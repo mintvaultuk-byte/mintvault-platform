@@ -26,6 +26,9 @@ interface ImagesResponse {
   workingEvidence?: Partial<
     Record<"front" | "back", { available: boolean; reason: string | null; recovery: string | null }>
   >;
+  reviewEvidence?: Partial<
+    Record<"front" | "back", { available: boolean; reason: string | null; recovery: string | null }>
+  >;
 }
 
 // Button-only zoom levels: 100% → 175% → … → 550% → 600% (75 percentage
@@ -98,14 +101,22 @@ export function CardPreviewPanel({
   // admitted this side against the immutable 1200-DPI master in the same
   // response, otherwise the details/review surface fails visibly closed.
   const frontUrl =
-    frontObjectUrl ?? (data?.workingEvidence?.front?.available === true ? data.urls?.front_working ?? null : null);
+    frontObjectUrl ??
+    (data?.workingEvidence?.front?.available === true ? (data.urls?.front_working ?? null) : null) ??
+    (data?.reviewEvidence?.front?.available === true ? (data.urls?.front_review ?? null) : null);
   const backUrl =
-    backObjectUrl ?? (data?.workingEvidence?.back?.available === true ? data.urls?.back_working ?? null : null);
+    backObjectUrl ??
+    (data?.workingEvidence?.back?.available === true ? (data.urls?.back_working ?? null) : null) ??
+    (data?.reviewEvidence?.back?.available === true ? (data.urls?.back_review ?? null) : null);
   const url = side === "front" ? frontUrl : backUrl;
   const unavailableReason =
-    data?.workingEvidence?.[side]?.reason ?? `${side.toUpperCase()} cannot be inspected from a display derivative.`;
+    data?.reviewEvidence?.[side]?.reason ??
+    data?.workingEvidence?.[side]?.reason ??
+    `${side.toUpperCase()} cannot be inspected from a display derivative.`;
   const unavailableRecovery =
-    data?.workingEvidence?.[side]?.recovery ?? "Restore canonical full-resolution working evidence for this side.";
+    data?.reviewEvidence?.[side]?.recovery ??
+    data?.workingEvidence?.[side]?.recovery ??
+    "Restore canonical full-resolution working evidence for this side.";
 
   // Reset only when an already-loaded image is actually replaced. Initial load,
   // side switches and fullscreen preserve workstation-owned inspection state.

@@ -417,6 +417,31 @@ describe("destructive-SQL linter (expanded object coverage)", () => {
       )
     ).toContain("drop_constraint");
   });
+
+  it("approves only the protected 0103 first-shop management-audit CHECK widen", () => {
+    const migrationPath = "migrations/0105_partner_first_shop_delivery_address.sql";
+    const migration = readFileSync(migrationPath, "utf8");
+    const findings = lintSql(migration);
+    const dropConstraint = findings.find((x) => x.kind === "drop_constraint");
+
+    expect(dropConstraint, "0103 must keep the CHECK replacement explicit").toBeDefined();
+    expect(hasBlocking(findings), "raw DROP CONSTRAINT remains destructive to the generic linter").toBe(true);
+    expect(isApprovedDestructiveFinding(migrationPath, migration, dropConstraint!)).toBe(true);
+    expect(unapprovedBlockingFindings(migrationPath, migration, findings)).toEqual([]);
+  });
+
+  it("does not let the 0103 approval omit or add management-audit actions", () => {
+    const migrationPath = "migrations/0105_partner_first_shop_delivery_address.sql";
+    const migration = readFileSync(migrationPath, "utf8");
+    const findings = lintSql(migration);
+
+    for (const weakened of [
+      migration.replace("'partner_first_shop_onboarded'", "'partner_first_shop_created'"),
+      migration.replace("'partner_first_shop_onboarded'", "'partner_first_shop_onboarded','unreviewed_action'"),
+    ]) {
+      expect(unapprovedBlockingFindings(migrationPath, weakened, findings).map((x) => x.kind)).toContain("drop_constraint");
+    }
+  });
 });
 
 describe("migration runner planning (pure)", () => {

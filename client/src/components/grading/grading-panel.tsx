@@ -427,6 +427,15 @@ export default function GradingPanel({
         working: { width: number | null; height: number | null; format: string | null } | null;
       }
     >;
+    reviewEvidence?: Record<
+      "front" | "back",
+      {
+        available: boolean;
+        reason: string | null;
+        recovery: string | null;
+        source: "certificate-bound-image";
+      }
+    >;
   }>({
     queryKey: [`${apiBase}/certificates/${certId}/images`],
     queryFn: async () => {
@@ -3173,12 +3182,14 @@ export default function GradingPanel({
                   apiBase={apiBase}
                   urls={urls}
                   workingEvidence={imageData?.workingEvidence}
+                  reviewEvidence={imageData?.reviewEvidence}
                   defects={defects}
                   onDefectAdded={(d) => active && setDefects((prev) => [...prev, d])}
                   onDefectsChange={(next) => active && setDefects(next)}
                   inspectionState={inspectionState}
                   onInspectionStateChange={onInspectionStateChange}
                   mutationsEnabled={active && !approvalInteractionLocked}
+                  sourceImageMutationsEnabled={workstationCapabilities.imageMutations}
                   readOnly={approvalInteractionLocked}
                   highlightId={highlightDefect}
                   referenceImageUrl={aiIdentification?.referenceImageUrl}
@@ -3186,7 +3197,7 @@ export default function GradingPanel({
                   omitSideTabs
                   fillHost={previewHost != null}
                   topRowSlot={previewHost != null ? previewTopSlot : null}
-                  onOpenCardTool={active && workstationCapabilities.imageMutations ? setManualCardToolSide : undefined}
+                  onOpenCardTool={active ? setManualCardToolSide : undefined}
                   // MVGS v2.1 measurement state — flows back through the
                   // callbacks below when the operator draws a whitening or
                   // crease line inside mark mode (no separate tool overlay).
@@ -4120,61 +4131,66 @@ export default function GradingPanel({
         manualCardToolSide &&
         imageData?.workingEvidence?.[manualCardToolSide]?.available === true &&
         (manualCardToolSide === "front" ? urls.front_working : urls.back_working) && (
-        <ManualCardTool
-          apiBase={apiBase}
-          certId={certId}
-          side={manualCardToolSide}
-          workingImageUrl={(manualCardToolSide === "front" ? urls.front_working : urls.back_working) as string}
-          onCentering={(result) => {
-            if (!active) return;
-            if (result.side === "front") {
-              setFrontLR(result.leftRight);
-              setFrontTB(result.topBottom);
-              setManualOuterFront(result.outer);
-              setManualInnerFront(result.inner);
-            } else {
-              setBackLR(result.leftRight);
-              setBackTB(result.topBottom);
-              setManualOuterBack(result.outer);
-              setManualInnerBack(result.inner);
+          <ManualCardTool
+            apiBase={apiBase}
+            certId={certId}
+            side={manualCardToolSide}
+            workingImageUrl={(manualCardToolSide === "front" ? urls.front_working : urls.back_working) as string}
+            onCentering={(result) => {
+              if (!active) return;
+              if (result.side === "front") {
+                setFrontLR(result.leftRight);
+                setFrontTB(result.topBottom);
+                setManualOuterFront(result.outer);
+                setManualInnerFront(result.inner);
+              } else {
+                setBackLR(result.leftRight);
+                setBackTB(result.topBottom);
+                setManualOuterBack(result.outer);
+                setManualInnerBack(result.inner);
+              }
+              setCenteringOverride(null);
+              setCenteringMethod("manual");
+              clearOverallOverrideIfSet();
+            }}
+            onDefectAdded={(d) => active && setDefects((prev) => [...prev, d])}
+            existingDefects={defects}
+            // MVGS v2.1 — line tools mirrored from image-viewer mark mode.
+            // Same callbacks; the defects phase shares the panel's state.
+            whiteningLines={whiteningLines}
+            creaseLines={creaseLines}
+            onWhiteningLinesChange={(next) => {
+              if (!active) return;
+              setWhiteningLines(next);
+              clearOverallOverrideIfSet();
+            }}
+            onCreaseLinesChange={(next) => {
+              if (!active) return;
+              setCreaseLines(next);
+              clearOverallOverrideIfSet();
+            }}
+            onDone={() => {
+              queryClient.invalidateQueries({ queryKey: [`${apiBase}/certificates/${certId}/images`] });
+              queryClient.invalidateQueries({ queryKey: [`${apiBase}/certificates/${certId}/grading`] });
+              setManualCardToolSide(null);
+            }}
+            onCancel={() => setManualCardToolSide(null)}
+            allowSourceImageMutations={workstationCapabilities.imageMutations}
+            // Background crop upload owned by the panel so it survives this tool
+            // closing and gates the Approve button. Tracked PER SIDE so a back
+            // upload can't clobber a still-pending front one.
+            onStartCropUpload={
+              workstationCapabilities.imageMutations
+                ? (payload) => {
+                    if (!active) return Promise.resolve(undefined);
+                    return runRecrop(payload.side, payload);
+                  }
+                : undefined
             }
-            setCenteringOverride(null);
-            setCenteringMethod("manual");
-            clearOverallOverrideIfSet();
-          }}
-          onDefectAdded={(d) => active && setDefects((prev) => [...prev, d])}
-          existingDefects={defects}
-          // MVGS v2.1 — line tools mirrored from image-viewer mark mode.
-          // Same callbacks; the defects phase shares the panel's state.
-          whiteningLines={whiteningLines}
-          creaseLines={creaseLines}
-          onWhiteningLinesChange={(next) => {
-            if (!active) return;
-            setWhiteningLines(next);
-            clearOverallOverrideIfSet();
-          }}
-          onCreaseLinesChange={(next) => {
-            if (!active) return;
-            setCreaseLines(next);
-            clearOverallOverrideIfSet();
-          }}
-          onDone={() => {
-            queryClient.invalidateQueries({ queryKey: [`${apiBase}/certificates/${certId}/images`] });
-            queryClient.invalidateQueries({ queryKey: [`${apiBase}/certificates/${certId}/grading`] });
-            setManualCardToolSide(null);
-          }}
-          onCancel={() => setManualCardToolSide(null)}
-          // Background crop upload owned by the panel so it survives this tool
-          // closing and gates the Approve button. Tracked PER SIDE so a back
-          // upload can't clobber a still-pending front one.
-          onStartCropUpload={(payload) => {
-            if (!active) return Promise.resolve(undefined);
-            return runRecrop(payload.side, payload);
-          }}
-          cropSyncStatus={cropSync[manualCardToolSide].status}
-          onRetryCrop={() => retryCrop(manualCardToolSide)}
-        />
-      )}
+            cropSyncStatus={workstationCapabilities.imageMutations ? cropSync[manualCardToolSide].status : "idle"}
+            onRetryCrop={workstationCapabilities.imageMutations ? () => retryCrop(manualCardToolSide) : undefined}
+          />
+        )}
 
       {/* MeasurementTool overlay retired in v2.1 — operator draws lines in
           the same mark-mode surfaces where pins are placed (image-viewer mark

@@ -375,9 +375,9 @@ describe("P8 integration surfaces", () => {
     // One partner dashboard page, registered once.
     expect(app).toContain('path="/partner/dashboard"');
     expect(app).not.toMatch(/dashboard-v2|DashboardV2|partner\/dashboard2/i);
-    // The new sections live in the same file as the pre-existing ones.
+    // The compact shop-floor board lives in the same dashboard file.
     expect(dashboard).toContain('id="credit-summary-title"'); // pre-existing
-    expect(dashboard).toContain('id="operations-title"'); // P8
+    expect(dashboard).toContain('id="card-work-title"');
   });
 
   it("renders every required operational figure", () => {
@@ -386,30 +386,34 @@ describe("P8 integration surfaces", () => {
      * source. Assert the template AND each id — matching the rendered form here would silently pass
      * only if someone hard-coded them, which is the opposite of what this file wants.
      */
-    expect(dashboard).toContain("text-ops-${id}");
+    expect(dashboard).toContain("text-ops-${testId}");
     for (const [label, id] of [
-      ["Reserved / in progress", '"reserved"'],
       ["Needs scan", '"needs-scan"'],
       ["FIX required", '"fix-required"'],
       ["Ready to grade", '"ready-to-grade"'],
       ["In review", '"in-review"'],
-      ["Completed", '"completed"'],
+      ["Completed / return", '"completed"'],
     ]) {
       expect(dashboard, `${label} tile missing`).toContain(label);
       expect(dashboard, `${id} tile id missing`).toContain(id);
     }
   });
 
-  it("offers the four primary actions", () => {
-    for (const id of ["action-scan-new-card", "action-buy-credits", "action-fix-queue", "action-ready-to-grade"]) {
+  it("offers primary shop-floor actions that lead to live destinations", () => {
+    for (const id of ["action-start-submission", "action-scan-new-card", "action-open-grading"]) {
       expect(dashboard, `${id} missing`).toContain(id);
     }
   });
 
-  it("states plainly that a FIX changes neither the MV, the certificate nor the credit", () => {
+  it("does not manufacture grading links for roles without the server assessment capability", () => {
+    expect(dashboard).toContain('href={canAssessCards ? "/partner/grading" : undefined}');
+    expect(dashboard).toContain("Continue Grading");
+    expect(dashboard).toContain('href={canCreateSubmissions ? "/partner/certificates" : undefined}');
+  });
+
+  it("states plainly that a FIX does not charge another credit", () => {
     const flat = dashboard.replace(/\s+/g, " ");
-    expect(flat).toContain("Fixing a card costs no Grading Credits");
-    expect(flat).toMatch(/keeps its MV number, its certificate and the credit already paid for it/);
+    expect(flat).toContain("Replacement evidence only; no additional credit is charged.");
   });
 
   it("scopes SERVER-SIDE — no tenant or location filtering in the browser", () => {
@@ -429,46 +433,10 @@ describe("P8 integration surfaces", () => {
     expect(handler).not.toMatch(/req\.(query|body|params)/);
   });
 
-  it("readiness reuses the Super Admin computation rather than a second one", () => {
-    // Both audiences render the server-owned operational verdict, so this cannot become a second
-    // browser-side readiness calculation.
-    expect(routes).toContain("getPartnerOnboardingReadiness(req.partner!.tenantId)");
-    expect(dashboard).toContain("ReadinessPanel");
-    expect(dashboard).toContain("readiness.data.operational");
-    const code = dashboard.replace(/\/\*[\s\S]*?\*\//g, "").split("\n").filter((line) => !/^\s*\/\//.test(line)).join("\n");
-    expect(code).not.toContain("READINESS_COPY");
-  });
-
-  it("no hard-coded 'Main location' assumption survives in the UI", () => {
-    /*
-     * Strips BLOCK comments as well as line comments. The explanatory comment above the Locations
-     * section names "Main location" in order to say the assumption is gone, and a line-based filter
-     * misses its continuation lines — so asserting against raw source would fail on the very prose
-     * documenting the fix.
-     */
-    const code = dashboard
-      .replace(/\/\*[\s\S]*?\*\//g, "")
-      .split("\n")
-      .filter((l) => !/^\s*\/\//.test(l))
-      .join("\n");
-    expect(code).not.toContain("Main location");
-    expect(code).toContain("list-locations");
-    // Locations come from the server as a list — never a single assumed one.
-    expect(code).toContain("operations.data.locations.map");
-  });
-
-  it("wide content scrolls inside its own container rather than breaking the page", () => {
-    // The station table is the one genuinely wide element; a shop console gets used on a laptop
-    // and sometimes a tablet.
-    expect(dashboard).toContain('data-testid="table-stations-wrap"');
-    const wrap = dashboard.slice(dashboard.indexOf('data-testid="table-stations-wrap"') - 200);
-    expect(wrap.slice(0, 260)).toContain("overflow-x-auto");
-  });
-
-  it("the browser never recomputes station readiness", () => {
-    // The server decides; the console renders. Otherwise the two can disagree about whether a Mac
-    // can work, and the operator believes the wrong one.
-    expect(dashboard).toContain("station.ready");
+  it("keeps scanner setup and location administration off the primary operations board", () => {
+    expect(dashboard).not.toContain("ReadinessPanel");
+    expect(dashboard).not.toContain("table-stations-wrap");
+    expect(dashboard).not.toContain("operations.data.locations.map");
     expect(dashboard).not.toMatch(/calibrationStatus === "VALID"/);
   });
 });

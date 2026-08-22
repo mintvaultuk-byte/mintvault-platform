@@ -20,11 +20,13 @@ const CUSTOMER_SERVICE = read("server/partner/customer-service.ts");
 const APP = read("client/src/App.tsx");
 const ROUTE_GUARD = read("client/src/components/partner/partner-route-guard.tsx");
 
-describe("partner customers are manageable from a real page", () => {
-  it("exposes customer create/edit/search through partner APIs and nav", () => {
+describe("partner customer CRM remains available only as a secondary direct surface", () => {
+  it("keeps customer create/edit/search APIs intact without presenting CRM in primary workflow", () => {
     expect(API).toContain("partnerCustomers");
     expect(API).toContain('PATCH", `/api/partner/customers/${id}`');
-    expect(SHELL).toContain('href: "/partner/customers"');
+    expect(SHELL).not.toContain('href: "/partner/customers"');
+    expect(WIZARD).not.toContain("partnerCustomers");
+    expect(WIZARD).toContain("A customer record is not required to start, scan, or process this submission.");
     expect(CUSTOMERS).toContain("partnerCustomers.list");
     expect(CUSTOMERS).toContain("partnerCustomers.create");
     expect(CUSTOMERS).toContain("partnerCustomers.edit");

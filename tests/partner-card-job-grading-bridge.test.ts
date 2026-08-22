@@ -27,6 +27,9 @@
  */
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { Client } from "pg";
+import { mkdtemp, mkdir, rm, writeFile } from "node:fs/promises";
+import { tmpdir } from "node:os";
+import { dirname, join } from "node:path";
 import {
   applyMigrationsRealistic,
   PARTNER_MIGRATIONS_WITH_PER_CARD,
@@ -46,6 +49,7 @@ let grading: typeof import("../server/partner/grading-routes");
 let printEligibility: typeof import("../server/partner/print-eligibility");
 let drizzle: typeof import("../server/db");
 let savedEnv: Record<string, string | undefined> = {};
+let localEvidenceRoot = "";
 
 const adminActor = { actorType: "admin" as const, actorUserId: null, actorEmail: "ops@mintvault.test" };
 
@@ -171,6 +175,12 @@ async function seedMintVaultTables(): Promise<void> {
     pixel_width integer not null check (pixel_width > 0),
     pixel_height integer not null check (pixel_height > 0),
     bit_depth integer, dpi integer, format varchar(16) not null,
+    working_object_key text,
+    working_sha256 varchar(64),
+    working_width integer,
+    working_height integer,
+    working_format varchar(16),
+    working_settings jsonb,
     capture_metadata jsonb not null default '{}'::jsonb,
     is_current boolean not null default true,
     superseded_at timestamptz, superseded_by_id integer,
@@ -357,6 +367,12 @@ async function scannerNew(
 
 let evidenceSeq = 0;
 
+async function writeWorkingEvidence(key: string): Promise<void> {
+  const destination = join(localEvidenceRoot, ...key.split("/"));
+  await mkdir(dirname(destination), { recursive: true });
+  await writeFile(destination, "fixture working evidence");
+}
+
 /**
  * Accept ONE side on a station — the evidence shape the queue and the lifecycle both require.
  *
@@ -382,16 +398,24 @@ async function captureSide(
   await admin.query(
     `INSERT INTO certificate_image_evidence
        (certificate_id, side, evidence_class, object_key, sha256, byte_length, pixel_width, pixel_height,
-        format, capture_metadata, is_current)
-     VALUES ($1,$2,'NEW_IMMUTABLE_MASTER',$3,$4,1024,1000,1400,'tiff',$5::jsonb,true)`,
+        dpi, format, working_object_key, working_width, working_height, working_format, working_settings,
+        capture_metadata, is_current)
+     VALUES ($1,$2,'NEW_IMMUTABLE_MASTER',$3,$4,1024,4724,6136,1200,'tiff',$5,4724,6136,'jpeg',$6::jsonb,$7::jsonb,true)`,
     [
       certificateId,
       side,
       `evidence/${certificateId}/${side}/${evidenceSeq}.tif`,
       "a".repeat(64),
-      JSON.stringify({ captureSessionId: sessionId, stationId: stationId ?? f.stationA }),
+      `evidence/${certificateId}/${side}/${evidenceSeq}.working.jpg`,
+      JSON.stringify({ version: "v1", resize: null }),
+      JSON.stringify({
+        captureSessionId: sessionId,
+        stationId: stationId ?? f.stationA,
+        scannerProfileVersion: "mintvault-canon-lide-400-v3",
+      }),
     ]
   );
+  await writeWorkingEvidence(`evidence/${certificateId}/${side}/${evidenceSeq}.working.jpg`);
 }
 
 /** A Scanner card captured on both sides and advanced to READY_TO_GRADE through the real bridge. */
@@ -511,7 +535,10 @@ describe("Card Job → canonical grading bridge (real PostgreSQL)", () => {
       PARTNER_ADMIN_DATABASE_URL: process.env.PARTNER_ADMIN_DATABASE_URL,
       PARTNER_DATABASE_URL: process.env.PARTNER_DATABASE_URL,
       PARTNER_CONNECTOR_DATABASE_URL: process.env.PARTNER_CONNECTOR_DATABASE_URL,
+      MINTVAULT_LOCAL_EVIDENCE_DIR: process.env.MINTVAULT_LOCAL_EVIDENCE_DIR,
     };
+    localEvidenceRoot = await mkdtemp(join(tmpdir(), "mintvault-bridge-evidence-"));
+    process.env.MINTVAULT_LOCAL_EVIDENCE_DIR = localEvidenceRoot;
     process.env.MINTVAULT_DATABASE_URL = cluster.url;
     delete process.env.PARTNER_ADMIN_DATABASE_URL;
     delete process.env.PARTNER_DATABASE_URL;
@@ -546,6 +573,7 @@ describe("Card Job → canonical grading bridge (real PostgreSQL)", () => {
     await drizzle?.pool.end().catch(() => {});
     await admin?.end().catch(() => {});
     await cluster?.stop().catch(() => {});
+    await rm(localEvidenceRoot, { recursive: true, force: true }).catch(() => {});
     for (const [k, v] of Object.entries(savedEnv)) {
       if (v === undefined) delete process.env[k];
       else process.env[k] = v;
@@ -1147,6 +1175,54 @@ describe("Card Job → canonical grading bridge (real PostgreSQL)", () => {
     expect(auth?.cardJobStatus).toBe("GRADING");
     expect(auth?.destinationSubmissionId).toBeNull();
     expect(grading.authorizeAssignedPartnerCert(p, auth).ok).toBe(true);
+  });
+
+  it("AT-B2a: a raw READY_TO_GRADE lifecycle cannot create a lease when either working side fails admission", async () => {
+    const card = await readyToGradeCard(shopA);
+    await admin.query(
+      `UPDATE certificate_image_evidence
+          SET working_width = 1600, working_height = 2079
+        WHERE certificate_id = $1 AND side = 'back' AND is_current = true`,
+      [card.certificateId]
+    );
+
+    const refused = await settle(leases.acquireLease(principal(shopA, shopA.graderOne), card.cardJobId, "Ada"));
+    expect(refused).toEqual({ ok: false, code: "NOT_GRADABLE" });
+    expect(await jobStatus(card.cardJobId)).toBe("READY_TO_GRADE");
+    const leaseCount = await admin.query<{ n: string }>(
+      `SELECT count(*)::text AS n FROM partner_grading_leases WHERE card_job_id = $1 AND released_at IS NULL`,
+      [card.cardJobId]
+    );
+    expect(Number(leaseCount.rows[0].n)).toBe(0);
+  });
+
+  it("AT-B2a2: invalidated evidence cannot renew, take over, or write through an existing lease", async () => {
+    const card = await readyToGradeCard(shopA);
+    const holder = principal(shopA, shopA.graderOne);
+    const owner = principal(shopA, shopA.owner, { orgWide: true });
+    const acquired = await leases.acquireLease(holder, card.cardJobId, "Ada");
+    await admin.query(
+      `UPDATE certificate_image_evidence
+          SET working_width = 1600, working_height = 2079
+        WHERE certificate_id = $1 AND side = 'back' AND is_current = true`,
+      [card.certificateId]
+    );
+
+    for (const attempt of [
+      () => leases.heartbeatLease(holder, card.cardJobId),
+      () => leases.takeoverLease(owner, card.cardJobId, "Evidence integrity failure"),
+      () => leases.assertMayWriteCertificate(holder, card.certificateId, acquired.lease.revision),
+    ]) {
+      const refused = await settle(attempt());
+      expect(refused).toEqual({ ok: false, code: "NOT_GRADABLE" });
+    }
+
+    const active = await admin.query<{ holder_user_id: string }>(
+      `SELECT holder_user_id FROM partner_grading_leases
+        WHERE card_job_id = $1 AND released_at IS NULL`,
+      [card.cardJobId]
+    );
+    expect(active.rows).toEqual([{ holder_user_id: shopA.graderOne }]);
   });
 
   it("AT-B2b: a Card Job with NO assigned grader is still loadable — the defect that blocked every Scanner card", async () => {

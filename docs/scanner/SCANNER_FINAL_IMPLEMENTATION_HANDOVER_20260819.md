@@ -636,3 +636,267 @@ Production remained read-only and untouched:
 Production release is hard-stopped until staging has valid TEST Stripe credentials, canonical TEST
 prices configured, real TEST Checkout/webhook proof, and the owner completes the requested staging
 test purchase through the normal product UI.
+
+## Staging Stripe TEST credential-cleared acceptance pass — 2026-08-19
+
+This addendum supersedes the immediately preceding `api_key_expired` staging blocker. The owner
+rotated the staging Stripe TEST secret and declared `STRIPE_ENV=test`; this pass completed the
+owner-independent staging configuration and negative-payment proof. No production mutation was
+performed.
+
+### Staging Stripe authority
+
+- `mintvault-v2` now resolves `STRIPE_ENV=test`.
+- The staging Stripe secret authenticates to Stripe account `acct_1T3qghPFVe8DwVlR` and is
+  TEST-shaped (`sk_test_`); no secret value was printed or recorded.
+- A compatible TEST webhook endpoint was created for
+  `https://mintvault-v2.fly.dev/api/stripe/webhook`, enabled only for
+  `checkout.session.completed`: `we_1U685wPFVe8DwVlRUBznZXs8`.
+- An accidentally-created staging endpoint whose signing secret was not imported was disabled:
+  `we_1U683SPFVe8DwVlRKBCtGv8d`.
+- Fly staging secret rotation completed across both app machines; current staging state is Fly
+  machine version **516**, `/health=ok`, `/api/version.commit=e6b82b2d`.
+- A local signature probe using the active Fly `STRIPE_WEBHOOK_SECRET` passed; a live bogus webhook
+  delivery to staging returned HTTP 400 and changed no Stripe ledger, Checkout intent, Card Job, or
+  reservation counts.
+
+### Canonical TEST packs configured on staging
+
+The five owner-locked staging TEST Products/Prices were created in the current MintVault Stripe
+sandbox because no exact canonical reusable objects existed. Every configured Price is active,
+GBP, exact pence, `tax_behavior='inclusive'`, and `livemode=false`.
+
+| Pack       | Total  | Staging TEST Price ID            | Result |
+| ---------- | ------ | -------------------------------- | ------ |
+| `PACK_5`   | £50    | `price_1U68AVPFVe8DwVlRRMYdpx0f` | PASS   |
+| `PACK_10`  | £100   | `price_1U68AVPFVe8DwVlR8t9TyGgM` | PASS   |
+| `PACK_25`  | £250   | `price_1U68AWPFVe8DwVlRNGT365e7` | PASS   |
+| `PACK_50`  | £500   | `price_1U68AXPFVe8DwVlRCckrlyFN` | PASS   |
+| `PACK_100` | £1,000 | `price_1U68AYPFVe8DwVlR4IzmXD5J` | PASS   |
+
+The staging `partner_credit_packs` mapping was updated in one guarded transaction: the active pack
+set remains exactly `PACK_5`, `PACK_10`, `PACK_25`, `PACK_50`, `PACK_100`; each row now has the
+verified TEST Price ID above and `stripe_currency='gbp'`. Wallets, credit ledger, reservations,
+Card Jobs, MV numbers, and production data were not edited.
+
+### Owner-independent acceptance proof
+
+- Focused server payment/wallet/station gate:
+  `npx vitest run tests/partner-credit-purchase.test.ts tests/partner-at21-grant-boundary.test.ts
+tests/partner-station-new-card.test.ts tests/partner-card-job-cancellation.test.ts
+tests/partner-credit-admin-service.test.ts tests/partner-portal-credit-view.test.ts
+tests/payment-control-plane-load-sim.test.ts tests/partner-schema-parity.test.ts
+tests/db-migration-safety.test.ts` — **169 passed / 0 failed**.
+- Focused Scanner payment/zero-credit/env gate — **81 passed / 0 failed**.
+- Full Scanner app suite: `node --test test/*.test.js` — **177 passed / 0 failed**.
+- 5k/10k/20k server payment-control simulations — **PASS** with 20,000 hostile/replay burst
+  events on each run.
+- 5k/10k/20k Scanner payment simulations — **PASS** with 20,000 hostile/replay burst events and
+  1,000 pure zero-credit attempts on each run.
+- `npm run check` — passed.
+- `npm run build` — passed with the existing PostCSS `from` warning.
+- `git diff --check` — passed.
+- Staging deploy: `scripts/safe-deploy.sh staging --allow-behind --yes` fast-forwarded
+  `mintvault-v2` from `e6b82b2d` to `7da1a1df`; both Fly machines passed health checks and
+  `/api/version` reported `7da1a1df`.
+- Destructive-SQL lint for `0093`, `0097`, and `0098` — passed.
+- Repository-wide `npx vitest run` reported **293 files passed / 5033 tests passed** and only five
+  env-aborted suites. Those five suites were rerun against a fresh disposable local DB
+  (`127.0.0.1:55432/mintvault_vq_phase10_local_*`) and passed **62/62**; the temporary port forward
+  and database were removed.
+
+Live staging negative proof:
+
+- Visiting `/partner/billing?purchase=processing` grants zero credits.
+- Posting an invalid-signature `checkout.session.completed` webhook returns 400.
+- Before/after counts stayed identical: Stripe ledger rows **1**, Stripe ledger amount **5**,
+  Checkout intents **0**, granted intents **0**, Card Jobs **19**, reservations **21**.
+
+### Remaining owner/UI payment gate
+
+The only remaining payment action is human and browser-owned: complete a normal staging product UI
+purchase of `PACK_5` (£50 / 5 credits) in Stripe TEST mode. The in-app browser was not signed in, so
+this pass did not create a normal authenticated Checkout Session and did not enter credentials or
+payment details. After the owner completes the TEST Checkout, verify the signed webhook chain:
+Stripe API re-read → local Checkout provenance → `PACK_5` → £50 → GBP → TEST → paid → exactly +5
+append-only ledger credits; then prove wallet auto-refresh, modal auto-close, NEW CARD enablement,
+restart persistence, and replay no-extra-grant.
+
+### Production status
+
+Production was read-only only. At final check it was healthy at Fly version **1105** with
+`/api/version.commit=158dbf53`; this pass performed no production migration, deploy, Stripe
+configuration mutation, live payment, or wallet edit.
+
+## Scanner credit UX / manual top-up staging pass — 2026-08-19
+
+This pass adds the permanent Scanner-side manual top-up entry point and rechecks the zero-credit
+acceptance path without disturbing the live Pilot wallet or MV280.
+
+### Source changes
+
+- The Scanner identity row now shows `BUY MORE CREDITS` whenever the authenticated Partner operator
+  has `partner.credits.purchase`.
+- The button opens the same canonical pack/Checkout modal used by the zero-credit hard stop; no new
+  payment implementation or local credit grant path was added.
+- Positive balances keep the Scanner usable. Balances from 1 to 5 show the non-blocking warning
+  `LOW CREDITS — TOP UP`.
+- Authoritative zero available credits still hard-stop the next card with
+  `NO GRADING CREDITS AVAILABLE` / `TOP UP TO CONTINUE`; close/Escape only dismisses the modal until
+  the next wallet reconciliation, and `NEW CARD` remains disabled at zero.
+- The modal copy for manual purchase is `BUY GRADING CREDITS` / `GBP • VAT INCLUDED`; pack buttons
+  display the canonical server-returned prices: £50, £100, £250, £500, £1,000.
+- Manual top-up Checkout now keeps watching the authoritative wallet after Stripe opens; when the
+  server balance moves, the visible credit count updates and the modal closes.
+
+### Local proof
+
+- `node --test scripts/scanner-app/test/billing-ux.test.js` — **7 passed / 0 failed**.
+- `node --test scripts/scanner-app/test/*.test.js` — **184 passed / 0 failed**.
+- Payment/wallet authority gate:
+  `npx vitest run tests/partner-credit-purchase.test.ts tests/partner-at21-grant-boundary.test.ts
+tests/partner-card-job-authority.test.ts tests/partner-credit-reservation-service.test.ts
+tests/partner-station-new-card.test.ts tests/station-identity.test.ts
+tests/partner-schema-parity.test.ts tests/db-migration-safety.test.ts` — **162 passed / 0
+  failed**.
+- `npm run check` — passed.
+- `npm run build` — passed with the existing PostCSS `from` warning.
+- `git diff --check` — passed.
+
+### Live staging fixture state
+
+- Current Pilot Partner wallet was read-only checked and preserved: ledger **510**, reserved **11**,
+  available **499**.
+- MV280 was read-only checked and preserved as the latest Pilot card job.
+- Previous `pokemon kings` TEST-payment tenant was not reset or corrupted; it remains at the
+  legitimate **+5** from the successful PACK_5 TEST Checkout.
+- Existing dedicated zero-credit staging Partner selected for fallback UI proof:
+  `AT23 Bravo Collectibles Ltd`, `ACTIVE`, ledger **0**, reserved **0**, available **0**, active
+  location and active owner user present, with `partner.credits.view`, `partner.credits.purchase`,
+  and `partner.cards.scan`.
+- A new staging-only Bravo fixture user was added for owner visual acceptance:
+  `scanner.credit.acceptance.1787146656945@at23.test`. It inherits authority only through the
+  existing `PARTNER_OWNER` RBAC role; an audit row records the fixture purpose. No wallet, ledger,
+  reservation, Card Job, station, MV, or production table was edited to create zero.
+- Live deployed API proof for that fixture: login returned `mfaRequired=false`; `/api/partner/credits`
+  returned `availableCredits=0`, `reservedCredits=0`, `postedBalance=0`, `balanceStatus=empty`; and
+  `/api/partner/credits/packs` returned all five active GBP VAT-included TEST packs as purchasable.
+- The current physical Pilot Canon station must not be rebound to Bravo. Use the Partner
+  billing/Scanner-compatible no-Canon fallback for zero-credit top-up proof unless a separate
+  disposable Scanner station identity is enrolled and approved.
+
+### Production status
+
+Production was not targeted. No production deploy, migration, Stripe configuration mutation, live
+payment, wallet edit, reservation edit, Card Job edit, or MV edit was performed.
+
+## Final credit purchase / zero-credit / Stripe staging pass — 2026-08-19
+
+This addendum supersedes the earlier payment notes above where runtime facts differ. It records the
+owner's locked commercial decision and the staging work completed from commit
+`e6b82b2d13e81d75792a858b19bc26ea4a1d7e9c`.
+
+### Locked commercial configuration
+
+- **£10 per Partner Grading Credit**
+- **GBP**
+- **VAT included** in the displayed/charged price; this pass does not add VAT on top.
+- `PACK_5` = 5 credits = **£50** total, VAT included.
+- `PACK_10` = 10 credits = **£100** total, VAT included.
+- `PACK_25` = 25 credits = **£250** total, VAT included.
+- `PACK_50` = 50 credits = **£500** total, VAT included.
+- `PACK_100` = 100 credits = **£1,000** total, VAT included.
+
+### Source repairs completed
+
+- Canonical pack pricing is now hard-coded as pence values plus `gbp` and VAT-included
+  presentation. Unknown active DB pack rows are ignored instead of falling back to `credits * £10`.
+- Checkout and verified webhook fulfilment now reject wrong Stripe Price ID, wrong currency, wrong
+  amount, Stripe `tax_behavior='exclusive'`, wrong TEST/LIVE mode, unpaid sessions, missing local
+  Checkout provenance, disabled/unknown packs, and duplicate/replayed events before any
+  append-only credit grant.
+- Scanner zero-credit UI uses server `displayPrice` / `vatIncluded`; server
+  `INSUFFICIENT_CREDITS` is an authoritative zero-lock signal even if a wallet refresh is delayed.
+- `SCANNER_OPERATOR` receives exactly one new additive permission,
+  `partner.credits.view`, through `0098_scanner_operator_credit_view.sql`; it still receives no
+  purchase, user, station-enrolment, card-fix, or admin permissions.
+- `MVGS_ASSESSMENT_TECHNICIAN` is hard-blocked from credit purchase even if a purchase permission
+  is mis-granted.
+
+### Local proof
+
+- `npm run check` — passed.
+- Post-commit focused smoke: 6 Vitest files, **91 passed / 0 failed**; scanner active-card/payment
+  node tests, **42 passed / 0 failed**.
+- Wider payment/server authority slice before commit: 14 Vitest files, **244 passed / 0 failed**.
+- Full Scanner app suite: **177 passed / 0 failed**.
+- `npm run build` — passed with the existing PostCSS `from` warning.
+- Destructive-SQL lint for `0097_partner_credit_checkout_sessions.sql` and
+  `0098_scanner_operator_credit_view.sql` — passed.
+- DB-required root files rerun against disposable local PostgreSQL 17 at
+  `127.0.0.1:55432/mintvault_vq_phase10_local`: 5 files, **62 passed / 0 failed**.
+- Payment/control-plane simulations passed at 5,000, 10,000 and 20,000 workflows, each with 20,000
+  hostile/replay burst events.
+- Scanner payment simulations passed at 5,000, 10,000 and 20,000 workflows, each with 20,000
+  hostile/replay burst events and 1,000 pure zero-credit attempts.
+- `git diff --check` — passed.
+
+Repository-wide `npm test` under the local DB environment is **not** claimed as green: enabling
+`TEST_DATABASE_URL` opened unrelated Vault Quest integration suites whose tables
+(`vq_generation_requests`, `vq_feature_flags`, `vq_artwork_revisions`, etc.) were not bootstrapped
+in that disposable database. That run reported 298 files passed, 29 skipped and 25 unrelated VQ
+files failed from missing VQ schema. No payment/scanner/RBAC regression remained in the focused
+release matrix.
+
+### Staging changes completed
+
+Staging was changed; production was not.
+
+- Deployed commit `e6b82b2d` to `mintvault-v2` from a detached clean worktree, excluding unrelated
+  dirty partner-management/location files in the shared checkout.
+- Fly staging release **513** deployed image
+  `registry.fly.io/mintvault-v2:deployment-01M0CWH725PNN74ZYGXYKPP46Q`.
+- Fly staging release **514** set `STRIPE_ENV=test` on the same image.
+- `https://mintvault-v2.fly.dev/api/version` reports `e6b82b2d`; `/health` reports `ok`.
+- Both staging machines are started in `lhr` on version 514 with 1/1 health check passing.
+- Scoped migration dry-run and apply:
+  - `0097_partner_credit_checkout_sessions.sql`, checksum
+    `c1039b6fbe3bf9d58ba52f3dc9a34cc2d294fe620918cf881a700561ba87644a`, journal **85 → 86**.
+  - `0098_scanner_operator_credit_view.sql`, checksum
+    `55e27da14c2343a7eae3a73f39836e5bcd20676122f71b4166a7f2721258d313`, journal **86 → 87**.
+
+Post-checks:
+
+- Staging environment: `STRIPE_ENV=test`; Stripe secret/publishable keys are TEST-shaped; webhook
+  secret present; database present.
+- Staging migration journal count: **87**; relevant rows present: `0093`, `0094`, `0096`, `0097`,
+  `0098`.
+- `partner_credit_checkout_sessions` table exists.
+- `stripe_webhook_events` table exists.
+- `SCANNER_OPERATOR|partner.credits.view` exists exactly once.
+- Wallet aggregate: 4 wallets, 1 zero-available wallet, ledger 619, reserved 18, available 601.
+- Active pack rows remain exactly `PACK_5`, `PACK_10`, `PACK_25`, `PACK_50`, `PACK_100`, but all
+  still have no `stripe_price_id` and no `stripe_currency`; they are visible but not purchasable.
+
+### Staging blocker
+
+The staging Stripe TEST secret is externally unusable: Stripe returned HTTP **401**
+`api_key_expired` when asked to list TEST prices. No raw secret was recorded. Because that key is
+expired, this pass could not safely search/reuse/create TEST Stripe Products/Prices, could not
+write canonical TEST Price IDs into `partner_credit_packs`, and could not run a real TEST Checkout
+or webhook grant. Staging therefore remains intentionally **fail-closed** rather than buyable.
+
+### Production status
+
+Production remained read-only and untouched:
+
+- `https://mintvault.fly.dev/api/version` reports `8359e902`; `/health` reports `ok`.
+- Fly production version **1104** is healthy on both `lhr` machines.
+- Production environment: `STRIPE_ENV` unset; Stripe keys are LIVE-shaped; webhook secret present.
+- Production migration journal count: **41**; no `0093`, `0094`, `0096`, `0097`, or `0098` journal
+  rows.
+- Production has no `partner_credit_packs` table and no `partner_credit_checkout_sessions` table.
+
+Production release is hard-stopped until staging has valid TEST Stripe credentials, canonical TEST
+prices configured, real TEST Checkout/webhook proof, and the owner completes the requested staging
+test purchase through the normal product UI.

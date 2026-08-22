@@ -10,6 +10,7 @@
  * explicit id/tenant-id predicates in connector-service.ts, not by a session GUC.
  */
 import pg from "pg";
+import { assertMintVaultDatabaseEnvironmentSafety } from "../lib/database-environment-guard";
 
 let pool: pg.Pool | null = null;
 
@@ -21,6 +22,12 @@ function getPool(): pg.Pool {
   if (!process.env.PARTNER_CONNECTOR_DATABASE_URL) {
     throw new Error("PARTNER_CONNECTOR_DATABASE_URL is not configured — connector refuses to start (fail closed).");
   }
+  // Same environment-isolation gate as MINTVAULT_DATABASE_URL (server/config.ts).
+  assertMintVaultDatabaseEnvironmentSafety(
+    process.env.PARTNER_CONNECTOR_DATABASE_URL,
+    process.env,
+    "PARTNER_CONNECTOR_DATABASE_URL"
+  );
   if (!pool) {
     // G3F: optional, env-gated bounded acquisition timeout. Unset (the default) preserves prior
     // behaviour (node-postgres waits indefinitely for a free client); when set, an exhausted pool

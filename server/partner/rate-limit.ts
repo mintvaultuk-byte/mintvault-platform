@@ -230,6 +230,30 @@ export const partnerMfaLimiter = partnerRateLimit({
   failClosed: true,
 });
 /**
+ * MFA, per-ACCOUNT bucket — defence in depth, applied IN ADDITION to the IP bucket above (never
+ * instead of it), exactly as partnerLoginLimiter sits behind partnerLoginIpLimiter.
+ *
+ * WHY: password authentication has two layers — an IP bucket AND a durable per-account lockout
+ * (partner_users.failed_login_count / locked_until). The MFA layer had NEITHER: partnerMfaLimiter
+ * declares no keyFn, so it falls through to the normalised client IP with no account component, and
+ * a wrong code wrote nothing at all. An attacker who already holds the password (phished or reused)
+ * completes /auth/login to obtain an mfa-pending session, then grinds the six-digit code by rotating
+ * source addresses — every address earns a fresh 20-attempt budget, and a single delegated IPv6 /48
+ * supplies hundreds of them. The account holder sees no lockout and no security event.
+ *
+ * The key is the SESSION's user id, resolved by partnerSessionMiddleware before any route handler
+ * runs — never a request-body value, so nothing the caller sends can move them to a fresh bucket.
+ * An unauthenticated caller (no session yet) falls back to the IP key rather than sharing one global
+ * bucket, which would let one attacker deny MFA to everyone.
+ */
+export const partnerMfaAccountLimiter = partnerRateLimit({
+  name: "partner_mfa_acct",
+  windowMs: 15 * 60_000,
+  max: 10,
+  failClosed: true,
+  keyFn: (req) => req.partner?.userId ?? `anon|${partnerRateLimitClientKey(req)}`,
+});
+/**
  * Password-reset CONSUME. Keyed on IP only (no keyFn). A consume body carries a token, not an
  * email, so the previous `acct` key collapsed to `partner_reset:|<ip>` for well-formed traffic —
  * but any caller could ALSO supply an arbitrary `email` field and mint itself a fresh bucket per

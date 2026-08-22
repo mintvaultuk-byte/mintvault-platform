@@ -1,5 +1,5 @@
 /**
- * Partner Portal — New Submission wizard (Increment B). Five clear steps: Customer, Service,
+ * Partner Portal — New Submission wizard. Five clear steps: Reference, Service,
  * Cards, Review, Submit. A draft is created on entry (using the session's current location) and
  * every subsequent change is saved via the existing version-checked PATCH — so navigating between
  * steps never loses data, and a stale-write conflict is surfaced rather than silently overwritten.
@@ -19,7 +19,6 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@
 import {
   partnerSubmissions,
   partnerCards,
-  partnerCustomers,
   partnerServiceTiers,
   partnerCredits,
   partnerCatalogue,
@@ -29,7 +28,6 @@ import {
   formatPence,
   type SubmissionSummary,
   type SubmissionCard,
-  type PartnerCustomer,
   type AvailableServiceTier,
 } from "@/lib/partner-api";
 import { usePartnerSession } from "@/hooks/use-partner-session";
@@ -37,7 +35,7 @@ import { PARTNER_CARD_CATEGORIES } from "@shared/partner-card-categories";
 import { PartnerErrorState, PartnerLoadingState } from "@/components/partner/partner-shell";
 import { Trash2, Pencil, Check, X, Upload, Image as ImageIcon, CreditCard } from "lucide-react";
 
-const STEPS = ["Customer", "Service", "Cards", "Review", "Submit"] as const;
+const STEPS = ["Reference", "Service", "Cards", "Review", "Submit"] as const;
 type SaveStatus = "idle" | "saving" | "saved" | "error" | "conflict";
 
 export default function PartnerSubmissionWizardPage() {
@@ -50,16 +48,8 @@ export default function PartnerSubmissionWizardPage() {
   const [initError, setInitError] = useState<string | null>(null);
   const [saveStatus, setSaveStatus] = useState<SaveStatus>("idle");
 
-  // Step 1 — customer
-  const [customerId, setCustomerId] = useState<string | null>(null);
-  const [customerDisplay, setCustomerDisplay] = useState<string>("");
+  // Step 1 — optional shop reference. A customer CRM record is neither collected nor required.
   const [internalReference, setInternalReference] = useState("");
-  const [customerSearch, setCustomerSearch] = useState("");
-  const [creatingCustomer, setCreatingCustomer] = useState(false);
-  const [newCustomerName, setNewCustomerName] = useState("");
-  const [newCustomerEmail, setNewCustomerEmail] = useState("");
-  const [newCustomerPhone, setNewCustomerPhone] = useState("");
-  const [customerError, setCustomerError] = useState<string | null>(null);
 
   // Step 2 — service
   const [serviceTierCode, setServiceTierCode] = useState<string | null>(null);
@@ -87,8 +77,6 @@ export default function PartnerSubmissionWizardPage() {
         try {
           const detail = await partnerSubmissions.detail(draftId);
           setSubmission(detail.submission);
-          setCustomerId(detail.submission.customerId);
-          setCustomerDisplay(detail.submission.customerId ? "Selected customer" : "");
           setInternalReference(detail.submission.internalReference ?? "");
           setServiceTierCode(detail.submission.serviceTierCode);
           setCards(detail.cards);
@@ -114,11 +102,6 @@ export default function PartnerSubmissionWizardPage() {
     queryFn: () => partnerServiceTiers.list(),
     enabled: !!submission,
   });
-  const { data: customerResults } = useQuery({
-    queryKey: ["/api/partner/customers", customerSearch],
-    queryFn: () => partnerCustomers.list(customerSearch || undefined),
-    enabled: !!submission && customerSearch.length > 0,
-  });
   const { data: credits } = useQuery({
     queryKey: ["/api/partner/credits"],
     queryFn: () => partnerCredits.view(),
@@ -131,11 +114,7 @@ export default function PartnerSubmissionWizardPage() {
   });
 
   const saveField = useCallback(
-    async (patch: {
-      customerId?: string | null;
-      internalReference?: string | null;
-      serviceTierCode?: string | null;
-    }) => {
+    async (patch: { internalReference?: string | null; serviceTierCode?: string | null }) => {
       if (!submission) return;
       setSaveStatus("saving");
       try {
@@ -170,33 +149,6 @@ export default function PartnerSubmissionWizardPage() {
       if (internalReferenceTimer.current) clearTimeout(internalReferenceTimer.current);
     };
   }, []);
-
-  async function handleCreateCustomer() {
-    if (!newCustomerName.trim()) return;
-    setCustomerError(null);
-    try {
-      const created = await partnerCustomers.create({
-        fullName: newCustomerName.trim(),
-        email: newCustomerEmail.trim() || null,
-        phone: newCustomerPhone.trim() || null,
-      });
-      setCustomerId(created.id);
-      setCustomerDisplay(created.fullName);
-      setCreatingCustomer(false);
-      await saveField({ customerId: created.id });
-    } catch (err) {
-      // The server's validation message (e.g. why an email was rejected) was previously swallowed
-      // into a bare "error" status, leaving the user with a form that silently refused to save.
-      setCustomerError(partnerErrorMessage(err));
-    }
-  }
-
-  function selectExistingCustomer(c: PartnerCustomer) {
-    setCustomerId(c.id);
-    setCustomerDisplay(c.fullName);
-    setCustomerSearch("");
-    saveField({ customerId: c.id });
-  }
 
   async function handleAddCard(input: Parameters<typeof partnerCards.add>[1]) {
     if (!submission) return;
@@ -301,7 +253,6 @@ export default function PartnerSubmissionWizardPage() {
   // warning banner AND the Submit step's button-disabled state, so a partner can never reach an
   // enabled Submit button by skipping past Review with something still missing.
   const missing: string[] = [];
-  if (!customerDisplay) missing.push("Customer");
   if (!serviceTierCode) missing.push("Service");
   if (cards.length === 0) missing.push("At least one card");
 
@@ -311,28 +262,12 @@ export default function PartnerSubmissionWizardPage() {
       <SaveStatusIndicator status={saveStatus} />
 
       {step === 0 && (
-        <CustomerStep
-          customerId={customerId}
-          customerDisplay={customerDisplay}
+        <ReferenceStep
           internalReference={internalReference}
           onInternalReferenceChange={(v) => {
             setInternalReference(v);
             saveInternalReferenceDebounced(v);
           }}
-          customerSearch={customerSearch}
-          onCustomerSearchChange={setCustomerSearch}
-          customerResults={customerResults ?? []}
-          onSelectCustomer={selectExistingCustomer}
-          creatingCustomer={creatingCustomer}
-          onToggleCreate={() => setCreatingCustomer((v) => !v)}
-          newCustomerName={newCustomerName}
-          setNewCustomerName={setNewCustomerName}
-          newCustomerEmail={newCustomerEmail}
-          setNewCustomerEmail={setNewCustomerEmail}
-          newCustomerPhone={newCustomerPhone}
-          setNewCustomerPhone={setNewCustomerPhone}
-          onCreateCustomer={handleCreateCustomer}
-          customerError={customerError}
         />
       )}
 
@@ -364,7 +299,6 @@ export default function PartnerSubmissionWizardPage() {
 
       {step === 3 && (
         <ReviewStep
-          customerDisplay={customerDisplay}
           internalReference={internalReference}
           serviceTierCode={serviceTierCode}
           tiers={availableTiers ?? []}
@@ -462,131 +396,20 @@ function SaveStatusIndicator({ status }: { status: SaveStatus }) {
   );
 }
 
-// ---------------- Step 1: Customer ----------------
-function CustomerStep(props: {
-  customerId: string | null;
-  customerDisplay: string;
-  internalReference: string;
-  onInternalReferenceChange: (v: string) => void;
-  customerSearch: string;
-  onCustomerSearchChange: (v: string) => void;
-  customerResults: PartnerCustomer[];
-  onSelectCustomer: (c: PartnerCustomer) => void;
-  creatingCustomer: boolean;
-  onToggleCreate: () => void;
-  newCustomerName: string;
-  setNewCustomerName: (v: string) => void;
-  newCustomerEmail: string;
-  setNewCustomerEmail: (v: string) => void;
-  newCustomerPhone: string;
-  setNewCustomerPhone: (v: string) => void;
-  onCreateCustomer: () => void;
-  customerError: string | null;
-}) {
+// ---------------- Step 1: Optional shop reference ----------------
+function ReferenceStep(props: { internalReference: string; onInternalReferenceChange: (v: string) => void }) {
   return (
-    <Card data-testid="wizard-step-customer">
+    <Card data-testid="wizard-step-reference">
       <CardHeader>
-        <CardTitle>Step 1 — Customer</CardTitle>
+        <CardTitle>Step 1 — Shop reference</CardTitle>
       </CardHeader>
       <CardContent className="space-y-4">
-        <p className="text-xs text-muted-foreground">
-          We only collect what's needed to process this submission. Email and phone are optional.
+        <p className="text-sm text-muted-foreground">
+          A customer record is not required to start, scan, or process this submission. Add a shop reference only if it
+          helps your own floor track the work.
         </p>
-
-        {props.customerId ? (
-          <div className="flex items-center justify-between rounded-md border p-3">
-            <span data-testid="text-selected-customer">{props.customerDisplay}</span>
-            <Button variant="ghost" size="sm" onClick={props.onToggleCreate} data-testid="button-change-customer">
-              Change
-            </Button>
-          </div>
-        ) : (
-          <div className="space-y-3">
-            <div className="space-y-2">
-              <Label htmlFor="customer-search">Search existing customers</Label>
-              <Input
-                id="customer-search"
-                value={props.customerSearch}
-                onChange={(e) => props.onCustomerSearchChange(e.target.value)}
-                placeholder="Start typing a name…"
-                data-testid="input-customer-search"
-              />
-              {props.customerResults.length > 0 && (
-                <ul className="border rounded-md divide-y" data-testid="list-customer-results">
-                  {props.customerResults.map((c) => (
-                    <li key={c.id}>
-                      <button
-                        type="button"
-                        className="w-full text-left px-3 py-2 hover:bg-accent"
-                        onClick={() => props.onSelectCustomer(c)}
-                        data-testid={`button-select-customer-${c.id}`}
-                      >
-                        {c.fullName}
-                      </button>
-                    </li>
-                  ))}
-                </ul>
-              )}
-            </div>
-
-            {!props.creatingCustomer ? (
-              <Button variant="outline" onClick={props.onToggleCreate} data-testid="button-new-customer">
-                + New customer
-              </Button>
-            ) : (
-              <div className="space-y-3 rounded-md border p-3">
-                <div className="space-y-2">
-                  <Label htmlFor="new-customer-name">
-                    Customer name <span aria-hidden="true">*</span>
-                    <span className="sr-only">required</span>
-                  </Label>
-                  <Input
-                    id="new-customer-name"
-                    value={props.newCustomerName}
-                    onChange={(e) => props.setNewCustomerName(e.target.value)}
-                    required
-                    data-testid="input-new-customer-name"
-                  />
-                </div>
-                <div className="space-y-2">
-                  <Label htmlFor="new-customer-email">Customer email (optional)</Label>
-                  <Input
-                    id="new-customer-email"
-                    type="email"
-                    value={props.newCustomerEmail}
-                    onChange={(e) => props.setNewCustomerEmail(e.target.value)}
-                    data-testid="input-new-customer-email"
-                  />
-                </div>
-                <div className="space-y-2">
-                  <Label htmlFor="new-customer-phone">Customer phone (optional)</Label>
-                  <Input
-                    id="new-customer-phone"
-                    type="tel"
-                    value={props.newCustomerPhone}
-                    onChange={(e) => props.setNewCustomerPhone(e.target.value)}
-                    data-testid="input-new-customer-phone"
-                  />
-                </div>
-                {props.customerError && (
-                  <p role="alert" className="text-sm text-destructive" data-testid="text-new-customer-error">
-                    {props.customerError}
-                  </p>
-                )}
-                <Button
-                  onClick={props.onCreateCustomer}
-                  disabled={!props.newCustomerName.trim()}
-                  data-testid="button-save-new-customer"
-                >
-                  Save customer
-                </Button>
-              </div>
-            )}
-          </div>
-        )}
-
         <div className="space-y-2">
-          <Label htmlFor="internal-reference">Your internal reference (optional)</Label>
+          <Label htmlFor="internal-reference">Shop/card reference (optional)</Label>
           <Input
             id="internal-reference"
             value={props.internalReference}
@@ -1032,7 +855,6 @@ function CardEditRow({
 
 // ---------------- Step 4: Review ----------------
 function ReviewStep(props: {
-  customerDisplay: string;
   internalReference: string;
   serviceTierCode: string | null;
   tiers: AvailableServiceTier[];
@@ -1066,8 +888,7 @@ function ReviewStep(props: {
           </div>
         )}
 
-        <ReviewRow label="Customer" value={props.customerDisplay || "Not set"} onEdit={() => props.onEditStep(0)} />
-        <ReviewRow label="Your reference" value={props.internalReference || "—"} onEdit={() => props.onEditStep(0)} />
+        <ReviewRow label="Shop reference" value={props.internalReference || "—"} onEdit={() => props.onEditStep(0)} />
         <ReviewRow
           label="Service"
           value={tier ? `${tier.label} (${formatPence(tier.pricePerCardPence)})` : "Not set"}

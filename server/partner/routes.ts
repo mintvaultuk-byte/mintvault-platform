@@ -25,18 +25,25 @@ import {
   partnerLoginIpLimiter,
   partnerLoginLimiter,
   partnerMfaLimiter,
+  partnerMfaAccountLimiter,
   partnerResetLimiter,
   partnerLocationSwitchLimiter,
   partnerInviteLimiter,
   partnerTeamMutationLimiter,
 } from "./rate-limit";
 import { withTenant, partnerRuntimeQuery } from "./db";
-import { auditInOwnTxn } from "./audit";
+import { auditInOwnTxn, writePartnerSecurity } from "./audit";
 import { recoveryHash, mfaEncryptionConfigured } from "./mfa";
 import { resetDeliveryConfigured, deliverResetToken } from "./delivery";
 import { switchLocation } from "./location";
-import { acceptPartnerInvitation } from "./partner-management-service";
+import {
+  acceptPartnerInvitation,
+  getFirstShopOnboarding,
+  updateFirstShopDeliveryAddress,
+  upsertFirstShopOperationsContact,
+} from "./partner-management-service";
 import { toG5Error, g5StatusFor, requireReason, optionalReason, G5RequestError } from "./partner-management-errors";
+import { getUserRoles } from "./permissions";
 import {
   changeTeamMemberRole,
   deliverTeamInvitationAfterCommit,
@@ -61,8 +68,12 @@ import {
 import { hasRecentStepUp, recordStepUp, requireRecentAuth, STEP_UP_WINDOW_MINUTES } from "./step-up";
 import {
   canPurchaseCredits,
+  checkoutStripeEnvironmentStatus,
+  completePartnerCreditCheckoutOperation,
+  findActivePartnerCreditCheckoutOperation,
   listCreditPacks,
-  recordPartnerCreditCheckoutIntent,
+  presentPartnerCreditCheckoutOperation,
+  reservePartnerCreditCheckoutOperation,
   resolvePackForCheckout,
   validateStripePriceForCheckout,
 } from "./credit-purchase-service";
@@ -96,6 +107,70 @@ function sendPartnerTeamError(res: import("express").Response, err: unknown): vo
 
 function noStore(res: import("express").Response): void {
   res.setHeader("Cache-Control", "private, no-store");
+}
+
+function requiredPartnerOnboardingText(raw: unknown, field: string, max = 500): string {
+  if (typeof raw !== "string") throw new G5RequestError("VALIDATION_ERROR", `${field} is required.`);
+  const value = raw.trim();
+  if (!value || value.length > max) throw new G5RequestError("VALIDATION_ERROR", `${field} is invalid.`);
+  return value;
+}
+
+function optionalPartnerOnboardingText(raw: unknown, field: string, max = 200): string | null {
+  if (raw == null || raw === "") return null;
+  return requiredPartnerOnboardingText(raw, field, max);
+}
+
+/**
+ * First-shop edits are self-service for the canonical Partner Owner, never a browser-supplied
+ * tenant or a broad team-management permission. The admin service remains the single writer and
+ * audit authority; this helper only derives its actor from the authenticated session.
+ */
+export async function currentPartnerOwnerActor(req: import("express").Request) {
+  const principal = req.partner;
+  if (!principal) throw new G5RequestError("UNAUTHENTICATED", "Sign in to continue.");
+  return withTenant({ tenantId: principal.tenantId, locationId: principal.locationId }, async (client) => {
+    const roles = await getUserRoles(client, principal.userId);
+    if (!roles.includes("PARTNER_OWNER")) {
+      throw new G5RequestError("FORBIDDEN", "Only the Partner Owner can confirm first-shop setup.");
+    }
+    const user = await client.query<{ email: string }>("SELECT email FROM partner_users WHERE id=$1", [principal.userId]);
+    if (!user.rows[0]?.email) throw new G5RequestError("UNAUTHENTICATED", "Partner account details are unavailable.");
+    return {
+      actorUserId: principal.userId,
+      actorEmail: user.rows[0].email,
+      requestId: String(req.headers["x-request-id"] ?? `partner-onboarding-${req.method}-${Date.now()}`),
+      idempotencyKey: partnerOriginatedIdempotencyKey(req.body?.idempotencyKey, principal.tenantId),
+    };
+  });
+}
+
+/**
+ * Namespace and validate a CUSTOMER-supplied idempotency key before it can reach the Super Admin
+ * management ledger.
+ *
+ * `partner_management_audit.idempotency_key` is a GLOBAL namespace: priorSuccess() matches on the
+ * key alone, and uq_partner_management_audit_idem is unique on the key alone. Until first-shop
+ * onboarding added self-service Owner routes, only MintVault staff could name a key. Passing a raw
+ * body value through would let any Partner Owner register a key of their choosing and thereby make
+ * a LATER Super Admin mutation carrying the same key short-circuit to
+ * `{ ok: true, alreadyCompleted: true }` without executing — including the containment actions
+ * (suspend partner, revoke invitation, reset MFA, revoke sessions). The ledger is append-only and
+ * the index is unique-on-success, so such a collision would be permanent.
+ *
+ * Two defences, deliberately both: the key is validated to the same shape createFirstShopOnboarding
+ * already enforces, and it is prefixed with the authenticated tenant so a partner-originated key can
+ * never be spelled the same way as a staff-originated one. The tenant comes from the session, never
+ * the body.
+ */
+function partnerOriginatedIdempotencyKey(raw: unknown, tenantId: string): string | undefined {
+  if (typeof raw !== "string") return undefined;
+  const value = raw.trim();
+  if (!value) return undefined;
+  if (!/^[A-Za-z0-9._:-]{16,128}$/.test(value)) {
+    throw new G5RequestError("VALIDATION_ERROR", "idempotencyKey is invalid.");
+  }
+  return `partner:${tenantId}:${value}`;
 }
 
 function sendGooglePresenceError(res: import("express").Response, err: unknown): void {
@@ -288,7 +363,7 @@ export function partnerApiRouter(): Router {
     res.json({ ok: true, mfaRequired: !!result.mfaPending });
   });
 
-  r.post("/auth/mfa", partnerMfaLimiter, async (req, res) => {
+  r.post("/auth/mfa", partnerMfaLimiter, partnerMfaAccountLimiter, async (req, res) => {
     if (!req.partner) {
       res.status(401).json({ error: "authentication required" });
       return;
@@ -316,6 +391,20 @@ export function partnerApiRouter(): Router {
       return false;
     });
     if (!ok) {
+      /*
+       * A wrong second factor used to write NOTHING — no counter, no audit row, no security event —
+       * so a sustained guessing campaign against one account was invisible to the account holder and
+       * to us. The account-keyed limiter above is the bound; this is the evidence. Written
+       * best-effort: failing to record the attempt must never turn a refused login into a 500.
+       */
+      await withTenant({ tenantId: req.partner.tenantId }, async (c) =>
+        writePartnerSecurity(c, {
+          tenantId: req.partner!.tenantId,
+          severity: "medium",
+          kind: "partner_mfa_failed",
+          detail: { userId: req.partner!.userId, method: typeof recoveryCode === "string" && recoveryCode ? "recovery_code" : "totp" },
+        })
+      ).catch(() => {});
       res.status(401).json({ error: "invalid code" });
       return;
     }
@@ -518,76 +607,121 @@ export function partnerApiRouter(): Router {
         }
 
         const packCode = typeof req.body?.packCode === "string" ? req.body.packCode : "";
-        const pack = await resolvePackForCheckout(packCode);
+        const checkoutEnvironment = checkoutStripeEnvironmentStatus();
+        if (!checkoutEnvironment.ok || checkoutEnvironment.environment === null) {
+          const error = new Error(checkoutEnvironment.message || "Stripe mode is not configured.") as Error & {
+            code?: string;
+          };
+          error.code = checkoutEnvironment.code || "STRIPE_ENV_UNDECLARED";
+          throw error;
+        }
+
+        /*
+         * Reuse a live operation BEFORE looking at the mutable pack catalogue. A pack may be
+         * disabled or its Stripe Price rotated after a buyer was sent to Checkout; that must stop
+         * only NEW purchases, never strand this already server-created operation.
+         */
+        let operation = await findActivePartnerCreditCheckoutOperation({
+          tenantId: principal.tenantId,
+          initiatingUserId: principal.userId,
+          packCode,
+          stripeEnvironment: checkoutEnvironment.environment,
+        });
+
+        if (!operation) {
+          const pack = await resolvePackForCheckout(packCode);
+          const { getUncachableStripeClient } = await import("../stripeClient");
+          const stripe = await getUncachableStripeClient();
+          const stripePrice = await stripe.prices.retrieve(pack.stripePriceId!);
+          const priceFields = stripePrice as {
+            id?: unknown;
+            currency?: unknown;
+            unit_amount?: unknown;
+            tax_behavior?: unknown;
+            livemode?: unknown;
+            active?: unknown;
+          };
+          const stripeEnvironment = validateStripePriceForCheckout(pack, {
+            id: typeof priceFields.id === "string" ? priceFields.id : null,
+            currency: typeof priceFields.currency === "string" ? priceFields.currency : null,
+            unitAmount: typeof priceFields.unit_amount === "number" ? priceFields.unit_amount : null,
+            taxBehavior: typeof priceFields.tax_behavior === "string" ? priceFields.tax_behavior : null,
+            livemode: typeof priceFields.livemode === "boolean" ? priceFields.livemode : null,
+            active: typeof priceFields.active === "boolean" ? priceFields.active : null,
+          });
+          operation = await reservePartnerCreditCheckoutOperation({
+            tenantId: principal.tenantId,
+            packCode: pack.code,
+            initiatingUserId: principal.userId,
+            stripePriceId: pack.stripePriceId!,
+            stripeCurrency: pack.stripeCurrency!,
+            stripeEnvironment,
+            credits: pack.credits,
+            pricePence: pack.pricePence,
+            taxBehavior: "inclusive",
+            // A creating operation is deliberately durable long enough for a request timeout to
+            // retry through the same Stripe idempotency key. Stripe returns its exact expiry below.
+            checkoutExpiresAt: new Date(Date.now() + 24 * 60 * 60 * 1000),
+          });
+        }
 
         const { getUncachableStripeClient } = await import("../stripeClient");
         const stripe = await getUncachableStripeClient();
-        const stripePrice = await stripe.prices.retrieve(pack.stripePriceId!);
-        const priceFields = stripePrice as {
-          id?: unknown;
-          currency?: unknown;
-          unit_amount?: unknown;
-          tax_behavior?: unknown;
-          livemode?: unknown;
-          active?: unknown;
-        };
-        const stripeEnvironment = validateStripePriceForCheckout(pack, {
-          id: typeof priceFields.id === "string" ? priceFields.id : null,
-          currency: typeof priceFields.currency === "string" ? priceFields.currency : null,
-          unitAmount: typeof priceFields.unit_amount === "number" ? priceFields.unit_amount : null,
-          taxBehavior: typeof priceFields.tax_behavior === "string" ? priceFields.tax_behavior : null,
-          livemode: typeof priceFields.livemode === "boolean" ? priceFields.livemode : null,
-          active: typeof priceFields.active === "boolean" ? priceFields.active : null,
-        });
         const appUrl = process.env.APP_URL || "https://mintvaultuk.com";
-        // Checkout Session metadata serves the successful purchase fulfilment webhook. A charge
-        // refund/dispute is emitted from the PaymentIntent/Charge object instead, so copy the same
-        // server-derived identifiers there as well. No quantity or price is ever client-provided.
-        const checkoutAttribution = {
-          partner_tenant_id: principal.tenantId,
-          partner_pack_code: pack.code,
-          partner_initiating_user_id: principal.userId,
-        };
-        const session = await stripe.checkout.sessions.create({
-          mode: "payment",
-          line_items: [{ price: pack.stripePriceId!, quantity: 1 }],
-          // The webhook reads ONLY these keys to attribute the payment. The credit quantity is
-          // deliberately absent: it is resolved from partner_credit_packs by pack code at grant
-          // time, so tampered metadata cannot mint capacity.
-          metadata: checkoutAttribution,
-          payment_intent_data: { metadata: checkoutAttribution },
-          // MUST match a real client route. `/partner/credits` is not registered in App.tsx, so the
-          // partner catch-all route silently redirected the returning buyer to the dashboard and
-          // threw the `?purchase=` signal away — the one moment the shop most needs to be told
-          // "paid, processing, credits appear shortly". The wallet page is `/partner/billing`.
-          //
-          // NB: that catch-all's path pattern is deliberately NOT written out here. A slash-star
-          // sequence inside a comment opens a block comment as far as a naive stripper is
-          // concerned, and tests/partner-main-reconciliation-merge-loss.test.ts strips comments
-          // before asserting that routes still exist — so writing it literally silently swallowed
-          // every route below this point and failed a merge-loss sentinel.
-          success_url: `${appUrl}/partner/billing?purchase=processing`,
-          cancel_url: `${appUrl}/partner/billing?purchase=cancelled`,
-        });
-        if (!session.url) throw new Error("Stripe Checkout did not return a URL.");
-        await recordPartnerCreditCheckoutIntent({
-          stripeSessionId: session.id,
-          tenantId: principal.tenantId,
-          packCode: pack.code,
-          initiatingUserId: principal.userId,
-          stripePriceId: pack.stripePriceId!,
-          stripeCurrency: pack.stripeCurrency!,
-          stripeEnvironment,
-        });
-
-        res.json({
-          url: session.url,
-          packCode: pack.code,
-          credits: pack.credits,
-          pricePence: pack.pricePence,
-          displayPrice: pack.displayPrice,
-          vatIncluded: pack.vatIncluded,
-        });
+        if (!operation.checkoutUrl) {
+          let session;
+          if (operation.stripeSessionId) {
+            // 0099 is compatible with a pre-existing 0097 row whose Session was recorded before
+            // URLs were persisted: retrieve that same Session, never create a second one.
+            session = await stripe.checkout.sessions.retrieve(operation.stripeSessionId);
+          } else {
+            // ONE server-derived attribution object, deliberately built once and used in both
+            // places. The Checkout Session metadata serves the successful-purchase fulfilment
+            // webhook; a refund or dispute is emitted from the PaymentIntent/Charge object instead,
+            // so the SAME identifiers must reach payment_intent_data or charge.refunded /
+            // charge.dispute.created cannot attribute the event to a tenant. Sharing the constant
+            // is what makes "the same attribution" provable rather than a coincidence of two
+            // literals that could drift apart. The webhook reads ONLY these keys: credits and price
+            // remain in the immutable server-created operation, never in Stripe metadata.
+            const checkoutAttribution = {
+              partner_tenant_id: principal.tenantId,
+              partner_pack_code: operation.packCode,
+              partner_initiating_user_id: principal.userId,
+              partner_checkout_operation_key: operation.checkoutOperationKey,
+            };
+            session = await stripe.checkout.sessions.create(
+              {
+                mode: "payment",
+                line_items: [{ price: operation.stripePriceId, quantity: 1 }],
+                metadata: checkoutAttribution,
+                payment_intent_data: { metadata: checkoutAttribution },
+                // success_url MUST match a real client route. `/partner/credits` is not registered
+                // in App.tsx, so the partner catch-all silently redirected the returning buyer to
+                // the dashboard and discarded the `?purchase=` signal. The wallet page is
+                // `/partner/billing`.
+                //
+                // NB: that catch-all's path pattern is deliberately NOT written out here. A
+                // slash-star sequence inside a comment opens a block comment as far as a naive
+                // stripper is concerned, and tests/partner-main-reconciliation-merge-loss.test.ts
+                // strips comments before asserting routes still exist — writing it literally
+                // silently swallowed every route below this point.
+                success_url: `${appUrl}/partner/billing?purchase=processing`,
+                cancel_url: `${appUrl}/partner/billing?purchase=cancelled`,
+              },
+              { idempotencyKey: `partner-credit-checkout:${operation.checkoutOperationKey}` }
+            );
+          }
+          if (!session.url || !session.id || !session.expires_at) {
+            throw new Error("Stripe Checkout did not return a URL and expiry.");
+          }
+          operation = await completePartnerCreditCheckoutOperation({
+            checkoutOperationKey: operation.checkoutOperationKey,
+            stripeSessionId: session.id,
+            checkoutUrl: session.url,
+            checkoutExpiresAt: new Date(session.expires_at * 1000),
+          });
+        }
+        res.json({ url: operation.checkoutUrl, ...presentPartnerCreditCheckoutOperation(operation) });
       } catch (err) {
         const code = (err as { code?: string })?.code;
         if (code === "PACK_NOT_FOUND" || code === "PACK_NOT_PURCHASABLE") {
@@ -659,6 +793,72 @@ export function partnerApiRouter(): Router {
         .json({ error: { code: "readiness_unavailable", message: "Setup status is unavailable right now." } });
     }
   });
+
+  /** The Owner's guided view of the same canonical first-shop record Super Admin sees. */
+  r.get("/onboarding", requirePartnerCapability("partner.dashboard.view"), async (req, res) => {
+    try {
+      await currentPartnerOwnerActor(req);
+      res.json(await getFirstShopOnboarding(req.partner!.tenantId));
+    } catch (err) {
+      sendPartnerTeamError(res, err);
+    }
+  });
+
+  r.patch(
+    "/onboarding/main-location",
+    requirePartnerCapability("partner.dashboard.view"),
+    requireNotViewOnly,
+    requireNotSensitiveFrozen,
+    partnerTeamMutationLimiter,
+    async (req, res) => {
+      try {
+        const actor = await currentPartnerOwnerActor(req);
+        const snapshot = await getFirstShopOnboarding(req.partner!.tenantId);
+        if (!snapshot.mainLocation) throw new G5RequestError("PARTNER_NOT_FOUND", "No active Main location is available.");
+        const result = await updateFirstShopDeliveryAddress(
+          actor,
+          req.partner!.tenantId,
+          snapshot.mainLocation.id,
+          {
+            line1: requiredPartnerOnboardingText(req.body?.deliveryAddress?.line1, "Address line 1", 200),
+            line2: optionalPartnerOnboardingText(req.body?.deliveryAddress?.line2, "Address line 2", 200),
+            city: requiredPartnerOnboardingText(req.body?.deliveryAddress?.city, "Town or city", 120),
+            postcode: requiredPartnerOnboardingText(req.body?.deliveryAddress?.postcode, "Postcode", 32),
+            country: requiredPartnerOnboardingText(req.body?.deliveryAddress?.country, "Country", 120),
+          },
+          "Partner Owner confirmed Main location delivery address"
+        );
+        res.json({ ok: true, result });
+      } catch (err) {
+        denyTeamAction(req, res, "partner_first_shop_main_location", err);
+      }
+    }
+  );
+
+  r.put(
+    "/onboarding/operations-contact",
+    requirePartnerCapability("partner.dashboard.view"),
+    requireNotViewOnly,
+    requireNotSensitiveFrozen,
+    partnerTeamMutationLimiter,
+    async (req, res) => {
+      try {
+        const actor = await currentPartnerOwnerActor(req);
+        const result = await upsertFirstShopOperationsContact(
+          actor,
+          req.partner!.tenantId,
+          {
+            fullName: requiredPartnerOnboardingText(req.body?.fullName, "Contact name", 200),
+            email: requiredPartnerOnboardingText(req.body?.email, "Operational email", 320),
+          },
+          "Partner Owner confirmed primary operations contact"
+        );
+        res.json({ ok: true, result });
+      } catch (err) {
+        denyTeamAction(req, res, "partner_first_shop_operations_contact", err);
+      }
+    }
+  );
 
   r.get("/sessions", requirePartnerAuth, async (req, res) => {
     try {
@@ -1050,7 +1250,7 @@ export function partnerApiRouter(): Router {
    * asking again inside the window. It returns NO new session and NO token: this raises the
    * privilege of the session already in hand rather than issuing anything new.
    */
-  r.post("/auth/step-up", requirePartnerAuth, partnerMfaLimiter, async (req, res) => {
+  r.post("/auth/step-up", requirePartnerAuth, partnerMfaLimiter, partnerMfaAccountLimiter, async (req, res) => {
     const principal = req.partner!;
     try {
       const result = await verifyStepUp(
@@ -1186,7 +1386,7 @@ export function partnerApiRouter(): Router {
     res.json({ ok: true });
   });
 
-  r.post("/mfa/confirm", partnerMfaLimiter, async (req, res) => {
+  r.post("/mfa/confirm", partnerMfaLimiter, partnerMfaAccountLimiter, async (req, res) => {
     if (!req.partner) {
       res.status(401).json({ error: "authentication required" });
       return;
@@ -1215,7 +1415,7 @@ export function partnerApiRouter(): Router {
     res.json({ ok: true, recoveryCodes: out.recoveryCodes }); // shown once
   });
 
-  r.post("/mfa/recovery-codes/regenerate", requirePartnerAuth, partnerMfaLimiter, async (req, res) => {
+  r.post("/mfa/recovery-codes/regenerate", requirePartnerAuth, partnerMfaLimiter, partnerMfaAccountLimiter, async (req, res) => {
     const { password, code, recoveryCode } = req.body ?? {};
     if (typeof password !== "string") {
       res.status(400).json({ error: "elevated verification required" });

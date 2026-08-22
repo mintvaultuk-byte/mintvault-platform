@@ -402,6 +402,9 @@ function stationSummary(sessionBody, availableCredits) {
     canCalibrate: Array.isArray(sessionBody.permissions)
       ? sessionBody.permissions.includes("partner.stations.calibrate")
       : false,
+    canPurchaseCredits: Array.isArray(sessionBody.permissions)
+      ? sessionBody.permissions.includes("partner.credits.purchase")
+      : false,
   };
 }
 
@@ -443,8 +446,15 @@ async function availableCreditsOrNull() {
  */
 async function refreshAvailableCredits() {
   const available = await availableCreditsOrNull();
+  const prior = stateMod.get().availableCredits;
+  /*
+   * A failed read is not evidence that capacity changed. Do not replace a confirmed zero with
+   * null and then fall back to a stale sign-in snapshot in the renderer. Return the raw read so a
+   * following authoritative 402 can still force the zero state if this read failed.
+   */
+  const displayed = typeof available === "number" ? available : typeof prior === "number" ? prior : null;
   stateMod.set({
-    availableCredits: available,
+    availableCredits: displayed,
     walletRefreshGeneration: Number(stateMod.get().walletRefreshGeneration || 0) + 1,
   });
   pushStateToRenderer();
@@ -1012,7 +1022,16 @@ function setupIpc() {
       const result = await stationClient.creditCheckout(packCode);
       if (!result.ok) {
         const error = result.body?.error || {};
-        return { ok: false, status: result.status, error: error.message || error || "Checkout could not start" };
+        // The CODE crosses IPC too, not just the message: the renderer has to distinguish
+        // "step-up required" (which the Scanner cannot satisfy — there is no in-app step-up flow)
+        // from an ordinary failure, so it can hand the operator to the browser wallet instead of
+        // showing a dead end at the exact moment the shop most needs to buy.
+        return {
+          ok: false,
+          status: result.status,
+          code: typeof error.code === "string" ? error.code : null,
+          error: error.message || error || "Checkout could not start",
+        };
       }
       const url = result.body?.url;
       if (!url) return { ok: false, error: "Checkout did not return a Stripe URL" };

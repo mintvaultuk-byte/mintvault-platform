@@ -3,9 +3,10 @@
  * authoritative migrations. The Drizzle model covers the 14 foundation tables of migration 0001,
  * which is the surface it is used for; the auth/MFA tables and columns added in 0002–0005 are
  * accessed by the runtime through raw SQL / SECURITY DEFINER functions (never typed Drizzle access),
- * so they are MIGRATION-authoritative and intentionally not modelled in Drizzle. This test asserts
- * the 0001 Drizzle↔migration parity exactly AND pins the full Phase-1 migration inventory (0001–0006)
- * so a new/removed migration is noticed. Pure: reads files, no DB.
+ * so they are MIGRATION-authoritative and intentionally not modelled in Drizzle. The four Supplies
+ * tables are the one approved later typed surface and remain bound to their own 0102 migration.
+ * Additive typed columns must be listed against their exact, numbered extension migration; this
+ * test does not infer schema authority from runtime code. Pure: reads files, no DB.
  */
 import { describe, it, expect } from "vitest";
 import { readFileSync, readdirSync } from "node:fs";
@@ -14,13 +15,24 @@ import { getTableName, getTableColumns, is } from "drizzle-orm";
 import { PgTable } from "drizzle-orm/pg-core";
 import * as partnerSchema from "../shared/partner-schema";
 
-const migration = readFileSync(join(process.cwd(), "migrations", "0001_partner_foundation.sql"), "utf8");
+const foundationMigration = readFileSync(join(process.cwd(), "migrations", "0001_partner_foundation.sql"), "utf8");
+const suppliesMigration = readFileSync(join(process.cwd(), "migrations", "0104_partner_supplies_orders.sql"), "utf8");
+const firstShopDeliveryAddressMigration = readFileSync(
+  join(process.cwd(), "migrations", "0105_partner_first_shop_delivery_address.sql"),
+  "utf8",
+);
+const SUPPLIES_TABLES = [
+  "partner_supplies_orders",
+  "partner_supplies_order_items",
+  "partner_supplies_order_events",
+  "partner_supplies_order_notifications",
+] as const;
 
-function migrationTableNames(): string[] {
+function migrationTableNames(sql: string): string[] {
   const re = /CREATE TABLE IF NOT EXISTS\s+(\w+)/gi;
   const names = new Set<string>();
   let m: RegExpExecArray | null;
-  while ((m = re.exec(migration)) !== null) names.add(m[1]);
+  while ((m = re.exec(sql)) !== null) names.add(m[1]);
   return [...names].sort();
 }
 
@@ -32,16 +44,18 @@ function drizzleTableNames(): string[] {
 }
 
 describe("partner schema ↔ migration parity", () => {
-  it("every Drizzle partner table exists in the migration", () => {
-    const inMigration = new Set(migrationTableNames());
+  it("every typed Drizzle partner table exists in its authoritative migration", () => {
+    const inMigration = new Set([...migrationTableNames(foundationMigration), ...migrationTableNames(suppliesMigration)]);
     for (const t of drizzleTableNames()) {
-      expect(inMigration.has(t), `Drizzle table ${t} missing from migration 0001`).toBe(true);
+      expect(inMigration.has(t), `Drizzle table ${t} missing from its migration authority`).toBe(true);
     }
   });
 
-  it("the Drizzle schema and migration 0001 define the same 14 foundation tables", () => {
-    expect(drizzleTableNames()).toEqual(migrationTableNames());
-    expect(drizzleTableNames().length).toBe(14);
+  it("keeps the 14 foundation tables in 0001 and the four Supplies tables in 0102", () => {
+    const foundationTables = drizzleTableNames().filter((name) => !SUPPLIES_TABLES.includes(name as (typeof SUPPLIES_TABLES)[number]));
+    expect(foundationTables).toEqual(migrationTableNames(foundationMigration));
+    expect(foundationTables).toHaveLength(14);
+    expect([...SUPPLIES_TABLES].sort()).toEqual(migrationTableNames(suppliesMigration));
   });
 
   it("pins the full numbered migration inventory, so a new migration is noticed", () => {
@@ -287,6 +301,8 @@ describe("partner schema ↔ migration parity", () => {
       // 0098 grants SCANNER_OPERATOR balance/catalogue read authority for zero-credit lockout UX.
       // Raw-SQL RBAC reference data; no Drizzle model.
       "0098_scanner_operator_credit_view.sql",
+      // 0099 records one durable Checkout operation/snapshot before Stripe is called.
+      "0099_partner_credit_checkout_operation_idempotency.sql",
       // GB-04 first-party attribution is application-scoped and uses the
       // canonical post-credit migration identity.
       "0100_growth_commercial_attribution.sql",
@@ -298,6 +314,12 @@ describe("partner schema ↔ migration parity", () => {
       // SQL, isolated from the whole-portal schema contract and never auto-enabled.
       "0102_partner_public_presence.sql",
       "0103_partner_google_presence.sql",
+      "0104_partner_supplies_orders.sql",
+      "0105_partner_first_shop_delivery_address.sql",
+      // Forward-only lineage convergence for the 0102 slot collision, and the idempotency-namespace
+      // widening that stops a customer-chosen key matching a Super Admin action.
+      "0106_lineage_convergence_public_presence.sql",
+      "0107_partner_management_audit_idempotency_scope.sql",
     ]);
   });
 
@@ -328,45 +350,68 @@ describe("partner schema ↔ migration parity", () => {
     for (const t of drizzleTableNames()) expect(t.startsWith("partner_")).toBe(true);
   });
 
-  it("every Drizzle column name exists in the migration's CREATE TABLE for that table (F5 — column drift guard)", () => {
+  it("every Drizzle column name exists in its authoritative CREATE TABLE or explicitly pinned additive migration (F5 — column drift guard)", () => {
     // Parse the migration's CREATE TABLE column names per table.
     const tableCols = new Map<string, Set<string>>();
     const blockRe = /CREATE TABLE IF NOT EXISTS\s+(\w+)\s*\(([\s\S]*?)\n\);/gi;
-    let b: RegExpExecArray | null;
-    while ((b = blockRe.exec(migration)) !== null) {
-      const [, table, body] = b;
-      const cols = new Set<string>();
-      for (const line of body.split("\n")) {
-        const m = line.match(/^\s*([a-z_]+)\s+/i);
-        // skip constraint/PK/UNIQUE lines
-        if (m && !/^(primary|unique|constraint|foreign|check)$/i.test(m[1])) cols.add(m[1]);
+    for (const sql of [foundationMigration, suppliesMigration]) {
+      let b: RegExpExecArray | null;
+      while ((b = blockRe.exec(sql)) !== null) {
+        const [, table, body] = b;
+        const cols = new Set<string>();
+        for (const line of body.split("\n")) {
+          const m = line.match(/^\s*([a-z_]+)\s+/i);
+          // skip constraint/PK/UNIQUE lines
+          if (m && !/^(primary|unique|constraint|foreign|check)$/i.test(m[1])) cols.add(m[1]);
+        }
+        tableCols.set(table, cols);
       }
-      tableCols.set(table, cols);
     }
-    // ALTER TABLE ... ADD COLUMN (org tenant_id)
+    // ALTER TABLE ... ADD COLUMN (org tenant_id). The only approved typed additive
+    // extension is listed explicitly below; a new migration cannot become authority
+    // merely by containing a similarly named column.
     const alterRe = /ALTER TABLE\s+(\w+)\s+ADD COLUMN IF NOT EXISTS\s+(\w+)/gi;
-    let a: RegExpExecArray | null;
-    while ((a = alterRe.exec(migration)) !== null) tableCols.get(a[1])?.add(a[2]);
+    for (const sql of [foundationMigration, suppliesMigration]) {
+      let a: RegExpExecArray | null;
+      while ((a = alterRe.exec(sql)) !== null) tableCols.get(a[1])?.add(a[2]);
+    }
+
+    const approvedAdditiveColumns = new Map<string, Set<string>>([
+      [
+        "partner_locations",
+        new Set(
+          [...firstShopDeliveryAddressMigration.matchAll(/ADD COLUMN IF NOT EXISTS\s+(address_[a-z0-9_]+)/gi)].map(
+            (match) => match[1],
+          ),
+        ),
+      ],
+    ]);
+    expect(approvedAdditiveColumns.get("partner_locations")).toEqual(
+      new Set(["address_line1", "address_line2", "address_city", "address_postcode", "address_country"]),
+    );
 
     for (const table of Object.values(partnerSchema).filter((v): v is PgTable => is(v, PgTable))) {
       const name = getTableName(table);
       const migCols = tableCols.get(name);
       expect(migCols, `migration has no CREATE TABLE for ${name}`).toBeTruthy();
       for (const col of Object.values(getTableColumns(table))) {
-        expect(migCols!.has(col.name), `column ${name}.${col.name} missing from migration`).toBe(true);
+        expect(
+          migCols!.has(col.name) || approvedAdditiveColumns.get(name)?.has(col.name),
+          `column ${name}.${col.name} missing from migration`,
+        ).toBe(true);
       }
     }
   });
 
   it("migration enables RLS + FORCE and uses the fail-closed partner_current_tenant() helper", () => {
-    expect(migration).toMatch(/ENABLE ROW LEVEL SECURITY/i);
-    expect(migration).toMatch(/FORCE ROW LEVEL SECURITY/i);
-    expect(migration).toMatch(/CREATE POLICY/i);
+    expect(foundationMigration).toMatch(/ENABLE ROW LEVEL SECURITY/i);
+    expect(foundationMigration).toMatch(/FORCE ROW LEVEL SECURITY/i);
+    expect(foundationMigration).toMatch(/CREATE POLICY/i);
     // the helper coerces unset/empty/malformed context -> NULL -> 0 rows (fail closed).
-    expect(migration).toMatch(/CREATE OR REPLACE FUNCTION partner_current_tenant\(\) RETURNS uuid/i);
-    expect(migration).toMatch(/nullif\(current_setting\('app\.tenant_id', true\), ''\)::uuid/);
-    expect(migration).toMatch(/WHEN invalid_text_representation THEN\s*\n?\s*RETURN NULL/i);
-    expect(migration).toMatch(/tenant_id = partner_current_tenant\(\)/);
+    expect(foundationMigration).toMatch(/CREATE OR REPLACE FUNCTION partner_current_tenant\(\) RETURNS uuid/i);
+    expect(foundationMigration).toMatch(/nullif\(current_setting\('app\.tenant_id', true\), ''\)::uuid/);
+    expect(foundationMigration).toMatch(/WHEN invalid_text_representation THEN\s*\n?\s*RETURN NULL/i);
+    expect(foundationMigration).toMatch(/tenant_id = partner_current_tenant\(\)/);
   });
 
   it("the RLS loop covers all 11 tenant-scoped tables (not the 3 global reference tables)", () => {
@@ -384,10 +429,10 @@ describe("partner schema ↔ migration parity", () => {
       "partner_emergency_controls",
     ];
     // the RLS ARRAY literal is repeated (enable loop + grant loop); assert each tenant table is in it.
-    for (const t of tenantScoped) expect(migration).toContain(`'${t}'`);
+    for (const t of tenantScoped) expect(foundationMigration).toContain(`'${t}'`);
     // global reference tables must NOT be RLS-looped (they are granted SELECT only).
     for (const g of ["partner_roles", "partner_permissions", "partner_role_permissions"]) {
-      expect(migration).toMatch(new RegExp(`GRANT SELECT ON[^;]*${g}`));
+      expect(foundationMigration).toMatch(new RegExp(`GRANT SELECT ON[^;]*${g}`));
     }
   });
 });

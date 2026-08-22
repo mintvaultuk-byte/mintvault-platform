@@ -887,6 +887,11 @@ export default function PartnerManagementDetailPage() {
 
         {workspaceTab === "onboarding" && (
           <Panel title="Onboarding" sub="Operational readiness and owner access.">
+            <div style={{ marginBottom: 12 }}>
+              <Link href={`/admin/partners/${partnerId}/onboarding`} data-testid="pm-open-guided-onboarding">
+                Continue guided first-shop onboarding
+              </Link>
+            </div>
             <ReadinessPanel readiness={onboarding.data?.operational} audience="SUPER_ADMIN" />
           </Panel>
         )}

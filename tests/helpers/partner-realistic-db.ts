@@ -96,6 +96,8 @@ export const PARTNER_MIGRATIONS_WITH_G6B = [
   // Local Checkout provenance: the verified webhook must match a server-created Stripe Session
   // before it can grant wallet capacity.
   "0097_partner_credit_checkout_sessions",
+  // Durable Checkout-operation idempotency and immutable payment snapshot.
+  "0099_partner_credit_checkout_operation_idempotency",
 ] as const;
 
 /** Partner user management + invitations. Depends on G5 partner-management audit/profile tables. */
@@ -117,6 +119,21 @@ export const PARTNER_MIGRATIONS_WITH_USER_MANAGEMENT_INVARIANT = [
   // never exercise step-up, and neither PARTNER_SCHEMA_MIGRATIONS nor
   // PARTNER_MIGRATIONS_WITH_LIFECYCLE derives from this list, so it is not applied twice anywhere.
   "0086_partner_session_step_up",
+] as const;
+
+/**
+ * Partner onboarding-readiness proofs.
+ *
+ * getPartnerOnboardingReadiness() reads the STRUCTURED delivery-address columns that 0105 adds to
+ * partner_locations (address_line1/city/postcode/country). Without 0105 the readiness query raises
+ * `column main.address_line1 does not exist`, the route answers 500, and every downstream
+ * invitation/login assertion in the onboarding matrix then fails as though authentication itself
+ * were broken. That is the same mis-read the 0086 note above records, so the FIXTURE is corrected
+ * here rather than the assertions weakened.
+ */
+export const PARTNER_MIGRATIONS_WITH_ONBOARDING_READINESS = [
+  ...PARTNER_MIGRATIONS_WITH_USER_MANAGEMENT_INVARIANT,
+  "0105_partner_first_shop_delivery_address",
 ] as const;
 
 /**
@@ -174,6 +191,33 @@ export const PARTNER_MIGRATIONS_WITH_RBAC_SEED = [
   // assertions compare against). That suite already excluded 0073 from THIS list
   // and applies it explicitly through the real runner, so removing it here is a
   // no-op for the suite that wants it and a repair for the four that never did.
+] as const;
+
+/** Partner supplies ordering needs management snapshots (0015) and the real RBAC seed (0034). */
+export const PARTNER_MIGRATIONS_WITH_SUPPLIES = [
+  ...PARTNER_MIGRATIONS_WITH_RBAC_SEED,
+  "0104_partner_supplies_orders",
+  "0105_partner_first_shop_delivery_address",
+] as const;
+
+/**
+ * First-shop onboarding creates the wallet in the same transaction as its organisation/location/
+ * contact/Owner invitation. Unlike supplies-only proofs it therefore needs the G6 wallet lineage,
+ * followed by the complete management audit/RBAC/supplies vocabulary in migration order.
+ */
+export const PARTNER_MIGRATIONS_WITH_FIRST_SHOP = [
+  ...PARTNER_MIGRATIONS_WITH_G6B,
+  "0018_correction_audit_index",
+  "0031_partner_user_management",
+  "0032_partner_final_owner_invariant",
+  "0033_partner_audit_action_precision",
+  "0074_partner_submission_lifecycle_and_location_snapshot",
+  "0084_partner_location_management",
+  "0086_partner_session_step_up",
+  "0096_partner_card_job_void_management_audit",
+  "0034_partner_rbac_seed",
+  "0104_partner_supplies_orders",
+  "0105_partner_first_shop_delivery_address",
 ] as const;
 
 /**
@@ -357,8 +401,23 @@ export const PARTNER_SCHEMA_MIGRATIONS = [
   "0097_partner_credit_checkout_sessions",
   // PARTNER scope: one additive RBAC grant so SCANNER_OPERATOR can read wallet/catalogue state.
   "0098_scanner_operator_credit_view",
+  // PARTNER scope: additive Checkout-operation provenance; no wallet/ledger mutation.
+  "0099_partner_credit_checkout_operation_idempotency",
   "0102_partner_public_presence",
   "0103_partner_google_presence",
+  // PARTNER scope: durable operational supplies orders/outbox, RLS and additive RBAC only. It
+  // touches no core certificate/payment table, so every Partner-only realistic harness may model it.
+  "0104_partner_supplies_orders",
+  // PARTNER scope: additive structured delivery fields on the existing partner_locations authority
+  // plus a management-audit vocabulary extension. It touches no core table.
+  "0105_partner_first_shop_delivery_address",
+  // PARTNER scope: forward-only lineage convergence carrying 0102's public-presence body verbatim
+  // for hosts whose 0102 slot is occupied by the pre-rename supplies identity. Same tables, same
+  // namespace, idempotent — so it is a no-op wherever 0102 already applied.
+  "0106_lineage_convergence_public_presence",
+  // PARTNER scope: widens the partner_management_audit idempotency index to
+  // (tenant_id, action_type, idempotency_key). One partner_* table, no core dependency.
+  "0107_partner_management_audit_idempotency_scope",
 ] as const;
 
 /** True when a declared list pulls in a migration that needs the core schema. */
@@ -451,6 +510,7 @@ export const PARTNER_MIGRATIONS_WITH_PER_CARD = [
   // the forward-only vocabulary repair in every real-Postgres Card Job harness so the exercised
   // workflow runs against the same constraint contract as production will after migration.
   "0096_partner_card_job_void_management_audit",
+  "0105_partner_first_shop_delivery_address",
 ] as const;
 /**
  * 0044 widens partner_submissions.status past the three states 0007 allowed (draft /

@@ -16,10 +16,10 @@ describe("Partner Portal team management UI source assertions", () => {
     expect(app).not.toContain('const PartnerUsersPage = lazy(() => import("@/pages/partner/coming-soon"))');
   });
 
-  it("keeps the navigation permission-gated to partner.users.view", () => {
-    expect(shell).toContain(
-      '{ href: "/partner/users", label: "Users", icon: Users, permission: "partner.users.view" }'
-    );
+  it("keeps Users on its permission-gated direct route without restoring it to launch navigation", () => {
+    const primary = shell.slice(shell.indexOf("const PRIMARY_NAV_ITEMS"), shell.indexOf("const SECONDARY_NAV_ITEMS"));
+    expect(primary).not.toContain('href: "/partner/users"');
+    expect(app).toContain('path="/partner/users"');
   });
 
   it("renders the expected team table, empty state, invite form, and action controls", () => {

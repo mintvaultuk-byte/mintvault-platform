@@ -789,7 +789,12 @@ describe("P6 integration surfaces", () => {
      * when the operator most needs the true figure.
      */
     expect(scannerMain).toContain("async function refreshAvailableCredits()");
-    expect(scannerMain).toMatch(/stateMod\.set\(\{\s*availableCredits: available,/);
+    expect(scannerMain).toMatch(/stateMod\.set\(\{\s*availableCredits: displayed,/);
+    // A failed refresh preserves the last verified fact rather than reviving the sign-in snapshot.
+    expect(scannerMain).toContain("const prior = stateMod.get().availableCredits");
+    expect(scannerMain).toContain(
+      'typeof available === "number" ? available : typeof prior === "number" ? prior : null'
+    );
     expect(scannerMain).toMatch(/await refreshAvailableCredits\(\);\s*\n\s*return \{ ok: true, cardJob: job/);
     expect(scannerMain).toContain("const refreshedAvailable = await refreshAvailableCredits()");
     expect(scannerMain).toContain('error.code === "INSUFFICIENT_CREDITS" && typeof refreshedAvailable !== "number"');
