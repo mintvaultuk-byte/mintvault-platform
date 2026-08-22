@@ -200,6 +200,34 @@ export function isApprovedDestructiveFinding(filePath: string, sql: string, find
     ].every((action) => block.includes(`'${action}'`));
   }
 
+  if (filename === "0108_partner_setup_only_deletion_retention.sql") {
+    /*
+     * 0108 RE-POINTS four tenant foreign keys. PostgreSQL cannot alter a referential action in
+     * place, so each change is a DROP + ADD of the SAME constraint name on the SAME table. Approve
+     * it only when every dropped constraint is provably recreated in the same file, in that order,
+     * with the intended action — SET NULL for the three retained-history tables (the row must
+     * SURVIVE its Partner) and CASCADE for derivative profile state. A drop with no matching add,
+     * or a different action, falls through and stays blocked.
+     */
+    if (finding.severity !== "block" || finding.kind !== "drop_constraint") return false;
+    const cleaned = stripSqlNoise(sql);
+    const pairs: Array<[string, string]> = [
+      ["partner_management_audit", "SET\\s+NULL"],
+      ["partner_audit_events", "SET\\s+NULL"],
+      ["partner_security_events", "SET\\s+NULL"],
+      ["partner_profiles", "CASCADE"],
+    ];
+    return pairs.every(([table, action]) => {
+      const name = `${table}_tenant_id_fkey`;
+      const drop = new RegExp(`ALTER\\s+TABLE\\s+${table}\\s+DROP\\s+CONSTRAINT\\s+IF\\s+EXISTS\\s+${name}\\s*;`, "i").exec(cleaned);
+      const addFk = new RegExp(
+        `ALTER\\s+TABLE\\s+${table}\\s+ADD\\s+CONSTRAINT\\s+${name}\\s+FOREIGN\\s+KEY\\s*\\(\\s*tenant_id\\s*\\)\\s+REFERENCES\\s+partner_organisations\\s*\\(\\s*id\\s*\\)\\s+ON\\s+DELETE\\s+${action}\\s*;`,
+        "i"
+      ).exec(cleaned);
+      return Boolean(drop && addFk && drop.index < addFk.index);
+    });
+  }
+
   if (filename === "0107_partner_management_audit_idempotency_scope.sql") {
     // 0107 WIDENS the management-audit idempotency namespace from (key) to
     // (tenant_id, action_type, key). PostgreSQL cannot alter a partial unique index's key list in
@@ -332,6 +360,9 @@ function approvedDestructiveFindingSuffix(filePath: string): string {
   }
   if (filename === "0107_partner_management_audit_idempotency_scope.sql") {
     return " (approved protected idempotency-namespace index widening)";
+  }
+  if (filename === "0108_partner_setup_only_deletion_retention.sql") {
+    return " (approved protected tenant-FK referential-action replacement)";
   }
   return " (approved protected migration replacement)";
 }
