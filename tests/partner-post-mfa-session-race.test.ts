@@ -75,6 +75,26 @@ describe("post-MFA session state reaches the route guard before navigation", () 
     expect(GUARD).toContain("if (unavailable) {");
   });
 
+  it("routes an already-authenticated visitor OFF the sign-in form and into the Portal", () => {
+    // The loop amplifier: PartnerRouteGuard sends an incomplete session to /partner/login, but the
+    // login page offered an ALREADY-authenticated owner nothing but a password box — and signing in
+    // again revokes the good session (one-active-session) and mints a new one. One bad bounce
+    // therefore became permanent. An authenticated+mfaPassed visitor must be routed into the Portal.
+    expect(LOGIN).toContain('if (step === "credentials" && !submitting && ready && !isLoading && session?.mfaPassed)');
+    expect(LOGIN).toContain('navigate("/partner/dashboard")');
+    expect(LOGIN).toContain("const { refresh, session, ready, isLoading } = usePartnerSession();");
+  });
+
+  it("does not redirect off the sign-in form while enrolment is mid-flight", () => {
+    // mfa_passed is set server-side at enrolment CONFIRM, while the user is still reading one-time
+    // recovery codes. Redirecting on that transition would navigate them away from codes that can
+    // never be shown again, so the reverse guard is scoped to the credentials step only.
+    const reverse = LOGIN.slice(LOGIN.indexOf("REVERSE GUARD"), LOGIN.indexOf("async function handleCredentials"));
+    expect(reverse).toContain('step === "credentials"');
+    expect(reverse).not.toContain('step === "enrol"');
+    expect(reverse).toContain("!submitting");
+  });
+
   it("does not weaken MFA: the guard still demands mfaPassed to render any protected page", () => {
     expect(GUARD).toContain("if (!session || !session.mfaPassed)");
     expect(GUARD).not.toMatch(/mfaPassed\s*\|\|\s*true/);
