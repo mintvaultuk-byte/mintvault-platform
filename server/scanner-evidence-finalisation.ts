@@ -144,7 +144,44 @@ export async function finaliseScannerEvidence(input: {
    */
   const { assertCommittedSidesShareOneRectangle } = await import("./scanner-capture-service");
   await assertCommittedSidesShareOneRectangle(input.session.certificateId, input.session.side, authoritativeRegion);
-  const frameAssessment = await assessLide400CardFrame(input.buffer, inspection, authoritativeRegion);
+  /*
+   * WHICH EVIDENCE FLOOR THIS CAPTURE IS ADMITTED UNDER.
+   *
+   * Resolved from server-owned state plus the platen the NATIVE capture declared. The upload cannot
+   * name a floor and cannot reach one below the fleet default by any combination of claims: station
+   * code, status, calibration id, calibration status and environment are all read here, from the
+   * database and the runtime, never from the request.
+   */
+  const { resolveLide400EvidencePolicy, nativePlatenToMm } = await import("./lib/lide400-evidence-policy");
+  const { classifyMintVaultRuntimeEnvironment } = await import("./lib/database-environment-guard");
+  const stationRow = input.session.stationId
+    ? (
+        await db.execute(sql`
+          SELECT s.station_code, s.status, s.calibration_status, s.current_calibration_id,
+                 k.scanner_profile_version AS calibration_profile_version, k.calibration_version
+            FROM partner_stations s
+            LEFT JOIN partner_station_calibrations k ON k.id = s.current_calibration_id
+           WHERE s.id = ${input.session.stationId}
+           LIMIT 1`)
+      ).rows[0]
+    : undefined;
+  const evidencePolicy = resolveLide400EvidencePolicy({
+    environment: classifyMintVaultRuntimeEnvironment(),
+    stationCode: stationRow ? String((stationRow as any).station_code ?? "") || null : null,
+    stationStatus: stationRow ? String((stationRow as any).status ?? "") || null : null,
+    calibrationId: stationRow ? ((stationRow as any).current_calibration_id ?? null) : null,
+    calibrationStatus: stationRow ? String((stationRow as any).calibration_status ?? "") || null : null,
+    calibrationScannerProfileVersion: stationRow ? ((stationRow as any).calibration_profile_version ?? null) : null,
+    calibrationVersion: stationRow ? ((stationRow as any).calibration_version ?? null) : null,
+    scannerModel: provenance.scannerModel,
+    platenPhysicalSizeMm: nativePlatenToMm(provenance.platenPhysicalSize),
+  });
+  const frameAssessment = await assessLide400CardFrame(
+    input.buffer,
+    inspection,
+    authoritativeRegion,
+    evidencePolicy.evidenceMinMarginMm
+  );
   if (!frameAssessment.accepted) {
     throw new Error(frameAssessment.reason || "Card-boundary safety check rejected this acquired TIFF");
   }

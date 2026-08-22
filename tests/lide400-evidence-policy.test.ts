@@ -9,6 +9,7 @@ import {
   resolveLide400EvidencePolicy,
   SHOP0_STAGING_QUALIFICATION as Q,
   PLATEN_TOLERANCE_MM,
+  nativePlatenToMm,
   type Lide400EvidenceObservations,
 } from "../server/lib/lide400-evidence-policy";
 import { STANDARD_TCG } from "@shared/lide400-capture-profile.cjs";
@@ -25,8 +26,6 @@ const qualified = (over: Partial<Lide400EvidenceObservations> = {}): Lide400Evid
   calibrationScannerProfileVersion: Q.scannerProfileVersion,
   calibrationVersion: Q.calibrationVersion,
   scannerModel: "Canon LiDE 400",
-  usbVendorId: 0x04a9,
-  usbProductId: 0x1912,
   platenPhysicalSizeMm: { width: 215.9, height: 297.0107 },
   ...over,
 });
@@ -83,9 +82,6 @@ describe("every gate fails closed to the fleet floor, never downwards", () => {
     ["another calibration version", { calibrationVersion: "capture-geometry-v0" }, "calibration_version"],
     ["a different scanner model", { scannerModel: "CanoScan LiDE 300" }, "scanner_model"],
     ["no model at all", { scannerModel: null }, "scanner_model"],
-    ["a different USB vendor", { usbVendorId: 0x1234 }, "usb_identity"],
-    ["a different USB product", { usbProductId: 0x9999 }, "usb_identity"],
-    ["absent USB identity", { usbVendorId: null, usbProductId: null }, "usb_identity"],
     ["absent platen geometry", { platenPhysicalSizeMm: null }, "platen_geometry"],
   ];
 
@@ -149,5 +145,50 @@ describe("no client-supplied floor exists", () => {
   it("the observation contract carries no margin/floor field", () => {
     const keys = Object.keys(qualified());
     expect(keys.filter((k) => /margin|floor|clearance|evidenceMin/i.test(k))).toEqual([]);
+  });
+});
+
+
+describe("the native platen conversion", () => {
+  it("converts the scan path's centimetres", () => {
+    // measurementUnit is set to centimetres before the scan; 21.59 cm x 29.70107 cm.
+    const mm = nativePlatenToMm({ width: 21.59, height: 29.70107, unit: "centimeters" })!;
+    expect(mm.width).toBeCloseTo(215.9, 10);
+    expect(mm.height).toBeCloseTo(297.0107, 10);
+  });
+
+  it("converts a capabilities probe's inches", () => {
+    const mm = nativePlatenToMm({ width: 8.5, height: 11.693333333333333, unit: "inches" })!;
+    expect(mm.width).toBeCloseTo(215.9, 10);
+    expect(mm.height).toBeCloseTo(297.0107, 4);
+  });
+
+  it("either unit, honestly converted, qualifies", () => {
+    for (const reported of [
+      { width: 21.59, height: 29.70107, unit: "centimeters" },
+      { width: 8.5, height: 11.693333333333333, unit: "inches" },
+    ]) {
+      expect(resolveLide400EvidencePolicy(qualified({ platenPhysicalSizeMm: nativePlatenToMm(reported) })).qualified).toBe(true);
+    }
+  });
+
+  it("an unrecognised or missing unit yields null, never a guess", () => {
+    expect(nativePlatenToMm({ width: 8.5, height: 11.69, unit: "picas" })).toBeNull();
+    expect(nativePlatenToMm({ width: 8.5, height: 11.69 })).toBeNull();
+    expect(nativePlatenToMm(null)).toBeNull();
+    expect(nativePlatenToMm({ width: 0, height: 0, unit: "inches" })).toBeNull();
+  });
+
+  it("a wrong unit fails the gate rather than being silently retried as the other one", () => {
+    // 8.5 reported as CENTIMETRES is 85 mm — nowhere near the platen. It must fail, not be
+    // re-interpreted as inches because that happens to match.
+    const mm = nativePlatenToMm({ width: 8.5, height: 11.693333333333333, unit: "centimeters" });
+    const p = resolveLide400EvidencePolicy(qualified({ platenPhysicalSizeMm: mm }));
+    expect(p.qualified).toBe(false);
+    expect(p.failedGates).toContain("platen_geometry");
+  });
+
+  it("no native platen at all means no qualification", () => {
+    expect(resolveLide400EvidencePolicy(qualified({ platenPhysicalSizeMm: nativePlatenToMm(null) })).qualified).toBe(false);
   });
 });

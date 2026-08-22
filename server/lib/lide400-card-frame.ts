@@ -55,7 +55,14 @@ function rejected(reason: string): Lide400FrameAssessment {
 export async function assessLide400CardFrame(
   tiff: Buffer,
   inspection: Pick<ScannerEvidenceInspection, "width" | "height">,
-  acquisition: AcquisitionArea
+  acquisition: AcquisitionArea,
+  /*
+   * THE FLOOR IS RESOLVED BY THE CALLER, FROM SERVER-OWNED STATE. Defaulting to the fleet constant
+   * keeps every existing caller on 4.0 mm; only a caller that has run
+   * `resolveLide400EvidencePolicy` and passed all of its gates supplies anything lower. No client
+   * value reaches this parameter.
+   */
+  evidenceMinMarginMm: number = LIDE_400_MIN_EVIDENCE_MARGIN_MM
 ): Promise<Lide400FrameAssessment> {
   if (
     !Number.isFinite(acquisition.width) ||
@@ -163,10 +170,10 @@ export async function assessLide400CardFrame(
     }
 
     const closestMargin = Math.min(...Object.values(evidenceMarginMm));
-    if (closestMargin < LIDE_400_MIN_EVIDENCE_MARGIN_MM) {
+    if (closestMargin < evidenceMinMarginMm) {
       return {
         accepted: false,
-        reason: `Card is too close to the hardware acquisition boundary (${closestMargin.toFixed(1)} mm; ${LIDE_400_MIN_EVIDENCE_MARGIN_MM} mm required); rescan`,
+        reason: `Card is too close to the hardware acquisition boundary (${closestMargin.toFixed(1)} mm; ${evidenceMinMarginMm} mm required); rescan`,
         ...common,
       };
     }

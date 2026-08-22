@@ -17,6 +17,24 @@
  * calibration id, calibration status and environment are all read from server-owned state, never
  * from the request.
  *
+ * WHERE THE USB AUTHORITY LIVES — NOT HERE, AND DELIBERATELY SO.
+ *
+ * There is no VID/PID gate in this function. Canon LiDE 400 identity (VID 04A9 / PID 1912) is
+ * enforced INSIDE THE NATIVE BRIDGE at capture time: it refuses the operation outright unless that
+ * physical USB device is attached ("Physical Canon LiDE 400 USB device (VID 04A9, PID 1912) is not
+ * attached"). A capture therefore cannot exist without that check having passed.
+ *
+ * Adding a server gate over client-supplied VID/PID constants would be strictly weaker theatre: the
+ * client would be asserting the outcome of a check it did not perform, and any client able to lie
+ * about the numbers is equally able to lie about having checked them. The authority chain is:
+ *
+ *   approved authenticated station -> supported native LiDE bridge -> native VID/PID enforcement
+ *   -> capture possible only from that device -> per-capture model + native platen provenance
+ *   -> this resolver -> 1.70 mm
+ *
+ * Hardening the bridge to report VID/PID/model natively and binding those into accepted evidence is
+ * the stronger fleet architecture and is recorded as backlog, NOT implemented here.
+ *
  * FAIL CLOSED, UPWARDS ONLY. Any gate that is false, absent or unparseable yields the fleet floor.
  * There is deliberately no path that lowers the floor on missing information.
  */
@@ -31,7 +49,6 @@ export const SHOP0_STAGING_QUALIFICATION = Object.freeze({
   scannerProfileVersion: "mintvault-canon-lide-400-v3",
   calibrationVersion: "capture-geometry-v1",
   evidenceMinMarginMm: 1.7,
-  usb: Object.freeze({ vendorId: 0x04a9, productId: 0x1912 }),
   /** Driver-declared, in millimetres: 8.5 in x 11.693333333333333 in. */
   platenMm: Object.freeze({ width: 215.9, height: 297.0107 }),
 });
@@ -72,10 +89,10 @@ export type Lide400EvidenceObservations = {
   calibrationVersion: string | null;
   /** Station-reported, validated against the approved alias set by the profile check. */
   scannerModel: string | null;
-  /** Station-reported. A response at all means the native bridge matched VID/PID. */
-  usbVendorId: number | null;
-  usbProductId: number | null;
-  /** Station-reported, millimetres, converted from the driver's declared inches. */
+  /**
+   * The platen the NATIVE capture declared, converted to millimetres from the unit the bridge
+   * reported alongside it. Never reconstructed from profile constants.
+   */
   platenPhysicalSizeMm: { width: number; height: number } | null;
 };
 
@@ -132,7 +149,6 @@ export function resolveLide400EvidencePolicy(observations: Lide400EvidenceObserv
   if (!observations.scannerModel || !APPROVED_MODELS.has(observations.scannerModel.trim().toLowerCase())) {
     failed.push("scanner_model");
   }
-  if (observations.usbVendorId !== q.usb.vendorId || observations.usbProductId !== q.usb.productId) failed.push("usb_identity");
   const platen = observations.platenPhysicalSizeMm;
   if (!platen || !near(platen.width, q.platenMm.width) || !near(platen.height, q.platenMm.height)) {
     failed.push("platen_geometry");
@@ -155,4 +171,30 @@ export function resolveLide400EvidencePolicy(observations: Lide400EvidenceObserv
       platenToleranceMm: PLATEN_TOLERANCE_MM,
     },
   };
+}
+
+
+/**
+ * Convert the platen the NATIVE bridge reported into millimetres, using the unit it reported
+ * alongside it.
+ *
+ * The same ImageCaptureCore property yields different numbers depending on when it is read: the
+ * scan path sets `measurementUnit` to CENTIMETRES, while an unconfigured capabilities probe reports
+ * INCHES. The bridge therefore emits the raw pair plus its unit and the conversion happens here,
+ * once, where it can be tested.
+ *
+ * Anything unrecognised returns null, which fails the platen gate and drops to the fleet floor.
+ * There is no guessing between units: trying each in turn until one matched the expected platen
+ * would defeat the point of having a gate.
+ */
+export function nativePlatenToMm(
+  reported: { width?: unknown; height?: unknown; unit?: unknown } | null | undefined
+): { width: number; height: number } | null {
+  if (!reported || typeof reported !== "object") return null;
+  const width = Number(reported.width);
+  const height = Number(reported.height);
+  if (!Number.isFinite(width) || !Number.isFinite(height) || width <= 0 || height <= 0) return null;
+  const scale = reported.unit === "inches" ? 25.4 : reported.unit === "centimeters" ? 10 : null;
+  if (scale === null) return null;
+  return { width: width * scale, height: height * scale };
 }
