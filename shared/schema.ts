@@ -1,4 +1,9 @@
 import { sql } from "drizzle-orm";
+// Type-only: erased at compile time, so this adds no runtime import edge from the
+// schema barrel to the client-safe commerce leaf.
+import type { PricingTier } from "./commerce";
+// Value import: this barrel USES the category list in a table definition below.
+import { CATALOGUE_CATEGORIES } from "./vocabulary";
 import {
   pgTable,
   text,
@@ -19,7 +24,6 @@ import {
 } from "drizzle-orm/pg-core";
 import { createInsertSchema } from "drizzle-zod";
 import { z } from "zod";
-import { mvgsTierName } from "./mvgs-scoring";
 
 /**
  * pgvector column type — drizzle-orm doesn't ship a first-class pgvector
@@ -498,6 +502,10 @@ export const certificates = pgTable("certificates", {
   qrPayloadUrl: text("qr_payload_url"),
   labelType: text("label_type").notNull().default("Standard"),
   gradeType: text("grade_type").notNull().default("numeric"),
+  /** MVGS ruleset the stored grade was computed under (e.g. "v1.4"). NULL on
+   *  rows written before the column existed; the 0111 migration backfills those
+   *  to the ruleset they were actually issued under. Never recalculated. */
+  mvgsRulesVersion: text("mvgs_rules_version"),
   cardGame: text("card_game"),
   setName: text("set_name"),
   cardName: text("card_name"),
@@ -1324,17 +1332,9 @@ export type InsertRarityMappingReview = z.infer<typeof insertRarityMappingReview
 // hard-coded arrays in shared/pokemon-rarity-catalogue.ts SEED this table and
 // remain the offline fallback — they are NOT a competing source. Audit uses the
 // existing `audit_log` table (entity_type="catalogue_item") — no new audit table.
-export const CATALOGUE_CATEGORIES = [
-  "rarity",
-  "finish",
-  "promo",
-  "designation",
-  "language",
-  "era",
-  "subset",
-  "attribute",
-] as const;
-export type CatalogueCategory = (typeof CATALOGUE_CATEGORIES)[number];
+// MOVED to shared/vocabulary.ts (client-safe leaf) — see that file for why.
+export { CATALOGUE_CATEGORIES } from "./vocabulary";
+export type { CatalogueCategory } from "./vocabulary";
 
 export const catalogueItems = pgTable(
   "catalogue_items",
@@ -1818,87 +1818,24 @@ export type TransferV2Status = (typeof TRANSFER_V2_STATUSES)[number];
 export const OWNERSHIP_STATUSES = ["unclaimed", "claimed", "transfer_pending"] as const;
 export type OwnershipStatus = (typeof OWNERSHIP_STATUSES)[number];
 
-export const NUMERIC_GRADES = [
-  { value: 10, label: "GEM MT", description: "Gem Mint" },
-  { value: 9.5, label: "MINT+", description: "Mint+" },
-  { value: 9, label: "MINT", description: "Mint" },
-  { value: 8.5, label: "NM-MT+", description: "NM-Mint+" },
-  { value: 8, label: "NM-MT", description: "Near Mint-Mint" },
-  { value: 7.5, label: "NM+", description: "NM+" },
-  { value: 7, label: "NM", description: "Near Mint" },
-  { value: 6.5, label: "EX-MT+", description: "EX-Mint+" },
-  { value: 6, label: "EX-MT", description: "Excellent-Mint" },
-  { value: 5.5, label: "EX+", description: "Excellent+" },
-  { value: 5, label: "EX", description: "Excellent" },
-  { value: 4.5, label: "VG-EX+", description: "VG-EX+" },
-  { value: 4, label: "VG-EX", description: "Very Good-Excellent" },
-  { value: 3.5, label: "VG+", description: "VG+" },
-  { value: 3, label: "VG", description: "Very Good" },
-  { value: 2.5, label: "GOOD+", description: "Good+" },
-  { value: 2, label: "GOOD", description: "Good" },
-  { value: 1.5, label: "FAIR", description: "Fair" },
-  { value: 1, label: "PR", description: "Poor" },
-] as const;
-
-export const NON_NUMERIC_GRADES = [
-  { value: "NO", label: "AUTHENTIC", description: "Authentic Only" },
-  { value: "AA", label: "AUTHENTIC ALTERED", description: "Authentic Altered" },
-] as const;
-
-// The complete set of valid MVGS overall grades — whole grades 1–10 plus the
-// half grades (1.5, 2.5, … 9.5). Single source of truth for grade validation
-// on both client and server; derived from NUMERIC_GRADES so it can never drift.
-export const NUMERIC_GRADE_VALUES: readonly number[] = NUMERIC_GRADES.map((g) => g.value);
-
-/** True if `grade` is one of the permitted MVGS numeric grades (incl. half grades). */
-export function isValidNumericGrade(grade: number): boolean {
-  return Number.isFinite(grade) && NUMERIC_GRADE_VALUES.includes(grade);
-}
-
-export function isNonNumericGrade(gradeType: string): boolean {
-  // Accept the legacy long-form aliases that some grade write-paths persisted
-  // ("not_original" == NO / Authentic, "authentic_altered" == AA) so cert pages,
-  // /verify, search, labels and PDFs classify those certs correctly. New writes
-  // should use the canonical "NO"/"AA"; normalising the write-paths + a data
-  // backfill is the follow-up that lets these aliases be removed again.
-  return gradeType === "NO" || gradeType === "AA" || gradeType === "not_original" || gradeType === "authentic_altered";
-}
-
-export function gradeLabel(grade: number): string {
-  if (grade >= 10) return "GEM MT";
-  if (grade >= 9.5) return "MINT+";
-  if (grade >= 9) return "MINT";
-  if (grade >= 8.5) return "NM-MT+";
-  if (grade >= 8) return "NM-MT";
-  if (grade >= 7.5) return "NM+";
-  if (grade >= 7) return "NM";
-  if (grade >= 6.5) return "EX-MT+";
-  if (grade >= 6) return "EX-MT";
-  if (grade >= 5.5) return "EX+";
-  if (grade >= 5) return "EX";
-  if (grade >= 4.5) return "VG-EX+";
-  if (grade >= 4) return "VG-EX";
-  if (grade >= 3.5) return "VG+";
-  if (grade >= 3) return "VG";
-  if (grade >= 2.5) return "GOOD+";
-  if (grade >= 2) return "GOOD";
-  if (grade >= 1.5) return "FAIR";
-  if (grade >= 1) return "PR";
-  return "";
-}
-
-export function gradeLabelFull(gradeType: string, gradeOverall: string): string {
-  if (gradeType === "NO" || gradeType === "not_original") return "AUTHENTIC";
-  if (gradeType === "AA" || gradeType === "authentic_altered") return "AUTHENTIC ALTERED";
-  // Tier NAME from the exact grade via the canonical MVGS tier table — no
-  // rounding, so half grades read their TRUE tier (8.5 → "NM-MINT+", 9.5 →
-  // "MINT+") and agree with the displayed number. Same source the cert page,
-  // slab, PDF and logbook use. (The numeric VALUE is rendered separately by
-  // callers; this returns the name only.)
-  const g = parseFloat(gradeOverall);
-  if (!Number.isFinite(g)) return "";
-  return mvgsTierName(g).toUpperCase();
-}
+// ── Grade vocabulary ───────────────────────────────────────────────────────
+// MOVED to shared/grade-presentation.ts, which is a LEAF with no Drizzle and no
+// scoring engine. This barrel cannot be tree-shaken (every `pgTable(...)` below
+// is a side-effectful module-scope call), so anything living HERE is shipped in
+// full to any bundle that takes even one value from this file. Re-exported so
+// the many server call sites that import these from "@shared/schema" are
+// unchanged; client code must import from "@shared/grade-presentation" instead,
+// and tests/mvgs-public-bundle-boundary.test.ts enforces that.
+export {
+  NUMERIC_GRADES,
+  NON_NUMERIC_GRADES,
+  NUMERIC_GRADE_VALUES,
+  isValidNumericGrade,
+  isNonNumericGrade,
+  gradeLabel,
+  gradeLabelFull,
+  mvgsTierName,
+} from "./grade-presentation";
 
 // ── Tier capacity gating ────────────────────────────────────────────────────
 // Controls how many active submissions are allowed per tier before new orders
@@ -1995,271 +1932,30 @@ export function serviceTierToPricingTier(st: ServiceTierRecord): PricingTier {
   };
 }
 
-export interface PricingTier {
-  id: string;
-  name: string;
-  price: string;
-  pricePerCard: number;
-  recommendedCardValue: string;
-  turnaround: string;
-  turnaroundDays?: number;
-  features: string[];
-  serviceType?: string;
-}
-
-export interface PublicCertificate {
-  certId: string;
-  status: string;
-  gradeType: string;
-  cardGame: string;
-  cardName: string;
-  cardSet: string;
-  cardYear: string;
-  cardNumber: string;
-  rarity: string | null;
-  rarityLabel: string | null;
-  designations: string[];
-  variant: string | null;
-  collection: string | null;
-  language: string;
-  grade: string;
-  gradeNumeric: number;
-  gradeCentering: string | null;
-  gradeCorners: string | null;
-  gradeEdges: string | null;
-  gradeSurface: string | null;
-  // MVGS — admin-computed score 0–100, set on grade approval. Null when
-  // gradeType !== "numeric" or when the cert was approved before MVGS
-  // existed. UI gates rendering on both fields.
-  gradeStrengthScore: number | null;
-  labelType: string;
-  /** Pristine 10P / black-label, derived live from the MVGS gate (isPristine),
-   *  NOT the stored label_type flag. Single source of truth for display. */
-  isBlackLabel: boolean;
-  frontImageUrl: string | null;
-  backImageUrl: string | null;
-  gradedDate: string;
-  notes: string | null;
-  nfcEnabled: boolean | null;
-  nfcScanCount: number | null;
-  ownershipStatus: string;
-  ownershipRef: string | null;
-  gradingReport: { centering?: string; corners?: string; edges?: string; surface?: string; overall?: string } | null;
-  isOwnedByViewer: boolean;
-  // Stolen flag — null for unflagged certs, "reported_stolen" once a stolen
-  // report has been verified. Drives the red banner on cert-detail.tsx.
-  stolenStatus: string | null;
-}
-
-export interface PopulationData {
-  lowerCount: number;
-  sameCount: number;
-  higherCount: number;
-  totalCount: number;
-  authenticOnlyCount: number;
-  authenticAlteredCount: number;
-  gradeDistribution: { grade: number; count: number }[];
-}
-
-export const SUBMISSION_STATUSES = [
-  "new",
-  "received",
-  "in_grading",
-  "ready_to_return",
-  "shipped",
-  "completed",
-] as const;
-
-export type SubmissionStatus = (typeof SUBMISSION_STATUSES)[number];
-
-export const SUBMISSION_STATUS_LABELS: Record<string, string> = {
-  draft: "Draft",
-  new: "New",
-  paid: "Paid",
-  received: "Received",
-  in_grading: "In Grading",
-  ready_to_return: "Ready to Return",
-  shipped: "Shipped",
-  completed: "Completed",
-};
-
-export const SUBMISSION_STATUS_TRANSITIONS: Record<string, string> = {
-  new: "received",
-  paid: "received",
-  received: "in_grading",
-  in_grading: "ready_to_return",
-  ready_to_return: "shipped",
-  shipped: "completed",
-};
-
-export const submissionTypes = [
-  { id: "grading", name: "Grading", description: "Professional card grading and encapsulation" },
-  { id: "reholder", name: "Reholder", description: "Transfer your card to a new MintVault slab" },
-  { id: "crossover", name: "Crossover", description: "Re-grade a card from another grading company" },
-  { id: "authentication", name: "Authentication", description: "Verify the authenticity of your card" },
-];
-
-export interface BulkDiscountTier {
-  minQty: number;
-  maxQty: number | null;
-  percent: number;
-  label: string;
-}
-
-export const bulkDiscountTiers: BulkDiscountTier[] = [
-  { minQty: 1, maxQty: 9, percent: 0, label: "1–9 cards" },
-  { minQty: 10, maxQty: 24, percent: 5, label: "10–24 cards" },
-  { minQty: 25, maxQty: 49, percent: 7.5, label: "25–49 cards" },
-  { minQty: 50, maxQty: null, percent: 10, label: "50+ cards" },
-];
-
-export function getBulkDiscountPercent(quantity: number): number {
-  for (let i = bulkDiscountTiers.length - 1; i >= 0; i--) {
-    if (quantity >= bulkDiscountTiers[i].minQty) {
-      return bulkDiscountTiers[i].percent;
-    }
-  }
-  return 0;
-}
-
-// Vault Club grading discount — Silver tier only. Mutually exclusive with
-// bulk discount; server applies max(vc, bulk) and ties go to vc.
-export const VAULT_CLUB_SILVER_DISCOUNT_PERCENT = 10;
-
-export function getVaultClubDiscountPercent(
-  tier: string | null | undefined,
-  status: string | null | undefined
-): number {
-  if (tier === "silver" && (status === "active" || status === "trialing")) {
-    return VAULT_CLUB_SILVER_DISCOUNT_PERCENT;
-  }
-  return 0;
-}
-
-export interface InsuranceTier {
-  maxValue: number;
-  shippingPence: number;
-  label: string;
-}
-
-export const insuranceTiers: InsuranceTier[] = [
-  { maxValue: 500, shippingPence: 499, label: "Up to £500 cover" },
-  { maxValue: 1500, shippingPence: 999, label: "Up to £1,500 cover" },
-  { maxValue: 3000, shippingPence: 1499, label: "Up to £3,000 cover" },
-  { maxValue: 7500, shippingPence: 2499, label: "Up to £7,500 cover" },
-];
-
-export function getInsuranceTier(totalDeclaredValue: number): InsuranceTier {
-  for (const tier of insuranceTiers) {
-    if (totalDeclaredValue <= tier.maxValue) return tier;
-  }
-  return insuranceTiers[insuranceTiers.length - 1];
-}
-
-export interface InsuranceSurchargeBand {
-  maxValue: number;
-  surchargePence: number;
-  label: string;
-}
-
-export const insuranceSurchargeBands: InsuranceSurchargeBand[] = [
-  { maxValue: 500, surchargePence: 0, label: "No surcharge" },
-  { maxValue: 1500, surchargePence: 200, label: "+£2 per card" },
-  { maxValue: 3000, surchargePence: 500, label: "+£5 per card" },
-  { maxValue: 7500, surchargePence: 1000, label: "+£10 per card" },
-];
-
-export function getInsuranceSurchargePerCard(declaredValuePerCard: number): InsuranceSurchargeBand {
-  for (const band of insuranceSurchargeBands) {
-    if (declaredValuePerCard <= band.maxValue) return band;
-  }
-  return insuranceSurchargeBands[insuranceSurchargeBands.length - 1];
-}
-
-export function calculateOrderTotals(pricePerCard: number, quantity: number, totalDeclaredValue: number = 0) {
-  const subtotal = pricePerCard * quantity;
-  const discountPercent = getBulkDiscountPercent(quantity);
-  const discountAmount = Math.round((subtotal * discountPercent) / 100);
-  const discountedSubtotal = subtotal - discountAmount;
-  const insurance = getInsuranceTier(totalDeclaredValue);
-  const shipping = insurance.shippingPence;
-  const shippingLabel = insurance.label;
-
-  const declaredValuePerCard = quantity > 0 ? Math.ceil(totalDeclaredValue / quantity) : 0;
-  const surchargeInfo = getInsuranceSurchargePerCard(declaredValuePerCard);
-  const insuranceSurchargePerCard = surchargeInfo.surchargePence;
-  const totalInsuranceFee = insuranceSurchargePerCard * quantity;
-  const insuranceSurchargeLabel = surchargeInfo.label;
-
-  const total = discountedSubtotal + shipping + totalInsuranceFee;
-  return {
-    subtotal,
-    discountPercent,
-    discountAmount,
-    discountedSubtotal,
-    shipping,
-    shippingLabel,
-    insuranceSurchargePerCard,
-    totalInsuranceFee,
-    insuranceSurchargeLabel,
-    declaredValuePerCard,
-    total,
-  };
-}
-
-export const pricingTiers: PricingTier[] = [
-  {
-    id: "standard",
-    name: "VAULT QUEUE",
-    price: "£19 per card",
-    pricePerCard: 1900,
-    recommendedCardValue: "Any value",
-    turnaround: "40 working days",
-    turnaroundDays: 40,
-    features: [
-      "Professional grade assessment (1–10 scale)",
-      "Subgrade breakdown (centering, corners, edges, surface)",
-      "Tamper-evident NFC-enabled precision slab",
-      "Unique online-verifiable certificate",
-      "Claim code for ownership registration",
-      "Insured Royal Mail return shipping",
-    ],
-  },
-  {
-    id: "priority",
-    name: "STANDARD",
-    price: "£25 per card",
-    pricePerCard: 2500,
-    recommendedCardValue: "Any value",
-    turnaround: "15 working days",
-    turnaroundDays: 15,
-    features: [
-      "Professional grade assessment (1–10 scale)",
-      "Subgrade breakdown (centering, corners, edges, surface)",
-      "Tamper-evident NFC-enabled precision slab",
-      "Unique online-verifiable certificate",
-      "Claim code for ownership registration",
-      "Insured Royal Mail return shipping",
-    ],
-  },
-  {
-    id: "express",
-    name: "EXPRESS",
-    price: "£45 per card",
-    pricePerCard: 4500,
-    recommendedCardValue: "Any value",
-    turnaround: "5 working days",
-    turnaroundDays: 5,
-    features: [
-      "Professional grade assessment (1–10 scale)",
-      "Subgrade breakdown (centering, corners, edges, surface)",
-      "Tamper-evident NFC-enabled precision slab",
-      "Unique online-verifiable certificate",
-      "Claim code for ownership registration",
-      "Insured Royal Mail return shipping",
-    ],
-  },
-];
+// ── Commerce + submission-status vocabulary ────────────────────────────────
+// MOVED to shared/commerce.ts, a LEAF with no Drizzle and no scoring engine.
+// This barrel cannot be tree-shaken, so anything living HERE is shipped in full
+// to any bundle that takes even one value from this file. Re-exported so server
+// call sites are unchanged; client code imports "@shared/commerce" instead, and
+// tests/mvgs-public-bundle-boundary.test.ts enforces that.
+export type { PricingTier, PublicCertificate, PopulationData, SubmissionStatus } from "./commerce";
+export type { BulkDiscountTier, InsuranceTier, InsuranceSurchargeBand } from "./commerce";
+export {
+  SUBMISSION_STATUSES,
+  SUBMISSION_STATUS_LABELS,
+  SUBMISSION_STATUS_TRANSITIONS,
+  submissionTypes,
+  bulkDiscountTiers,
+  getBulkDiscountPercent,
+  VAULT_CLUB_SILVER_DISCOUNT_PERCENT,
+  getVaultClubDiscountPercent,
+  insuranceTiers,
+  getInsuranceTier,
+  insuranceSurchargeBands,
+  getInsuranceSurchargePerCard,
+  calculateOrderTotals,
+  pricingTiers,
+} from "./commerce";
 
 // ============================================================================
 // MARKETPLACE SCHEMA
@@ -2539,14 +2235,9 @@ export type MarketplaceDac7Quarterly = typeof marketplaceDac7Quarterly.$inferSel
 // Soft-delete via deletedAt; never hard-deleted. Audit-log entry on every
 // status change (entity_type='ig_post').
 
-export const IG_POST_TYPES = [
-  "card_reveal",
-  "grade_breakdown",
-  "service_explainer",
-  "vault_club",
-  "market_insight",
-] as const;
-export type IgPostType = (typeof IG_POST_TYPES)[number];
+// MOVED to shared/vocabulary.ts (client-safe leaf) — see that file for why.
+export { IG_POST_TYPES } from "./vocabulary";
+export type { IgPostType } from "./vocabulary";
 
 export const IG_POST_STATUSES = ["pending", "generating", "ready", "posted", "failed", "skipped"] as const;
 export type IgPostStatus = (typeof IG_POST_STATUSES)[number];

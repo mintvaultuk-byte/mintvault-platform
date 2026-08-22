@@ -76,7 +76,7 @@ describe("Partner supply orders — real PostgreSQL security and payment evidenc
       "0102_partner_public_presence",
       "0106_lineage_convergence_public_presence",
       "0107_partner_management_audit_idempotency_scope",
-      "0111_partner_supply_commerce",
+      "0112_partner_supply_commerce",
     ]);
     await admin.query(
       `INSERT INTO partner_organisations (id, public_ref, legal_name, status) VALUES

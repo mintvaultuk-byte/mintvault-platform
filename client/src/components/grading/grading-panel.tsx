@@ -3282,90 +3282,6 @@ export default function GradingPanel({
               </div>
               {/* Bottom corner/edge selectors removed — MVGS-driven. */}
             </div>
-            <div
-              className="bg-[var(--admin-panel2)] border border-[var(--admin-line)] rounded-lg p-3 space-y-2"
-              data-canonical-section="defect-marking"
-              data-testid="section-defect-marking"
-            >
-              <div className="flex items-center justify-between gap-2">
-                <p className="text-[var(--admin-gold-deep)] text-[10px] uppercase tracking-widest font-bold">Defects</p>
-                <div className="flex items-center gap-2">
-                  {defects.length > 0 && defects.some((d) => !d.mvgsCode || !d.tier || !d.zone) && (
-                    <button
-                      type="button"
-                      disabled={!active || approvalInteractionLocked}
-                      onClick={() => {
-                        if (!active || approvalInteractionLocked) return;
-                        setDefects(
-                          defects.map((d) => ({
-                            ...d,
-                            mvgsCode: d.mvgsCode ?? mapLegacyTypeToMvgsCode(d.type) ?? "WH",
-                            tier: d.tier ?? "D2",
-                            zone:
-                              d.zone ??
-                              deriveZone({
-                                xPercent: d.x_percent,
-                                yPercent: d.y_percent,
-                                imageSide: d.image_side,
-                              }),
-                          }))
-                        );
-                      }}
-                      className="flex items-center gap-1 text-[var(--admin-gold-deep)] hover:text-[var(--admin-gold)] text-[10px] font-bold uppercase tracking-wider transition-colors disabled:opacity-40 disabled:cursor-not-allowed"
-                      data-testid="btn-recalc-zones"
-                      title={
-                        approvalInteractionLocked
-                          ? gradingWorkflowStatusCopy
-                          : "Backfill mvgsCode, tier, and zone on defects missing them — triggers MVGS subgrade scoring"
-                      }
-                    >
-                      <Zap size={10} />
-                      Recalculate
-                    </button>
-                  )}
-                  {defects.length > 0 && (
-                    <button
-                      type="button"
-                      disabled={!active || approvalInteractionLocked}
-                      onClick={() => {
-                        if (!active || approvalInteractionLocked) return;
-                        if (!window.confirm("Delete all defect pins? This cannot be undone.")) return;
-                        setDefects([]);
-                      }}
-                      className="flex items-center gap-1 text-[var(--admin-ink-faint)] hover:text-[var(--admin-red)] text-[10px] font-bold uppercase tracking-wider transition-colors disabled:opacity-40 disabled:cursor-not-allowed"
-                      data-testid="btn-clear-defects"
-                      title={approvalInteractionLocked ? gradingWorkflowStatusCopy : "Delete all defect pins"}
-                    >
-                      <Trash2 size={10} />
-                      Clear Defects
-                    </button>
-                  )}
-                </div>
-              </div>
-
-              <DefectAnnotation
-                defects={defects}
-                onChange={(next) => active && setDefects(next)}
-                readOnly={!active || approvalInteractionLocked}
-                highlightId={highlightDefect}
-                onHighlight={setHighlightDefect}
-                candidates={defectCandidates}
-                onCandidatesChange={setDefectCandidates}
-                // MVGS v2.1 — line measurements merged into the same defect list.
-                whiteningLines={whiteningLines}
-                creaseLines={creaseLines}
-                onWhiteningLinesChange={(next) => {
-                  if (!active || approvalInteractionLocked) return;
-                  setWhiteningLines(next);
-                  clearOverallOverrideIfSet();
-                }}
-                onCreaseLinesChange={(next) => {
-                  if (!active || approvalInteractionLocked) return;
-                  setCreaseLines(next);
-                  clearOverallOverrideIfSet();
-                }}
-              />
-            </div>
           </div>
         </PreviewSurface>
 
@@ -3375,6 +3291,96 @@ export default function GradingPanel({
           data-canonical-section="grading-controls"
           data-testid="section-grading-controls"
         >
+          {/* Defect authority lives with the grading form, not under the card.
+              The pins are already drawn on the image, so a second long text list in the
+              left rail was pure duplication — and it was what pushed the card small and
+              made it resize as the form scrolled. Every affordance is unchanged: the same
+              DefectAnnotation, the same Recalculate and Clear Defects authority, the same
+              whitening/crease line rows. Only its position moved. */}
+          <div
+            className="bg-[var(--admin-panel2)] border border-[var(--admin-line)] rounded-lg p-3 space-y-2"
+            data-canonical-section="defect-marking"
+            data-testid="section-defect-marking"
+          >
+            <div className="flex items-center justify-between gap-2">
+              <p className="text-[var(--admin-gold-deep)] text-[10px] uppercase tracking-widest font-bold">Defects</p>
+              <div className="flex items-center gap-2">
+                {defects.length > 0 && defects.some((d) => !d.mvgsCode || !d.tier || !d.zone) && (
+                  <button
+                    type="button"
+                    disabled={!active || approvalInteractionLocked}
+                    onClick={() => {
+                      if (!active || approvalInteractionLocked) return;
+                      setDefects(
+                        defects.map((d) => ({
+                          ...d,
+                          mvgsCode: d.mvgsCode ?? mapLegacyTypeToMvgsCode(d.type) ?? "WH",
+                          tier: d.tier ?? "D2",
+                          zone:
+                            d.zone ??
+                            deriveZone({
+                              xPercent: d.x_percent,
+                              yPercent: d.y_percent,
+                              imageSide: d.image_side,
+                            }),
+                        }))
+                      );
+                    }}
+                    className="flex items-center gap-1 text-[var(--admin-gold-deep)] hover:text-[var(--admin-gold)] text-[10px] font-bold uppercase tracking-wider transition-colors disabled:opacity-40 disabled:cursor-not-allowed"
+                    data-testid="btn-recalc-zones"
+                    title={
+                      approvalInteractionLocked
+                        ? gradingWorkflowStatusCopy
+                        : "Backfill mvgsCode, tier, and zone on defects missing them — triggers MVGS subgrade scoring"
+                    }
+                  >
+                    <Zap size={10} />
+                    Recalculate
+                  </button>
+                )}
+                {defects.length > 0 && (
+                  <button
+                    type="button"
+                    disabled={!active || approvalInteractionLocked}
+                    onClick={() => {
+                      if (!active || approvalInteractionLocked) return;
+                      if (!window.confirm("Delete all defect pins? This cannot be undone.")) return;
+                      setDefects([]);
+                    }}
+                    className="flex items-center gap-1 text-[var(--admin-ink-faint)] hover:text-[var(--admin-red)] text-[10px] font-bold uppercase tracking-wider transition-colors disabled:opacity-40 disabled:cursor-not-allowed"
+                    data-testid="btn-clear-defects"
+                    title={approvalInteractionLocked ? gradingWorkflowStatusCopy : "Delete all defect pins"}
+                  >
+                    <Trash2 size={10} />
+                    Clear Defects
+                  </button>
+                )}
+              </div>
+            </div>
+
+            <DefectAnnotation
+              defects={defects}
+              onChange={(next) => active && setDefects(next)}
+              readOnly={!active || approvalInteractionLocked}
+              highlightId={highlightDefect}
+              onHighlight={setHighlightDefect}
+              candidates={defectCandidates}
+              onCandidatesChange={setDefectCandidates}
+              // MVGS v2.1 — line measurements merged into the same defect list.
+              whiteningLines={whiteningLines}
+              creaseLines={creaseLines}
+              onWhiteningLinesChange={(next) => {
+                if (!active || approvalInteractionLocked) return;
+                setWhiteningLines(next);
+                clearOverallOverrideIfSet();
+              }}
+              onCreaseLinesChange={(next) => {
+                if (!active || approvalInteractionLocked) return;
+                setCreaseLines(next);
+                clearOverallOverrideIfSet();
+              }}
+            />
+          </div>
           {/* Post-approval banner — read-only by default, with an EDIT GRADE
               button that flips into explicit-save edit mode. Auto-save is
               disabled post-approval (see autoSave useEffect gate) so any

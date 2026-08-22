@@ -274,10 +274,10 @@ describe("lineage exclusion declarations", () => {
     }
   });
 
-  it("the SHIPPED declarations file resolves the real staging lineage: 4 excluded, 0 undeclared", () => {
+  it("the SHIPPED declarations file resolves the real staging lineage: 5 declared, 4 excluded, 0 undeclared", () => {
     const files = listMigrationFiles();
     const exclusions = loadLineageExclusions();
-    expect(exclusions).toHaveLength(4);
+    expect(exclusions).toHaveLength(5);
     for (const d of exclusions) {
       expect(
         files.some((f) => f.filename === d.incoming),
@@ -288,11 +288,14 @@ describe("lineage exclusion declarations", () => {
         `${d.supersededBy} must ship in this release`
       ).toBe(true);
     }
-    // Staging's journal identities at the colliding numbers, as read on 2026-08-14.
+    // Staging's journal identities at the colliding numbers. 0044/0046/0047 were read on
+    // 2026-08-14; 0111 was read live off the staging database (ep-dawn-cloud) on 2026-08-22,
+    // where the supplies migration had already been applied under its pre-rename identity.
     const stagingJournal = [
       "0044_partner_submission_lifecycle_and_location_snapshot.sql",
       "0046_partner_mfa_pending_lifecycle.sql",
       "0047_partner_owner_invariant_tenants_rls.sql",
+      "0111_partner_supply_commerce.sql",
     ];
     const pending = files.map((f) => f.filename);
     const partition = partitionIdentityConflicts(pending, stagingJournal, files, exclusions);
@@ -301,6 +304,7 @@ describe("lineage exclusion declarations", () => {
       "0044_partner_mfa_pending_lifecycle.sql",
       "0046_scanner_processing_jobs.sql",
       "0047_scanner_evidence_staging.sql",
+      "0111_mvgs_rules_version.sql",
     ]);
   });
 

@@ -32,7 +32,7 @@ const CATALOGUE_MIGRATIONS = [
   "0102_partner_public_presence",
   "0106_lineage_convergence_public_presence",
   "0107_partner_management_audit_idempotency_scope",
-  "0111_partner_supply_commerce",
+  "0112_partner_supply_commerce",
 ] as const;
 
 async function seedMintVaultTables(): Promise<void> {

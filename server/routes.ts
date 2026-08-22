@@ -2650,6 +2650,14 @@ export async function handleCertificateGradeUpdate(req: any, res: any): Promise<
           -- Preserves the stored kind when the caller did not state one (see nextGradeType
           -- above): an autosave must never convert an authentication-only record to numeric.
           grade_type          = ${nextGradeType},
+          -- Ruleset the grade was computed under, from the same server authority
+          -- that produced the grade itself. Preserve-on-omission is deliberate:
+          -- a metadata-only autosave must not restamp a grade it did not compute.
+          mvgs_rules_version  = ${
+            isNonNum || effOverallGrade == null
+              ? sql`mvgs_rules_version`
+              : sql`${authoritativeGrade.rulesVersion}`
+          },
           grade_strength_score = ${gradeChanged ? sql`NULL` : sql`grade_strength_score`},
           corner_values       = COALESCE(${jsn(b.corners)}::jsonb, corner_values),
           edge_values         = COALESCE(${jsn(b.edges)}::jsonb,   edge_values),
@@ -8320,7 +8328,7 @@ Defects (admin-confirmed): ${defectLines}`;
         // hasCrease/hasTear booleans are only consulted when the v2
         // measurement (creaseSpanPct / tearSeverity) is null.
         const { scoreMvgsV2 } = await import("@shared/mvgs-input-builder");
-        const { loadMvgsCalibration } = await import("./lib/mvgs-calibration");
+        const { calibrationForRulesVersion } = await import("@shared/mvgs/registry");
         // OWNER-AUTHORISED REPAIR (2026-08-11): every engine input now reads the
         // STORED row. The body-preferred fallbacks that used to sit here let an
         // approval payload steer the Pristine/black-label gate toward a tier the
@@ -8333,7 +8341,9 @@ Defects (admin-confirmed): ${defectLines}`;
         const mvgsPins = storedDefects
           .filter((d: any) => d?.mvgsCode && d?.tier && d?.zone)
           .map((d: any) => ({ mvgsCode: String(d.mvgsCode), tier: String(d.tier), zone: String(d.zone) }));
-        const calibration = await loadMvgsCalibration();
+        // Version-routed: re-render a stored certificate under the ruleset it
+        // was ISSUED under, never under whatever the current rules happen to be.
+        const calibration = calibrationForRulesVersion(certAny.mvgsRulesVersion);
         const certSurface = (certAny.surfaceValues as any) ?? {};
         const r = scoreMvgsV2(
           {
@@ -12570,11 +12580,26 @@ Defects (admin-confirmed): ${defectLines}`;
     }
   });
 
-  // ── MVGS v2 grading calibration (Phase 3 Step 1) ────────────────────────
-  // Admin panel writes the three "[CALIBRATE]" values per spec §3 + §6 into
-  // the pipeline_settings row keyed "mvgs.calibration". Engine
-  // (shared/mvgs-scoring.ts, frozen at fe0d60c) reads them via
-  // loadMvgsCalibration() — these routes never touch engine code.
+  // ── MVGS calibration ─────────────────────────────────────────────────────
+  //
+  // ⚠️ THESE VALUES NO LONGER AFFECT GRADING. MVGS v1.4 IS FROZEN.
+  //
+  // The engine used to read this `pipeline_settings` row on every score, which
+  // meant six thresholds — the whitening ladder, the dark-border multiplier and
+  // the crease ceilings — could change how a card grades without touching a
+  // single protected byte. In production the row sat `locked: false`. That is
+  // not compatible with a ruleset whose whole promise is that a certificate
+  // stays reproducible, so v1.4 now carries its own frozen calibration in
+  // shared/mvgs/v1_4/calibration.ts and ignores this row entirely.
+  //
+  // The row is KEPT, readable and editable, for two honest reasons: it is the
+  // historical record of what v1.4 was calibrated to, and a future v1.5 will
+  // need somewhere to be tuned before ITS values are frozen. Every response
+  // below therefore carries `appliesToGrading: false` and the frozen values, so
+  // the admin UI can say plainly that editing changes nothing today.
+  //
+  // To actually re-tune grading: ship shared/mvgs/v1_5/ and stamp new grades
+  // "v1.5". Do not edit v1.4.
   //
   // Lock semantics: once `locked: true`, normal PATCH refuses (server-side
   // gate in saveMvgsCalibration). The dedicated /unlock route is the ONLY
@@ -12589,7 +12614,19 @@ Defects (admin-confirmed): ${defectLines}`;
       const { loadMvgsCalibration } = await import("./lib/mvgs-calibration");
       const { defaultCalibration, FIELD_RANGES } = await import("./lib/mvgs-calibration-validation");
       const calibration = await loadMvgsCalibration();
-      res.json({ calibration, defaults: defaultCalibration(), ranges: FIELD_RANGES });
+      const { MVGS_V1_4_CALIBRATION, MVGS_V1_4_VERSION } = await import("@shared/mvgs/v1_4");
+      res.json({
+        calibration,
+        defaults: defaultCalibration(),
+        ranges: FIELD_RANGES,
+        // The freeze, stated in the payload so the UI cannot imply otherwise.
+        appliesToGrading: false,
+        frozenRulesVersion: MVGS_V1_4_VERSION,
+        frozenCalibration: MVGS_V1_4_CALIBRATION,
+        frozenNotice:
+          `MVGS ${MVGS_V1_4_VERSION} is frozen. Editing these values does not change how any card grades. ` +
+          `Re-tuning requires a new rules version.`,
+      });
     } catch (err: any) {
       console.error("[mvgs-calibration] load failed:", err);
       sendServerError(res, err);

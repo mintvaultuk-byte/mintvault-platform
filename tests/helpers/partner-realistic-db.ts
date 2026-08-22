@@ -311,6 +311,14 @@ export const APPLICATION_SCOPE_MIGRATIONS = [
   // payment/fulfilment authority. A partner-only harness has neither the
   // canonical submission lifecycle nor the review/conversion ownership model.
   "0101_growth_reviews_and_conversion",
+  // APPLICATION scope, unambiguously: 0111 is a bare `ALTER TABLE certificates ADD COLUMN` plus a
+  // backfill UPDATE over that same core table. A partner-only disposable database has no
+  // `certificates` table at all, so it would fail closed there — the 0073 failure mode this
+  // contract exists to catch. Classified on what it TOUCHES, not on which feature motivated it.
+  "0111_mvgs_rules_version",
+  // Forward-only convergence for the two-lineage 0111 collision. Touches core `certificates`,
+  // exactly like 0111 itself, so it is APPLICATION scope for the same reason.
+  "0113_lineage_convergence_mvgs_rules_version",
 ] as const;
 
 /**
@@ -433,7 +441,7 @@ export const PARTNER_SCHEMA_MIGRATIONS = [
   // PARTNER scope: the supplies catalogue, orders, payments, refunds and their RLS. Every foreign
   // key points at a partner_* table; it touches no core certificate or submission table, so a
   // partner-only disposable database models it exactly as production would.
-  "0111_partner_supply_commerce",
+  "0112_partner_supply_commerce",
 ] as const;
 
 /** True when a declared list pulls in a migration that needs the core schema. */

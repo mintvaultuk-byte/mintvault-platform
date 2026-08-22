@@ -9,7 +9,7 @@ import FooterV2 from "@/components/v2/footer-v2";
 import SectionEyebrow from "@/components/v2/section-eyebrow";
 import AmbientLayer from "@/components/v2/ambient-layer";
 import DarkSectionGlow from "@/components/v2/dark-section-glow";
-import { pricingTiers, insuranceTiers, insuranceSurchargeBands, bulkDiscountTiers } from "@shared/schema";
+import { pricingTiers, insuranceTiers, insuranceSurchargeBands, bulkDiscountTiers } from "@shared/commerce";
 import { ADDON_PRICES, ADDON_ORDER } from "@shared/addons";
 import { cn } from "@/lib/utils";
 import { useActivePromo } from "@/hooks/use-active-promo";

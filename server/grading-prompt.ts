@@ -3,6 +3,25 @@
  * Core grading standards sent to Claude Vision API.
  */
 
+import { centeringChartText } from "@shared/centering";
+
+/**
+ * The ONE centering chart, rendered from shared/centering.ts — the same tables
+ * computeMvgsScore scores against and the /standard page publishes.
+ *
+ * Every prompt below used to carry its own hand-written restatement of this
+ * chart and all four had drifted: two claimed a 10 required 52/48 or better
+ * when the engine and the published standard both allow 55/45 (so the AI told
+ * the grader a 54/46 card was a 9 while the authoritative engine scored it a
+ * 10), and the low front bands and the entire back chart were wrong in every
+ * copy. The AI is advisory only — it has never been able to set a grade — but
+ * an advisory number computed from rules the engine does not use is a number
+ * the grader has to argue with on every card.
+ *
+ * Interpolate this constant. Do not restate the numbers.
+ */
+const CENTERING_CHART = centeringChartText();
+
 export const GRADING_SYSTEM_PROMPT = `You are a professional trading card grader for MintVault UK. You are examining high-resolution images of a trading card.
 
 IMAGE ORDER:
@@ -27,21 +46,7 @@ IMAGE BOUNDARIES: The images may have a BLACK SCANNER BACKGROUND around the card
 
 Measure the borders on all four sides, front and back. Calculate ratios of opposite borders (left vs right, top vs bottom). The ratio represents the LARGER side first (e.g. 55/45 means one border is 55% of the total width).
 
-FRONT centering grade thresholds (whole numbers only):
-- 10: Both L/R and T/B are 55/45 or better (50/50 to 55/45)
-- 9: Worst ratio is between 55/45 and 60/40
-- 8: Worst ratio is between 60/40 and 65/35
-- 7: Worst ratio is between 65/35 and 70/30
-- 6: Worst ratio is between 70/30 and 80/20
-- 5: Worst ratio is between 80/20 and 85/15
-- 4 or below: Worse than 85/15
-
-BACK centering grade thresholds (whole numbers only):
-- 10: Both ratios 75/25 or better
-- 9: Worst ratio between 75/25 and 90/10
-- 7 or below: Worse than 90/10
-
-Final centering subgrade = LOWER of front and back centering grades.
+${CENTERING_CHART}
 
 For borderless or minimal-border cards: note this in your response. Assess image position relative to the card's physical edges. If borders are too thin to measure reliably, estimate and note your confidence is lower.
 
@@ -408,11 +413,7 @@ Identify the card from visible text, artwork, set symbols, and card number. Incl
 
 CENTERING (10% weight):
 - Measure left/right and top/bottom border ratios
-- 10: 50/50 to 52/48 both axes
-- 9: up to 55/45 both axes
-- 8: up to 60/40
-- 7: up to 65/35
-- 6 or below: worse than 65/35
+${CENTERING_CHART}
 - Include measured ratios in your note
 
 CORNERS (25% weight):
@@ -540,9 +541,7 @@ Return ONLY valid JSON:
 
 Note: front_inner_frame top_pct should be around 3-5% (where the yellow border ends at the top) and bottom_pct around 95-97% (where the yellow border starts at the bottom). If your inner frame is only 40-70% of card height, you're likely measuring the illustration window, NOT the full yellow frame border. The full inner frame on a Pokemon card covers ~90% of the card height.
 
-Grade thresholds (front): 10=55/45 or better, 9=60/40, 8=65/35, 7=70/30, 6=80/20, 5=85/15
-Grade thresholds (back): 10=75/25 or better, 9=90/10, 7=worse than 90/10
-Final centering subgrade = LOWER of front and back grades. Whole numbers only (1-10).`;
+${CENTERING_CHART}`;
 
 export const DEFECTS_ONLY_PROMPT = `CRITICAL OUTPUT FORMAT:
 - First character of your response MUST be {
@@ -663,8 +662,7 @@ The image may have a small mat-coloured frame around the card. Grade only what i
 
 CENTERING (10% weight)
 - Measure left/right and top/bottom border ratios on each side.
-- 10: 50/50 to 52/48 both axes  ·  9: up to 55/45  ·  8: up to 60/40  ·  7: up to 65/35  ·  ≤6: worse than 65/35.
-- Final centering subgrade = LOWER of front and back grades.
+${CENTERING_CHART}
 
 CORNERS (25% weight) — score each of 8 zones independently (front + back × TL, TR, BL, BR):
 - 10: factory-sharp, no wear  ·  9: minimal softness  ·  8: slight softness on this corner

@@ -854,10 +854,12 @@ export async function generateLabelPNG(cert: CertificateRecord, side: "front" | 
     // ceiling-triggered scores still surface the right deduction shape for
     // the isPristine check below.
     const { scoreMvgsV2 } = await import("@shared/mvgs-input-builder");
-    const { loadMvgsCalibration } = await import("./lib/mvgs-calibration");
+    const { calibrationForRulesVersion } = await import("@shared/mvgs/registry");
     const certAny = cert as any;
     const surfaceFlags = (certAny.surfaceValues as any) ?? {};
-    const calibration = await loadMvgsCalibration();
+    // Version-routed, not "current rules": a certificate is re-rendered under the
+    // ruleset it was ISSUED under, so a future v1.5 cannot restate an old slab.
+    const calibration = calibrationForRulesVersion((cert as any).mvgsRulesVersion);
     mvgsDeductions = scoreMvgsV2(
       {
         centeringFrontLr: cert.centeringFrontLr,

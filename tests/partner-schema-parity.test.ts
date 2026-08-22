@@ -323,7 +323,9 @@ describe("partner schema ↔ migration parity", () => {
       "0108_partner_setup_only_deletion_retention.sql",
       "0109_partner_card_job_purpose.sql",
       "0110_partner_permanent_deletion_audit_vocabulary.sql",
-      "0111_partner_supply_commerce.sql",
+      "0111_mvgs_rules_version.sql",
+      "0112_partner_supply_commerce.sql",
+      "0113_lineage_convergence_mvgs_rules_version.sql",
     ]);
   });
 

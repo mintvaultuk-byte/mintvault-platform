@@ -772,9 +772,12 @@ export default function StandardPage() {
 
             <h3 className={subTitle}>Overall Grade Floor Rule</h3>
             <p className={`${para} mb-3`}>
-              The overall grade cannot exceed the lowest MVGS category subgrade plus 0.5. If the gap between the lowest
-              and all other subgrades is less than 4 aggregate points, the overall equals the lowest subgrade exactly —
-              no bump.
+              The overall grade cannot exceed the lowest MVGS category subgrade plus 0.5. That +0.5 is granted only on
+              high variance: the other three subgrades must sit at least 4 aggregate points above the lowest. Where the
+              1–10 subgrade scale makes 4 points unreachable — a lowest subgrade of 9, whose three companions can be at
+              most 10 each and so can never exceed it by more than 3 in total — the threshold is the largest gap that
+              rung can produce, so 9 / 10 / 10 / 10 qualifies and 9 / 9 / 10 / 10 does not. Otherwise the overall equals
+              the lowest subgrade exactly — no bump.
             </p>
             <p className={`${para} mb-3`}>
               <strong className="text-[#ccc]">Crease cap and floor rule priority:</strong> When a D1 crease (CR) cap and
@@ -841,7 +844,7 @@ export default function StandardPage() {
             future revision changes weights / rules. Issued certificates
             stay bound to the version active at grading time. */}
         <div className="text-center mt-12 space-y-1.5 text-[10px] text-[#666] leading-relaxed">
-          <p>MVGS v1.3 · Published 24 May 2026 · MintVault UK Ltd.</p>
+          <p>MVGS v1.4 · Published 22 August 2026 · MintVault UK Ltd.</p>
           <p>
             v1.1 additions: mandatory grading process, whitening grade thresholds, NQ/AA authentication designations.
           </p>
@@ -854,8 +857,15 @@ export default function StandardPage() {
             priority rule, holo zone boundary definition.
           </p>
           <p>
-            Grades issued under MVGS v1.3 are certified to this specification. Future revisions carry a new version
-            number and do not retroactively alter issued certificates.
+            v1.4 correction: the floor rule&rsquo;s high-variance threshold is now measured against the largest gap a
+            rung can produce, so grade 9.5 (Mint+) is attainable. Under v1.3 a lowest subgrade of 9 could never reach
+            the fixed 4-point threshold, and a card one step below perfect fell from 10 straight to 9. No other subgrade
+            rung is affected.
+          </p>
+          <p>
+            Each certificate records the MVGS version it was graded under. Grades issued under MVGS v1.3 remain
+            certified to v1.3 and are not re-graded; future revisions carry a new version number and do not
+            retroactively alter issued certificates.
           </p>
         </div>
       </div>

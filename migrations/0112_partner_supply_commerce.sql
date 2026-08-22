@@ -1,4 +1,4 @@
--- 0111 — Partner supplies commerce: a Super-Admin-owned catalogue and a tenant-isolated order record.
+-- 0112 — Partner supplies commerce: a Super-Admin-owned catalogue and a tenant-isolated order record.
 --
 -- LINEAGE. Recovered from 0069 on codex/mintvault-final-product-integration (0549c0cc), which was
 -- never applied to any database. Renumbered above this lineage's 0110 high-water mark, and adapted

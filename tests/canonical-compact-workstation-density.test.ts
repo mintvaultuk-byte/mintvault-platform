@@ -42,7 +42,7 @@ describe("compact rail geometry", () => {
     // Tailwind class. The cap is load-bearing — uncapped, the preview grew to 431px in a
     // 569px rail and pushed the header down onto the card — and a utility class only
     // exists if the JIT emitted it. An inline value cannot be silently absent.
-    expect(CERTIFICATE).toContain("CERTIFICATE_PREVIEW_MAX_WIDTH_PX = 285");
+    expect(CERTIFICATE).toContain("CERTIFICATE_PREVIEW_MAX_WIDTH_PX = 320");
     expect(CERTIFICATE).toContain("maxWidth: CERTIFICATE_PREVIEW_MAX_WIDTH_PX");
     // Display width only. The certificate document, its print dimensions and its
     // resolution are untouched.

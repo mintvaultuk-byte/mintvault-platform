@@ -35,7 +35,7 @@ import GradientButton from "@/components/ui/gradient-button";
 import VaultClubBadge from "@/components/vault-club-badge";
 import MemberHeader from "@/components/dashboard/member-header";
 import { apiRequest } from "@/lib/queryClient";
-import { isNonNumericGrade } from "@shared/schema";
+import { isNonNumericGrade } from "@shared/grade-presentation";
 import { carrierIdFromLegacyName, carrierLabel, serviceLabel, trackUrl } from "@shared/carriers";
 import { useToast } from "@/hooks/use-toast";
 import SeoHead from "@/components/seo-head";

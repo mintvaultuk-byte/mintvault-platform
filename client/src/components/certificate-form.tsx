@@ -16,7 +16,7 @@ import {
   type StructuredCardVariant,
 } from "@shared/pokemon-rarity-catalogue";
 import type { CertificateRecord, CardMaster } from "@shared/schema";
-import { NON_NUMERIC_GRADES, isNonNumericGrade, isValidNumericGrade } from "@shared/schema";
+import { NON_NUMERIC_GRADES, isNonNumericGrade, isValidNumericGrade } from "@shared/grade-presentation";
 import {
   Save,
   Upload,

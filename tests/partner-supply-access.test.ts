@@ -18,7 +18,7 @@ const read = (file: string) => readFileSync(join(process.cwd(), file), "utf8");
 const mount = read("server/partner/mount.ts");
 const partnerRoutes = read("server/partner/supply-routes.ts");
 const adminRoutes = read("server/partner/supply-admin-routes.ts");
-const migration = read("migrations/0111_partner_supply_commerce.sql");
+const migration = read("migrations/0112_partner_supply_commerce.sql");
 const partnerPage = read("client/src/pages/partner/supplies.tsx");
 const adminPage = read("client/src/pages/admin/partner-supplies.tsx");
 const app = read("client/src/App.tsx");
