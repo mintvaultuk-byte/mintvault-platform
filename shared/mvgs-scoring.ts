@@ -47,6 +47,26 @@
 
 import { centeringScoreDeductions, centeringSubgrade } from "./centering";
 
+/**
+ * The MVGS ruleset a grade was computed under, stamped onto every grade write.
+ *
+ * Approved grades are IMMUTABLE. This string is what makes that promise
+ * enforceable rather than aspirational: when the rules change, historical
+ * certificates keep the version they were issued under and nothing recalculates
+ * them. Bump it in the SAME commit as any change to the deduction tables, the
+ * centering chart, the floor rule, the grade brackets or the Pristine gate —
+ * and update the version lock on the public /standard page to match.
+ *
+ * v1.3 → v1.4: floor-rule variance threshold made attainable at the 9 rung, so
+ * grade 9.5 (Mint+) can be awarded. No other rung changes. See the floor-rule
+ * block in computeMvgsScore.
+ */
+export const MVGS_RULES_VERSION = "v1.4";
+
+/** The ruleset every certificate graded before MVGS_RULES_VERSION was
+ *  introduced was issued under. Used only to backfill existing rows. */
+export const MVGS_RULES_VERSION_LEGACY = "v1.3";
+
 export interface MvgsDefect {
   tier: string; // "D1" | "D2" | "D3"
   mvgsCode: string;
@@ -307,6 +327,14 @@ function surfaceDeduction(d: MvgsDefect): SurfaceOutcome {
   return { deduction: raw * backMultiplier, forceCap74 };
 }
 
+/** Aggregate points the other subgrades must sit above the lowest before the
+ *  floor rule grants its +0.5 bump. Published at /standard. */
+const HIGH_VARIANCE_GAP = 4;
+/** A subgrade tops out at 10, so one category can contribute at most
+ *  (10 - lowest) points to the aggregate gap; three categories can contribute
+ *  three times that. Used to keep HIGH_VARIANCE_GAP attainable at every rung. */
+const MAX_SUBGRADE_GAP_PER_CATEGORY = 3;
+
 // ── Grade brackets ────────────────────────────────────────────────────────
 
 /**
@@ -314,8 +342,16 @@ function surfaceDeduction(d: MvgsDefect): SurfaceOutcome {
  * of mvgsRemainingToGrade in grading-panel.tsx — kept in sync because the
  * lowest-subgrade floor rule (below) needs the same bucketing the UI uses
  * for chip display.
+ *
+ * EXPORTED because server/lib/draft-grade-authority.ts used to carry a
+ * hand-copied duplicate of this ladder that had drifted: its copy was missing
+ * the `remaining >= 5 -> 4` rung, so a category holding 5-7 remaining points
+ * persisted a subgrade of 3 while the floor rule above scored it as a 4, and
+ * subgrade 4 could never be written to a certificate at all. The authority now
+ * imports THIS function so the persisted subgrade and the scored subgrade
+ * cannot diverge again.
  */
-function remainingToGrade(remaining: number): number {
+export function remainingToGrade(remaining: number): number {
   if (remaining >= 23) return 10;
   if (remaining >= 20) return 9;
   if (remaining >= 17) return 8;
@@ -608,8 +644,26 @@ export function computeMvgsScore(input: MvgsInput): MvgsResult {
   // Derive per-category subgrades from deductions, find the lowest, and cap
   // the headline grade so a near-perfect card with one destroyed category
   // can't whitewash that category. Two regimes:
-  //   gap ≥ 4 (high variance): maxGrade = lowest + 0.5  (one half-grade above)
-  //   gap < 4 (low variance) : maxGrade = lowest        (strict cap to lowest)
+  //   high variance: maxGrade = lowest + 0.5  (one half-grade above)
+  //   low variance : maxGrade = lowest        (strict cap to lowest)
+  //
+  // "High variance" is an aggregate gap of 4 points between the lowest
+  // subgrade and the others — EXCEPT where the 1-10 subgrade ceiling makes 4
+  // points arithmetically unreachable. With lowest = 9 the three other
+  // subgrades can be at most 10 each, so the largest gap that can ever exist
+  // is 3. A fixed `gap >= 4` therefore made the +0.5 bump impossible at the 9
+  // rung and ONLY at the 9 rung, which is why grade 9.5 (Mint+) — published at
+  // /standard, present in NUMERIC_GRADES, GRADE_BRACKET_TOP and mvgsTierName,
+  // and rendered by the slab and PDF — had never been issued: 0 of 714 live
+  // certificates held it, while 140 sat at lowest-subgrade 9. Cards fell
+  // 10 → 9 with no intermediate step.
+  //
+  // The threshold is therefore taken relative to the maximum gap the rung can
+  // produce, 3 * (10 - lowest). For lowest ≤ 8 that is ≥ 6, so min(...) is 4
+  // and every rung from 8 down behaves EXACTLY as before — this change cannot
+  // move any grade other than at the 9 rung. At lowest = 9 it becomes 3, so
+  // the maximum possible variance at that rung (9 / 10 / 10 / 10) earns its
+  // +0.5 and 9.5 becomes reachable. 9 / 9 / 10 / 10 (gap 2) still caps at 9.
   // The cappedScore then sits at the top of the bracket one step ABOVE
   // finalGrade, matching how the engine surfaces labels through
   // gradeLabelForScore (see GRADE_BRACKET_TOP rationale).
@@ -657,7 +711,8 @@ export function computeMvgsScore(input: MvgsInput): MvgsResult {
   const lowest = Math.min(...subList);
   const others = subList.filter((s) => s !== lowest);
   const gap = others.reduce((sum, s) => sum + (s - lowest), 0);
-  let maxGrade = gap >= 4 ? lowest + 0.5 : lowest;
+  const varianceThreshold = Math.min(HIGH_VARIANCE_GAP, MAX_SUBGRADE_GAP_PER_CATEGORY * (10 - lowest));
+  let maxGrade = gap >= varianceThreshold && gap > 0 ? lowest + 0.5 : lowest;
 
   // v2 §4 — structural ceilings (crease / wrinkle / tear) cap the overall
   // grade if they're stricter than the floor rule. Worst ceiling wins per

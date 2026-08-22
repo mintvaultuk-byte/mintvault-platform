@@ -76,6 +76,7 @@ const SUPPLIES_MIGRATION = "0104_partner_supplies_orders.sql";
 const FIRST_SHOP_ADDRESS_MIGRATION = "0105_partner_first_shop_delivery_address.sql";
 const PUBLIC_PRESENCE_CONVERGENCE_MIGRATION = "0106_lineage_convergence_public_presence.sql";
 const AUDIT_IDEMPOTENCY_SCOPE_MIGRATION = "0107_partner_management_audit_idempotency_scope.sql";
+const MVGS_RULES_VERSION_MIGRATION = "0111_mvgs_rules_version.sql";
 
 /** The expected ordered plan after canonical Partner/Scanner integration. */
 const CANONICAL_PENDING = [
@@ -160,6 +161,7 @@ let growthApplied: string[];
 let completionApplied: string[];
 let publicPresenceApplied: string[];
 let firstShopApplied: string[];
+let mvgsRulesVersionApplied: string[];
 
 describe("canonical Partner/Scanner production-journal rehearsal", () => {
   beforeAll(async () => {
@@ -215,7 +217,8 @@ describe("canonical Partner/Scanner production-journal rehearsal", () => {
         file.filename !== SUPPLIES_MIGRATION &&
         file.filename !== FIRST_SHOP_ADDRESS_MIGRATION &&
         file.filename !== PUBLIC_PRESENCE_CONVERGENCE_MIGRATION &&
-        file.filename !== AUDIT_IDEMPOTENCY_SCOPE_MIGRATION
+        file.filename !== AUDIT_IDEMPOTENCY_SCOPE_MIGRATION &&
+        file.filename !== MVGS_RULES_VERSION_MIGRATION
     );
     const before = await planMigrations(migrator as never, preGrowthFiles);
     expect(before.alreadyApplied).toHaveLength(41);
@@ -245,7 +248,8 @@ describe("canonical Partner/Scanner production-journal rehearsal", () => {
         file.filename !== SUPPLIES_MIGRATION &&
         file.filename !== FIRST_SHOP_ADDRESS_MIGRATION &&
         file.filename !== PUBLIC_PRESENCE_CONVERGENCE_MIGRATION &&
-        file.filename !== AUDIT_IDEMPOTENCY_SCOPE_MIGRATION
+        file.filename !== AUDIT_IDEMPOTENCY_SCOPE_MIGRATION &&
+        file.filename !== MVGS_RULES_VERSION_MIGRATION
     );
     const growthBefore = await planMigrations(migrator as never, attributionFiles);
     expect(growthBefore.alreadyApplied).toHaveLength(63);
@@ -263,7 +267,8 @@ describe("canonical Partner/Scanner production-journal rehearsal", () => {
         file.filename !== SUPPLIES_MIGRATION &&
         file.filename !== FIRST_SHOP_ADDRESS_MIGRATION &&
         file.filename !== PUBLIC_PRESENCE_CONVERGENCE_MIGRATION &&
-        file.filename !== AUDIT_IDEMPOTENCY_SCOPE_MIGRATION
+        file.filename !== AUDIT_IDEMPOTENCY_SCOPE_MIGRATION &&
+        file.filename !== MVGS_RULES_VERSION_MIGRATION
     );
     const completionBefore = await planMigrations(migrator as never, completionFiles);
     expect(completionBefore.alreadyApplied).toHaveLength(64);
@@ -281,7 +286,8 @@ describe("canonical Partner/Scanner production-journal rehearsal", () => {
         file.filename !== SUPPLIES_MIGRATION &&
         file.filename !== FIRST_SHOP_ADDRESS_MIGRATION &&
         file.filename !== PUBLIC_PRESENCE_CONVERGENCE_MIGRATION &&
-        file.filename !== AUDIT_IDEMPOTENCY_SCOPE_MIGRATION
+        file.filename !== AUDIT_IDEMPOTENCY_SCOPE_MIGRATION &&
+        file.filename !== MVGS_RULES_VERSION_MIGRATION
     );
     const publicPresenceBefore = await planMigrations(migrator as never, publicPresenceFiles);
     expect(publicPresenceBefore.alreadyApplied).toHaveLength(65);
@@ -295,7 +301,8 @@ describe("canonical Partner/Scanner production-journal rehearsal", () => {
     // supplies authority and the additive structured delivery address on partner_locations.
     // 0105 rewrites the management-audit vocabulary constraint, so it is a declared,
     // owner-approved destructive entry and must be planned as one.
-    const firstShopBefore = await planMigrations(migrator as never, files);
+    const firstShopFiles = files.filter((file) => file.filename !== MVGS_RULES_VERSION_MIGRATION);
+    const firstShopBefore = await planMigrations(migrator as never, firstShopFiles);
     expect(firstShopBefore.alreadyApplied).toHaveLength(67);
     expect(firstShopBefore.pending).toEqual([
       SUPPLIES_MIGRATION,
@@ -309,7 +316,20 @@ describe("canonical Partner/Scanner production-journal rehearsal", () => {
       FIRST_SHOP_ADDRESS_MIGRATION,
       AUDIT_IDEMPOTENCY_SCOPE_MIGRATION,
     ]);
-    firstShopApplied = (await applyMigrations(migrator as never, files, { allowDestructive: true })).applied;
+    firstShopApplied = (await applyMigrations(migrator as never, firstShopFiles, { allowDestructive: true })).applied;
+
+    // MVGS rules versioning sits last: a purely ADDITIVE column on core `certificates` plus a
+    // backfill of the ruleset every existing grade was in fact issued under. It must plan as
+    // NON-destructive — it drops nothing, rewrites no constraint, and touches no grade value —
+    // so if this migration ever starts planning as destructive, that is a real regression and
+    // this assertion is what catches it before it reaches production.
+    const mvgsRulesVersionBefore = await planMigrations(migrator as never, files);
+    expect(mvgsRulesVersionBefore.alreadyApplied).toHaveLength(71);
+    expect(mvgsRulesVersionBefore.pending).toEqual([MVGS_RULES_VERSION_MIGRATION]);
+    expect(mvgsRulesVersionBefore.inconsistent).toEqual([]);
+    expect(mvgsRulesVersionBefore.checksumMismatches).toEqual([]);
+    expect(mvgsRulesVersionBefore.destructive).toEqual([]);
+    mvgsRulesVersionApplied = (await applyMigrations(migrator as never, files)).applied;
   }, 180_000);
 
   afterAll(async () => {
@@ -329,11 +349,12 @@ describe("canonical Partner/Scanner production-journal rehearsal", () => {
       PUBLIC_PRESENCE_CONVERGENCE_MIGRATION,
       AUDIT_IDEMPOTENCY_SCOPE_MIGRATION,
     ]);
+    expect(mvgsRulesVersionApplied).toEqual([MVGS_RULES_VERSION_MIGRATION]);
     const after = await planMigrations(migrator as never, listMigrationFiles());
     expect(after.pending).toEqual([]);
     expect(after.inconsistent).toEqual([]);
     expect(after.checksumMismatches).toEqual([]);
-    expect(after.alreadyApplied).toHaveLength(71);
+    expect(after.alreadyApplied).toHaveLength(72);
   });
 
   it("applies growth 0100/0101, then public 0102/0103, then first-shop 0104/0105 in order", async () => {

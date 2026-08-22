@@ -14,6 +14,7 @@ import { protectedChangedFiles, protectedDiffFor } from "./helpers/protected-dif
 import { execFileSync } from "child_process";
 import { join } from "path";
 import { addedCodeOf, addedJsOf, hasMalformedEscape, stripNonCode } from "./helpers/strip-non-code";
+import { MVGS_V14_FILES, mvgsV14Verdict } from "./helpers/mvgs-v14-authorisation";
 import { formatVariantLine, hasStructuredVariant, CONSOLIDATED_VARIANT_SCHEME } from "@shared/variant-line";
 import {
   STRUCTURED_VARIANT_VERSION,
@@ -339,8 +340,31 @@ describe("MVGS / grading calculations are not touched (item 14)", () => {
         //    formula bundled alongside these two calls still fails.
         const signatureG =
           /\breturnCardJobToGraderForCertificate\b/.test(addedJs) && /\bapproveCardJobForCertificate\b/.test(addedJs);
+        // H) MVGS rules-version stamp — founder-approved 2026-08-22, narrowly, as part of the
+        //    v1.4 half-grade reconciliation (see tests/helpers/mvgs-v14-authorisation.ts for the
+        //    full approval). MVGS had NO rules version at all, which made "approved grades are
+        //    immutable" unenforceable: nothing recorded which revision of the engine issued any
+        //    given certificate, so a future scoring change would silently reinterpret every
+        //    historical grade.
+        //
+        //    This authorises the workflow to PERSIST a provenance string that the separately
+        //    tested server authority already sealed — the same shape signature F authorises for
+        //    the grade itself. BOTH tokens are required, so an incidental edit cannot satisfy
+        //    it: the column assignment, and the fact that its value comes from the authority
+        //    rather than from the request or from a computation in this file.
+        //
+        //    THIS AUTHORISES NO MATHS. `authority.rulesVersion` is a string the resolver
+        //    returns; nothing here reads, derives, compares or arithmetises a grade. The
+        //    calculation-token assertion below still applies unchanged — the only concession is
+        //    that the literal COLUMN NAME `mvgs_rules_version` and the resolver output field
+        //    `authority.rulesVersion` are stripped before it runs, exactly as the four B3
+        //    sub-grade column names already are. Bare `mvgs`, `pristine`, `centering`,
+        //    `gradeNum`, `calculateOverallGrade` and `scoreMvgs` all still fail.
+        const signatureH =
+          /mvgs_rules_version\s*=\s*\$\{authority\.rulesVersion\}/.test(addedCode) &&
+          /\bauthority\.rulesVersion\b/.test(addedJs);
         expect(
-          signatureA || signatureB || signatureC || signatureD || signatureE || signatureF || signatureG,
+          signatureA || signatureB || signatureC || signatureD || signatureE || signatureF || signatureG || signatureH,
           "server/grader.ts changed but matches no founder-authorised signature"
         ).toBe(true);
         // The B3 sub-grade COMPLETENESS check that signature C extracts verbatim from
@@ -359,7 +383,29 @@ describe("MVGS / grading calculations are not touched (item 14)", () => {
             .replace(b3Columns, "")
             .replace(authorityOutputFields, "")
             .replace(/'(centering|corners|edges|surface)'/g, "")
+            .replace(/\bmvgs_rules_version\b/g, "")
+            .replace(/\bauthority\.rulesVersion\b/g, "")
         ).not.toMatch(/mvgs|pristine|centering|gradeNum|calculateOverallGrade|scoreMvgs/i);
+        continue;
+      }
+      // H) MVGS v1.4 half-grade reconciliation — founder-approved 2026-08-22, narrowly, for the
+      //    ONE defect that made the PUBLISHED grade 9.5 (Mint+) unissuable: the floor rule's
+      //    +0.5 bump required an aggregate gap of 4, which a lowest subgrade of 9 can never
+      //    reach because the other three subgrades top out at 10. Production held 0 of 714
+      //    certificates at 9.5 while 140 sat at a lowest subgrade of 9.
+      //
+      //    The authorisation is stated ONCE in tests/helpers/mvgs-v14-authorisation.ts and is
+      //    called by BOTH copies of this guard, so the pair cannot disagree the way signature G
+      //    once did — that defect is recorded in G's own comment in this file. It permits three
+      //    things and refuses everything else: the named floor-rule threshold, a purely
+      //    additive centering-chart renderer, and the AI prompts reading that renderer instead
+      //    of their four drifted hand-written copies. It authorises NO change to any deduction
+      //    weight, band boundary, grade bracket, cap, ceiling, calibration value or the
+      //    Pristine gate — the verdict refuses a diff that removes an unlisted line or adds a
+      //    scoring literal.
+      if ((MVGS_V14_FILES as readonly string[]).includes(f)) {
+        const verdict = mvgsV14Verdict(f, protectedDiffFor(f));
+        expect(verdict.authorised, `${f}: ${verdict.reason}`).toBe(true);
         continue;
       }
       expect(f, `unexpected change to grading engine: ${f}`).not.toMatch(calcEngine);
@@ -388,7 +434,14 @@ describe("MVGS / grading calculations are not touched (item 14)", () => {
     // template literal — single-line or multi-line, nested or not — can no longer hide code,
     // and a tagged sql`` keeps its SQL text where the guard can see it.
     for (const raw of addedCodeOf(diff, "both").split("\n")) {
-      const code = raw.trim();
+      // Signature H's narrow concession, applied here exactly as the block-level assertion
+      // applies it: the literal COLUMN NAME `mvgs_rules_version` and the sealed resolver output
+      // `authority.rulesVersion` are stripped, and nothing else is. Bare `mvgs`, `calibration`,
+      // `WEIGHT`, `deduction =` and every other blocked identifier still fail on this line.
+      const code = raw
+        .trim()
+        .replace(/\bmvgs_rules_version\b/g, "")
+        .replace(/\bauthority\.rulesVersion\b/g, "");
       if (!code || code === "*" || code.startsWith("*")) continue; // JSDoc continuation line
 
       expect(code, `grader workflow change must not name grade-calculation machinery: ${code}`).not.toMatch(
