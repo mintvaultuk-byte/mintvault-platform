@@ -218,12 +218,45 @@ describe("permanent-deletion admin UI", () => {
     const detail = read("client/src/pages/admin/partner-management-detail.tsx");
     const start = detail.indexOf('kind: "partner-permanent-delete"');
     expect(start).toBeGreaterThan(-1);
-    const block = detail.slice(start, start + 1600);
+    const block = detail.slice(start, start + 2600);
     // highRisk renders the reason field plus the typed CONFIRM the rest of this surface uses.
     expect(block).toContain("highRisk: true");
     expect(block).toContain("pm-delete-confirm-name");
     expect(block).toContain("runAdminProtected");
     expect(block).toContain("confirmLegalName");
+  });
+
+  /**
+   * REGRESSION (staging, 2026-08-22). The delete dialog opened with the confirmation box ALREADY
+   * FILLED IN — it contained "shop", left behind by a previous dialog.
+   *
+   * ROOT CAUSE: `modalValue` is one piece of state shared by every dialog on this page, and several
+   * openers seed it by hand (`openBrandingEdit` writes the branding display name into it). The
+   * deletion panel opened its dialog with a bare `setModal`, which touches nothing, so the box
+   * inherited the last value. `openModalSeeded` is the only opener that honours `initial: ""`.
+   *
+   * The server refused correctly and nothing was deleted — but a destructive confirmation that
+   * arrives pre-filled and enabled is the precise trap that typing the shop's name exists to
+   * prevent, so the UI must not be able to present one.
+   */
+  it("opens the delete confirmation EMPTY, and will not enable Confirm on text that cannot work", () => {
+    const detail = read("client/src/pages/admin/partner-management-detail.tsx");
+
+    // 1. The panel must go through the seeding opener, not setModal.
+    const mount = detail.slice(detail.indexOf("<PermanentDeletionPanel"), detail.indexOf("<PermanentDeletionPanel") + 1500);
+    expect(mount).toContain("openModal={openModalSeeded}");
+    expect(mount).not.toContain("openModal={setModal}");
+
+    // 2. openModalSeeded is what blanks the field from `initial`.
+    expect(detail).toContain('setModalValue(m.input?.initial ?? "");');
+
+    // 3. The dialog declares the exact string it must equal, and says so inline on a mismatch.
+    expect(detail).toContain("mustEqual: data.confirmationPhrase,");
+    expect(detail).toContain("pm-modal-input-mismatch");
+
+    // 4. A non-empty but WRONG value must not enable the destructive button. "not empty" was the
+    //    old guard, and it is what made a stale value look ready to submit.
+    expect(detail).toContain("(!!modal.input?.mustEqual && modalValue.trim() !== modal.input.mustEqual) ||");
   });
 
   it("returns to the directory after deleting, rather than reloading a shop that no longer exists", () => {

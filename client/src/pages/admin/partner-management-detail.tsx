@@ -263,7 +263,13 @@ export default function PartnerManagementDetailPage() {
      * could not be validated, was not keyboard-trappable, dropped the typed value on cancel and is
      * invisible to screen readers.
      */
-    input?: { label: string; initial: string; testId: string; required?: boolean };
+    /**
+     * `mustEqual` turns the field from "not empty" into "exactly this". Used by permanent deletion,
+     * where the whole point of typing the shop's name is that it identifies WHICH shop — so text
+     * that cannot possibly work must not enable a destructive button and send the operator to a
+     * server refusal with no inline explanation.
+     */
+    input?: { label: string; initial: string; testId: string; required?: boolean; mustEqual?: string };
     /**
      * A SECOND optional field, added for locations: a shop floor is created with a name and an
      * address together, and splitting that into two sequential one-field dialogs would mean a
@@ -1299,7 +1305,18 @@ export default function PartnerManagementDetailPage() {
             partnerId={partnerId}
             legalName={org.legal_name}
             busy={mutation.isPending}
-            openModal={setModal}
+            /*
+             * openModalSeeded, NOT setModal. `modalValue` is ONE piece of state shared by every
+             * dialog on this page, and several openers seed it by hand — openBrandingEdit writes the
+             * branding display name straight into it. Opening this dialog with a bare setModal
+             * touches none of that, so the DESTRUCTIVE confirmation box inherited whatever the last
+             * dialog left behind; on staging (2026-08-22) it opened already containing "shop".
+             *
+             * The server refused it correctly and nothing was deleted, but a confirmation field that
+             * arrives pre-filled and enabled is the exact trap that typing the shop's name exists to
+             * prevent. openModalSeeded honours `initial: ""` and blanks the field every time.
+             */
+            openModal={openModalSeeded}
           />
         )}
 
@@ -1617,6 +1634,17 @@ export default function PartnerManagementDetailPage() {
                         : `${modal.input.label} is required.`}
                     </div>
                   )}
+                  {!!modal.input.mustEqual &&
+                    modalValue.trim() !== "" &&
+                    modalValue.trim() !== modal.input.mustEqual && (
+                      <div
+                        role="alert"
+                        data-testid="pm-modal-input-mismatch"
+                        style={{ color: "var(--admin-red, #ff6b6b)", fontSize: 12, marginTop: 4 }}
+                      >
+                        That does not match. Type exactly: {modal.input.mustEqual}
+                      </div>
+                    )}
                 </div>
               )}
               {modal.input2 && (
@@ -1726,6 +1754,7 @@ export default function PartnerManagementDetailPage() {
                       : !reasonValid(reason)) ||
                     (modal.highRisk && typed.trim() !== TYPED_CONFIRM) ||
                     (!!modal.input?.required && modalValue.trim() === "") ||
+                    (!!modal.input?.mustEqual && modalValue.trim() !== modal.input.mustEqual) ||
                     mutation.isPending
                   }
                   onClick={() => mutation.mutate(modal.run)}
@@ -2571,7 +2600,7 @@ function LocationActions({
     successMessage?: string;
     highRisk?: boolean;
     body?: ReactNode;
-    input?: { label: string; initial: string; testId: string; required?: boolean };
+    input?: { label: string; initial: string; testId: string; required?: boolean; mustEqual?: string };
     input2?: { label: string; initial: string; testId: string; required?: boolean };
     run: (reason: string, value: string, value2: string) => Promise<unknown>;
   }) => void;
@@ -3062,7 +3091,7 @@ function PermanentDeletionPanel({
     successMessage?: string;
     highRisk?: boolean;
     body?: ReactNode;
-    input?: { label: string; initial: string; testId: string; required?: boolean };
+    input?: { label: string; initial: string; testId: string; required?: boolean; mustEqual?: string };
     run: (reason: string, value: string, value2: string) => Promise<unknown>;
   }) => void;
 }) {
@@ -3136,6 +3165,10 @@ function PermanentDeletionPanel({
                 initial: "",
                 testId: "pm-delete-confirm-name",
                 required: true,
+                // The server checks this too and remains the real gate; stating it here means the
+                // operator is told what is wrong inside the dialog rather than by a refusal after
+                // pressing a destructive button that was never going to work.
+                mustEqual: data.confirmationPhrase,
               },
               run: async (reasonText, typedName) =>
                 (
