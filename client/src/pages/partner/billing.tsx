@@ -41,8 +41,18 @@ export default function PartnerBillingPage() {
   const query = useQuery({
     queryKey: ["/api/partner/credits"],
     queryFn: () => partnerCredits.view(),
-    // Poll only while we are waiting for a webhook we did not trigger and cannot confirm client-side.
-    refetchInterval: awaitingWebhook ? 4000 : false,
+    /*
+     * Poll only while we are waiting for a webhook we did not trigger and cannot confirm
+     * client-side — and STOP the moment a poll fails.
+     *
+     * Without the error condition this interval has no terminal state. A tab left in the
+     * post-checkout "processing" view whose session later ended kept requesting /api/partner/credits
+     * every four seconds indefinitely, rendering "authentication required" forever and never
+     * recovering. On staging that single tab produced a continuous 401 every four seconds across the
+     * whole day and buried the real requests in the application log. A failed poll means this page
+     * can no longer learn anything by asking again.
+     */
+    refetchInterval: (query) => (awaitingWebhook && !query.state.error ? 4000 : false),
   });
 
   const packs = useQuery({
