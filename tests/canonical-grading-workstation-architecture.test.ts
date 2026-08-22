@@ -498,6 +498,7 @@ describe("Hotfix: stage bar gates content (Card Details / Grade / Review)", () =
     // "effectively hidden" on a stage if it OR grading-controls is in that stage's
     // hide-rule. Model that and assert every section is shown on ≥1 stage.
     const childrenOfGradingControls = new Set([
+      "defect-marking",
       "mvgs-score",
       "grade-result",
       "d1-d2-d3",
