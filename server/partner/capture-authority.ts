@@ -40,7 +40,8 @@ export class CaptureAuthorityError extends Error {
       | "SIDE_ALREADY_PRESENT"
       | "FRONT_REQUIRED"
       | "CAPTURE_HELD_BY_OTHER_STATION"
-      | "NOTHING_TO_CAPTURE",
+      | "NOTHING_TO_CAPTURE"
+      | "CAPTURE_IN_FLIGHT",
     message: string
   ) {
     super(message);
@@ -52,6 +53,48 @@ export type CaptureSide = "front" | "back";
 
 /** FRONT first: a bench works front-then-back, so an unqualified request should arm the front. */
 const SIDES: readonly CaptureSide[] = ["front", "back"];
+
+/**
+ * WHICH SIDES ARE OUTSTANDING, AND WHAT "NONE" MEANS.
+ *
+ * Two different facts decide whether a side can be armed, and conflating them is what produced the
+ * MV837 false completion on staging, 2026-08-22:
+ *
+ *   ACCEPTED EVIDENCE   a row in certificate_image_evidence. The only thing that can finish a card.
+ *   A LIVE PHYSICAL HOLD a non-expired claimed/capturing session this station already released.
+ *                        It stops the same side being armed twice. It is NOT evidence.
+ *
+ * Both block arming. Only the first means the card is done. Previously both produced
+ * NOTHING_TO_CAPTURE, whose message says "already has both images" — so the Scanner read a live hold
+ * as a finished card and rendered Front OK / Back OK against ZERO evidence rows and no R2 object.
+ *
+ * Pure and exported deliberately: this is the rule, and a rule that can only be exercised when a
+ * test database happens to be configured is a rule that silently stops being tested.
+ */
+export type SidePresenceVerdict = {
+  present: CaptureSide[];
+  missing: CaptureSide[];
+  /** Set only when nothing can be armed. `complete` distinguishes "finished" from "busy". */
+  blocked: null | { code: "NOTHING_TO_CAPTURE" | "CAPTURE_IN_FLIGHT"; complete: boolean };
+};
+
+export function classifySidePresence(
+  evidenceSides: readonly CaptureSide[],
+  liveHeldSides: readonly CaptureSide[]
+): SidePresenceVerdict {
+  const evidence = new Set<CaptureSide>(evidenceSides);
+  const present = new Set<CaptureSide>([...evidenceSides, ...liveHeldSides]);
+  const missing = SIDES.filter((side) => !present.has(side));
+  if (missing.length > 0) return { present: [...present], missing, blocked: null };
+  const evidenceComplete = SIDES.every((side) => evidence.has(side));
+  return {
+    present: [...present],
+    missing,
+    blocked: evidenceComplete
+      ? { code: "NOTHING_TO_CAPTURE", complete: true }
+      : { code: "CAPTURE_IN_FLIGHT", complete: false },
+  };
+}
 
 function cleanSide(value: unknown): CaptureSide {
   if (value === "front" || value === "back") return value;
@@ -177,9 +220,17 @@ export async function authoriseStationCapture(input: {
         [job.certificate_id]
       );
       const present = new Set<CaptureSide>();
+      /*
+       * Evidence ONLY. `present` goes on to absorb live physical holds as well, and the difference
+       * between the two sets is exactly the difference between "finished" and "busy".
+       */
+      const evidencePresent = new Set<CaptureSide>();
       const ownerStationBySide: Partial<Record<CaptureSide, string>> = {};
       for (const row of current.rows) {
-        if (row.side === "front" || row.side === "back") present.add(row.side);
+        if (row.side === "front" || row.side === "back") {
+          present.add(row.side);
+          evidencePresent.add(row.side);
+        }
         if ((row.side === "front" || row.side === "back") && row.station_id) {
           ownerStationBySide[row.side] = row.station_id;
         }
@@ -196,7 +247,8 @@ export async function authoriseStationCapture(input: {
            FROM scanner_capture_sessions
           WHERE certificate_id = $1
             AND state IN ('claimed','capturing')
-            AND physical_released = true`,
+            AND physical_released = true
+            AND expires_at > NOW()`,
         [job.certificate_id]
       );
       const otherStation = pendingPhysical.rows.find((row) => row.station_id !== input.stationId);
@@ -212,12 +264,30 @@ export async function authoriseStationCapture(input: {
           ownerStationBySide[row.side] = row.station_id;
         }
       }
-      const missing = SIDES.filter((s) => !present.has(s));
+      const verdict = classifySidePresence([...evidencePresent], [...present]);
+      const missing = verdict.missing;
 
-      if (missing.length === 0) {
+      /*
+       * "NOTHING TO CAPTURE" MUST MEAN "BOTH IMAGES EXIST", AND NOTHING ELSE.
+       *
+       * `present` deliberately mixes two different facts: accepted evidence, and a side a live
+       * capture is currently holding. Collapsing both into one refusal made an in-flight hold
+       * indistinguishable from a finished card — and the Scanner, reasonably, read
+       * NOTHING_TO_CAPTURE as "this card is done" and rendered Front ✓ Back ✓.
+       *
+       * On MV837 (staging, 2026-08-22) that produced a card marked READY TO GRADE with ZERO rows in
+       * `certificate_image_evidence` and no object in R2. The comment above already says this set is
+       * "deliberately NOT evidence for READY_TO_GRADE"; this is that sentence made true.
+       *
+       * Completion is answered from the evidence ledger alone. A side held only by a live capture
+       * gets its own code, so a caller cannot mistake "wait" for "finished".
+       */
+      if (verdict.blocked) {
         throw new CaptureAuthorityError(
-          "NOTHING_TO_CAPTURE",
-          `${job.mv_number} already has both images. Remove the one that is wrong before re-scanning it.`
+          verdict.blocked.code,
+          verdict.blocked.complete
+            ? `${job.mv_number} already has both images. Remove the one that is wrong before re-scanning it.`
+            : `${job.mv_number} still has a capture finishing on this station. Wait for it to finish before scanning another side.`
         );
       }
 
