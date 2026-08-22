@@ -99,6 +99,11 @@ export type PartnerReadinessCode =
   | "STAFF_LOCATION_ASSIGNMENT_REQUIRED"
   // Credits
   | "CREDITS_REQUIRED"
+  // Onboarding test card — the shop proving, once, that a real card goes end to end.
+  | "TEST_CARD_REQUIRED"
+  | "TEST_CARD_IN_PROGRESS"
+  | "TEST_CARD_AWAITING_REVIEW"
+  | "TEST_CARD_BLOCKED"
   // Any authority that could not be consulted
   | "CONFIGURATION_UNAVAILABLE";
 
@@ -113,6 +118,58 @@ export type ReadinessDimensionKey =
   | "scanner"
   | "credits";
 
+/**
+ * THE ONBOARDING TEST CARD — where the shop's own test card has got to.
+ *
+ * NOT_STARTED      no onboarding-test Card Job exists for this shop.
+ * CAPTURING        one exists, but FRONT and BACK are not both accepted yet.
+ * READY_TO_GRADE   both sides accepted; the card has reached the Staff/grading handoff.
+ * COMPLETE         the test card finished — MintVault graded, approved and released it.
+ * BLOCKED          an authoritative blocker on the test card itself (e.g. it was cancelled).
+ * UNKNOWN          the Card Job authority could not be consulted. NEVER a pass.
+ *
+ * Every one of these is DERIVED SERVER-SIDE from the canonical Card Job lifecycle and the explicit
+ * `purpose = 'ONBOARDING_TEST'` marker (migration 0109). None of it is inferred from the newest
+ * job, the newest MV number, a timestamp or the newest submission — those were the available
+ * guesses before the marker existed, and each of them is wrong as soon as a real customer card is
+ * scanned during onboarding.
+ */
+export type PartnerTestCardState =
+  | "NOT_STARTED"
+  | "CAPTURING"
+  | "READY_TO_GRADE"
+  | "COMPLETE"
+  | "BLOCKED"
+  | "UNKNOWN";
+
+export interface PartnerTestCardReadiness {
+  state: PartnerTestCardState;
+  /** The same four-value vocabulary every other dimension uses, so one renderer serves both. */
+  status: ReadinessStatus;
+  code: PartnerReadinessCode;
+  /** One sentence of operator-facing plain English, produced on the server. */
+  message: string;
+  actions: ReadinessAction[];
+  /**
+   * Identity of the test Card Job this verdict is about, so the operator can find the actual card.
+   * null in NOT_STARTED and in UNKNOWN — in the second case because nothing was established.
+   */
+  cardJob: {
+    id: string;
+    mvNumber: string | null;
+    status: string;
+    /**
+     * Which of FRONT/BACK the capture authority has accepted so far. Informational only — the STATE
+     * above comes from the Card Job lifecycle, which the capture path already advances.
+     *
+     * `null` means the evidence authority could not be consulted (a database without the scanner
+     * evidence tables). Deliberately not `[]`: "we could not tell" and "neither side is captured"
+     * are different facts, and only one of them should ever be shown to an operator.
+     */
+    sidesAccepted: Array<"front" | "back"> | null;
+  } | null;
+}
+
 export interface PartnerOperationalReadiness {
   overall: {
     /** True ONLY when every load-bearing dimension is PASS. Never true alongside UNKNOWN. */
@@ -123,6 +180,29 @@ export interface PartnerOperationalReadiness {
   dimensions: Record<ReadinessDimensionKey, ReadinessDimension>;
   /** The blocking dimensions in fix-first order, flattened for direct rendering. */
   actions: Array<ReadinessAction & { dimension: ReadinessDimensionKey; code: PartnerReadinessCode }>;
+  /**
+   * The onboarding test card, kept OUTSIDE `dimensions` on purpose.
+   *
+   * `overall` answers "can this shop start a NEW grading job right now?", and a shop that has never
+   * scanned a test card can. Folding the test card into `dimensions` would silently change that
+   * question for every existing consumer — including the Command Centre's blocked-partner rollup,
+   * which iterates the dimension map — and would report every long-established Partner as blocked
+   * on a step that did not exist when they were onboarded. The test card is an ONBOARDING question,
+   * so it is answered beside the operational one rather than mixed into it.
+   */
+  testCard: PartnerTestCardReadiness;
+  /**
+   * Is FIRST-SHOP ONBOARDING finished? The wizard's final step, and nothing else, reads this.
+   *
+   * Deliberately stricter than `overall.ready`: complete requires every operational dimension to
+   * PASS *and* the test card to have finished. It can never be true while any authority is UNKNOWN,
+   * because `overall.ready` already fails closed on UNKNOWN and the test card does the same.
+   */
+  onboarding: {
+    complete: boolean;
+    code: PartnerReadinessCode;
+    message: string;
+  };
 }
 
 /**

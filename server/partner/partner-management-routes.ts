@@ -56,6 +56,27 @@ const g5MutationRateLimit = rateLimit({
   keyGenerator: adminClientIpRateLimitKey,
 });
 
+/**
+ * PERMANENT DELETION gets its own, far tighter budget.
+ *
+ * The general G5 limiter allows 60 mutations a minute, which is right for editing a shop and wrong
+ * for destroying one. A legitimate operator deletes a Partner a handful of times a day at most, so
+ * anything beyond a few an hour is either a mistake being repeated or an attack, and both are better
+ * stopped. Keyed the same way as every other admin limiter here, and applied IN ADDITION to
+ * g5MutationRateLimit rather than instead of it.
+ */
+const partnerDeleteRateLimit = rateLimit({
+  windowMs: 60 * 60 * 1000,
+  max: 5,
+  standardHeaders: true,
+  legacyHeaders: false,
+  validate: false,
+  message: {
+    error: { code: "RATE_LIMITED", message: "Too many permanent deletions attempted. Try again later." },
+  },
+  keyGenerator: adminClientIpRateLimitKey,
+});
+
 function actorOf(req: Request): ActorContext {
   const actorUserId = req.session.authUserId;
   const actorEmail = req.session.adminEmail;
@@ -308,6 +329,23 @@ export function partnerManagementRouter(): Router {
   r.get("/partners/:partnerId/first-shop", async (req, res) => {
     try {
       res.json(await svc.getFirstShopOnboarding(req.params.partnerId));
+    } catch (err) {
+      sendError(res, err);
+    }
+  });
+
+  /**
+   * CAN this Partner be permanently deleted, and if not, exactly why not?
+   *
+   * A READ, deliberately separate from the deletion itself, so the Super Admin screen can decide
+   * whether to offer a destructive control at all. Showing a delete button that is certain to fail —
+   * and then surfacing a raw foreign-key violation to a non-technical operator — is the behaviour
+   * this endpoint exists to replace.
+   */
+  r.get("/partners/:partnerId/deletion-assessment", async (req, res) => {
+    try {
+      const { assessPartnerDeletion } = await import("./partner-deletion-service");
+      res.json(await assessPartnerDeletion(String(req.params.partnerId)));
     } catch (err) {
       sendError(res, err);
     }
@@ -605,6 +643,59 @@ export function partnerManagementRouter(): Router {
         actor.requestId,
         await svc.voidPartnerCardJob(actor, String(req.params.partnerId), String(req.params.cardJobId), reason)
       );
+    } catch (err) {
+      sendError(res, err);
+    }
+  });
+
+  /**
+   * PERMANENTLY DELETE a setup-only Partner.
+   *
+   * Layered on purpose, and no layer is redundant:
+   *   requireSuperAdmin        (router-wide) only MintVault's owner-level admin reaches this at all
+   *   requireAdminStepUp       a fresh re-authentication, as suspending a Partner already demands
+   *   partnerDeleteRateLimit   a handful an hour, far below the general mutation budget
+   *   requireReason            a written reason, kept on the tombstone that outlives the Partner
+   *   confirmLegalName         the operator types the shop's exact name, proving WHICH shop
+   *   the service               re-assesses under a row lock and refuses anything with history
+   *
+   * The service returns a friendly PARTNER_DELETE_BLOCKED with the operator-facing cause rather than
+   * letting a database foreign-key violation reach the screen.
+   */
+  r.post(
+    "/partners/:partnerId/permanent-delete",
+    requireAdminStepUp(),
+    partnerDeleteRateLimit,
+    async (req, res) => {
+      try {
+        const actor = actorOf(req);
+        const reason = requireReason(req.body?.reason);
+        const confirmLegalName = requireNonEmpty(req.body?.confirmLegalName, "confirmLegalName");
+        const { deletePartnerPermanently } = await import("./partner-deletion-service");
+        mutationResponse(
+          res,
+          actor.requestId,
+          await deletePartnerPermanently(actor, String(req.params.partnerId), { reason, confirmLegalName })
+        );
+      } catch (err) {
+        sendError(res, err);
+      }
+    }
+  );
+
+  /**
+   * ARM this shop's onboarding TEST CARD — the next new card scanned at this shop becomes the test.
+   *
+   * Not step-up gated, unlike deletion: arming destroys nothing, spends nothing and is superseded by
+   * the very next card. What it DOES do is authorise one ordinary Grading Credit to be labelled as a
+   * test, so it takes a written reason and is recorded in the management-audit ledger under its own
+   * action name (0110) rather than folded into a neighbouring one.
+   */
+  r.post("/partners/:partnerId/first-shop/test-card/arm", async (req, res) => {
+    try {
+      const actor = actorOf(req);
+      const reason = optionalReason(req.body?.reason, "onboarding test card armed");
+      mutationResponse(res, actor.requestId, await svc.armOnboardingTestCard(actor, String(req.params.partnerId), reason));
     } catch (err) {
       sendError(res, err);
     }

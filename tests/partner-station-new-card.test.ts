@@ -728,7 +728,14 @@ describe("P6 integration surfaces", () => {
     const route = stationRoutes.slice(stationRoutes.indexOf('r.post("/card-jobs"'));
     const body = route.slice(0, route.indexOf('r.post("/stations/calibrations"'));
     expect(body).toMatch(/INSUFFICIENT_CREDITS"?\s*\?\s*402/);
-    expect(body).toMatch(/IDEMPOTENCY_CONFLICT"?\s*\n?\s*\?\s*409/);
+    /*
+     * 409 is the "conflicts with state that already exists" group. It now covers a second condition
+     * — TEST_CARD_ALREADY_OPEN (migration 0109) — so the assertion matches the shared branch rather
+     * than the exact one-code shape it had before. What it still pins is the mapping that matters:
+     * an idempotency conflict is a 409 and not a 400, 403 or 500.
+     */
+    expect(body).toMatch(/IDEMPOTENCY_CONFLICT"?[\s\S]{0,80}?\?\s*409/);
+    expect(body).toMatch(/TEST_CARD_ALREADY_OPEN"?[\s\S]{0,80}?\?\s*409/);
   });
 
   it("the walk-in binding is an ADDITIONAL tenant check, not a relaxation of the existing one", () => {

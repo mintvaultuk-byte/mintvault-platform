@@ -15,6 +15,7 @@ import { AdminShell, Panel, Badge, AdminButton, Chip } from "@/components/admin"
 import { apiRequest, queryClient } from "@/lib/queryClient";
 import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { runAdminProtected } from "@/components/admin/admin-step-up";
+import type { PartnerDeletionAssessment } from "@shared/partner-deletion";
 import {
   canSuspendLocation,
   statusBadgeVariant,
@@ -432,7 +433,18 @@ export default function PartnerManagementDetailPage() {
       setBanner(
         modal?.successMessage ? deliveryBanner(data?.result?.deliveryStatus, modal.successMessage) : "Action completed."
       );
+      const deleted = modal?.kind === "partner-permanent-delete";
       closeModal();
+      /*
+       * A deleted Partner has no detail page left to refresh. Staying here would immediately re-fetch
+       * a record that no longer exists and replace a successful deletion with "Partner not found" —
+       * so the operator is returned to the directory, where the removal is visible.
+       */
+      if (deleted) {
+        queryClient.invalidateQueries({ queryKey: [`${BASE}/partners`] });
+        navigate(isLegacyPath ? "/admin/partner-network/partners" : "/admin/partners/directory");
+        return;
+      }
       queryClient.invalidateQueries({ queryKey: pmKeys.partner(partnerId) });
       queryClient.invalidateQueries({ queryKey: pmKeys.users(partnerId) });
       queryClient.invalidateQueries({ queryKey: pmKeys.locations(partnerId) });
@@ -1280,6 +1292,15 @@ export default function PartnerManagementDetailPage() {
               )}
             </div>
           </Panel>
+        )}
+
+        {((workspaceTab === "overview" && !administrationTab) || (isLegacyPath && tab === "overview")) && (
+          <PermanentDeletionPanel
+            partnerId={partnerId}
+            legalName={org.legal_name}
+            busy={mutation.isPending}
+            openModal={setModal}
+          />
         )}
 
         {tab === "profile" && (
@@ -3011,5 +3032,129 @@ function UserActions({
         Reset MFA
       </AdminButton>
     </div>
+  );
+}
+
+/**
+ * PERMANENT DELETION — shown only when the SERVER says the shop can actually be deleted.
+ *
+ * WHY THE ASSESSMENT COMES FIRST. Deletion here is decided by dozens of foreign keys, most of them
+ * deliberately ON DELETE RESTRICT. A button that simply issued the DELETE would, for almost every
+ * real Partner, produce a raw PostgreSQL foreign-key violation on screen — naming one arbitrary
+ * constraint out of several, in a vocabulary no operator can act on. So this panel asks the server
+ * first and renders one of two entirely different things: a destructive control, or the reasons
+ * there isn't one. It never offers a button that is certain to fail.
+ *
+ * Everything shown is server-derived. This component classifies nothing and counts nothing.
+ */
+function PermanentDeletionPanel({
+  partnerId,
+  legalName,
+  busy,
+  openModal,
+}: {
+  partnerId: string;
+  legalName: string;
+  busy: boolean;
+  openModal: (modal: {
+    kind: string;
+    title: string;
+    successMessage?: string;
+    highRisk?: boolean;
+    body?: ReactNode;
+    input?: { label: string; initial: string; testId: string; required?: boolean };
+    run: (reason: string, value: string, value2: string) => Promise<unknown>;
+  }) => void;
+}) {
+  const assessment = useQuery<PartnerDeletionAssessment>({
+    queryKey: [`${BASE}/partners/${partnerId}/deletion-assessment`],
+  });
+
+  if (assessment.isLoading) {
+    return (
+      <Panel title="Permanent deletion">
+        <div data-testid="pm-delete-loading">Checking what depends on this shop…</div>
+      </Panel>
+    );
+  }
+  if (!assessment.data) {
+    return (
+      <Panel title="Permanent deletion">
+        {/* Fail closed in the UI too: an unreadable assessment shows no destructive control. */}
+        <div role="alert" data-testid="pm-delete-unavailable">
+          MintVault could not confirm what depends on this shop, so it cannot be permanently deleted here.
+        </div>
+      </Panel>
+    );
+  }
+
+  const data = assessment.data;
+  if (!data.canDelete) {
+    return (
+      <Panel title="Permanent deletion" sub="Not available for this shop">
+        <div data-testid="pm-delete-blocked" data-can-delete="false">
+          <p style={{ marginTop: 0, fontWeight: 700, letterSpacing: "0.04em" }}>CANNOT PERMANENTLY DELETE</p>
+          <ul style={{ margin: 0, paddingLeft: 18 }}>
+            {data.blockers.map((blocker) => (
+              <li key={blocker.code + blocker.dependency} data-testid={`pm-delete-blocker-${blocker.code}`}>
+                {blocker.message}
+              </li>
+            ))}
+          </ul>
+          <p style={{ fontSize: 12, opacity: 0.75, marginBottom: 0 }}>
+            Suspend or revoke the shop instead. Its records are kept.
+          </p>
+        </div>
+      </Panel>
+    );
+  }
+
+  return (
+    <Panel title="Permanent deletion" sub="This shop has setup records only">
+      <div data-testid="pm-delete-available" data-can-delete="true">
+        <p style={{ marginTop: 0 }}>This removes {data.removes.join(", ")}.</p>
+        <p style={{ fontSize: 12, opacity: 0.85 }}>Kept: {data.retains.join(", ")}.</p>
+        <AdminButton
+          size="sm"
+          variant="gold"
+          disabled={busy}
+          onClick={() =>
+            openModal({
+              kind: "partner-permanent-delete",
+              title: `Permanently delete ${legalName}?`,
+              highRisk: true,
+              successMessage: "Shop permanently deleted. Its audit and security history was kept.",
+              body: (
+                <p style={{ fontSize: 12 }}>
+                  This cannot be undone. The shop record, its locations, staff accounts, sessions,
+                  invitations, contacts, branding and empty credit wallet are destroyed. Every audit and
+                  security event about it is kept and re-attributed to a deletion tombstone.
+                </p>
+              ),
+              input: {
+                label: `Type the shop's exact legal name to confirm: ${data.confirmationPhrase}`,
+                initial: "",
+                testId: "pm-delete-confirm-name",
+                required: true,
+              },
+              run: async (reasonText, typedName) =>
+                (
+                  // The SAME admin step-up every other destructive Partner action uses. The server
+                  // requires it independently; this only makes the browser satisfy it up front.
+                  await runAdminProtected(() =>
+                    apiRequest("POST", `${BASE}/partners/${partnerId}/permanent-delete`, {
+                      reason: reasonText,
+                      confirmLegalName: typedName,
+                    })
+                  )
+                ).json(),
+            })
+          }
+          data-testid="pm-delete-partner"
+        >
+          Permanently delete setup-only partner
+        </AdminButton>
+      </div>
+    </Panel>
   );
 }

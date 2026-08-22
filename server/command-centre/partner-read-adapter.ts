@@ -303,6 +303,17 @@ async function readOnboardingCandidates(
        * never PASS — so this surface can never claim a shop is ready on a question it did not ask.
        */
       staff: null,
+      /*
+       * Likewise the onboarding TEST CARD. This adapter builds one bulk projection across every
+       * Partner and does not read Card Jobs, so it cannot answer it — `null` is UNKNOWN, never PASS.
+       *
+       * That costs this surface nothing, and deliberately so: the test card lives on
+       * `readiness.testCard` and `readiness.onboarding`, NOT in `readiness.dimensions`, and the
+       * blocked-partner rollup below iterates only `dimensions`. So a shop that has never scanned a
+       * test card is not reported as blocked here, and long-established Partners are unaffected by a
+       * step that did not exist when they were onboarded.
+       */
+      testCard: null,
       orgStatus: row.org_status,
       portalEnabled,
       loginFlagEnabled,

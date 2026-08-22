@@ -33,6 +33,10 @@ type FirstShop = {
   primaryContact: Contact | null;
   owner: { id?: string; email: string; userStatus: string; readiness?: { onboardingState?: string } } | null;
   operational: PartnerOperationalReadiness;
+  /** When MintVault declared this shop's next card to be its onboarding test. null = not armed. */
+  testCardArmedAt: string | null;
+  /** False when the arming authority could not be read (migration 0109 not applied here). */
+  testCardArmingReadable: boolean;
 };
 
 type StaffUser = {
@@ -284,6 +288,24 @@ export default function PartnerFirstShopOnboardingPage() {
     },
   });
 
+  /*
+   * ARM THE TEST CARD. The wizard cannot scan a card — that happens physically, on the shop Mac —
+   * so what it can do is DECLARE that the next card scanned there is the test. The server consumes
+   * that declaration inside the NEW transaction and stamps the Card Job, which is why this step can
+   * be truthful about a card nobody here has touched.
+   */
+  const armTestCard = useMutation({
+    mutationFn: async () =>
+      apiRequest("POST", `${BASE}/partners/${partnerId}/first-shop/test-card/arm`, {
+        reason: "First-shop onboarding: arm the shop's test card",
+      }).then((response) => response.json()),
+    onSuccess: () => {
+      setBanner("The next card scanned at this shop will be recorded as its onboarding test card.");
+      void onboarding.refetch();
+    },
+    onError: (error) => setBanner(errorMessage(error, "The onboarding test card was not armed.")),
+  });
+
   return (
     <AdminShell activeTab="dashboard" onTabChange={() => navigate("/admin")} onLogout={() => navigate("/admin")} title="First-shop onboarding" crumb="Partner Network">
       <div data-testid="first-shop-onboarding-root" style={{ maxWidth: 980 }}>
@@ -461,8 +483,65 @@ export default function PartnerFirstShopOnboardingPage() {
                 <Link href={`/admin/partners/${shop.organisation.id}/credits`} data-testid="first-shop-credits-action">Open credits / billing readiness</Link>
               </div>
             </Step>
-            <Step number={9} title="Ready to grade" complete={shop.operational.overall.ready}>
-              {/* Server-authoritative: rendered verbatim from derivePartnerOperationalReadiness. */}
+            <Step number={9} title="Test card" complete={shop.operational.testCard.state === "COMPLETE"}>
+              {/*
+                * EVERY WORD HERE COMES FROM THE SERVER. The state, the sentence and the actions are
+                * all produced by derivePartnerOperationalReadiness from the explicit
+                * `purpose = 'ONBOARDING_TEST'` marker and the Card Job lifecycle. Nothing on this
+                * page inspects a status, counts a card or infers which job the test one is — that
+                * inference is the exact defect the marker was added to remove.
+                */}
+              <p data-testid="first-shop-test-card-message" data-state={shop.operational.testCard.state}>
+                {shop.operational.testCard.message}
+              </p>
+              {shop.operational.testCard.cardJob?.mvNumber && (
+                <p style={{ fontSize: 12, opacity: 0.85 }} data-testid="first-shop-test-card-mv">
+                  Test card: <code>{shop.operational.testCard.cardJob.mvNumber}</code>
+                  {shop.operational.testCard.cardJob.sidesAccepted
+                    ? ` — captured: ${
+                        shop.operational.testCard.cardJob.sidesAccepted.length > 0
+                          ? shop.operational.testCard.cardJob.sidesAccepted.join(" + ")
+                          : "neither side yet"
+                      }`
+                    : ""}
+                </p>
+              )}
+              {shop.operational.testCard.state === "NOT_STARTED" &&
+                (!shop.testCardArmingReadable ? (
+                  <p role="alert" data-testid="first-shop-test-card-unavailable">
+                    Test card status unavailable.
+                  </p>
+                ) : shop.testCardArmedAt ? (
+                  <p data-testid="first-shop-test-card-armed" style={{ fontSize: 12, opacity: 0.85 }}>
+                    Armed. The next card scanned in MintVault Scanner at this shop is recorded as the
+                    onboarding test card. It costs one Grading Credit, exactly like any other card.
+                  </p>
+                ) : (
+                  <div data-testid="first-shop-test-card-arm-panel" style={{ marginTop: 10 }}>
+                    <p style={{ fontSize: 12, opacity: 0.85 }}>
+                      The shop scans its test card on its own Mac. Arm it here first so MintVault records
+                      that card as the test rather than guessing which one it was.
+                    </p>
+                    <AdminButton
+                      size="sm"
+                      variant="gold"
+                      disabled={armTestCard.isPending}
+                      onClick={() => armTestCard.mutate()}
+                      data-testid="first-shop-arm-test-card"
+                    >
+                      {armTestCard.isPending ? "Arming…" : "Arm the test card"}
+                    </AdminButton>
+                  </div>
+                ))}
+            </Step>
+            <Step number={10} title="Ready" complete={shop.operational.onboarding.complete}>
+              {/*
+                * `onboarding.complete`, NOT `overall.ready`. The two are different questions and the
+                * server keeps them apart: `ready` is "can this shop grade a card now", which is true
+                * before any test card exists, while `onboarding.complete` additionally requires the
+                * shop to have put one card all the way through. This step is the second question.
+                */}
+              <p data-testid="first-shop-ready-message">{shop.operational.onboarding.message}</p>
               <ReadinessPanel readiness={shop.operational} audience="SUPER_ADMIN" />
             </Step>
           </>

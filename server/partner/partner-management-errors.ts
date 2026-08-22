@@ -32,6 +32,13 @@ export const G5_ERROR_CODES = [
   "IDEMPOTENCY_CONFLICT",
   "REQUEST_ALREADY_COMPLETED",
   "WALLET_BACKFILL_DISABLED",
+  // Onboarding test card (migrations 0109/0110).
+  "TEST_CARD_ALREADY_OPEN",
+  "TEST_CARD_UNAVAILABLE",
+  // Permanent deletion of a setup-only Partner (migration 0108).
+  "PARTNER_DELETE_BLOCKED",
+  "PARTNER_DELETE_CONFIRMATION_REQUIRED",
+  "PARTNER_DELETE_UNAVAILABLE",
   "INTERNAL_ERROR",
 ] as const;
 export type G5ErrorCode = (typeof G5_ERROR_CODES)[number];
@@ -97,17 +104,25 @@ export function g5StatusFor(code: G5ErrorCode): number {
     case "BRANDING_NOT_FOUND":
       return 404;
     // 409 group: the request conflicts with current state, not with the caller's input.
-    // (INVITATION_NOT_AMENDABLE = the invitation has already been accepted.)
+    // (INVITATION_NOT_AMENDABLE = the invitation has already been accepted; TEST_CARD_ALREADY_OPEN =
+    // a test card is already in flight; PARTNER_DELETE_BLOCKED = the Partner still carries
+    // operational history.)
     case "VERSION_CONFLICT":
     case "DUPLICATE_PRIMARY_CONTACT":
     case "DUPLICATE_PARTNER_USER":
     case "FINAL_OWNER_REQUIRED":
     case "IDEMPOTENCY_CONFLICT":
     case "INVITATION_NOT_AMENDABLE":
+    case "TEST_CARD_ALREADY_OPEN":
+    case "PARTNER_DELETE_BLOCKED":
       return 409;
     case "RATE_LIMITED":
       return 429;
+    // 503 group: the authority itself is absent (an unapplied migration on this deployment), which
+    // is a service condition rather than anything the caller did wrong.
     case "PARTNER_ADMIN_CAPABILITY_UNAVAILABLE":
+    case "TEST_CARD_UNAVAILABLE":
+    case "PARTNER_DELETE_UNAVAILABLE":
       return 503;
     case "REQUEST_ALREADY_COMPLETED":
       return 200;

@@ -418,6 +418,18 @@ export const PARTNER_SCHEMA_MIGRATIONS = [
   // PARTNER scope: widens the partner_management_audit idempotency index to
   // (tenant_id, action_type, idempotency_key). One partner_* table, no core dependency.
   "0107_partner_management_audit_idempotency_scope",
+  // PARTNER scope: re-points four tenant foreign keys on partner_* tables (retained audit/security
+  // history to SET NULL, derivative profile state to CASCADE) and adds the tombstone table. It
+  // touches no core certificate/payment table, so a Partner-only disposable database models it
+  // exactly as production does — which is what lets the safe-delete proofs be real.
+  "0108_partner_setup_only_deletion_retention",
+  // PARTNER scope: one additive column, constraint, indexes and trigger on partner_card_jobs. 0080
+  // creates that table on a partner-only database (its core FK is conditional), so this is safe
+  // there for the same reason 0082 is.
+  "0109_partner_card_job_purpose",
+  // PARTNER scope: one-value CHECK widen on partner_management_audit, the same shape as 0096 and
+  // 0105. No core table dependency.
+  "0110_partner_permanent_deletion_audit_vocabulary",
 ] as const;
 
 /** True when a declared list pulls in a migration that needs the core schema. */

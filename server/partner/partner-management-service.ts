@@ -15,6 +15,7 @@ import { hashPassword, isValidPartnerPassword } from "./auth";
 import { deliverInvitationToken, invitationDeliveryConfigured } from "./delivery";
 import { ensureWallet, ensureWalletWithClient } from "./partner-wallet-service";
 import { derivePartnerOperationalReadiness, type PartnerReadinessFacts } from "./operational-readiness";
+import { loadOnboardingTestCardArmedAt, loadPartnerTestCardFacts } from "./test-card-authority";
 import { APP_BASE_URL } from "../app-url";
 import type { PoolClient } from "pg";
 import crypto from "node:crypto";
@@ -175,7 +176,11 @@ type AuditAction =
   | "partner_location_created"
   | "partner_location_updated"
   | "partner_location_status_changed"
-  | "partner_user_locations_changed";
+  | "partner_user_locations_changed"
+  // Declaring that a shop's NEXT new card is its onboarding test (migration 0109/0110). It
+  // authorises one Grading Credit to be spent as a test, so it is recorded honestly rather than
+  // folded into profile_updated — the same reason 0033 exists.
+  | "partner_onboarding_test_card_armed";
 
 // ---------------------------------------------------------------------------
 // Partner + profile lookups (admin pool, explicit tenant scoping).
@@ -2133,6 +2138,13 @@ export async function getPartnerOnboardingReadiness(partnerId: string) {
   }
 
   /*
+   * THE ONBOARDING TEST CARD. Read from the explicit `purpose = 'ONBOARDING_TEST'` marker only, and
+   * left as null — UNKNOWN — when that authority cannot be consulted. The loader never falls back to
+   * "the newest Card Job", so a shop that has genuinely not tested cannot be reported as having done.
+   */
+  const testCard = await loadPartnerTestCardFacts(org.id);
+
+  /*
    * The OWNER row backing the readiness decision. Chosen deterministically: the PARTNER_OWNER if
    * there is one, else the first listed user, so both audiences reason about the same account
    * rather than "whichever row happened to sort first" differing between callers.
@@ -2166,6 +2178,7 @@ export async function getPartnerOnboardingReadiness(partnerId: string) {
     operationsContactReady,
     station: stationFacts,
     credits,
+    testCard,
     nowMs: Date.now(),
   }), org.id);
 
@@ -3239,6 +3252,14 @@ export async function getFirstShopOnboarding(partnerId: string) {
       (contact) => contact.active && contact.is_primary
     ) ?? null;
   const owner = readiness.users.find((user: { role: string }) => user.role === "OWNER") ?? null;
+  /*
+   * Armed-but-not-yet-scanned is a state the Card Job facts CANNOT express — no job exists yet — and
+   * it is the one the operator most needs to distinguish. "Nothing has happened" and "we have told
+   * this shop's next card to be the test and are waiting for the Mac" look identical without it.
+   * `undefined` means the arming authority itself was unreadable, and the wizard says so rather than
+   * claiming nothing is armed.
+   */
+  const testCardArmedAt = await loadOnboardingTestCardArmedAt(org.id);
   return {
     organisation: readiness.organisation,
     profileVersion: profile.rows[0]?.version ?? 1,
@@ -3246,7 +3267,75 @@ export async function getFirstShopOnboarding(partnerId: string) {
     primaryContact,
     owner,
     operational: readiness.operational,
+    testCardArmedAt: testCardArmedAt === undefined ? null : testCardArmedAt,
+    testCardArmingReadable: testCardArmedAt !== undefined,
   };
+}
+
+/**
+ * DECLARE that this shop's next new Card Job is its onboarding test card.
+ *
+ * This is the canonical initiation the marker requires. MintVault Scanner has no concept of a test
+ * card and should not need one: an operator arms the shop here, the very next NEW at that shop is
+ * stamped ONBOARDING_TEST inside the transaction that mints it (card-job-authority's
+ * resolveCardJobPurpose), and the arm is consumed in the same breath. The classification is
+ * therefore still made at the moment of creation by an explicit instruction — never applied to a
+ * card that already exists, and never inferred from timing.
+ *
+ * COSTS. Arming spends nothing. The card the shop then scans costs exactly one Grading Credit, like
+ * any other card, because a test card IS an ordinary card; only its label differs.
+ *
+ * IDEMPOTENT. Arming an already-armed shop is a successful no-op that writes no second audit row —
+ * recording an event that did not occur would put a false entry in the one ledger an investigation
+ * would trust. Arming a shop that already has an OPEN test card is refused with a cause the operator
+ * can act on, rather than silently queueing a second one that 0109 would later reject.
+ */
+export async function armOnboardingTestCard(actor: ActorContext, partnerId: string, reason: string) {
+  const org = await loadPartner(partnerId);
+  await loadOrInitProfileVersion(org.id);
+
+  const open = await partnerAdminQuery(
+    `SELECT 1 FROM partner_card_jobs
+      WHERE tenant_id = $1 AND purpose = 'ONBOARDING_TEST' AND status NOT IN ('COMPLETED','CANCELLED')
+      LIMIT 1`,
+    [org.id]
+  );
+  if (open.rows.length > 0) {
+    throw new G5RequestError(
+      "TEST_CARD_ALREADY_OPEN",
+      "This shop already has an onboarding test card in progress. Finish or cancel that card first."
+    );
+  }
+
+  const already = await loadOnboardingTestCardArmedAt(org.id);
+  if (already === undefined) {
+    throw new G5RequestError(
+      "TEST_CARD_UNAVAILABLE",
+      "The onboarding test-card authority is not available on this deployment."
+    );
+  }
+  if (already !== null) return { result: { armedAt: already, changed: false }, alreadyCompleted: false };
+
+  return withAudit(actor, org.id, "partner_onboarding_test_card_armed", reason, { armedAt: null }, async () => {
+    // Conditional on the column still being clear, so two operators arming at once write one arm and
+    // one no-op rather than two audit rows describing one state change.
+    const armed = await partnerAdminQuery<{ armed_at: string }>(
+      `UPDATE partner_profiles
+          SET onboarding_test_card_armed_at = now(),
+              onboarding_test_card_armed_by = $2,
+              updated_at = now()
+        WHERE tenant_id = $1 AND onboarding_test_card_armed_at IS NULL
+        RETURNING onboarding_test_card_armed_at AS armed_at`,
+      [org.id, actor.actorUserId]
+    );
+    const armedAt = armed.rows[0]?.armed_at ?? (await loadOnboardingTestCardArmedAt(org.id)) ?? null;
+    return {
+      result: { armedAt, changed: armed.rows.length > 0 },
+      entityType: "partner",
+      entityId: org.id,
+      afterState: { armedAt },
+    };
+  });
 }
 
 /**

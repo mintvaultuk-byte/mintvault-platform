@@ -39,7 +39,10 @@
 CREATE TABLE IF NOT EXISTS partner_deleted_tombstones (
   tenant_id            uuid PRIMARY KEY,
   legal_name           text NOT NULL,
-  public_ref           uuid,
+  -- TEXT, matching partner_organisations.public_ref (0001), which is `text NOT NULL UNIQUE DEFAULT
+  -- gen_random_uuid()::text` — a uuid-SHAPED string, not a uuid column. Declaring this uuid made the
+  -- snapshot reject the very value it exists to preserve, and only at the first real deletion.
+  public_ref           text,
   organisation_status  text,
   organisation_created_at timestamptz,
   deleted_at           timestamptz NOT NULL DEFAULT now(),
@@ -49,6 +52,23 @@ CREATE TABLE IF NOT EXISTS partner_deleted_tombstones (
   environment          text,
   snapshot             jsonb NOT NULL DEFAULT '{}'::jsonb
 );
+
+/*
+ * The tombstone must be able to hold what it snapshots. This is asserted rather than assumed
+ * because the mismatch it guards against (a uuid column for a text public_ref) is invisible until
+ * somebody actually deletes a Partner — the worst possible moment to discover it.
+ */
+DO $$
+BEGIN
+  IF (SELECT data_type FROM information_schema.columns
+       WHERE table_schema='public' AND table_name='partner_deleted_tombstones' AND column_name='public_ref')
+     IS DISTINCT FROM
+     (SELECT data_type FROM information_schema.columns
+       WHERE table_schema='public' AND table_name='partner_organisations' AND column_name='public_ref')
+  THEN
+    RAISE EXCEPTION '0108: partner_deleted_tombstones.public_ref must have the same type as partner_organisations.public_ref';
+  END IF;
+END$$;
 
 COMMENT ON TABLE partner_deleted_tombstones IS
   'Identity context for permanently deleted setup-only Partners. Retained audit/security rows keep deleted_tenant_id and join here.';

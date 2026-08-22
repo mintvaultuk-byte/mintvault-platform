@@ -169,6 +169,46 @@ function normaliseMigrationFilename(filePath: string): string {
  * - replacement predicate must include physical_released=false;
  * - canonical index name is restored by rename inside the same transactional file.
  */
+/**
+ * The management-audit action vocabulary as 0105 left it.
+ *
+ * Shared by the 0105 and 0110 approvals so a widen can be checked as "everything that was there,
+ * plus the named new value". Written out in full deliberately: the point of these approvals is that
+ * the expected set is stated here and compared against the migration, so a value quietly dropped
+ * from the migration cannot also disappear from the expectation.
+ */
+const PARTNER_MANAGEMENT_AUDIT_ACTIONS_0105 = [
+  "partner_created",
+  "profile_updated",
+  "status_changed",
+  "contact_added",
+  "contact_updated",
+  "contact_deactivated",
+  "branding_updated",
+  "note_added",
+  "partner_user_invited",
+  "partner_invitation_resent",
+  "partner_invitation_revoked",
+  "partner_invitation_accepted",
+  "partner_user_role_changed",
+  "partner_user_suspended",
+  "partner_user_reactivated",
+  "partner_user_password_reset_initiated",
+  "partner_user_sessions_revoked",
+  "partner_user_membership_removed",
+  "partner_user_mfa_reset",
+  "partner_invitation_amended",
+  "partner_legal_name_changed",
+  "partner_duplicate_override",
+  "partner_wallet_backfilled",
+  "partner_location_created",
+  "partner_location_updated",
+  "partner_location_status_changed",
+  "partner_user_locations_changed",
+  "partner_card_job_voided",
+  "partner_first_shop_onboarded",
+] as const;
+
 export function isApprovedDestructiveFinding(filePath: string, sql: string, finding: DestructiveFinding): boolean {
   const filename = normaliseMigrationFilename(filePath);
   if (filename === "0096_partner_card_job_void_management_audit.sql") {
@@ -250,6 +290,49 @@ export function isApprovedDestructiveFinding(filePath: string, sql: string, find
     return rawCreate.test(sql);
   }
 
+  if (filename === "0110_partner_permanent_deletion_audit_vocabulary.sql") {
+    /*
+     * 0110 makes the management-audit vocabulary ONE action wider so a permanent Partner deletion
+     * can be recorded honestly rather than borrowed from a neighbouring action. PostgreSQL cannot
+     * alter a CHECK expression in place, so this is a transactional DROP/ADD of the SAME constraint
+     * on the SAME table.
+     *
+     * The approval is deliberately narrow, and its real work is the LAST line: the replacement must
+     * contain the complete prior vocabulary PLUS exactly one new value. A widen that silently
+     * dropped an existing action would be a destructive change wearing an additive shape, and it
+     * falls through here and stays blocked. Do not generalise this to other constraints.
+     */
+    if (finding.severity !== "block" || finding.kind !== "drop_constraint") return false;
+    const cleaned = stripSqlNoise(sql);
+    const drop =
+      /\bALTER\s+TABLE\s+partner_management_audit\s+DROP\s+CONSTRAINT\s+IF\s+EXISTS\s+chk_partner_management_audit_action\s*;/i.exec(
+        cleaned
+      );
+    const add =
+      /\bALTER\s+TABLE\s+partner_management_audit\s+ADD\s+CONSTRAINT\s+chk_partner_management_audit_action\s+CHECK\s*\(\s*action_type\s+IN\s*\(/i.exec(
+        cleaned
+      );
+    if (!drop || !add || drop.index > add.index) return false;
+    // stripSqlNoise() blanks string literals, so the vocabulary itself is verified against the RAW
+    // sql; ordering is still judged on the cleaned text, where a comment cannot fake a statement.
+    const rawAdd =
+      /\bALTER\s+TABLE\s+partner_management_audit\s+ADD\s+CONSTRAINT\s+chk_partner_management_audit_action\s+CHECK\s*\(\s*action_type\s+IN\s*\(/i.exec(
+        sql
+      );
+    if (!rawAdd) return false;
+    const blockEnd = sql.indexOf("));", rawAdd.index);
+    if (blockEnd < 0) return false;
+    const actionValues = new Set([...sql.slice(rawAdd.index, blockEnd).matchAll(/'([^']+)'/g)].map((match) => match[1]));
+    const expected = [
+      ...PARTNER_MANAGEMENT_AUDIT_ACTIONS_0105,
+      // The only two values 0110 is approved to add. Any third one, or any missing prior value,
+      // fails the size/membership comparison below and stays blocked.
+      "partner_permanently_deleted",
+      "partner_onboarding_test_card_armed",
+    ];
+    return actionValues.size === expected.length && expected.every((action) => actionValues.has(action));
+  }
+
   if (filename === "0105_partner_first_shop_delivery_address.sql") {
     // 0103 makes the existing management-audit vocabulary one action wider. PostgreSQL cannot
     // alter a CHECK expression in place, so this is a deliberately narrow transactional
@@ -274,37 +357,7 @@ export function isApprovedDestructiveFinding(filePath: string, sql: string, find
     const blockEnd = sql.indexOf("));", rawAdd.index);
     if (blockEnd < 0) return false;
     const actionValues = new Set([...sql.slice(rawAdd.index, blockEnd).matchAll(/'([^']+)'/g)].map((match) => match[1]));
-    const expected = [
-      "partner_created",
-      "profile_updated",
-      "status_changed",
-      "contact_added",
-      "contact_updated",
-      "contact_deactivated",
-      "branding_updated",
-      "note_added",
-      "partner_user_invited",
-      "partner_invitation_resent",
-      "partner_invitation_revoked",
-      "partner_invitation_accepted",
-      "partner_user_role_changed",
-      "partner_user_suspended",
-      "partner_user_reactivated",
-      "partner_user_password_reset_initiated",
-      "partner_user_sessions_revoked",
-      "partner_user_membership_removed",
-      "partner_user_mfa_reset",
-      "partner_invitation_amended",
-      "partner_legal_name_changed",
-      "partner_duplicate_override",
-      "partner_wallet_backfilled",
-      "partner_location_created",
-      "partner_location_updated",
-      "partner_location_status_changed",
-      "partner_user_locations_changed",
-      "partner_card_job_voided",
-      "partner_first_shop_onboarded",
-    ];
+    const expected = PARTNER_MANAGEMENT_AUDIT_ACTIONS_0105;
     return actionValues.size === expected.length && expected.every((action) => actionValues.has(action));
   }
 

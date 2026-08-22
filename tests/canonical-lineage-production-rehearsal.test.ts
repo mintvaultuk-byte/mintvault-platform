@@ -76,6 +76,23 @@ const SUPPLIES_MIGRATION = "0104_partner_supplies_orders.sql";
 const FIRST_SHOP_ADDRESS_MIGRATION = "0105_partner_first_shop_delivery_address.sql";
 const PUBLIC_PRESENCE_CONVERGENCE_MIGRATION = "0106_lineage_convergence_public_presence.sql";
 const AUDIT_IDEMPOTENCY_SCOPE_MIGRATION = "0107_partner_management_audit_idempotency_scope.sql";
+/**
+ * The setup-only deletion stage: retention re-pointing (0108), the onboarding test-card marker
+ * (0109) and the audit vocabulary the guarded deletion needs (0110). They sit ABOVE first-shop
+ * onboarding, and two of the three are DECLARED destructive — 0108 re-points four tenant foreign
+ * keys, 0110 replaces a CHECK — so the rehearsal plans them as such and proves they apply on their
+ * narrow linter approvals rather than on a blanket --allow-destructive.
+ */
+const SETUP_ONLY_DELETION_MIGRATION = "0108_partner_setup_only_deletion_retention.sql";
+const CARD_JOB_PURPOSE_MIGRATION = "0109_partner_card_job_purpose.sql";
+const DELETION_AUDIT_VOCABULARY_MIGRATION = "0110_partner_permanent_deletion_audit_vocabulary.sql";
+const DELETION_STAGE_MIGRATIONS = [
+  SETUP_ONLY_DELETION_MIGRATION,
+  CARD_JOB_PURPOSE_MIGRATION,
+  DELETION_AUDIT_VOCABULARY_MIGRATION,
+] as const;
+const isDeletionStage = (filename: string): boolean =>
+  (DELETION_STAGE_MIGRATIONS as readonly string[]).includes(filename);
 
 /** The expected ordered plan after canonical Partner/Scanner integration. */
 const CANONICAL_PENDING = [
@@ -160,6 +177,7 @@ let growthApplied: string[];
 let completionApplied: string[];
 let publicPresenceApplied: string[];
 let firstShopApplied: string[];
+let deletionApplied: string[];
 
 describe("canonical Partner/Scanner production-journal rehearsal", () => {
   beforeAll(async () => {
@@ -215,7 +233,8 @@ describe("canonical Partner/Scanner production-journal rehearsal", () => {
         file.filename !== SUPPLIES_MIGRATION &&
         file.filename !== FIRST_SHOP_ADDRESS_MIGRATION &&
         file.filename !== PUBLIC_PRESENCE_CONVERGENCE_MIGRATION &&
-        file.filename !== AUDIT_IDEMPOTENCY_SCOPE_MIGRATION
+        file.filename !== AUDIT_IDEMPOTENCY_SCOPE_MIGRATION &&
+        !isDeletionStage(file.filename)
     );
     const before = await planMigrations(migrator as never, preGrowthFiles);
     expect(before.alreadyApplied).toHaveLength(41);
@@ -245,7 +264,8 @@ describe("canonical Partner/Scanner production-journal rehearsal", () => {
         file.filename !== SUPPLIES_MIGRATION &&
         file.filename !== FIRST_SHOP_ADDRESS_MIGRATION &&
         file.filename !== PUBLIC_PRESENCE_CONVERGENCE_MIGRATION &&
-        file.filename !== AUDIT_IDEMPOTENCY_SCOPE_MIGRATION
+        file.filename !== AUDIT_IDEMPOTENCY_SCOPE_MIGRATION &&
+        !isDeletionStage(file.filename)
     );
     const growthBefore = await planMigrations(migrator as never, attributionFiles);
     expect(growthBefore.alreadyApplied).toHaveLength(63);
@@ -263,7 +283,8 @@ describe("canonical Partner/Scanner production-journal rehearsal", () => {
         file.filename !== SUPPLIES_MIGRATION &&
         file.filename !== FIRST_SHOP_ADDRESS_MIGRATION &&
         file.filename !== PUBLIC_PRESENCE_CONVERGENCE_MIGRATION &&
-        file.filename !== AUDIT_IDEMPOTENCY_SCOPE_MIGRATION
+        file.filename !== AUDIT_IDEMPOTENCY_SCOPE_MIGRATION &&
+        !isDeletionStage(file.filename)
     );
     const completionBefore = await planMigrations(migrator as never, completionFiles);
     expect(completionBefore.alreadyApplied).toHaveLength(64);
@@ -281,7 +302,8 @@ describe("canonical Partner/Scanner production-journal rehearsal", () => {
         file.filename !== SUPPLIES_MIGRATION &&
         file.filename !== FIRST_SHOP_ADDRESS_MIGRATION &&
         file.filename !== PUBLIC_PRESENCE_CONVERGENCE_MIGRATION &&
-        file.filename !== AUDIT_IDEMPOTENCY_SCOPE_MIGRATION
+        file.filename !== AUDIT_IDEMPOTENCY_SCOPE_MIGRATION &&
+        !isDeletionStage(file.filename)
     );
     const publicPresenceBefore = await planMigrations(migrator as never, publicPresenceFiles);
     expect(publicPresenceBefore.alreadyApplied).toHaveLength(65);
@@ -295,7 +317,8 @@ describe("canonical Partner/Scanner production-journal rehearsal", () => {
     // supplies authority and the additive structured delivery address on partner_locations.
     // 0105 rewrites the management-audit vocabulary constraint, so it is a declared,
     // owner-approved destructive entry and must be planned as one.
-    const firstShopBefore = await planMigrations(migrator as never, files);
+    const firstShopFiles = files.filter((file) => !isDeletionStage(file.filename));
+    const firstShopBefore = await planMigrations(migrator as never, firstShopFiles);
     expect(firstShopBefore.alreadyApplied).toHaveLength(67);
     expect(firstShopBefore.pending).toEqual([
       SUPPLIES_MIGRATION,
@@ -309,7 +332,25 @@ describe("canonical Partner/Scanner production-journal rehearsal", () => {
       FIRST_SHOP_ADDRESS_MIGRATION,
       AUDIT_IDEMPOTENCY_SCOPE_MIGRATION,
     ]);
-    firstShopApplied = (await applyMigrations(migrator as never, files, { allowDestructive: true })).applied;
+    firstShopApplied = (await applyMigrations(migrator as never, firstShopFiles, { allowDestructive: true })).applied;
+
+    /*
+     * The setup-only deletion stage, applied WITHOUT --allow-destructive on purpose. 0108 and 0110
+     * both carry blocking lint findings (a re-pointed foreign key and a replaced CHECK), so this
+     * only succeeds because each one has a narrow, file-specific approval that proves the dropped
+     * constraint is recreated in the same file with the intended action. A blanket flag here would
+     * have proven nothing about those approvals.
+     */
+    const deletionBefore = await planMigrations(migrator as never, files);
+    expect(deletionBefore.alreadyApplied).toHaveLength(71);
+    expect(deletionBefore.pending).toEqual([...DELETION_STAGE_MIGRATIONS]);
+    expect(deletionBefore.inconsistent).toEqual([]);
+    expect(deletionBefore.checksumMismatches).toEqual([]);
+    expect(deletionBefore.destructive.map((entry) => entry.filename)).toEqual([
+      SETUP_ONLY_DELETION_MIGRATION,
+      DELETION_AUDIT_VOCABULARY_MIGRATION,
+    ]);
+    deletionApplied = (await applyMigrations(migrator as never, files)).applied;
   }, 180_000);
 
   afterAll(async () => {
@@ -333,7 +374,8 @@ describe("canonical Partner/Scanner production-journal rehearsal", () => {
     expect(after.pending).toEqual([]);
     expect(after.inconsistent).toEqual([]);
     expect(after.checksumMismatches).toEqual([]);
-    expect(after.alreadyApplied).toHaveLength(71);
+    expect(deletionApplied).toEqual([...DELETION_STAGE_MIGRATIONS]);
+    expect(after.alreadyApplied).toHaveLength(74);
   });
 
   it("applies growth 0100/0101, then public 0102/0103, then first-shop 0104/0105 in order", async () => {
