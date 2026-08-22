@@ -87,3 +87,64 @@ describe("NEGATIVE proofs", () => {
     expect(cardToolImageSource({ side: "front", urls: certA, workingEvidence: NO, reviewEvidence: OK })).toBe(certA.front_review);
   });
 });
+
+/**
+ * SUPER ADMIN TOOLING RULE (owner-locked 2026-08-22): if Super Admin has a server-authorised
+ * image for the selected side, that side's grading tools must be available BEFORE the card is
+ * graded. They may depend on an authorised image existing, on server-side Super Admin
+ * authorisation, and on side-safe admission — never on grade completion or identity confirmation.
+ *
+ * This is enforced structurally: the resolver takes ONLY side + urls + the two server admission
+ * maps. There is no grade, status, or identity input it could depend on, so an ungraded card
+ * behaves identically to a graded one by construction.
+ */
+describe("Super Admin tools on an UNGRADED card", () => {
+  const REVIEW_FRONT_ONLY = { front: { available: true }, back: { available: false } };
+  const REVIEW_BACK_ONLY = { front: { available: false }, back: { available: true } };
+  const NONE = { front: { available: false }, back: { available: false } };
+
+  it("ungraded + review FRONT only -> FRONT tools enabled, BACK disabled", () => {
+    const a = { urls: URLS, workingEvidence: NONE, reviewEvidence: REVIEW_FRONT_ONLY };
+    expect(cardToolEnabled({ ...a, side: "front" })).toBe(true);
+    expect(cardToolImageSource({ ...a, side: "front" })).toBe(URLS.front_review);
+    expect(cardToolEnabled({ ...a, side: "back" })).toBe(false);
+  });
+
+  it("ungraded + review BACK only -> BACK tools enabled, FRONT disabled", () => {
+    const a = { urls: URLS, workingEvidence: NONE, reviewEvidence: REVIEW_BACK_ONLY };
+    expect(cardToolEnabled({ ...a, side: "back" })).toBe(true);
+    expect(cardToolImageSource({ ...a, side: "back" })).toBe(URLS.back_review);
+    expect(cardToolEnabled({ ...a, side: "front" })).toBe(false);
+  });
+
+  it("ungraded + review FRONT and BACK -> BOTH tool sets enabled", () => {
+    const a = { urls: URLS, workingEvidence: NONE, reviewEvidence: OK };
+    expect(cardToolEnabled({ ...a, side: "front" })).toBe(true);
+    expect(cardToolEnabled({ ...a, side: "back" })).toBe(true);
+  });
+
+  it("working evidence still wins on an ungraded card", () => {
+    const a = { urls: URLS, workingEvidence: OK, reviewEvidence: OK };
+    expect(cardToolImageSource({ ...a, side: "front" })).toBe(URLS.front_working);
+  });
+
+  it("no authorised image -> tools disabled even for Super Admin", () => {
+    const a = { urls: URLS, workingEvidence: NONE, reviewEvidence: NONE };
+    expect(cardToolEnabled({ ...a, side: "front" })).toBe(false);
+    expect(cardToolEnabled({ ...a, side: "back" })).toBe(false);
+  });
+
+  it("cannot cross-fallback between sides on an ungraded card", () => {
+    const front = { urls: URLS, workingEvidence: NONE, reviewEvidence: REVIEW_FRONT_ONLY };
+    expect(cardToolImageSource({ ...front, side: "back" })).toBeNull();
+    const back = { urls: URLS, workingEvidence: NONE, reviewEvidence: REVIEW_BACK_ONLY };
+    expect(cardToolImageSource({ ...back, side: "front" })).toBeNull();
+  });
+
+  it("the decision cannot depend on grade state — no such input exists", () => {
+    // Passing grade-ish extras must not change the outcome; they are not part of the contract.
+    const base = { urls: URLS, workingEvidence: NONE, reviewEvidence: REVIEW_FRONT_ONLY, side: "front" as const };
+    const withNoise = { ...base, ...({ gradingStatus: "submitted", identityConfirmed: false } as any) };
+    expect(cardToolImageSource(withNoise)).toBe(cardToolImageSource(base));
+  });
+});
