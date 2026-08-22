@@ -429,6 +429,9 @@ export default function AdminShell({
               <Link href="/admin/partners/settings" className="underline">
                 Settings
               </Link>
+              <Link href="/admin/partners/supplies" className="underline">
+                Supplies Orders
+              </Link>
             </nav>
           )}
           <header className="admin-top">

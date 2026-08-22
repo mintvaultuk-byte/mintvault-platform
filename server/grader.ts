@@ -18,7 +18,7 @@ import { checkPrintableGrade } from "@shared/printable-grade";
 import { db } from "./db";
 import { sql, type SQL } from "drizzle-orm";
 import { storage } from "./storage";
-import { getR2SignedUrl } from "./r2";
+import { checkR2ObjectReadable, getR2SignedUrl, headR2 } from "./r2";
 import { hashPassword, verifyPassword, validatePassword } from "./account-auth";
 import { CORRECTION_DISPLAY_EXCLUDED_FIELDS } from "./lib/correction-fields";
 import { GradeDraftValidationError, validateGradeDraftIdentityAndVariant } from "@shared/grading-draft-validation";
@@ -636,12 +636,18 @@ const IMAGE_KEY_MAP: Array<[string, (c: any) => string | null]> = [
   ["back_highcontrast", (c) => c.gradingBackHighcontrast || null],
   ["back_edgeenhanced", (c) => c.gradingBackEdgeenhanced || null],
   ["back_inverted", (c) => c.gradingBackInverted || null],
+  ["angled_original", (c) => c.gradingAngledOriginal || null],
+  ["angled_cropped", (c) => c.gradingAngledCropped || null],
+  ["closeup_original", (c) => c.gradingCloseupOriginal || null],
+  ["closeup_cropped", (c) => c.gradingCloseupCropped || null],
   ["front_display", (c) => c.gradingFrontDisplay || c.gradingFrontCropped || c.frontImagePath || null],
   ["back_display", (c) => c.gradingBackDisplay || c.gradingBackCropped || c.backImagePath || null],
 ];
 
 type Side = "front" | "back";
 export type WorkingEvidenceStatus = {
+  /** Server-owned classification. A browser must not infer readiness from a URL. */
+  state: "admitted" | "missing" | "invalid" | "unavailable";
   available: boolean;
   reason: string | null;
   recovery: string | null;
@@ -649,9 +655,20 @@ export type WorkingEvidenceStatus = {
   working: { width: number | null; height: number | null; format: string | null } | null;
 };
 
-type WorkingEvidenceRow = {
+export type ReviewEvidenceStatus = {
+  available: boolean;
+  reason: string | null;
+  recovery: string | null;
+  source: "certificate-bound-image";
+};
+
+export type WorkingEvidenceRow = {
+  /** Present for ledger batches; admission itself is deliberately certificate-agnostic. */
+  certificate_id?: number;
   side: string;
   working_object_key: string | null;
+  /** Immutable master container format. Only the canonical TIFF master is admissible. */
+  format: string | null;
   pixel_width: number | null;
   pixel_height: number | null;
   dpi: number | null;
@@ -660,18 +677,36 @@ type WorkingEvidenceRow = {
   working_format: string | null;
   working_settings: unknown;
   scanner_profile_version: string | null;
+  /** Present on Partner projections. The station/capture proof belongs to the
+   * same admission decision as the raster metadata; it is never inferred in
+   * the browser. Undefined preserves the non-Partner admin projection. */
+  capture_provenance_valid?: boolean;
 };
 
 const sides: Side[] = ["front", "back"];
 
-function unavailable(reason: string, recovery: string, row?: WorkingEvidenceRow): WorkingEvidenceStatus {
+function unavailable(
+  reason: string,
+  recovery: string,
+  row?: WorkingEvidenceRow,
+  state: Exclude<WorkingEvidenceStatus["state"], "admitted"> = "invalid"
+): WorkingEvidenceStatus {
   return {
+    state,
     available: false,
     reason,
     recovery,
     master: row ? { dpi: row.dpi, width: row.pixel_width, height: row.pixel_height } : null,
     working: row ? { width: row.working_width, height: row.working_height, format: row.working_format } : null,
   };
+}
+
+function reviewUnavailable(reason: string, recovery: string): ReviewEvidenceStatus {
+  return { available: false, reason, recovery, source: "certificate-bound-image" };
+}
+
+function reviewAvailable(): ReviewEvidenceStatus {
+  return { available: true, reason: null, recovery: null, source: "certificate-bound-image" };
 }
 
 function parseWorkingSettings(value: unknown): Record<string, unknown> | null {
@@ -694,7 +729,26 @@ function parseWorkingSettings(value: unknown): Record<string, unknown> | null {
 export function assessWorkingEvidence(row: WorkingEvidenceRow): WorkingEvidenceStatus {
   const recovery = "Regenerate the working evidence from the immutable 1200-DPI master.";
   if (!row.working_object_key)
-    return unavailable("Full-resolution working evidence has not been generated for this side.", recovery, row);
+    return unavailable(
+      "Full-resolution working evidence has not been generated for this side.",
+      recovery,
+      row,
+      "invalid"
+    );
+  if (row.capture_provenance_valid === false) {
+    return unavailable(
+      "The current master is not linked to a captured session on the active authorised station.",
+      "Recapture this side on the approved station before grading.",
+      row
+    );
+  }
+  if (row.format !== "tiff") {
+    return unavailable(
+      "The current master is not the immutable TIFF capture required for grading.",
+      "Recapture this side with the locked Canon 1200-DPI profile.",
+      row
+    );
+  }
   if (row.scanner_profile_version !== CANON_LIDE_400_PROFILE.version || row.dpi !== 1200) {
     return unavailable(
       "The current master is not verified Canon 1200-DPI evidence.",
@@ -717,6 +771,7 @@ export function assessWorkingEvidence(row: WorkingEvidenceRow): WorkingEvidenceS
     return unavailable("Working evidence is not recorded as an undownsampled canonical derivative.", recovery, row);
   }
   return {
+    state: "admitted",
     available: true,
     reason: null,
     recovery: null,
@@ -725,73 +780,156 @@ export function assessWorkingEvidence(row: WorkingEvidenceRow): WorkingEvidenceS
   };
 }
 
-/** Signed full-resolution assets plus safe, side-specific admission status for the workstation. */
-export async function buildWorkingEvidencePayload(certId: number): Promise<{
+/**
+ * The evidence row is necessary but not sufficient: a presigned GET can be
+ * minted for a missing key. Verify that the object store can read the exact
+ * canonical working key before it is admitted to a grader. This deliberately
+ * has no display-derivative fallback.
+ */
+export async function assessWorkingEvidenceAvailability(row: WorkingEvidenceRow): Promise<WorkingEvidenceStatus> {
+  const structural = assessWorkingEvidence(row);
+  if (!structural.available || !row.working_object_key) return structural;
+  const object = await headR2(row.working_object_key);
+  if (object && object.contentLength > 0) return structural;
+  return unavailable(
+    "Validated full-resolution working evidence could not be opened.",
+    "Restore the working evidence from the immutable 1200-DPI master.",
+    row,
+    "unavailable"
+  );
+}
+
+export type WorkingEvidencePayload = {
   urls: Record<string, string | null>;
   workingEvidence: Record<Side, WorkingEvidenceStatus>;
-}> {
-  const urls: Record<string, string | null> = {};
-  const workingEvidence: Record<Side, WorkingEvidenceStatus> = {
-    front: unavailable(
-      "No current immutable Canon master is recorded for FRONT.",
-      "Capture or restore FRONT at the locked Canon 1200-DPI profile."
-    ),
-    back: unavailable(
-      "No current immutable Canon master is recorded for BACK.",
-      "Capture or restore BACK at the locked Canon 1200-DPI profile."
-    ),
+};
+
+function emptyWorkingEvidencePayload(): WorkingEvidencePayload {
+  return {
+    urls: { front_working: null, back_working: null },
+    workingEvidence: {
+      front: unavailable(
+        "No current immutable Canon master is recorded for FRONT.",
+        "Capture or restore FRONT at the locked Canon 1200-DPI profile.",
+        undefined,
+        "missing"
+      ),
+      back: unavailable(
+        "No current immutable Canon master is recorded for BACK.",
+        "Capture or restore BACK at the locked Canon 1200-DPI profile.",
+        undefined,
+        "missing"
+      ),
+    },
   };
+}
+
+/** A ledger outage is distinct from a card without evidence. Keep that reason
+ * visible and fail closed instead of presenting an imprecise missing-side state. */
+export function unavailableWorkingEvidencePayloads(
+  certIds: readonly number[],
+  reason = "The immutable evidence ledger is unavailable, so full-resolution evidence cannot be verified.",
+  recovery = "Restore the evidence ledger connection, then reload this card."
+): Map<number, WorkingEvidencePayload> {
+  const payloads = new Map<number, WorkingEvidencePayload>();
+  for (const id of new Set(certIds.filter((candidate) => Number.isSafeInteger(candidate) && candidate > 0))) {
+    payloads.set(id, {
+      urls: { front_working: null, back_working: null },
+      workingEvidence: {
+        front: unavailable(reason, recovery, undefined, "unavailable"),
+        back: unavailable(reason, recovery, undefined, "unavailable"),
+      },
+    });
+  }
+  return payloads;
+}
+
+/**
+ * Materialise queue/workstation evidence from rows already read by an authority
+ * layer. Partner code supplies station-proven rows here; generic admin code
+ * uses the ledger reader below. One renderer means URL binding and the visible
+ * unavailable state cannot drift between those paths.
+ */
+export async function buildWorkingEvidencePayloadsFromRows(
+  certIds: readonly number[],
+  rows: readonly WorkingEvidenceRow[]
+): Promise<Map<number, WorkingEvidencePayload>> {
+  const ids = [...new Set(certIds.filter((id) => Number.isSafeInteger(id) && id > 0))];
+  const payloads = new Map<number, WorkingEvidencePayload>();
+  for (const id of ids) payloads.set(id, emptyWorkingEvidencePayload());
+  if (ids.length === 0) return payloads;
+
   try {
-    const rows = (
-      await db.execute(sql`
-        SELECT side, working_object_key, pixel_width, pixel_height, dpi,
-               working_width, working_height, working_format, working_settings,
-               COALESCE(capture_metadata->>'scannerProfileVersion', capture_metadata->>'profileVersion')
-                 AS scanner_profile_version
-        FROM certificate_image_evidence
-        WHERE certificate_id = ${certId}
-          AND evidence_class = 'NEW_IMMUTABLE_MASTER'
-          AND is_current = true
-      `)
-    ).rows as WorkingEvidenceRow[];
     await Promise.all(
       rows.map(async (row) => {
         if (!sides.includes(row.side as Side)) return;
         const side = row.side as Side;
-        const status = assessWorkingEvidence(row);
-        workingEvidence[side] = status;
+        const payload = payloads.get(Number(row.certificate_id));
+        if (!payload) return;
+        const status = await assessWorkingEvidenceAvailability(row);
+        payload.workingEvidence[side] = status;
         if (!status.available || !row.working_object_key) {
-          urls[`${side}_working`] = null;
+          payload.urls[`${side}_working`] = null;
           return;
         }
         try {
-          urls[`${side}_working`] = await getR2SignedUrl(row.working_object_key, 3600);
+          payload.urls[`${side}_working`] = await getR2SignedUrl(row.working_object_key, 3600);
         } catch {
-          urls[`${side}_working`] = null;
-          workingEvidence[side] = unavailable(
+          payload.urls[`${side}_working`] = null;
+          payload.workingEvidence[side] = unavailable(
             "Validated full-resolution working evidence could not be opened.",
             "Restore the working evidence from the immutable 1200-DPI master.",
-            row
+            row,
+            "unavailable"
           );
         }
       })
     );
   } catch {
-    for (const side of sides) {
-      urls[`${side}_working`] = null;
-      workingEvidence[side] = unavailable(
-        "The immutable evidence ledger is unavailable, so full-resolution evidence cannot be verified.",
-        "Restore the evidence ledger connection, then reload this card."
-      );
-    }
+    return unavailableWorkingEvidencePayloads(ids);
   }
-  return { urls, workingEvidence };
+  return payloads;
+}
+
+/**
+ * Build generic grading evidence projections in one ledger read. Partner
+ * grading uses `buildWorkingEvidencePayloadsFromRows` with its stricter
+ * station-proven rows instead of relaxing that authority here.
+ */
+export async function buildWorkingEvidencePayloads(
+  certIds: readonly number[]
+): Promise<Map<number, WorkingEvidencePayload>> {
+  const ids = [...new Set(certIds.filter((id) => Number.isSafeInteger(id) && id > 0))];
+  if (ids.length === 0) return new Map();
+  try {
+    const rows = (
+      await db.execute(sql`
+        SELECT certificate_id, side, working_object_key, format, pixel_width, pixel_height, dpi,
+               working_width, working_height, working_format, working_settings,
+               COALESCE(capture_metadata->>'scannerProfileVersion', capture_metadata->>'profileVersion')
+                 AS scanner_profile_version
+        FROM certificate_image_evidence
+        WHERE certificate_id IN (${sql.join(
+          ids.map((id) => sql`${id}`),
+          sql`, `
+        )})
+          AND evidence_class = 'NEW_IMMUTABLE_MASTER'
+          AND is_current = true
+      `)
+    ).rows as WorkingEvidenceRow[];
+    return buildWorkingEvidencePayloadsFromRows(ids, rows);
+  } catch {
+    return unavailableWorkingEvidencePayloads(ids);
+  }
+}
+
+/** Signed full-resolution assets plus safe, side-specific admission status for one workstation. */
+export async function buildWorkingEvidencePayload(certId: number): Promise<WorkingEvidencePayload> {
+  return (await buildWorkingEvidencePayloads([certId])).get(certId) ?? emptyWorkingEvidencePayload();
 }
 
 /** Signed image URLs for a certificate. NO customer PII — card images only. */
-export async function buildCertImagesPayload(
-  certId: number
-): Promise<{
+export async function buildCertImagesPayload(certId: number): Promise<{
   urls: Record<string, string | null>;
   quality: any;
   workingEvidence: Record<Side, WorkingEvidenceStatus>;
@@ -818,6 +956,90 @@ export async function buildCertImagesPayload(
   const working = await buildWorkingEvidencePayload(certId);
   Object.assign(urls, working.urls);
   return { urls, quality: c.imageQualityChecks || {}, workingEvidence: working.workingEvidence };
+}
+
+function reviewImageKey(c: any, side: Side): string | null {
+  if (side === "front") {
+    return c.gradingFrontDisplay || c.gradingFrontCropped || c.gradingFrontOriginal || c.frontImagePath || null;
+  }
+  return c.gradingBackDisplay || c.gradingBackCropped || c.gradingBackOriginal || c.backImagePath || null;
+}
+
+/**
+ * Super Admin review/preview is read-only QA of the exact submitted certificate. It may render the
+ * certificate-bound scan image when the stricter grader working derivative is missing, but only from
+ * explicitly Super Admin-authorised namespaces and only after storage confirms the bound object is
+ * readable.
+ */
+export async function buildSuperAdminCertImagesPayload(certId: number): Promise<{
+  urls: Record<string, string | null>;
+  quality: any;
+  workingEvidence: Record<Side, WorkingEvidenceStatus>;
+  reviewEvidence: Record<Side, ReviewEvidenceStatus>;
+} | null> {
+  const payload = await buildCertImagesPayload(certId);
+  const cert = await storage.getCertificate(certId);
+  if (!payload || !cert) return null;
+  const c = cert as any;
+  const reviewEvidence: Record<Side, ReviewEvidenceStatus> = {
+    front: reviewUnavailable(
+      "Canonical FRONT image binding is missing for this certificate.",
+      "Restore the certificate's authoritative FRONT image binding before review."
+    ),
+    back: reviewUnavailable(
+      "Canonical BACK image binding is missing for this certificate.",
+      "Restore the certificate's authoritative BACK image binding before review."
+    ),
+  };
+  await Promise.all(
+    sides.map(async (side) => {
+      const key = reviewImageKey(c, side);
+      if (!key) {
+        payload.urls[`${side}_review`] = null;
+        return;
+      }
+      const readable = await checkR2ObjectReadable(key);
+      if (!readable.ok) {
+        payload.urls[`${side}_review`] = null;
+        const upper = side.toUpperCase();
+        const reason =
+          readable.reason === "missing"
+            ? `Canonical ${upper} image storage object is missing.`
+            : readable.reason === "access_denied"
+              ? `Access denied while reading the canonical ${upper} image.`
+              : `Signed ${upper} review image could not be prepared because object storage is unavailable.`;
+        const recovery =
+          readable.reason === "missing"
+            ? `Restore the R2 object for the bound ${upper} image key.`
+            : readable.reason === "access_denied"
+              ? `Check R2 read policy for the bound ${upper} image key without loosening tenant isolation.`
+              : "Restore object-storage connectivity, then reload this review.";
+        reviewEvidence[side] = reviewUnavailable(reason, recovery);
+        return;
+      }
+      try {
+        payload.urls[`${side}_review`] = await getR2SignedUrl(key, 3600);
+        reviewEvidence[side] = reviewAvailable();
+      } catch {
+        payload.urls[`${side}_review`] = null;
+        const upper = side.toUpperCase();
+        reviewEvidence[side] = reviewUnavailable(
+          `Signed URL generation failed for the canonical ${upper} image.`,
+          `Check signing credentials and R2 namespace for the bound ${upper} image key.`
+        );
+      }
+    })
+  );
+  return { ...payload, reviewEvidence };
+}
+
+export async function buildAdminReviewImagesPayload(certId: number): Promise<{
+  urls: Record<string, string | null>;
+  quality: any;
+  workingEvidence: Record<Side, WorkingEvidenceStatus>;
+  reviewEvidence: Record<Side, ReviewEvidenceStatus>;
+} | null> {
+  return buildSuperAdminCertImagesPayload(certId);
 }
 
 /** The grading state for a certificate. NO customer PII — grade/measurement data only. */

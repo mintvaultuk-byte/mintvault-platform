@@ -19,6 +19,9 @@
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { Client } from "pg";
 import { readFileSync } from "node:fs";
+import { mkdtemp, mkdir, rm, writeFile } from "node:fs/promises";
+import { tmpdir } from "node:os";
+import { dirname, join } from "node:path";
 import {
   applyMigrationsRealistic,
   PARTNER_MIGRATIONS_WITH_PER_CARD,
@@ -31,6 +34,7 @@ let cluster: DisposablePostgres17;
 let admin: Client;
 let leases: typeof import("../server/partner/grading-lease-service");
 let savedEnv: Record<string, string | undefined> = {};
+let localEvidenceRoot = "";
 
 interface Fixture {
   tenantId: string;
@@ -80,9 +84,44 @@ async function seedMintVaultTables(): Promise<void> {
     print_state varchar(24) not null default 'awaiting_approval',
     updated_at timestamptz not null default now()
   )`);
-  for (const t of ["users", "submissions", "submission_items", "audit_log", "certificates"]) {
+  await admin.query(`CREATE TABLE certificate_image_evidence (
+    id serial primary key,
+    certificate_id integer not null references certificates(id) on delete restrict,
+    side varchar(5) not null check (side in ('front','back')),
+    evidence_class varchar(32) not null check (evidence_class in ('NEW_IMMUTABLE_MASTER','LEGACY_DERIVED_ONLY')),
+    evidence_version varchar(32) not null default 'v1',
+    object_key text not null unique, sha256 varchar(64) not null, byte_length bigint not null,
+    pixel_width integer not null, pixel_height integer not null,
+    bit_depth integer, dpi integer, format varchar(16) not null,
+    capture_metadata jsonb not null default '{}'::jsonb,
+    working_object_key text, working_sha256 varchar(64),
+    working_width integer, working_height integer, working_format varchar(16), working_settings jsonb,
+    is_current boolean not null default true,
+    superseded_at timestamptz, superseded_by_id integer,
+    created_at timestamptz not null default now()
+  )`);
+  await admin.query(`CREATE TABLE scanner_capture_sessions (
+    id text primary key, certificate_id integer not null references certificates(id),
+    side varchar(5) not null, station_id uuid, state varchar(16) not null,
+    created_at timestamptz not null default now()
+  )`);
+  for (const t of [
+    "users",
+    "submissions",
+    "submission_items",
+    "audit_log",
+    "certificates",
+    "certificate_image_evidence",
+    "scanner_capture_sessions",
+  ]) {
     await admin.query(`ALTER TABLE ${t} OWNER TO pn_migrator`);
   }
+}
+
+async function writeWorkingEvidence(key: string): Promise<void> {
+  const destination = join(localEvidenceRoot, ...key.split("/"));
+  await mkdir(dirname(destination), { recursive: true });
+  await writeFile(destination, "fixture working evidence");
 }
 
 async function makeUser(tenantId: string, label: string): Promise<string> {
@@ -146,12 +185,69 @@ async function makeGradableJob(
       [f.tenantId, submissionId, `Card ${tag}`]
     )
   ).rows[0].id;
+  const certificateId = (
+    await admin.query<{ id: number }>(
+      `INSERT INTO certificates (certificate_number, origin_type, origin_partner_id, origin_location_id)
+       VALUES ($1,'PARTNER',$2,$3) RETURNING id`,
+      [`MV-lease-${tag}-${cardId}`, f.tenantId, locationId]
+    )
+  ).rows[0].id;
+  const stationId = (
+    await admin.query<{ id: string }>(
+      `INSERT INTO partner_stations
+         (tenant_id, location_id, station_code, status, public_key_pem, public_key_fingerprint)
+       VALUES ($1,$2,$3,'ACTIVE',$4,$5) RETURNING id`,
+      [
+        f.tenantId,
+        locationId,
+        `MV-STN-${certificateId.toString(2).replaceAll("0", "A").replaceAll("1", "B").padStart(10, "A")}`,
+        "-----BEGIN PUBLIC KEY-----\\nfixture\\n-----END PUBLIC KEY-----",
+        `${String(certificateId).padStart(64, "a")}`.slice(-64),
+      ]
+    )
+  ).rows[0].id;
   const { rows } = await admin.query<{ id: string }>(
     `INSERT INTO partner_card_jobs
-       (tenant_id, submission_id, card_id, ordinal, card_reference, location_id, created_by, status)
-     VALUES ($1,$2,$3,1,$4,$5,$6,$7) RETURNING id`,
-    [f.tenantId, submissionId, cardId, `partner-submission-card:${cardId}:1`, locationId, f.graderOne, status]
+       (tenant_id, submission_id, card_id, ordinal, card_reference, location_id, created_by, status, certificate_id, mv_number)
+     VALUES ($1,$2,$3,1,$4,$5,$6,$7,$8,$9) RETURNING id`,
+    [
+      f.tenantId,
+      submissionId,
+      cardId,
+      `partner-submission-card:${cardId}:1`,
+      locationId,
+      f.graderOne,
+      status,
+      certificateId,
+      `MV-lease-${tag}-${cardId}`,
+    ]
   );
+  for (const side of ["front", "back"] as const) {
+    const sessionId = `lease-${certificateId}-${side}`;
+    const workingKey = `evidence/${certificateId}/${side}.working.jpg`;
+    await admin.query(
+      `INSERT INTO scanner_capture_sessions (id, certificate_id, side, station_id, state)
+       VALUES ($1,$2,$3,$4,'captured')`,
+      [sessionId, certificateId, side, stationId]
+    );
+    await admin.query(
+      `INSERT INTO certificate_image_evidence
+         (certificate_id, side, evidence_class, object_key, sha256, byte_length, pixel_width, pixel_height, dpi,
+          format, working_object_key, working_width, working_height, working_format, working_settings,
+          capture_metadata, is_current)
+       VALUES ($1,$2,'NEW_IMMUTABLE_MASTER',$3,$4,1024,4724,6136,1200,'tiff',$5,4724,6136,'jpeg',
+               '{"resize":null}'::jsonb,$6::jsonb,true)`,
+      [
+        certificateId,
+        side,
+        `evidence/${certificateId}/${side}.tif`,
+        "a".repeat(64),
+        workingKey,
+        JSON.stringify({ scannerProfileVersion: "mintvault-canon-lide-400-v3", captureSessionId: sessionId }),
+      ]
+    );
+    await writeWorkingEvidence(workingKey);
+  }
   return rows[0].id;
 }
 
@@ -192,13 +288,17 @@ describe("P9 grading edit lease (real PostgreSQL)", () => {
     await seedMintVaultTables();
     await applyMigrationsRealistic(admin, cluster.url, [
       ...PARTNER_MIGRATIONS_WITH_PER_CARD,
+      "0045_partner_stations",
       "0087_partner_grading_edit_lease",
     ]);
     savedEnv = {
       MINTVAULT_DATABASE_URL: process.env.MINTVAULT_DATABASE_URL,
       PARTNER_ADMIN_DATABASE_URL: process.env.PARTNER_ADMIN_DATABASE_URL,
       PARTNER_DATABASE_URL: process.env.PARTNER_DATABASE_URL,
+      MINTVAULT_LOCAL_EVIDENCE_DIR: process.env.MINTVAULT_LOCAL_EVIDENCE_DIR,
     };
+    localEvidenceRoot = await mkdtemp(join(tmpdir(), "mintvault-lease-evidence-"));
+    process.env.MINTVAULT_LOCAL_EVIDENCE_DIR = localEvidenceRoot;
     process.env.MINTVAULT_DATABASE_URL = cluster.url;
     delete process.env.PARTNER_ADMIN_DATABASE_URL;
     delete process.env.PARTNER_DATABASE_URL;
@@ -210,6 +310,7 @@ describe("P9 grading edit lease (real PostgreSQL)", () => {
     await db.closePartnerPools().catch(() => {});
     await admin?.end().catch(() => {});
     await cluster?.stop().catch(() => {});
+    await rm(localEvidenceRoot, { recursive: true, force: true }).catch(() => {});
     for (const [k, v] of Object.entries(savedEnv)) {
       if (v === undefined) delete process.env[k];
       else process.env[k] = v;
@@ -240,6 +341,25 @@ describe("P9 grading edit lease (real PostgreSQL)", () => {
       [job]
     );
     expect(live.rows[0].n).toBe("1");
+  });
+
+  it("2a: a metadata-shaped JPEG master cannot acquire a Partner grading lease", async () => {
+    const f = await makeTenant("lease2a");
+    const job = await makeGradableJob(f, f.locationA, "jpeg-master");
+    const certificateId = (
+      await admin.query<{ certificate_id: number }>(`SELECT certificate_id FROM partner_card_jobs WHERE id = $1`, [job])
+    ).rows[0].certificate_id;
+    await admin.query(`UPDATE certificate_image_evidence SET format = 'jpeg' WHERE certificate_id = $1`, [
+      certificateId,
+    ]);
+
+    const refused = await settle(leases.acquireLease(principal(f, f.graderOne), job));
+    expect(refused).toEqual({ ok: false, code: "NOT_GRADABLE" });
+    const live = await admin.query<{ n: string }>(
+      `SELECT count(*)::text AS n FROM partner_grading_leases WHERE card_job_id = $1 AND released_at IS NULL`,
+      [job]
+    );
+    expect(live.rows[0].n).toBe("0");
   });
 
   it("3: the grader who did NOT get the lease cannot mutate", async () => {
@@ -638,15 +758,10 @@ describe("P9 grading edit lease (real PostgreSQL)", () => {
   ): Promise<{ cardJobId: string; certificateId: number }> {
     const cardJobId = await makeGradableJob(f, locationId, tag);
     const certificateId = (
-      await admin.query<{ id: number }>(`INSERT INTO certificates (certificate_number) VALUES ($1) RETURNING id`, [
-        `MV-lease-${tag}`,
+      await admin.query<{ certificate_id: number }>(`SELECT certificate_id FROM partner_card_jobs WHERE id = $1`, [
+        cardJobId,
       ])
-    ).rows[0].id;
-    await admin.query(`UPDATE partner_card_jobs SET certificate_id=$1, mv_number=$2 WHERE id=$3`, [
-      certificateId,
-      `MV-lease-${tag}`,
-      cardJobId,
-    ]);
+    ).rows[0].certificate_id;
     return { cardJobId, certificateId };
   }
 

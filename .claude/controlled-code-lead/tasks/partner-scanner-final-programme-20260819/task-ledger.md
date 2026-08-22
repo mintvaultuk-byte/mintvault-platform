@@ -76,3 +76,15 @@ one live station session and finalisation requires immutable FRONT evidence befo
 Use an authorised staging grader session to inspect an existing Scanner capture at 12× on FRONT and
 BACK, recording the visible source identity and image dimensions. Do not configure Stripe, make a
 payment, restart the Scanner, or touch production.
+
+# 2026-08-19 — final credit UX acceptance repair pass
+
+- Review gate completed with three independent read-only audits (Scanner UX, wallet/reservation,
+  Stripe Checkout). They found SFAP-021 through SFAP-024; staging deployment is held until each has
+  a local regression and hostile review pass.
+- Staging schema inventory was read-only against `ep-purple-voice-abfez796`: the existing
+  `partner_credit_checkout_sessions` table has the 0097 columns exactly (no operation/snapshot
+  fields yet). No wallet, Partner, Stripe, card-job, Oliver, Pilot, or MV280 data was read or
+  changed.
+- Current staging was independently reconciled as release v519, serving `e5ca7b4b`; no production
+  action is authorised by this pass.

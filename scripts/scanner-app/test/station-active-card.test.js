@@ -647,7 +647,9 @@ test("authorising a FIX also ARMS and commits it — the only recovery for a lap
 
 test("FIX 2: every reservation-affecting action re-asks the server for the balance", () => {
   assert.match(main, /async function refreshAvailableCredits\(\)/);
-  assert.match(main, /availableCredits: available,/);
+  assert.match(main, /availableCredits: displayed,/);
+  assert.match(main, /const prior = stateMod\.get\(\)\.availableCredits/);
+  assert.match(main, /typeof available === "number" \? available : typeof prior === "number" \? prior : null/);
   assert.match(main, /walletRefreshGeneration: Number\(stateMod\.get\(\)\.walletRefreshGeneration \|\| 0\) \+ 1/);
   // Including a refusal: "no credits" must be shown beside the real figure.
   assert.match(main, /const refreshedAvailable = await refreshAvailableCredits\(\);/);
@@ -673,7 +675,8 @@ test("FIX 4: NEW CARD is gated on the server-confirmed open card, not on activeC
   assert.match(html, /TOP UP NOW/);
   assert.match(html, /id="billingLockModal"/);
   assert.match(renderer, /function shouldShowBillingLock\(state\)/);
-  assert.match(renderer, /billingLocked\(state\) && !stationHasReservedCardInProgress\(state\)/);
+  assert.match(renderer, /billingLocked\(state\) && !billingModalDismissedAtZero/);
+  assert.match(renderer, /billing-lock-nonblocking/);
   assert.match(renderer, /billingModalDismissedAtZero = billingLocked\(lastState\)/);
   assert.match(renderer, /let renderedWalletRefreshGeneration = null/);
   assert.match(renderer, /walletRefreshGeneration !== renderedWalletRefreshGeneration/);
@@ -715,6 +718,7 @@ test("ZERO-CREDIT billing lock opens automatically, survives manual close, and u
   assert.match(renderer, /billingModalDismissedAtZero = false;/);
   assert.match(renderer, /closeModal\(els\.billingLockModal\)/);
   assert.match(renderer, /startBillingPoll\(\)/);
+  assert.match(renderer, /stationSetup\?\.stage === "active"/);
   assert.match(renderer, /window\.scanner\.refreshAvailableCredits\(\)/);
   assert.match(renderer, /if \(result\?\.code === "INSUFFICIENT_CREDITS"\) \{/);
   assert.match(renderer, /availableCredits: 0/);

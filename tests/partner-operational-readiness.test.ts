@@ -22,6 +22,8 @@ const healthy = (over: Partial<PartnerReadinessFacts> = {}): PartnerReadinessFac
     mfaConfigured: true,
   },
   locationEligible: true,
+  deliveryAddressReady: true,
+  operationsContactReady: true,
   station: {
     enrolledCount: 1,
     approvedActiveCount: 1,
@@ -42,7 +44,7 @@ const healthy = (over: Partial<PartnerReadinessFacts> = {}): PartnerReadinessFac
 });
 
 describe("P5 server-authoritative operational readiness", () => {
-  it("passes only when all six dimensions pass", () => {
+  it("passes only when every operational dimension passes", () => {
     const result = derivePartnerOperationalReadiness(healthy());
     expect(result.overall).toMatchObject({ ready: true, code: "READY" });
     expect(Object.values(result.dimensions).every((dimension) => dimension.status === "PASS")).toBe(true);
@@ -52,6 +54,27 @@ describe("P5 server-authoritative operational readiness", () => {
     expect(derivePartnerOperationalReadiness(healthy({ station: null })).dimensions.station.status).toBe("UNKNOWN");
     expect(derivePartnerOperationalReadiness(healthy({ credits: null })).dimensions.credits.status).toBe("UNKNOWN");
     expect(derivePartnerOperationalReadiness(healthy({ emergencyStop: null })).overall.ready).toBe(false);
+  });
+
+  it("fails closed when the canonical delivery address or operations contact is incomplete", () => {
+    const missingDelivery = derivePartnerOperationalReadiness(healthy({ deliveryAddressReady: false }));
+    expect(missingDelivery.overall.code).toBe(
+      "DELIVERY_ADDRESS_REQUIRED"
+    );
+    expect(missingDelivery.dimensions.delivery.actions).toContainEqual({
+      audience: "PARTNER",
+      label: "Edit delivery address",
+      href: "/partner/onboarding",
+    });
+    const missingContact = derivePartnerOperationalReadiness(healthy({ operationsContactReady: false }));
+    expect(missingContact.overall.code).toBe(
+      "OPERATIONS_CONTACT_REQUIRED"
+    );
+    expect(missingContact.dimensions.operationsContact.actions).toContainEqual({
+      audience: "PARTNER",
+      label: "Add or edit operations contact",
+      href: "/partner/onboarding",
+    });
   });
 
   it("separates missing wallets, station approval, and station absence", () => {

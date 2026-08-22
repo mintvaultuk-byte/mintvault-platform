@@ -473,6 +473,20 @@ async function runTransferV2Sweep() {
   trackTimeout(guardedReviewRequests, 45_000);
   trackInterval(guardedReviewRequests, 15 * 60 * 1000);
 
+  // Partner supplies outbox. An order transaction is the authority; Resend is always after commit
+  // and may be retried safely because every claimed notification carries a stable provider key.
+  // The service returns UNAVAILABLE while migration 0102 is absent, so this startup hook cannot
+  // interfere with unrelated Partner/login traffic during an application-first rolling deploy.
+  const guardedPartnerSuppliesNotifications = guard("partner-supplies-notifications", async () => {
+    const { processPartnerSuppliesNotificationBatch } = await import("./partner/supplies-service");
+    const result = await processPartnerSuppliesNotificationBatch();
+    if (result.processed > 0) {
+      log(`processed=${result.processed} sent=${result.sent} failed=${result.failed}`, "partner-supplies-notifications");
+    }
+  });
+  trackTimeout(guardedPartnerSuppliesNotifications, 60_000);
+  trackInterval(guardedPartnerSuppliesNotifications, 15 * 60 * 1000);
+
   // Partner credit reservations are a temporary hold, never a manual-maintenance obligation. The
   // domain service treats a pre-0017 database as a no-op for application-first rollout; once G6B
   // exists this hourly, advisory-locked tick expires every due reservation automatically.

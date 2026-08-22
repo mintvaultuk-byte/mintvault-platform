@@ -44,8 +44,10 @@ describe("grading-coordinate isolation", () => {
     expect(PANEL).toContain("inspectionState={inspectionState}");
     expect(PANEL).toContain("onInspectionStateChange={onInspectionStateChange}");
     expect(VIEWER).toContain("if (!mutationsEnabled || !onDefectsChange) return");
-    expect(VIEWER).toContain("mutationsEnabled && manualCropSide");
+    expect(VIEWER).toContain("mayMutateSourceImage && manualCropSide");
     expect(VIEWER).toContain("onOpenCardTool && mutationsEnabled && !readOnly");
+    expect(PANEL).toContain("sourceImageMutationsEnabled={workstationCapabilities.imageMutations}");
+    expect(PANEL).toContain("onOpenCardTool={active ? setManualCardToolSide : undefined}");
     expect(PANEL).toContain("readOnly={!active || approvalInteractionLocked}");
     expect(PANEL).toContain("if (!active) setManualCardToolSide(null)");
   });

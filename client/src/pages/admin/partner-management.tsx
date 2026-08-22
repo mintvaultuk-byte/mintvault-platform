@@ -768,9 +768,13 @@ export default function PartnerManagementPage() {
             title="Partners"
             sub="Internal partner-company management"
             actions={
-              <AdminButton size="sm" variant="gold" onClick={() => setCreateOpen(true)} data-testid="pm-create-open">
-                Create partner
-              </AdminButton>
+              <Link
+                href="/admin/partners/onboarding"
+                className={adminButtonClass({ variant: "gold", size: "sm" })}
+                data-testid="pm-create-open"
+              >
+                Onboard first shop
+              </Link>
             }
           >
             <div

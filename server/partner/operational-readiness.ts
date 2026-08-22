@@ -25,6 +25,10 @@ export interface PartnerReadinessFacts {
     mfaConfigured: boolean;
   } | null;
   locationEligible: boolean;
+  /** Main-location delivery address admitted by the same authority Supplies reads. */
+  deliveryAddressReady: boolean;
+  /** ACTIVE PRIMARY operations contact with a valid operational email. */
+  operationsContactReady: boolean;
   /** null when partner_stations is absent from this database — unknown, not "no station". */
   station: {
     enrolledCount: number;
@@ -76,8 +80,10 @@ const dim = (
 /** Order matters: the first non-PASS dimension becomes the overall verdict — the thing to fix first. */
 const DIMENSION_ORDER: ReadinessDimensionKey[] = [
   "organisation",
-  "owner",
   "location",
+  "delivery",
+  "operationsContact",
+  "owner",
   "station",
   "scanner",
   "credits",
@@ -88,14 +94,16 @@ const DIMENSION_ORDER: ReadinessDimensionKey[] = [
  * to fix first.
  *
  * Pure and total: every branch returns a dimension, and there is no path on which an error, a null
- * or a missing row yields PASS. `ready` is true only when all six dimensions are PASS, so a single
+ * or a missing row yields PASS. `ready` is true only when every dimension is PASS, so a single
  * UNKNOWN is sufficient to withhold READY — which is the intended behaviour, not a limitation.
  */
 export function derivePartnerOperationalReadiness(facts: PartnerReadinessFacts): PartnerOperationalReadiness {
   const dimensions: Record<ReadinessDimensionKey, ReadinessDimension> = {
     organisation: deriveOrganisation(facts),
-    owner: deriveOwner(facts),
     location: deriveLocation(facts),
+    delivery: deriveDeliveryAddress(facts),
+    operationsContact: deriveOperationsContact(facts),
+    owner: deriveOwner(facts),
     station: deriveStation(facts),
     scanner: deriveScanner(facts),
     credits: deriveCredits(facts),
@@ -195,6 +203,34 @@ function deriveLocation(f: PartnerReadinessFacts): ReadinessDimension {
     : dim("BLOCKED", "LOCATION_REQUIRED", "This shop has no active location the owner can work from.", [
         { audience: "SUPER_ADMIN", label: "Add or activate a location" },
       ]);
+}
+
+function deriveDeliveryAddress(f: PartnerReadinessFacts): ReadinessDimension {
+  return f.deliveryAddressReady
+    ? pass("READY", "The Main location has a complete delivery address.")
+    : dim(
+        "BLOCKED",
+        "DELIVERY_ADDRESS_REQUIRED",
+        "The Main location needs address line 1, town/city, postcode and country.",
+        [
+          { audience: "PARTNER", label: "Edit delivery address", href: "/partner/onboarding" },
+          { audience: "SUPER_ADMIN", label: "Edit Main location address" },
+        ]
+      );
+}
+
+function deriveOperationsContact(f: PartnerReadinessFacts): ReadinessDimension {
+  return f.operationsContactReady
+    ? pass("READY", "An active primary operations contact with a valid email is set up.")
+    : dim(
+        "BLOCKED",
+        "OPERATIONS_CONTACT_REQUIRED",
+        "This shop needs an active primary operations contact with a valid email.",
+        [
+          { audience: "PARTNER", label: "Add or edit operations contact", href: "/partner/onboarding" },
+          { audience: "SUPER_ADMIN", label: "Add or edit operations contact" },
+        ]
+      );
 }
 
 function deriveStation(f: PartnerReadinessFacts): ReadinessDimension {

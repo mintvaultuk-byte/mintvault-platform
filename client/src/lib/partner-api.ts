@@ -31,9 +31,32 @@ export function partnerErrorMessage(err: unknown): string {
   return "Something went wrong. Please try again.";
 }
 
-async function req<T>(method: string, url: string, data?: unknown): Promise<T> {
+async function req<T>(method: string, url: string, data?: unknown, options?: { headers?: Record<string, string> }): Promise<T> {
   try {
-    const res = await apiRequest(method, url, data);
+    // apiRequest deliberately has a very small default surface. Supplies creation needs one
+    // additional, server-enforced Idempotency-Key header; merging it here keeps every other
+    // Partner call unchanged and prevents a component from inventing a second fetch path.
+    const res = options?.headers
+      ? await fetch(url, {
+          method,
+          headers: { ...(data ? { "Content-Type": "application/json" } : {}), ...options.headers },
+          body: data ? JSON.stringify(data) : undefined,
+          credentials: "include",
+        }).then(async (response) => {
+          if (response.ok) return response;
+          const text = (await response.text()) || response.statusText;
+          let body: unknown = null;
+          try {
+            body = JSON.parse(text);
+          } catch {
+            // PartnerApiError below normalises an unknown response to safe generic copy.
+          }
+          const error = new Error(text) as Error & { status?: number; body?: unknown };
+          error.status = response.status;
+          error.body = body;
+          throw error;
+        })
+      : await apiRequest(method, url, data);
     if (res.status === 204) return undefined as T;
     return (await res.json()) as T;
   } catch (err) {
@@ -248,6 +271,46 @@ export interface PartnerLocation {
 }
 export const partnerLocations = {
   list: () => req<PartnerLocation[]>("GET", "/api/partner/locations"),
+};
+
+// ---- supplies ----
+export type PartnerSuppliesProductCode = "PLASTIC_GRADED_SLABS" | "PRINT_PAPER_LABEL_STOCK" | "NFC_TAGS";
+export type PartnerSuppliesOrderStatus = "RECEIVED" | "PROCESSING" | "DISPATCHED" | "CANCELLED";
+export type PartnerSuppliesOrder = {
+  id: string;
+  reference: string;
+  status: PartnerSuppliesOrderStatus;
+  partnerName: string;
+  shopName: string;
+  contact: { name: string; email: string; phone: string | null };
+  delivery: { address: string; postcode: string; country: string };
+  notes: string | null;
+  items: Array<{ productCode: PartnerSuppliesProductCode; label: string; quantity: number }>;
+  createdAt: string;
+  updatedAt: string;
+  notificationStatus: "PENDING" | "CLAIMED" | "SENT" | "FAILED" | null;
+  notificationRecovery: "RETRY_AVAILABLE" | "RECONCILIATION_REQUIRED" | null;
+};
+
+export type PartnerSuppliesDelivery = {
+  partnerName: string;
+  shopName: string;
+  contact: { name: string; email: string; phone: string | null };
+  delivery: { address: string; postcode: string; country: string };
+};
+
+export const partnerSupplies = {
+  catalogue: () =>
+    req<{ products: Array<{ code: PartnerSuppliesProductCode; label: string }> }>("GET", "/api/partner/supplies/catalogue"),
+  delivery: () => req<PartnerSuppliesDelivery>("GET", "/api/partner/supplies/delivery"),
+  orders: () => req<{ orders: PartnerSuppliesOrder[] }>("GET", "/api/partner/supplies/orders"),
+  create: (input: { items: Array<{ productCode: PartnerSuppliesProductCode; quantity: number }>; notes?: string | null; idempotencyKey: string }) =>
+    req<{ order: PartnerSuppliesOrder; replayed: boolean }>(
+      "POST",
+      "/api/partner/supplies/orders",
+      { items: input.items, notes: input.notes ?? null },
+      { headers: { "Idempotency-Key": input.idempotencyKey } }
+    ),
 };
 
 export const partnerPublicProfile = {
@@ -703,8 +766,33 @@ export interface PartnerOnboardingReadiness {
   users: Array<{ id: string; email: string; readiness: PartnerUserLoginReadiness }>;
 }
 
+export interface PartnerFirstShopOnboarding {
+  organisation: { id: string; legalName: string; status: string };
+  mainLocation: {
+    id: string;
+    name: string;
+    status: string;
+    addressLine1: string | null;
+    addressLine2: string | null;
+    addressCity: string | null;
+    addressPostcode: string | null;
+    addressCountry: string | null;
+  } | null;
+  primaryContact: { full_name?: string; email?: string; contact_type?: string; active?: boolean; is_primary?: boolean } | null;
+  owner: { email: string; userStatus: string; readiness?: PartnerUserLoginReadiness } | null;
+  operational: PartnerOperationalReadiness;
+}
+
 export const partnerOperations = {
   view: () => req<PartnerOperationsView>("GET", "/api/partner/dashboard/operations"),
   fixQueue: () => req<{ items: PartnerFixQueueEntry[] }>("GET", "/api/partner/fix-queue"),
   readiness: () => req<PartnerOnboardingReadiness>("GET", "/api/partner/onboarding-readiness"),
+};
+
+export const partnerOnboarding = {
+  view: () => req<PartnerFirstShopOnboarding>("GET", "/api/partner/onboarding"),
+  updateMainLocation: (deliveryAddress: { line1: string; line2?: string | null; city: string; postcode: string; country: string }, idempotencyKey: string) =>
+    req("PATCH", "/api/partner/onboarding/main-location", { deliveryAddress, idempotencyKey }),
+  updateOperationsContact: (input: { fullName: string; email: string }, idempotencyKey: string) =>
+    req("PUT", "/api/partner/onboarding/operations-contact", { ...input, idempotencyKey }),
 };

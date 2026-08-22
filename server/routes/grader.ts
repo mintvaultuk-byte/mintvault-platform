@@ -28,6 +28,7 @@ import {
   reassignCerts,
   unassignCerts,
   getCertsForSubmission,
+  buildAdminReviewImagesPayload,
   buildCertImagesPayload,
   buildCertGradingPayload,
   applyCertGradeDraft,
@@ -95,7 +96,8 @@ const graderGradeMutationRateLimit = rateLimit({
   standardHeaders: true,
   legacyHeaders: false,
   passOnStoreError: false,
-  keyGenerator: (req) => `grader-grade-mutation:${String((req.session as any).staffId ?? (req.session as any).graderId ?? "unknown")}`,
+  keyGenerator: (req) =>
+    `grader-grade-mutation:${String((req.session as any).staffId ?? (req.session as any).graderId ?? "unknown")}`,
   message: { error: "Too many grading changes. Please wait a minute and try again." },
 });
 
@@ -416,183 +418,193 @@ export function registerGraderRoutes(app: Express): void {
   );
 
   // ── Grader DRAFT save (repeatable; status stays 'assigned') ─────────────────
-  app.put("/api/grader/certificates/:id/grade", requireCapability("grade"), graderGradeMutationRateLimit, async (req: Request, res: Response) => {
-    try {
-      const certId = parseInt(String(req.params.id), 10);
-      const auth = await authorizeGraderCert(req, certId);
-      if (!auth.ok) return res.status(auth.status).json({ error: auth.error });
-      // Drafts are allowed on an ASSIGNED card (normal grading) AND on the
-      // grader's OWN pending_review card (the edit-submission flow — re-grading an
-      // already-submitted card in the full workstation). Draft-only in BOTH cases:
-      // applyCertGradeDraft never approves and never changes grader_status. The
-      // final, gated commit still goes through POST /edit-submission (which
-      // re-asserts pending_review, re-snapshots operator_grade + audits).
-      if (auth.gradingStatus !== "assigned") {
-        if (auth.gradingStatus === "pending_review") {
-          const graderId = (req.session as any).graderId as string;
-          const row = (await db.execute(sql`SELECT graded_by FROM certificates WHERE id = ${certId}`)).rows[0] as any;
-          if (row?.graded_by && String(row.graded_by) !== String(graderId)) {
-            return res.status(403).json({ error: "Only the grader who submitted this card can edit it" });
+  app.put(
+    "/api/grader/certificates/:id/grade",
+    requireCapability("grade"),
+    graderGradeMutationRateLimit,
+    async (req: Request, res: Response) => {
+      try {
+        const certId = parseInt(String(req.params.id), 10);
+        const auth = await authorizeGraderCert(req, certId);
+        if (!auth.ok) return res.status(auth.status).json({ error: auth.error });
+        // Drafts are allowed on an ASSIGNED card (normal grading) AND on the
+        // grader's OWN pending_review card (the edit-submission flow — re-grading an
+        // already-submitted card in the full workstation). Draft-only in BOTH cases:
+        // applyCertGradeDraft never approves and never changes grader_status. The
+        // final, gated commit still goes through POST /edit-submission (which
+        // re-asserts pending_review, re-snapshots operator_grade + audits).
+        if (auth.gradingStatus !== "assigned") {
+          if (auth.gradingStatus === "pending_review") {
+            const graderId = (req.session as any).graderId as string;
+            const row = (await db.execute(sql`SELECT graded_by FROM certificates WHERE id = ${certId}`)).rows[0] as any;
+            if (row?.graded_by && String(row.graded_by) !== String(graderId)) {
+              return res.status(403).json({ error: "Only the grader who submitted this card can edit it" });
+            }
+          } else {
+            return res.status(409).json({ error: `Card is '${auth.gradingStatus}', not editable` });
           }
-        } else {
-          return res.status(409).json({ error: `Card is '${auth.gradingStatus}', not editable` });
         }
+        const saved = await applyCertGradeDraft(certId, req.body || {});
+        if (!saved) {
+          return res.status(409).json({ error: "Card status changed; refresh and try again" });
+        }
+        const payload = await buildCertGradingPayload(certId);
+        return res.json({
+          ok: true,
+          gradingStatus: auth.gradingStatus,
+          reviewRevision: saved,
+          authoritativeGrade: payload?.authoritativeGrade ?? null,
+        });
+      } catch (e: any) {
+        // A business-rule refusal (e.g. an attempted numeric <-> authentication-only
+        // conversion, or an unrecognised grade type) is operator-fixable, not a 500.
+        if (e instanceof GradeDraftRejected) return res.status(e.status).json({ error: e.message });
+        console.error("[grader] draft save error:", e.message);
+        if (e instanceof GradeDraftValidationError) return res.status(e.status).json({ error: e.message });
+        return sendServerError(res, e);
       }
-      const saved = await applyCertGradeDraft(certId, req.body || {});
-      if (!saved) {
-        return res.status(409).json({ error: "Card status changed; refresh and try again" });
-      }
-      const payload = await buildCertGradingPayload(certId);
-      return res.json({
-        ok: true,
-        gradingStatus: auth.gradingStatus,
-        reviewRevision: saved,
-        authoritativeGrade: payload?.authoritativeGrade ?? null,
-      });
-    } catch (e: any) {
-      // A business-rule refusal (e.g. an attempted numeric <-> authentication-only
-      // conversion, or an unrecognised grade type) is operator-fixable, not a 500.
-      if (e instanceof GradeDraftRejected) return res.status(e.status).json({ error: e.message });
-      console.error("[grader] draft save error:", e.message);
-      if (e instanceof GradeDraftValidationError) return res.status(e.status).json({ error: e.message });
-      return sendServerError(res, e);
     }
-  });
+  );
 
   // ── Grader SUBMIT for approval (assigned → pending_review) ───────────────────
   // Registered BEFORE the generic :action proxy so 'submit' isn't proxied.
-  app.post("/api/grader/certificates/:id/submit", requireCapability("grade"), graderGradeMutationRateLimit, async (req: Request, res: Response) => {
-    try {
-      const certId = parseInt(String(req.params.id), 10);
-      const auth = await authorizeGraderCert(req, certId);
-      if (!auth.ok) return res.status(auth.status).json({ error: auth.error });
-      if (auth.gradingStatus !== "assigned") {
-        return res.status(409).json({ error: `Card is '${auth.gradingStatus}', not submittable` });
-      }
-      const graderEmail = (req.session as any).graderEmail as string;
-      const graderId = (req.session as any).graderId || null;
-      // Model A: establish the authoritative revision wholly on the server.
-      // A submit body may contain final draft fields, but it never supplies the
-      // CAS token. The write returns R; an empty-body submit reads R from the
-      // assigned row. Every terminal transition below requires that exact R.
-      let expectedRevision: number;
-      if (req.body && Object.keys(req.body).length) {
-        const saved = await applyCertGradeDraft(certId, req.body);
-        if (!saved) return res.status(409).json({ error: "Card status changed; refresh and try again" });
-        expectedRevision = saved;
-      } else {
-        const row = (
-          await db.execute(sql`
+  app.post(
+    "/api/grader/certificates/:id/submit",
+    requireCapability("grade"),
+    graderGradeMutationRateLimit,
+    async (req: Request, res: Response) => {
+      try {
+        const certId = parseInt(String(req.params.id), 10);
+        const auth = await authorizeGraderCert(req, certId);
+        if (!auth.ok) return res.status(auth.status).json({ error: auth.error });
+        if (auth.gradingStatus !== "assigned") {
+          return res.status(409).json({ error: `Card is '${auth.gradingStatus}', not submittable` });
+        }
+        const graderEmail = (req.session as any).graderEmail as string;
+        const graderId = (req.session as any).graderId || null;
+        // Model A: establish the authoritative revision wholly on the server.
+        // A submit body may contain final draft fields, but it never supplies the
+        // CAS token. The write returns R; an empty-body submit reads R from the
+        // assigned row. Every terminal transition below requires that exact R.
+        let expectedRevision: number;
+        if (req.body && Object.keys(req.body).length) {
+          const saved = await applyCertGradeDraft(certId, req.body);
+          if (!saved) return res.status(409).json({ error: "Card status changed; refresh and try again" });
+          expectedRevision = saved;
+        } else {
+          const row = (
+            await db.execute(sql`
             SELECT grading_revision FROM certificates
             WHERE id = ${certId} AND grader_status = 'assigned'
             LIMIT 1
           `)
-        ).rows[0] as { grading_revision?: unknown } | undefined;
-        const revision = Number(row?.grading_revision);
-        if (!Number.isSafeInteger(revision) || revision < 1) {
+          ).rows[0] as { grading_revision?: unknown } | undefined;
+          const revision = Number(row?.grading_revision);
+          if (!Number.isSafeInteger(revision) || revision < 1) {
+            return res.status(409).json({ error: "Card status changed; refresh and try again" });
+          }
+          expectedRevision = revision;
+        }
+        const submitSnapshot = await getAssignedGradeSubmitSnapshot(certId, expectedRevision);
+        if (!submitSnapshot) return res.status(409).json({ error: "Card status changed; refresh and try again" });
+        const operatorGrade = submitSnapshot.operatorGrade;
+        const cardName = submitSnapshot.cardName;
+
+        // P0-C — PARTNER-ORIGIN MANDATORY REVIEW.
+        // A partner-originated card must NEVER reach a publish path without a
+        // human reviewer, so this is resolved BEFORE either auto-publish branch.
+        // FAILS CLOSED: an origin that cannot be determined counts as partner
+        // (see the seam contract on getCertOrigin in server/grader.ts).
+        const partnerOriginated = await isPartnerOriginatedCert(certId);
+
+        if (GRADER_AUTO_PUBLISH && !partnerOriginated) {
+          // AUTO-PUBLISH FLIP: publish directly, skip admin review.
+          const published = await autoApproveAssignedGradeAtRevision(certId, graderEmail, graderId, expectedRevision);
+          if (!published) {
+            return res.status(409).json({ error: "Card status changed; refresh and try again" });
+          }
+          await storage.writeAuditLog("certificate", String(certId), "grade_submit", graderEmail, {
+            auto_published: true,
+          });
+          return res.json({ ok: true, gradingStatus: "approved" });
+        }
+
+        // ── PHASE 4 — per-operator review gate (deterministic sampling) ──────────
+        // The gate is evaluated from the revision-bound persisted snapshot. The
+        // final transition below is a single assigned→pending/approved CAS, so
+        // no intermediate pending_review window can publish a newer grade.
+        // Hard overrides — never auto-approve: no grade to promote to final, or an
+        // unidentified card (never push an unnamed card live).
+        const gradeMissing = operatorGrade == null || String(operatorGrade).trim() === "";
+        const nameMissing = !cardName || String(cardName).trim() === "";
+
+        const reviewRate = await getOperatorReviewRate(graderId);
+        // Deterministic sampling — Knuth multiplicative hash of the cert id, mod 100.
+        // Review when bucket < rate, so ~rate% of a grader's cards are reviewed and
+        // the rest auto-approve. Pure function of certId → the SAME cert always
+        // decides the same way (reproducible, NOT random per call / per resubmit).
+        const bucket = (Math.imul(certId, 2654435761) >>> 0) % 100;
+
+        // rate 100 → always review; rate 0 → never review; else sample by bucket.
+        // PARTNER ORIGIN IS A HARD OVERRIDE — it sits with the other forceReview
+        // conditions, ABOVE the sampling expression, so no review_rate (including
+        // 0) can bypass it.
+        const forceReview = gradeMissing || nameMissing || partnerOriginated;
+        const sampledReview = reviewRate >= 100 || (reviewRate > 0 && bucket < reviewRate);
+
+        // P0-C(3) — a grade a HUMAN could not approve must not auto-publish
+        // either. Same two gates approveGraderCert enforces (B3 sub-grade
+        // completeness + printable grade), from the one shared helper. Only
+        // evaluated when this submit would otherwise publish unattended; a
+        // failure routes the card to human review rather than erroring the
+        // grader's submit (the card IS submitted — it just needs a person).
+        const publishGate = forceReview || sampledReview ? null : await checkGradePublishGates(certId);
+        const publishGateBlocked = publishGate !== null && !publishGate.ok;
+        const reviewRequired = forceReview || sampledReview || publishGateBlocked;
+
+        if (reviewRequired) {
+          const submitted = await submitAssignedGradeAtRevision(certId, graderId, expectedRevision);
+          if (!submitted) return res.status(409).json({ error: "Card status changed; refresh and try again" });
+          const forcedReason = partnerOriginated
+            ? "partner_origin"
+            : gradeMissing
+              ? "operator_grade_null"
+              : nameMissing
+                ? "unidentified"
+                : null;
+          await storage.writeAuditLog("certificate", String(certId), "grade_submit", graderEmail, {
+            review_required: true,
+            review_rate: reviewRate,
+            ...(forcedReason
+              ? { forced: forcedReason }
+              : publishGateBlocked
+                ? { forced: "publish_gate", publish_gate_code: (publishGate as { code: string }).code }
+                : { sampled_bucket: bucket }),
+          });
+          return res.json({ ok: true, gradingStatus: "pending_review", reviewRequired: true });
+        }
+
+        // AUTO-APPROVE — sampling cleared this persisted revision. The helper
+        // atomically snapshots and publishes directly from assigned at R.
+        const autoApproved = await autoApproveAssignedGradeAtRevision(certId, "auto", graderId, expectedRevision);
+        if (!autoApproved) {
           return res.status(409).json({ error: "Card status changed; refresh and try again" });
         }
-        expectedRevision = revision;
-      }
-      const submitSnapshot = await getAssignedGradeSubmitSnapshot(certId, expectedRevision);
-      if (!submitSnapshot) return res.status(409).json({ error: "Card status changed; refresh and try again" });
-      const operatorGrade = submitSnapshot.operatorGrade;
-      const cardName = submitSnapshot.cardName;
-
-      // P0-C — PARTNER-ORIGIN MANDATORY REVIEW.
-      // A partner-originated card must NEVER reach a publish path without a
-      // human reviewer, so this is resolved BEFORE either auto-publish branch.
-      // FAILS CLOSED: an origin that cannot be determined counts as partner
-      // (see the seam contract on getCertOrigin in server/grader.ts).
-      const partnerOriginated = await isPartnerOriginatedCert(certId);
-
-      if (GRADER_AUTO_PUBLISH && !partnerOriginated) {
-        // AUTO-PUBLISH FLIP: publish directly, skip admin review.
-        const published = await autoApproveAssignedGradeAtRevision(certId, graderEmail, graderId, expectedRevision);
-        if (!published) {
-          return res.status(409).json({ error: "Card status changed; refresh and try again" });
-        }
-        await storage.writeAuditLog("certificate", String(certId), "grade_submit", graderEmail, {
-          auto_published: true,
-        });
-        return res.json({ ok: true, gradingStatus: "approved" });
-      }
-
-      // ── PHASE 4 — per-operator review gate (deterministic sampling) ──────────
-      // The gate is evaluated from the revision-bound persisted snapshot. The
-      // final transition below is a single assigned→pending/approved CAS, so
-      // no intermediate pending_review window can publish a newer grade.
-      // Hard overrides — never auto-approve: no grade to promote to final, or an
-      // unidentified card (never push an unnamed card live).
-      const gradeMissing = operatorGrade == null || String(operatorGrade).trim() === "";
-      const nameMissing = !cardName || String(cardName).trim() === "";
-
-      const reviewRate = await getOperatorReviewRate(graderId);
-      // Deterministic sampling — Knuth multiplicative hash of the cert id, mod 100.
-      // Review when bucket < rate, so ~rate% of a grader's cards are reviewed and
-      // the rest auto-approve. Pure function of certId → the SAME cert always
-      // decides the same way (reproducible, NOT random per call / per resubmit).
-      const bucket = (Math.imul(certId, 2654435761) >>> 0) % 100;
-
-      // rate 100 → always review; rate 0 → never review; else sample by bucket.
-      // PARTNER ORIGIN IS A HARD OVERRIDE — it sits with the other forceReview
-      // conditions, ABOVE the sampling expression, so no review_rate (including
-      // 0) can bypass it.
-      const forceReview = gradeMissing || nameMissing || partnerOriginated;
-      const sampledReview = reviewRate >= 100 || (reviewRate > 0 && bucket < reviewRate);
-
-      // P0-C(3) — a grade a HUMAN could not approve must not auto-publish
-      // either. Same two gates approveGraderCert enforces (B3 sub-grade
-      // completeness + printable grade), from the one shared helper. Only
-      // evaluated when this submit would otherwise publish unattended; a
-      // failure routes the card to human review rather than erroring the
-      // grader's submit (the card IS submitted — it just needs a person).
-      const publishGate = forceReview || sampledReview ? null : await checkGradePublishGates(certId);
-      const publishGateBlocked = publishGate !== null && !publishGate.ok;
-      const reviewRequired = forceReview || sampledReview || publishGateBlocked;
-
-      if (reviewRequired) {
-        const submitted = await submitAssignedGradeAtRevision(certId, graderId, expectedRevision);
-        if (!submitted) return res.status(409).json({ error: "Card status changed; refresh and try again" });
-        const forcedReason = partnerOriginated
-          ? "partner_origin"
-          : gradeMissing
-            ? "operator_grade_null"
-            : nameMissing
-              ? "unidentified"
-              : null;
-        await storage.writeAuditLog("certificate", String(certId), "grade_submit", graderEmail, {
-          review_required: true,
+        await storage.writeAuditLog("certificate", String(certId), "auto_approve", "system", {
+          operator_grade: operatorGrade ?? null,
+          graded_by: graderId,
           review_rate: reviewRate,
-          ...(forcedReason
-            ? { forced: forcedReason }
-            : publishGateBlocked
-              ? { forced: "publish_gate", publish_gate_code: (publishGate as { code: string }).code }
-              : { sampled_bucket: bucket }),
+          sampled_bucket: bucket,
         });
-        return res.json({ ok: true, gradingStatus: "pending_review", reviewRequired: true });
+        return res.json({ ok: true, gradingStatus: "approved", autoApproved: true });
+      } catch (e: any) {
+        if (e instanceof GradeDraftRejected) return res.status(e.status).json({ error: e.message });
+        console.error("[grader] submit error:", e.message);
+        if (e instanceof GradeDraftValidationError) return res.status(e.status).json({ error: e.message });
+        return sendServerError(res, e);
       }
-
-      // AUTO-APPROVE — sampling cleared this persisted revision. The helper
-      // atomically snapshots and publishes directly from assigned at R.
-      const autoApproved = await autoApproveAssignedGradeAtRevision(certId, "auto", graderId, expectedRevision);
-      if (!autoApproved) {
-        return res.status(409).json({ error: "Card status changed; refresh and try again" });
-      }
-      await storage.writeAuditLog("certificate", String(certId), "auto_approve", "system", {
-        operator_grade: operatorGrade ?? null,
-        graded_by: graderId,
-        review_rate: reviewRate,
-        sampled_bucket: bucket,
-      });
-      return res.json({ ok: true, gradingStatus: "approved", autoApproved: true });
-    } catch (e: any) {
-      if (e instanceof GradeDraftRejected) return res.status(e.status).json({ error: e.message });
-      console.error("[grader] submit error:", e.message);
-      if (e instanceof GradeDraftValidationError) return res.status(e.status).json({ error: e.message });
-      return sendServerError(res, e);
     }
-  });
+  );
 
   // ── Edit an OWN submitted (pending_review) card — identity + grade ──────────
   // A grader can correct a card they already submitted while it's awaiting review.
@@ -842,8 +854,7 @@ export function registerGraderRoutes(app: Express): void {
         sql`SELECT deleted_at, can_edit_sets, credential_version FROM users WHERE id = ${String(s.staffId)} LIMIT 1`
       );
       const row = live.rows[0] as
-        | { deleted_at?: Date | string | null; can_edit_sets?: boolean; credential_version?: number }
-        | undefined;
+        { deleted_at?: Date | string | null; can_edit_sets?: boolean; credential_version?: number } | undefined;
       if (!row || row.deleted_at || Number(s.credentialVersion ?? 1) !== credentialVersionOf(row)) {
         return req.session.destroy(() => {
           clearSessionCookie(res);
@@ -1111,7 +1122,7 @@ export function registerGraderRoutes(app: Express): void {
     if (!a) return res.status(404).json({ error: "Certificate not found" });
     if (a.gradingStatus !== "pending_review")
       return res.status(409).json({ error: `Card is '${a.gradingStatus}', not pending review` });
-    const images = await buildCertImagesPayload(certId);
+    const images = await buildAdminReviewImagesPayload(certId);
     if (!images) return res.status(404).json({ error: "Certificate not found" });
     return res.json(images);
   });

@@ -63,7 +63,7 @@ import bcrypt from "bcryptjs";
 import {
   applyMigrationsRealistic,
   provisionRealisticRoles,
-  PARTNER_MIGRATIONS_WITH_USER_MANAGEMENT_INVARIANT,
+  PARTNER_MIGRATIONS_WITH_ONBOARDING_READINESS,
 } from "./helpers/partner-realistic-db";
 
 // ---------------------------------------------------------------------------
@@ -430,7 +430,7 @@ function assertInvitationUrlContract(rawUrl: string, token: string): void {
       await admin.query(`ALTER TABLE ${t} OWNER TO pn_migrator`);
     }
 
-    await applyMigrationsRealistic(admin, adminDbUrl, PARTNER_MIGRATIONS_WITH_USER_MANAGEMENT_INVARIANT);
+    await applyMigrationsRealistic(admin, adminDbUrl, PARTNER_MIGRATIONS_WITH_ONBOARDING_READINESS);
 
     // Cluster-unique login roles. Deliberately NOT a name shared with other partner suites on this
     // same PostgreSQL 17 server: roles are cluster-wide, so a suite that dropped or altered a shared

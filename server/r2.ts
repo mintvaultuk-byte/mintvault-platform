@@ -417,16 +417,17 @@ export async function listR2Objects(
 }
 
 /**
- * HEAD an R2 object — returns LastModified or null on any error.
+ * HEAD an R2 object — returns basic object integrity metadata or null on any error.
  * Used by the logbook PDF cache stale-check (compare against cert.updated_at).
  * Failure modes (404, network, no creds) all return null → caller treats as
  * "no cache" and regenerates, which is the safe default.
  */
-export async function headR2(key: string): Promise<{ lastModified: Date } | null> {
+export async function headR2(key: string): Promise<{ lastModified: Date; contentLength: number } | null> {
   const localRoot = localEvidenceDirectory();
   if (localRoot) {
     try {
-      return { lastModified: (await fs.stat(localEvidencePath(localRoot, key))).mtime };
+      const stat = await fs.stat(localEvidencePath(localRoot, key));
+      return { lastModified: stat.mtime, contentLength: stat.size };
     } catch (error: any) {
       if (error?.code === "ENOENT") return null;
       throw error;
@@ -440,9 +441,52 @@ export async function headR2(key: string): Promise<{ lastModified: Date } | null
         Key: key,
       })
     );
-    return result.LastModified ? { lastModified: result.LastModified } : null;
+    return result.LastModified && typeof result.ContentLength === "number"
+      ? { lastModified: result.LastModified, contentLength: result.ContentLength }
+      : null;
   } catch {
     return null;
+  }
+}
+
+export type R2ObjectReadCheck =
+  { ok: true } | { ok: false; reason: "missing" | "access_denied" | "storage_unavailable"; message: string };
+
+/** Distinguish read failures before issuing a browser URL for an admin review image. */
+export async function checkR2ObjectReadable(key: string): Promise<R2ObjectReadCheck> {
+  const localRoot = localEvidenceDirectory();
+  if (localRoot) {
+    try {
+      await fs.stat(localEvidencePath(localRoot, key));
+      return { ok: true };
+    } catch (error: any) {
+      if (error?.code === "ENOENT") {
+        return { ok: false, reason: "missing", message: "Storage object missing." };
+      }
+      return { ok: false, reason: "storage_unavailable", message: "Storage object could not be checked." };
+    }
+  }
+  let client: S3Client;
+  let bucket: string;
+  try {
+    client = getClient();
+    bucket = getBucket();
+  } catch {
+    return { ok: false, reason: "storage_unavailable", message: "Object storage is not configured." };
+  }
+  try {
+    await client.send(new HeadObjectCommand({ Bucket: bucket, Key: key }));
+    return { ok: true };
+  } catch (error: any) {
+    const status = error?.$metadata?.httpStatusCode;
+    const name = String(error?.name || "");
+    if (status === 404 || name === "NotFound" || name === "NoSuchKey") {
+      return { ok: false, reason: "missing", message: "Storage object missing." };
+    }
+    if (status === 403 || name === "AccessDenied") {
+      return { ok: false, reason: "access_denied", message: "Object storage access denied." };
+    }
+    return { ok: false, reason: "storage_unavailable", message: "Object storage could not be checked." };
   }
 }
 

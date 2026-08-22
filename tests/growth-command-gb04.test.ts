@@ -213,9 +213,21 @@ describe("GB-04 Growth Command commercial authority", () => {
       .readdirSync("migrations")
       .filter((file) => /^\d{4}_.*\.sql$/.test(file))
       .map((file) => file.slice(0, 4));
-    // Production's immutable journal owns 0099 for Partner checkout hardening;
-    // this never-applied Growth migration must occupy the next forward slot.
-    expect(numbered.filter((number) => number === "0099")).toHaveLength(0);
+    /*
+     * 0099 belongs to Partner checkout hardening, not to Growth. It used to be ABSENT from the
+     * release tree — the journal owned the number but the file did not ship — and this assertion
+     * pinned that absence. That gap was the defect: the staging database carried 0099's schema while
+     * neither this branch nor main carried the code that speaks to it, so a partner's second
+     * checkout of a pack 502'd permanently. The file is now shipped, with a checksum byte-identical
+     * to the applied journal row, so it reconciles instead of colliding.
+     *
+     * The invariant that actually protects Growth is unchanged and asserted below: Growth owns 0100,
+     * exactly one file claims each number, and 0099 is somebody else's.
+     */
+    expect(numbered.filter((number) => number === "0099")).toHaveLength(1);
+    expect(
+      fs.readdirSync("migrations").filter((file) => /^0099_/.test(file))
+    ).toEqual(["0099_partner_credit_checkout_operation_idempotency.sql"]);
     expect(numbered.filter((number) => number === "0100")).toHaveLength(1);
     expect(new Set(numbered).size).toBe(numbered.length);
   });

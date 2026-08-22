@@ -122,6 +122,11 @@ describe.skipIf(!isLocal)("migration 0034 — Partner RBAC seed (real runner, Po
    *   0092 — adds partner.stations.calibrate
    *   0098 — grants SCANNER_OPERATOR the read-only credit view required by the
    *           zero-credit lockout UX
+   *   0104 — adds partner.supplies.view / partner.supplies.submit (Partner supplies ordering).
+   *           This entry was MISSING while the TypeScript map already carried both permissions,
+   *           so the database came up two permissions and five mappings short and every parity
+   *           assertion in this suite failed. The gap survived because the suite skips without a
+   *           loopback PARTNER_RBAC_MIG_ADMIN — a skip is not a pass.
    *
    * ORDER IS LOAD-BEARING. 0083's permission seed is guarded by
    * `IF to_regclass('public.partner_permissions') IS NOT NULL`, so applying it BEFORE 0034 would
@@ -137,7 +142,8 @@ describe.skipIf(!isLocal)("migration 0034 — Partner RBAC seed (real runner, Po
         f.filename === "0083_partner_credit_packs.sql" ||
         f.filename === "0085_partner_scanner_operator_role.sql" ||
         f.filename === "0092_partner_station_calibrate_permission.sql" ||
-        f.filename === "0098_scanner_operator_credit_view.sql"
+        f.filename === "0098_scanner_operator_credit_view.sql" ||
+        f.filename === "0104_partner_supplies_orders.sql"
     );
     expect(
       files.map((f) => f.filename),
@@ -149,6 +155,7 @@ describe.skipIf(!isLocal)("migration 0034 — Partner RBAC seed (real runner, Po
       "0085_partner_scanner_operator_role.sql",
       "0092_partner_station_calibrate_permission.sql",
       "0098_scanner_operator_credit_view.sql",
+      "0104_partner_supplies_orders.sql",
     ]);
     return applyMigrations(admin as never, files);
   };
@@ -332,6 +339,7 @@ describe.skipIf(!isLocal)("migration 0034 — Partner RBAC seed (real runner, Po
       "0085_partner_scanner_operator_role.sql",
       "0092_partner_station_calibrate_permission.sql",
       "0098_scanner_operator_credit_view.sql",
+      "0104_partner_supplies_orders.sql",
     ]);
     const afterFirst = await counts();
 

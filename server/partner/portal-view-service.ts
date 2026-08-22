@@ -165,7 +165,8 @@ export async function getPartnerCreditView(principal: PartnerPrincipal): Promise
         consumedThisMonth: wholeCredit(wallet.consumed_this_month),
         consumedLifetime: wholeCredit(wallet.consumed_reservations),
         postedBalance: wholeCredit(wallet.ledger_balance),
-        balanceStatus: status !== "active" ? "inactive" : available === 0 ? "empty" : available < 3 ? "low" : "healthy",
+        balanceStatus:
+          status !== "active" ? "inactive" : available === 0 ? "empty" : available <= 5 ? "low" : "healthy",
       },
       ledger,
       purchaseHistory: ledger.filter((entry) => entry.type === "purchase"),

@@ -99,6 +99,13 @@ interface Props {
   cropSyncStatus?: "idle" | "pending" | "synced" | "failed";
   /** Re-runs THIS side's failed crop upload; resolves the display URL on success. */
   onRetryCrop?: () => Promise<string | undefined>;
+  /**
+   * Admin-only source mutations (Auto-Detect, recrop and persisted
+   * manual-centering). Partner Card Tool remains available for full-resolution
+   * inspection and local measurements, but must not call endpoints it does not
+   * own. Defaults true for existing admin/grader callers.
+   */
+  allowSourceImageMutations?: boolean;
   /** API base for cert endpoints: '/api/admin' (default) or '/api/grader'. */
   apiBase?: string;
 }
@@ -302,6 +309,7 @@ export default function ManualCardTool({
   onStartCropUpload,
   cropSyncStatus = "idle",
   onRetryCrop,
+  allowSourceImageMutations = true,
   apiBase = "/api/admin",
 }: Props) {
   // TIFF masters are intentionally not browser measurement inputs. This
@@ -943,7 +951,7 @@ export default function ManualCardTool({
       else if ((e.key === "Backspace" || e.key === "Delete") && outerPts.length + innerPts.length > 0) {
         e.preventDefault();
         undoLast();
-      } else if (e.key === "a" || e.key === "A") {
+      } else if (allowSourceImageMutations && (e.key === "a" || e.key === "A")) {
         e.preventDefault();
         if (!detecting) handleAutoDetect();
       } else if (e.key === "r" || e.key === "R") {
@@ -1014,6 +1022,7 @@ export default function ManualCardTool({
   // box is axis-aligned, so the auto deskew starts at 0. Inner dots are cleared
   // so the side-by-side capture resumes cleanly from the inner pass.
   async function handleAutoDetect() {
+    if (!allowSourceImageMutations) return;
     setDetecting(true);
     try {
       const bounds = await detectCardBounds(certId, side, apiBase);
@@ -1075,6 +1084,21 @@ export default function ManualCardTool({
       // lands; in the legacy path it's awaited inline (below).
       const sendCentering = async () => {
         if (!(mode === "full" && centering)) return;
+        if (!allowSourceImageMutations) {
+          // The Partner grade draft owns the final server validation. This
+          // measurement is intentionally kept in the canonical working-image
+          // coordinate space and is persisted only through the normal grading
+          // write, never through admin-only image mutation endpoints.
+          onCentering?.({
+            side,
+            outer: centering.outer,
+            inner: centering.inner,
+            leftRight: centering.lr,
+            topBottom: centering.tb,
+            subgrade: 0,
+          });
+          return;
+        }
         const cenRes = await fetch(`${apiBase}/certificates/${certId}/manual-centering`, {
           method: "POST",
           credentials: "include",
@@ -1103,6 +1127,27 @@ export default function ManualCardTool({
               ? `${side}: cropped + centered ${centering.lr} / ${centering.tb}${deskewNote}`
               : `${side}: cropped${deskewNote}`,
         });
+
+      if (!allowSourceImageMutations) {
+        await sendCentering();
+        setHover(null);
+        setDrag(null);
+        setCommittedDefects((existingDefects ?? []).filter((d) => d.image_side === side));
+        if (onDefectAdded) {
+          // Keep inspection on the admitted full-resolution working source.
+          // No crop, deskew or derivative is created on the Partner surface.
+          setPhase("defects");
+        } else {
+          onDone();
+        }
+        toast({
+          title:
+            mode === "full" && centering
+              ? `${side}: centering measurements ready ${centering.lr} / ${centering.tb}`
+              : `${side}: measurement ready`,
+        });
+        return;
+      }
 
       // ── OPTIMISTIC PATH ────────────────────────────────────────────────
       // Defects phase exists (onDefectAdded) AND the panel owns the upload
@@ -2196,16 +2241,18 @@ export default function ManualCardTool({
           <>
             {/* Row 0: quick actions — Auto-Detect + full Reset (parity with Manual Crop) */}
             <div className="flex items-center gap-2 flex-wrap">
-              <button
-                type="button"
-                onClick={handleAutoDetect}
-                disabled={detecting}
-                className="flex items-center gap-1.5 text-[var(--admin-gold)] text-xs border border-[var(--admin-gold)]/30 px-2 py-1 sm:px-3 sm:py-1.5 rounded-lg hover:bg-[var(--admin-gold)]/10 disabled:opacity-50 transition-colors"
-              >
-                {detecting ? <Loader2 size={12} className="animate-spin" /> : <Target size={12} />}
-                {detecting ? "Detecting..." : "Auto-Detect"}{" "}
-                <span className="text-[var(--admin-ink-dim)] text-[9px]">A</span>
-              </button>
+              {allowSourceImageMutations && (
+                <button
+                  type="button"
+                  onClick={handleAutoDetect}
+                  disabled={detecting}
+                  className="flex items-center gap-1.5 text-[var(--admin-gold)] text-xs border border-[var(--admin-gold)]/30 px-2 py-1 sm:px-3 sm:py-1.5 rounded-lg hover:bg-[var(--admin-gold)]/10 disabled:opacity-50 transition-colors"
+                >
+                  {detecting ? <Loader2 size={12} className="animate-spin" /> : <Target size={12} />}
+                  {detecting ? "Detecting..." : "Auto-Detect"}{" "}
+                  <span className="text-[var(--admin-ink-dim)] text-[9px]">A</span>
+                </button>
+              )}
               <button
                 type="button"
                 onClick={resetAll}
