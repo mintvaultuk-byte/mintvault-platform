@@ -763,7 +763,10 @@ export function partnerStationRouter(): Router {
                 ? 400
                 : error.code === "JOB_NOT_CAPTURABLE" ||
                     error.code === "SIDE_ALREADY_PRESENT" ||
-                    error.code === "NOTHING_TO_CAPTURE"
+                    error.code === "NOTHING_TO_CAPTURE" ||
+                    // Busy, not finished. Same 409 shape; the CODE is what stops a caller reading
+                    // "wait" as "complete", which is the whole point of splitting it out.
+                    error.code === "CAPTURE_IN_FLIGHT"
                   ? 409
                   : 403;
           res.status(status).json({ error: { code: error.code, message: error.message } });
