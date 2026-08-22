@@ -396,9 +396,25 @@ const date = (value: string | null) =>
   value && !Number.isNaN(new Date(value).getTime())
     ? new Intl.DateTimeFormat("en-GB", { dateStyle: "medium", timeStyle: "short" }).format(new Date(value))
     : "Not available";
+/**
+ * Money is stored and transported in pence so it stays an exact integer, but it
+ * must never be *presented* that way — "0 GBP pence" is not a figure an owner
+ * reads. Any metric the server denominates in pence is rendered as GBP, keeping
+ * the server's unit semantically accurate while the console shows £0.00.
+ */
+export function formatMetricValue(metric: Pick<Metric, "value" | "unit">): string {
+  const unit = metric.unit ?? "";
+  // Matches every pence denomination the server uses — "GBP pence",
+  // "GBP pence/hour", "pence" — and keeps any rate suffix such as "/hour".
+  const pence = /^(?:GBP\s+)?pence\b(.*)$/i.exec(unit);
+  if (typeof metric.value === "number" && pence) {
+    return `${formatGrowthMoneyGBP(metric.value)}${pence[1] ?? ""}`;
+  }
+  return `${metric.value}${unit ? ` ${unit}` : ""}`;
+}
 const text = (metric: Metric) =>
   (metric.state === "REAL" || metric.state === "STALE") && metric.value !== undefined
-    ? `${metric.value}${metric.unit ? ` ${metric.unit}` : ""}${metric.state === "STALE" ? " · STALE" : ""}`
+    ? `${formatMetricValue(metric)}${metric.state === "STALE" ? " · STALE" : ""}`
     : metric.state.replaceAll("_", " ");
 const tone = (status: Health) =>
   status === "GREEN"
@@ -875,14 +891,16 @@ export function trafficDistributionSegments(
  * instead of truncating.
  */
 export function kpiValueClass(value: string): string {
-  // Sized against the narrowest cell the strip produces: a seven-column strip on
-  // a 1440px viewport leaves about 127px of content width. A single word wider
-  // than that would be split mid-word by the break-words safety net, which is
-  // how "HEADROOM" became "HEADROO / M", so each tier is chosen to fit there.
-  const length = value.length;
-  if (length <= 6) return "text-xl sm:text-2xl";
-  if (length <= 10) return "text-lg sm:text-xl";
-  if (length <= 16) return "text-sm sm:text-base leading-snug";
+  // What can overflow is the longest UNBREAKABLE token, not the whole string:
+  // "NOT INSTRUMENTED" wraps happily at its space, but "INSTRUMENTED" cannot be
+  // split without producing the "INSTRU / MENTED" defect. Tiers are therefore
+  // sized on the longest word, measured in the real admin font against the
+  // narrowest cell a KPI strip produces (~127px of content on a 1440px
+  // seven-column strip): CONNECTED fits at text-xl, INSTRUMENTED at text-base.
+  const longestWord = value.split(/\s+/).reduce((longest, word) => Math.max(longest, word.length), 0);
+  if (longestWord <= 6) return "text-xl sm:text-2xl";
+  if (longestWord <= 9) return "text-lg sm:text-xl";
+  if (longestWord <= 12) return "text-sm sm:text-base leading-snug";
   return "text-xs sm:text-sm leading-snug";
 }
 
@@ -960,18 +978,16 @@ function CompactRing({ label, metric }: { label: string; metric: Metric }) {
 
 function CompactDigital({ label, metric }: { label: string; metric: Metric }) {
   const value = text(metric);
-  const compactValue = value.length > 14;
   return (
     <article
       className="rounded-lg border border-[var(--admin-line,#333)] bg-black/15 p-3"
       title={metric.reason ?? metric.source}
     >
-      <p className="text-[10px] font-semibold uppercase tracking-[0.12em]">{label}</p>
-      <p
-        className={`mt-2 break-words font-semibold tracking-tight ${compactValue ? "text-base leading-snug" : "text-2xl"}`}
-      >
-        {value}
-      </p>
+      <p className="break-words text-[10px] font-semibold uppercase tracking-[0.08em]">{label}</p>
+      {/* One shared sizing rule with the KPI strip. Its own length threshold sized
+          "NOT CONNECTED" at 24px, which no longer fitted the narrow Search Console
+          cell and split the word as "NOT CONN / ECTED". */}
+      <p className={`mt-2 break-words font-semibold tracking-tight ${kpiValueClass(value)}`}>{value}</p>
       <p className="mt-1 text-[10px] uppercase tracking-[0.1em]" style={{ color: statusAccent(metric.status) }}>
         {metric.status} · {date(metric.lastUpdated)}
       </p>
@@ -1717,7 +1733,7 @@ function InfrastructureOverview({ data }: { data: Intelligence }) {
             {text(infrastructure.neon.availability)}
           </span>
         </div>
-        <div className="grid grid-cols-2 divide-x divide-y divide-[var(--admin-line,#333)] sm:grid-cols-3">
+        <div className="grid grid-cols-2 divide-x divide-y divide-[var(--admin-line,#333)]">
           {[
             ["Connections", infrastructure.neon.connectionPressure],
             ["Latency", infrastructure.neon.latency],
@@ -1857,7 +1873,11 @@ function GrowthOverview({ data, summary, period }: { data: Intelligence; summary
           sub="External search authority remains distinct from request telemetry."
           bodyClassName="p-3"
         >
-          <div className="grid gap-2 sm:grid-cols-2">
+          {/* Two columns inside this narrow third column left each card ~93px —
+              narrower than the word "INSTRUMENTED" at any legible size, which is
+              what split the Search Console status. The cards pair up only where
+              the column is genuinely wide enough for them. */}
+          <div className="grid gap-2 sm:grid-cols-2 xl:grid-cols-1 2xl:grid-cols-2">
             <CompactDigital label="Connection" metric={data.seo.searchConsole} />
             <CompactDigital label="Impressions" metric={data.seo.impressions} />
             <CompactDigital label="Clicks" metric={data.seo.clicks} />
@@ -2636,7 +2656,7 @@ export default function GrowthCommandPage() {
                       <RadialRing label="CPU" metric={data.siteHealth.cpu} />
                       <RadialRing label="RAM" metric={data.siteHealth.memory} />
                     </div>
-                    <div className="mt-2 grid gap-2 sm:grid-cols-2">
+                    <div className="mt-2 grid gap-2 sm:grid-cols-2 xl:grid-cols-1 2xl:grid-cols-2">
                       <DigitalMetric label="Request rate" metric={data.siteHealth.requestRate} />
                       <RadialRing label="DB pressure" metric={data.siteHealth.databasePressure} />
                     </div>
@@ -2770,7 +2790,7 @@ export default function GrowthCommandPage() {
                                 {machine.region} · {machine.status} · {text(machine.deployedVersion)}
                               </span>
                             </div>
-                            <div className="mt-2 grid gap-2 sm:grid-cols-2 xl:grid-cols-4">
+                            <div className="mt-2 grid gap-2 sm:grid-cols-2 2xl:grid-cols-4">
                               <CompactRing label="CPU" metric={machine.cpu} />
                               <CompactRing label="RAM" metric={machine.memory} />
                               <CompactDigital label="P95" metric={machine.p95Latency} />
@@ -2782,7 +2802,7 @@ export default function GrowthCommandPage() {
                     )}
                   </Panel>
                   <Panel title="Database and cost" sub="Availability, pressure and month-to-date provider billing." bodyClassName="p-3">
-                    <div className="grid gap-2 sm:grid-cols-3">
+                    <div className="grid gap-2 sm:grid-cols-2">
                       <StatusTile label="Fly connection" metric={data.infrastructure.fly.connection} />
                       <StatusTile label="Availability" metric={data.infrastructure.neon.availability} />
                       <StatusTile label="Connections" metric={data.infrastructure.neon.connectionPressure} />
@@ -2807,7 +2827,7 @@ export default function GrowthCommandPage() {
                         </div>
                       ))}
                     </div>
-                    <div className="mt-2 grid gap-2 sm:grid-cols-3">
+                    <div className="mt-2 grid gap-2 sm:grid-cols-2">
                       <StatusTile label="Normalised total" metric={data.infrastructure.costs.normalisedTotalGBP} />
                       <StatusTile label="Cost / paid card" metric={data.infrastructure.costs.costPerPaidCardGBP} />
                       <StatusTile label="Cost / paid order" metric={data.infrastructure.costs.costPerPaidOrderGBP} />
