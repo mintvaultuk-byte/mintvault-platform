@@ -564,7 +564,11 @@ export default function PartnerManagementPage() {
         )}
 
         {showSettingsControls && (
-          <Panel title="Wallets / Credits" sub="Owner-approved staging controls" className="mb-4">
+          <Panel
+            title="Maintenance — Wallets / Credits"
+            sub="Owner-approved backfill. Infrequent, financial, and recorded in the management-audit ledger."
+            className="mb-4"
+          >
             <div data-testid="pm-wallet-backfill" style={{ display: "grid", gap: 12 }}>
               <div>
                 <strong>Provision Missing Partner Wallets</strong>

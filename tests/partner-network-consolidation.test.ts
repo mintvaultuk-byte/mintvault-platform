@@ -149,6 +149,36 @@ describe("the shop list is built exactly once", () => {
 });
 
 // ---------------------------------------------------------------------------------------------
+// Small IA refinements
+// ---------------------------------------------------------------------------------------------
+describe("the everyday actions are where they are reached for", () => {
+  it("offers Onboard a shop from Overview as well as Shops, through the one wizard", () => {
+    expect(overview).toContain('data-testid="pn-overview-onboard"');
+    expect(overview).toContain('href="/admin/partners/onboarding"');
+    expect(shops).toContain('data-testid="pn-shops-onboard"');
+    expect(shops).toContain('href="/admin/partners/onboarding"');
+  });
+
+  it("shows Locations on Shops using a value the bounded projection already carries", () => {
+    expect(shops).toContain("<th>Locations</th>");
+    expect(shops).toContain("shop.activeLocations === 0");
+    // No second query was introduced to render it — still exactly ONE call site (the import of
+    // `useQuery` is not a query, which is why this matches the call form rather than the name).
+    expect(shops.match(/useQuery</g) ?? []).toHaveLength(1);
+  });
+
+  it("groups the wallet backfill as infrequent maintenance rather than everyday work", () => {
+    expect(settings).toContain("Maintenance — Wallets / Credits");
+  });
+
+  it("points a destructive action at the audit surface that already exists", () => {
+    expect(detail).toContain('data-testid="pm-delete-audit-link"');
+    // The per-shop Audit tab, not a new network-wide audit page.
+    expect(detail).toContain("/security");
+  });
+});
+
+// ---------------------------------------------------------------------------------------------
 // Needs Attention — the judgement on the Overview screen
 // ---------------------------------------------------------------------------------------------
 function shop(overrides: Partial<PartnerTableRow> = {}): PartnerTableRow {

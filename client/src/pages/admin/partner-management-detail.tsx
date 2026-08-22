@@ -3148,6 +3148,16 @@ function PermanentDeletionPanel({
       <div data-testid="pm-delete-available" data-can-delete="true">
         <p style={{ marginTop: 0 }}>This removes {data.removes.join(", ")}.</p>
         <p style={{ fontSize: 12, opacity: 0.85 }}>Kept: {data.retains.join(", ")}.</p>
+        {/*
+          * The canonical audit surface already exists as this shop's own Audit tab, so this links to
+          * it rather than inventing a second one. The attempt row is written BEFORE the deletion and
+          * survives it (migration 0108), which is exactly why it is worth reading first.
+          */}
+        <p style={{ fontSize: 12 }}>
+          <Link href={`/admin/partners/${partnerId}/security`} className="underline" data-testid="pm-delete-audit-link">
+            Review this shop&apos;s audit history first →
+          </Link>
+        </p>
         <AdminButton
           size="sm"
           variant="gold"

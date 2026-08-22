@@ -114,6 +114,16 @@ function ShopRow({ shop }: { shop: PartnerTableRow }) {
         <ScannerCell shop={shop} />
       </td>
       <td>
+        {/*
+         * Locations comes free: `activeLocations` is already on the bounded projection, so this
+         * column costs no extra query. A zero is authoritative and is the condition that blocks
+         * every downstream step, so it is called out rather than shown as a bare 0.
+         */}
+        <Link href={`/admin/partners/${shop.partnerId}/locations`} className="underline">
+          {shop.activeLocations === 0 ? <Badge variant="red">NONE</Badge> : formatCount(shop.activeLocations)}
+        </Link>
+      </td>
+      <td>
         <Link href={`/admin/partners/${shop.partnerId}/staff`} className="underline">
           {formatCount(shop.activeStaff)}
         </Link>
@@ -243,6 +253,7 @@ export default function PartnerNetworkShopsPage() {
                     <th>Credits</th>
                     <th>Cards</th>
                     <th>Scanner</th>
+                    <th>Locations</th>
                     <th>Staff</th>
                     <th>Alerts</th>
                     <th>Last activity</th>

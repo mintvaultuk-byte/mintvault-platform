@@ -16,7 +16,7 @@
 import { useEffect, useMemo, useState } from "react";
 import { Link, useLocation } from "wouter";
 import { useQuery } from "@tanstack/react-query";
-import { AdminShell, Badge, Panel, StatCard, type AdminBadgeVariant } from "@/components/admin";
+import { AdminButton, AdminShell, Badge, Panel, StatCard, type AdminBadgeVariant } from "@/components/admin";
 import { apiRequest } from "@/lib/queryClient";
 import type { Metric, PartnerNetworkOverview } from "@shared/partner-dashboard";
 import { formatCount, formatCredits } from "./partner-dashboard-helpers";
@@ -162,7 +162,19 @@ export default function PartnerNetworkOverviewPage() {
               </Panel>
             )}
 
-            <Panel title="Shops" className="mt-4">
+            <Panel
+              title="Shops"
+              className="mt-4"
+              actions={
+                // The one thing an operator starts from this screen. It opens the same 10-step
+                // wizard Shops links to — one onboarding authority, offered where it is reached for.
+                <Link href="/admin/partners/onboarding">
+                  <AdminButton size="sm" variant="gold" data-testid="pn-overview-onboard">
+                    Onboard a shop
+                  </AdminButton>
+                </Link>
+              }
+            >
               <div className="flex flex-wrap items-center gap-3">
                 <span>
                   {overview.partners.total} shop{overview.partners.total === 1 ? "" : "s"} in the network.
