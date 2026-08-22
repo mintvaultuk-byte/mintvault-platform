@@ -1,0 +1,39 @@
+# ─────────────────────────────────────────────────────────────────────────────
+# MintVault code ownership
+#
+# GitHub requests a review from the listed owner on any pull request touching a
+# matching path. Combined with branch protection this makes the frozen grading
+# ruleset impossible to change without the owner seeing it.
+# ─────────────────────────────────────────────────────────────────────────────
+
+# ═════════════════════════════════════════════════════════════════════════════
+# MVGS v1.4 — IMMUTABLE GRADING RULESET
+#
+# These paths determine how ~700 issued certificates — and the physical slabs
+# printed from them — were graded. They are frozen by SHA-256 in
+# mvgs-v1_4-freeze.manifest.json and by golden vectors in
+# tests/mvgs-v14-golden-vectors.test.ts.
+#
+# A pull request touching any of them will fail CI at the freeze gate.
+# That is intended. To change how cards grade, add shared/mvgs/v1_5/ instead.
+# ═════════════════════════════════════════════════════════════════════════════
+/shared/mvgs/                          @mintvaultuk-byte
+/shared/mvgs-scoring.ts                @mintvaultuk-byte
+/shared/centering.ts                   @mintvaultuk-byte
+/shared/pristine.ts                    @mintvaultuk-byte
+/shared/mvgs-input-builder.ts          @mintvaultuk-byte
+/shared/grade-presentation.ts          @mintvaultuk-byte
+/server/lib/draft-grade-authority.ts   @mintvaultuk-byte
+/server/lib/grade-kind.ts              @mintvaultuk-byte
+/mvgs-v1_4-freeze.manifest.json        @mintvaultuk-byte
+/scripts/mvgs/                         @mintvaultuk-byte
+/tests/fixtures/mvgs-v1_4-golden.json  @mintvaultuk-byte
+/tests/mvgs-v14-freeze.test.ts         @mintvaultuk-byte
+/tests/mvgs-v14-golden-vectors.test.ts @mintvaultuk-byte
+
+# The published standard is the customer-facing statement of those same rules.
+/client/src/pages/standard.tsx         @mintvaultuk-byte
+
+# Payments and auth remain owner-reviewed for the same reason: consequence.
+/server/stripeClient.ts                @mintvaultuk-byte
+/migrations/                           @mintvaultuk-byte

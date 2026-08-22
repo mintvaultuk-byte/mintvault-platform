@@ -53,12 +53,12 @@ describe("role write paths suppress no-op audit rows", () => {
       .mockResolvedValueOnce({
         rows: [{ id: 700, assigned_grader_id: "grader-1", grader_status: "pending_review" }],
       })
-      // Server-owned grade authority consults calibration before the draft
-      // write, then buildCertGradingPayload repeats that read for its returned
-      // authoritative result.
-      .mockResolvedValueOnce({ rows: [] })
-      .mockResolvedValueOnce({ rows: [{ grading_revision: 1 }] })
-      .mockResolvedValueOnce({ rows: [] });
+      // The two calibration SELECTs that used to sit here are GONE. The MVGS
+      // v1.4 freeze pinned calibration to constants in shared/mvgs/v1_4, so the
+      // grade authority no longer reads `pipeline_settings` — neither for the
+      // draft write nor for buildCertGradingPayload's returned result. The
+      // remaining execute is the draft UPDATE itself.
+      .mockResolvedValueOnce({ rows: [{ grading_revision: 1 }] });
     runtime.getCertificate.mockResolvedValue({ ...certSnapshot });
 
     const result = await adminReviewSaveDraft(

@@ -1,5 +1,63 @@
 # CLAUDE.md — MintVault Project Guardrails
 
+## 🧊 MVGS v1.4 IS FROZEN — READ THIS BEFORE TOUCHING ANY GRADING CODE
+
+**MVGS v1.4 is an immutable grading ruleset. It is a historical protocol version,
+not ordinary application code.**
+
+Roughly 700 certificates — and the physical slabs printed from them, already in
+customers' hands — were graded under these exact rules. A grade is a published
+claim about someone else's property. Changing v1.4 silently re-states every one
+of those claims.
+
+### The rule
+
+**Never modify v1.4 in place.** If MintVault ever adopts different grading rules,
+they are implemented as a **new version** that coexists with v1.4:
+
+```
+shared/mvgs/v1_4/   ← frozen forever, never edited
+shared/mvgs/v1_5/   ← where a future ruleset goes
+```
+
+Register the new version in `shared/mvgs/registry.ts` and stamp new grades with
+its identifier. v1.4 stays exactly as it is.
+
+### Frozen paths
+
+`shared/mvgs/**` · `shared/mvgs-scoring.ts` · `shared/centering.ts` ·
+`shared/pristine.ts` · `shared/mvgs-input-builder.ts` ·
+`shared/grade-presentation.ts` · `server/lib/draft-grade-authority.ts` ·
+`server/lib/grade-kind.ts` · `mvgs-v1_4-freeze.manifest.json` ·
+`tests/fixtures/mvgs-v1_4-golden.json`
+
+Protected by SHA-256 (`scripts/mvgs/verify-freeze.ts`, run by CI on every PR),
+by 97 golden vectors, by a dependency-closure guard, and by CODEOWNERS.
+
+### Instructions to AI agents (Claude, Codex, any other)
+
+If a task appears to require modifying MVGS v1.4 — **STOP and report the
+conflict**. Do not proceed. Say plainly that v1.4 is frozen and that the work
+needs a new rules version, then wait for the owner.
+
+You must NOT, on v1.4:
+
+- improve, refactor, simplify, optimise or "clean up" it
+- update a threshold, weight, band, cap, ceiling or ladder
+- deduplicate it into mutable shared code
+- edit comments — **comment edits change the hash and break the freeze**
+- migrate it to a different algorithm
+- change a golden fixture or a test expectation to match new behaviour
+- run `scripts/mvgs/reseal-freeze.ts` or
+  `scripts/mvgs/generate-golden-vectors.ts` to make a red build go green
+
+That last one matters most. Those two scripts exist for a deliberate,
+owner-approved change and each demands a long explicit flag. **Reaching for them
+because CI is red is exactly the failure this freeze exists to prevent.** A
+failing freeze check is not a broken test — it is the alarm working.
+
+**A red freeze gate means: you changed grading. Undo it, or ship v1.5.**
+
 ## MANDATORY COMPLETION CONTROLLER
 
 Before every build, audit, repair, security, migration or release task, read and obey:
