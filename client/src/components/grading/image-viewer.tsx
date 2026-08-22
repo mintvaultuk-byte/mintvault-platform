@@ -1,4 +1,5 @@
 import { useState, useRef, useEffect, useLayoutEffect, lazy, Suspense } from "react";
+import { cardToolEnabled } from "./card-tool-image-source";
 import { sessionRequiredRailWidth } from "@shared/rail-width";
 import { usePublishRailWidth } from "@/components/grading-workflow/rail-width-context";
 import { createPortal } from "react-dom";
@@ -1050,6 +1051,13 @@ export default function ImageViewer({
     Boolean(getWorkingEvidenceAsset(urls, "front")) && workingEvidence?.front?.available === true;
   const backWorkingEvidenceAvailable =
     Boolean(getWorkingEvidenceAsset(urls, "back")) && workingEvidence?.back?.available === true;
+  /*
+   * The Card Tool enable gate reads the SAME authority the tool itself launches from, so the two
+   * can never disagree — that disagreement is exactly the regression this replaces (image visible
+   * via the review fallback, tool permanently disabled).
+   */
+  const frontCardToolAvailable = cardToolEnabled({ side: "front", urls, workingEvidence, reviewEvidence });
+  const backCardToolAvailable = cardToolEnabled({ side: "back", urls, workingEvidence, reviewEvidence });
   const sideDefects = defects.filter((d) => d.image_side === side);
   const frontDefectCount = defects.filter((d) => d.image_side === "front").length;
   const backDefectCount = defects.filter((d) => d.image_side === "back").length;
@@ -2410,7 +2418,7 @@ export default function ImageViewer({
         {onOpenCardTool && mutationsEnabled && !readOnly && (
           <>
             {(["front", "back"] as const).map((toolSide) => {
-              const available = toolSide === "front" ? frontWorkingEvidenceAvailable : backWorkingEvidenceAvailable;
+              const available = toolSide === "front" ? frontCardToolAvailable : backCardToolAvailable;
               return (
                 <button
                   key={toolSide}
@@ -2420,7 +2428,7 @@ export default function ImageViewer({
                   title={
                     available
                       ? `Open Card Tool — ${toolSide.toUpperCase()}`
-                      : "Working evidence is required before this side's Card Tool can open"
+                      : "An authorised full-resolution image for this side is required before its Card Tool can open"
                   }
                   data-testid={`btn-card-tool-${toolSide}`}
                   className="flex items-center gap-1.5 text-[10px] font-black uppercase tracking-wide px-3.5 py-1.5 rounded border border-[#B8960C] text-[#1A1400] [background:linear-gradient(135deg,#D4AF37_0%,#B8960C_100%)] shadow-[0_2px_8px_rgba(212,175,55,0.35)] transition-all hover:brightness-110 hover:shadow-[0_3px_12px_rgba(212,175,55,0.5)] hover:-translate-y-px active:translate-y-0 disabled:cursor-not-allowed disabled:opacity-40"
