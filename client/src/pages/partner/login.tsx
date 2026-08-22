@@ -4,7 +4,7 @@
  * recovery code) completes the session. No auth logic is duplicated client-side — every decision
  * is the server's.
  */
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { Link, useLocation } from "wouter";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -18,7 +18,7 @@ const GENERIC_LOGIN_ERROR = "We could not sign you in with those details.";
 
 export default function PartnerLoginPage() {
   const [, navigate] = useLocation();
-  const { refresh } = usePartnerSession();
+  const { refresh, session, ready, isLoading } = usePartnerSession();
   /**
    * A user with two-factor REQUIRED but no authenticator registered cannot satisfy the "enter your
    * 6-digit code" step — there is nothing to get a code from. The SERVER now says so directly
@@ -35,6 +35,27 @@ export default function PartnerLoginPage() {
   const [useRecovery, setUseRecovery] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [submitting, setSubmitting] = useState(false);
+
+  /*
+   * REVERSE GUARD — an authenticated, MFA-complete session must never sit on the sign-in form.
+   *
+   * PartnerRouteGuard sends a session it considers incomplete here. That is correct for a signed-out
+   * visitor, but this page offered an already-authenticated owner nothing except a password box, and
+   * signing in again REVOKES the good session (server/partner/auth.ts's one-active-session policy)
+   * and mints a new one — which is precisely the observed LOGIN → MFA → LOGIN loop. One bad bounce
+   * became permanent because the only affordance on this screen restarted the cycle.
+   *
+   * Scoped deliberately to the "credentials" step. During "enrol" the server has already marked the
+   * acting session mfa_passed=true at confirm time, while the user is still reading their one-time
+   * recovery codes; redirecting on that transition would navigate them away from codes they can
+   * never be shown again. The in-flight MFA and enrolment steps do their own navigation once the
+   * user has finished, and this must not race them.
+   */
+  useEffect(() => {
+    if (step === "credentials" && !submitting && ready && !isLoading && session?.mfaPassed) {
+      navigate("/partner/dashboard");
+    }
+  }, [step, submitting, ready, isLoading, session, navigate]);
 
   async function handleCredentials(e: React.FormEvent) {
     e.preventDefault();
