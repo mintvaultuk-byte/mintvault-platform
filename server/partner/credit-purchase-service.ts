@@ -811,7 +811,23 @@ export async function fulfilPartnerCreditPurchase(
       tenantId: session.metadata?.partner_tenant_id ?? null,
       sessionId: session.id ?? null,
       kind: outcome.reason,
-    }).catch(() => {});
+    }).catch((error) => {
+      /*
+       * This is the ONLY remaining trace of a customer who paid and received nothing. Swallowing it
+       * silently defeats the entire purpose of the wrapper: the refusal is already reported to
+       * Stripe as handled, so if the durable record also fails to write, the money-taken-no-credits
+       * event survives only in a log line that rotates away. Fail LOUD instead — the write stays
+       * best-effort so a failed audit can never turn a permanent refusal into an infinite Stripe
+       * retry, but it can no longer be invisible.
+       */
+      console.error(
+        "[partner credits] SETTLEMENT EXCEPTION WRITE FAILED — customer paid, no credits granted, no durable record:",
+        `event=${stripeEventId}`,
+        `reason=${outcome.reason}`,
+        `tenant=${session.metadata?.partner_tenant_id ?? "<none>"}`,
+        (error as Error)?.message ?? "unknown"
+      );
+    });
   }
   return outcome;
 }
