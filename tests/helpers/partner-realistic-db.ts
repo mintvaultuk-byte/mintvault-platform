@@ -430,6 +430,10 @@ export const PARTNER_SCHEMA_MIGRATIONS = [
   // PARTNER scope: one-value CHECK widen on partner_management_audit, the same shape as 0096 and
   // 0105. No core table dependency.
   "0110_partner_permanent_deletion_audit_vocabulary",
+  // PARTNER scope: the supplies catalogue, orders, payments, refunds and their RLS. Every foreign
+  // key points at a partner_* table; it touches no core certificate or submission table, so a
+  // partner-only disposable database models it exactly as production would.
+  "0111_partner_supply_commerce",
 ] as const;
 
 /** True when a declared list pulls in a migration that needs the core schema. */

@@ -73,6 +73,7 @@ import { mountPartnerPortal } from "./partner/mount";
 import { registerPartnerFlagAdminRoutes } from "./partner/flag-admin-routes";
 import { registerPartnerDashboardRoutes } from "./partner/dashboard-routes";
 import { registerPartnerSuppliesAdminRoutes } from "./partner/supplies-admin-routes";
+import { registerPartnerSupplyAdminRoutes } from "./partner/supply-admin-routes";
 import { registerPublicPartnerPresenceRoutes } from "./partner/public-presence-routes";
 import { registerCommandCentreRoutes } from "./command-centre/routes";
 import { registerCommercialGrowthRoutes } from "./routes/admin/commercial-growth";
@@ -2894,6 +2895,8 @@ export async function registerRoutes(httpServer: Server, app: Express): Promise<
   registerPartnerStationAdminRoutes(app); // server-paginated station fleet control
   registerPartnerDashboardRoutes(app); // Partner Master Dashboard (requireSuperAdmin-gated, read-only)
   registerPartnerSuppliesAdminRoutes(app); // Partner physical-supplies operations (Super Admin only)
+  // Supply catalogue + priced order fulfilment/refunds (requireSuperAdmin-gated).
+  registerPartnerSupplyAdminRoutes(app);
   registerCommandCentreRoutes(app); // Command Centre is feature-gated and Super-Admin read-only
   registerCommercialGrowthRoutes(app); // GB-04 aggregate/lead Super Admin Growth Command
   registerReviewRequestRoutes(app); // GB-05 signed review redirect + explicit suppression confirmation

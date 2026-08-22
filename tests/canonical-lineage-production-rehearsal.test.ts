@@ -86,10 +86,13 @@ const AUDIT_IDEMPOTENCY_SCOPE_MIGRATION = "0107_partner_management_audit_idempot
 const SETUP_ONLY_DELETION_MIGRATION = "0108_partner_setup_only_deletion_retention.sql";
 const CARD_JOB_PURPOSE_MIGRATION = "0109_partner_card_job_purpose.sql";
 const DELETION_AUDIT_VOCABULARY_MIGRATION = "0110_partner_permanent_deletion_audit_vocabulary.sql";
+/** The supplies commerce catalogue, recovered from 0549c0cc and renumbered above 0110. */
+const SUPPLY_COMMERCE_MIGRATION = "0111_partner_supply_commerce.sql";
 const DELETION_STAGE_MIGRATIONS = [
   SETUP_ONLY_DELETION_MIGRATION,
   CARD_JOB_PURPOSE_MIGRATION,
   DELETION_AUDIT_VOCABULARY_MIGRATION,
+  SUPPLY_COMMERCE_MIGRATION,
 ] as const;
 const isDeletionStage = (filename: string): boolean =>
   (DELETION_STAGE_MIGRATIONS as readonly string[]).includes(filename);
@@ -346,6 +349,7 @@ describe("canonical Partner/Scanner production-journal rehearsal", () => {
     expect(deletionBefore.pending).toEqual([...DELETION_STAGE_MIGRATIONS]);
     expect(deletionBefore.inconsistent).toEqual([]);
     expect(deletionBefore.checksumMismatches).toEqual([]);
+    // 0111 is purely additive — new tables, grants and RLS — so it contributes no destructive entry.
     expect(deletionBefore.destructive.map((entry) => entry.filename)).toEqual([
       SETUP_ONLY_DELETION_MIGRATION,
       DELETION_AUDIT_VOCABULARY_MIGRATION,
@@ -375,7 +379,7 @@ describe("canonical Partner/Scanner production-journal rehearsal", () => {
     expect(after.inconsistent).toEqual([]);
     expect(after.checksumMismatches).toEqual([]);
     expect(deletionApplied).toEqual([...DELETION_STAGE_MIGRATIONS]);
-    expect(after.alreadyApplied).toHaveLength(74);
+    expect(after.alreadyApplied).toHaveLength(75);
   });
 
   it("applies growth 0100/0101, then public 0102/0103, then first-shop 0104/0105 in order", async () => {

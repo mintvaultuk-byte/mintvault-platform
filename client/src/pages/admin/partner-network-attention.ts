@@ -51,6 +51,8 @@ export function alertDestination(alert: Pick<DashboardAlert, "id" | "partnerId">
   if (alert.id.startsWith("lock-")) return `/admin/partners/${alert.partnerId}/staff`;
   if (alert.id.startsWith("org-")) return `/admin/partners/${alert.partnerId}/onboarding`;
   if (alert.id.startsWith("esc-")) return "/admin/partners/settings/infrastructure";
+  // A paid supplies order stuck behind a human decision. Network-wide, so it goes to Supplies.
+  if (alert.id.startsWith("supply-")) return "/admin/partners/supplies";
   return `/admin/partners/${alert.partnerId}`;
 }
 
@@ -60,6 +62,7 @@ function alertAction(alert: Pick<DashboardAlert, "id">): string {
   if (alert.id.startsWith("lock-")) return "Open staff";
   if (alert.id.startsWith("org-")) return "Continue onboarding";
   if (alert.id.startsWith("esc-")) return "Open infrastructure";
+  if (alert.id.startsWith("supply-")) return "Open supplies";
   return "Open shop";
 }
 

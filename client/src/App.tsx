@@ -153,6 +153,7 @@ const AdminPartnerNetworkStationsPage = lazy(() => import("@/pages/admin/partner
 const AdminPartnerNetworkOverviewPage = lazy(() => import("@/pages/admin/partner-network-overview"));
 const AdminPartnerNetworkShopsPage = lazy(() => import("@/pages/admin/partner-network-shops"));
 const AdminPartnerSuppliesOrdersPage = lazy(() => import("@/pages/admin/partner-supplies-orders"));
+const AdminPartnerSuppliesPage = lazy(() => import("@/pages/admin/partner-supplies"));
 
 // Exposure-only kill switch for the consolidated Super Admin IA. It does not alter APIs,
 // permissions or mutations: with the flag off, canonical URLs simply lead back to their legacy
@@ -503,7 +504,13 @@ function Router() {
           {/* Partner Network static routes MUST remain above /admin/partners/:partnerId:
               a Partner id is a UUID, so literals such as stations/infrastructure/settings must
               never be treated as an identifier or cause a Partner lookup. */}
-          <Route path="/admin/partners/supplies" component={AdminPartnerSuppliesOrdersPage} />
+          {/*
+           * SUPPLIES = the priced catalogue (Products) plus fulfilment (Orders). The earlier
+           * request-and-email supplies surface is kept reachable at its own url so nothing that
+           * links to it breaks, but it is no longer the Supplies destination.
+           */}
+          <Route path="/admin/partners/supplies" component={AdminPartnerSuppliesPage} />
+          <Route path="/admin/partners/supplies/requests" component={AdminPartnerSuppliesOrdersPage} />
           {/* SHOPS — the one canonical network-wide list. */}
           <Route path="/admin/partners/shops">
             <AdminPartnerNetworkShopsPage />
