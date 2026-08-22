@@ -316,6 +316,9 @@ export const APPLICATION_SCOPE_MIGRATIONS = [
   // `certificates` table at all, so it would fail closed there — the 0073 failure mode this
   // contract exists to catch. Classified on what it TOUCHES, not on which feature motivated it.
   "0111_mvgs_rules_version",
+  // Forward-only convergence for the two-lineage 0111 collision. Touches core `certificates`,
+  // exactly like 0111 itself, so it is APPLICATION scope for the same reason.
+  "0113_lineage_convergence_mvgs_rules_version",
 ] as const;
 
 /**

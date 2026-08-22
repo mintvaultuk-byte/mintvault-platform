@@ -78,6 +78,12 @@ const PUBLIC_PRESENCE_CONVERGENCE_MIGRATION = "0106_lineage_convergence_public_p
 const AUDIT_IDEMPOTENCY_SCOPE_MIGRATION = "0107_partner_management_audit_idempotency_scope.sql";
 const MVGS_RULES_VERSION_MIGRATION = "0111_mvgs_rules_version.sql";
 /**
+ * Forward-only convergence for the two-lineage 0111 collision. It applies LAST, after the
+ * deletion stage, and must plan NON-destructive on a host that already carries 0111 — that is
+ * what proves it is a safe no-op on production rather than a second grading migration.
+ */
+const MVGS_CONVERGENCE_MIGRATION = "0113_lineage_convergence_mvgs_rules_version.sql";
+/**
  * The setup-only deletion stage: retention re-pointing (0108), the onboarding test-card marker
  * (0109) and the audit vocabulary the guarded deletion needs (0110). They sit ABOVE first-shop
  * onboarding, and two of the three are DECLARED destructive — 0108 re-points four tenant foreign
@@ -182,6 +188,7 @@ let completionApplied: string[];
 let publicPresenceApplied: string[];
 let firstShopApplied: string[];
 let mvgsRulesVersionApplied: string[];
+let convergenceApplied: string[];
 let deletionApplied: string[];
 
 describe("canonical Partner/Scanner production-journal rehearsal", () => {
@@ -240,7 +247,8 @@ describe("canonical Partner/Scanner production-journal rehearsal", () => {
         file.filename !== PUBLIC_PRESENCE_CONVERGENCE_MIGRATION &&
         file.filename !== AUDIT_IDEMPOTENCY_SCOPE_MIGRATION &&
         file.filename !== MVGS_RULES_VERSION_MIGRATION &&
-        !isDeletionStage(file.filename)
+        !isDeletionStage(file.filename) &&
+        file.filename !== MVGS_CONVERGENCE_MIGRATION
     );
     const before = await planMigrations(migrator as never, preGrowthFiles);
     expect(before.alreadyApplied).toHaveLength(41);
@@ -272,7 +280,8 @@ describe("canonical Partner/Scanner production-journal rehearsal", () => {
         file.filename !== PUBLIC_PRESENCE_CONVERGENCE_MIGRATION &&
         file.filename !== AUDIT_IDEMPOTENCY_SCOPE_MIGRATION &&
         file.filename !== MVGS_RULES_VERSION_MIGRATION &&
-        !isDeletionStage(file.filename)
+        !isDeletionStage(file.filename) &&
+        file.filename !== MVGS_CONVERGENCE_MIGRATION
     );
     const growthBefore = await planMigrations(migrator as never, attributionFiles);
     expect(growthBefore.alreadyApplied).toHaveLength(63);
@@ -292,7 +301,8 @@ describe("canonical Partner/Scanner production-journal rehearsal", () => {
         file.filename !== PUBLIC_PRESENCE_CONVERGENCE_MIGRATION &&
         file.filename !== AUDIT_IDEMPOTENCY_SCOPE_MIGRATION &&
         file.filename !== MVGS_RULES_VERSION_MIGRATION &&
-        !isDeletionStage(file.filename)
+        !isDeletionStage(file.filename) &&
+        file.filename !== MVGS_CONVERGENCE_MIGRATION
     );
     const completionBefore = await planMigrations(migrator as never, completionFiles);
     expect(completionBefore.alreadyApplied).toHaveLength(64);
@@ -312,7 +322,8 @@ describe("canonical Partner/Scanner production-journal rehearsal", () => {
         file.filename !== PUBLIC_PRESENCE_CONVERGENCE_MIGRATION &&
         file.filename !== AUDIT_IDEMPOTENCY_SCOPE_MIGRATION &&
         file.filename !== MVGS_RULES_VERSION_MIGRATION &&
-        !isDeletionStage(file.filename)
+        !isDeletionStage(file.filename) &&
+        file.filename !== MVGS_CONVERGENCE_MIGRATION
     );
     const publicPresenceBefore = await planMigrations(migrator as never, publicPresenceFiles);
     expect(publicPresenceBefore.alreadyApplied).toHaveLength(65);
@@ -327,7 +338,10 @@ describe("canonical Partner/Scanner production-journal rehearsal", () => {
     // 0105 rewrites the management-audit vocabulary constraint, so it is a declared,
     // owner-approved destructive entry and must be planned as one.
     const firstShopFiles = files.filter(
-      (file) => file.filename !== MVGS_RULES_VERSION_MIGRATION && !isDeletionStage(file.filename)
+      (file) =>
+        file.filename !== MVGS_RULES_VERSION_MIGRATION &&
+        !isDeletionStage(file.filename) &&
+        file.filename !== MVGS_CONVERGENCE_MIGRATION
     );
     const firstShopBefore = await planMigrations(migrator as never, firstShopFiles);
     expect(firstShopBefore.alreadyApplied).toHaveLength(67);
@@ -350,7 +364,9 @@ describe("canonical Partner/Scanner production-journal rehearsal", () => {
     // NON-destructive — it drops nothing, rewrites no constraint, and touches no grade value —
     // so if this migration ever starts planning as destructive, that is a real regression and
     // this assertion is what catches it before it reaches production.
-    const mvgsFiles = files.filter((file) => !isDeletionStage(file.filename));
+    const mvgsFiles = files.filter(
+      (file) => !isDeletionStage(file.filename) && file.filename !== MVGS_CONVERGENCE_MIGRATION
+    );
     const mvgsRulesVersionBefore = await planMigrations(migrator as never, mvgsFiles);
     expect(mvgsRulesVersionBefore.alreadyApplied).toHaveLength(71);
     expect(mvgsRulesVersionBefore.pending).toEqual([MVGS_RULES_VERSION_MIGRATION]);
@@ -366,7 +382,8 @@ describe("canonical Partner/Scanner production-journal rehearsal", () => {
      * constraint is recreated in the same file with the intended action. A blanket flag here would
      * have proven nothing about those approvals.
      */
-    const deletionBefore = await planMigrations(migrator as never, files);
+    const preConvergenceFiles = files.filter((file) => file.filename !== MVGS_CONVERGENCE_MIGRATION);
+    const deletionBefore = await planMigrations(migrator as never, preConvergenceFiles);
     expect(deletionBefore.alreadyApplied).toHaveLength(72);
     expect(deletionBefore.pending).toEqual([...DELETION_STAGE_MIGRATIONS]);
     expect(deletionBefore.inconsistent).toEqual([]);
@@ -376,7 +393,20 @@ describe("canonical Partner/Scanner production-journal rehearsal", () => {
       SETUP_ONLY_DELETION_MIGRATION,
       DELETION_AUDIT_VOCABULARY_MIGRATION,
     ]);
-    deletionApplied = (await applyMigrations(migrator as never, files)).applied;
+    deletionApplied = (await applyMigrations(migrator as never, preConvergenceFiles)).applied;
+
+    /*
+     * The convergence stage. On THIS rehearsal the journal already carries 0111, exactly as
+     * production does, so 0113 must plan as pending, NON-destructive, and apply as a no-op that
+     * changes no grade value. If it ever starts planning destructive, that is a real regression.
+     */
+    const convergenceBefore = await planMigrations(migrator as never, files);
+    expect(convergenceBefore.alreadyApplied).toHaveLength(76);
+    expect(convergenceBefore.pending).toEqual([MVGS_CONVERGENCE_MIGRATION]);
+    expect(convergenceBefore.inconsistent).toEqual([]);
+    expect(convergenceBefore.checksumMismatches).toEqual([]);
+    expect(convergenceBefore.destructive).toEqual([]);
+    convergenceApplied = (await applyMigrations(migrator as never, files)).applied;
   }, 180_000);
 
   afterAll(async () => {
@@ -402,8 +432,9 @@ describe("canonical Partner/Scanner production-journal rehearsal", () => {
     expect(after.inconsistent).toEqual([]);
     expect(after.checksumMismatches).toEqual([]);
     expect(deletionApplied).toEqual([...DELETION_STAGE_MIGRATIONS]);
-    // 71 pre-existing + 0111 (MVGS rules version) + the four deletion-stage migrations.
-    expect(after.alreadyApplied).toHaveLength(76);
+    expect(convergenceApplied).toEqual([MVGS_CONVERGENCE_MIGRATION]);
+    // 71 pre-existing + 0111 (MVGS rules version) + four deletion-stage + 0113 convergence.
+    expect(after.alreadyApplied).toHaveLength(77);
   });
 
   it("applies growth 0100/0101, then public 0102/0103, then first-shop 0104/0105 in order", async () => {

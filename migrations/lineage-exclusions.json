@@ -1,26 +1,8 @@
 [
   {
-    "incoming": "0044_partner_mfa_pending_lifecycle.sql",
-    "occupant": "0044_partner_submission_lifecycle_and_location_snapshot.sql",
-    "supersededBy": "0090_lineage_convergence_scanner.sql",
-    "reason": "Staging's 0044 slot is its old submission-lifecycle identity (renumbered to 0074 for this release). Staging already applied this exact MFA body \u2014 byte-identical checksum \u2014 as its own 0046_partner_mfa_pending_lifecycle.sql, so the content is present; 0090 verifies it and fails loudly if absent."
-  },
-  {
-    "incoming": "0046_scanner_processing_jobs.sql",
-    "occupant": "0046_partner_mfa_pending_lifecycle.sql",
-    "supersededBy": "0090_lineage_convergence_scanner.sql",
-    "reason": "Staging's 0046 slot is its applied MFA lifecycle identity (production applied the same MFA body at 0044). The scanner_processing_jobs content is genuinely missing on staging and is delivered idempotently by 0090."
-  },
-  {
-    "incoming": "0047_scanner_evidence_staging.sql",
-    "occupant": "0047_partner_owner_invariant_tenants_rls.sql",
-    "supersededBy": "0090_lineage_convergence_scanner.sql",
-    "reason": "Staging's 0047 slot is its applied owner-invariant/tenants-RLS identity (whose semantics reach other hosts via 0073). The scanner_evidence_staging content is genuinely missing on staging and is delivered idempotently by 0090."
-  },
-  {
-    "incoming": "0102_partner_public_presence.sql",
-    "occupant": "0102_partner_supplies_orders.sql",
-    "supersededBy": "0106_lineage_convergence_public_presence.sql",
-    "reason": "Staging's 0102 slot holds the first-shop supplies migration under its PRE-RENAME identity, applied there before the collision with main's already-released 0102_partner_public_presence.sql was found; the supplies pair was then renumbered to 0104/0105 for this release. Applied history is immutable, so staging's row stands and main's 0102 is excluded on that host. The public-presence content is genuinely missing there and is delivered idempotently by 0106. On production and fresh estates the occupant never matches, so main's 0102 applies normally and 0106 is a no-op."
+    "incoming": "0111_mvgs_rules_version.sql",
+    "occupant": "0111_partner_supply_commerce.sql",
+    "supersededBy": "0113_lineage_convergence_mvgs_rules_version.sql",
+    "reason": "The staging lineage applied the supplies commerce migration as 0111 before this release renumbered it to 0112. That journal row is immutable, so production's 0111_mvgs_rules_version.sql can never apply on that host. 0113 delivers the identical column, comment, backfill and index instead, and is a verified no-op wherever 0111_mvgs_rules_version.sql is already applied."
   }
 ]
