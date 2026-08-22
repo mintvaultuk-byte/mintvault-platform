@@ -25,6 +25,7 @@ import { readFileSync } from "fs";
 import { join } from "path";
 import { addedCodeOf, addedJsOf, hasMalformedEscape } from "./helpers/strip-non-code";
 import { protectedChangedFiles, protectedDiffFor } from "./helpers/protected-diff";
+import { MVGS_V14_FILES, mvgsV14Verdict } from "./helpers/mvgs-v14-authorisation";
 import {
   validateStructuredVariant,
   structuredColumnsToCertFields,
@@ -1064,15 +1065,40 @@ describe("rendering + protected-system guarantees (items 20-22)", () => {
         //    fails here.
         const signatureG =
           /\breturnCardJobToGraderForCertificate\b/.test(addedJs) && /\bapproveCardJobForCertificate\b/.test(addedJs);
+        // H) MVGS rules-version stamp — founder-approved 2026-08-22, narrowly, as part of the
+        //    v1.4 half-grade reconciliation (see tests/helpers/mvgs-v14-authorisation.ts for the
+        //    full approval). MVGS had NO rules version at all, which made "approved grades are
+        //    immutable" unenforceable: nothing recorded which revision of the engine issued any
+        //    given certificate, so a future scoring change would silently reinterpret every
+        //    historical grade.
+        //
+        //    This authorises the workflow to PERSIST a provenance string that the separately
+        //    tested server authority already sealed — the same shape signature F authorises for
+        //    the grade itself. BOTH tokens are required, so an incidental edit cannot satisfy
+        //    it: the column assignment, and the fact that its value comes from the authority
+        //    rather than from the request or from a computation in this file.
+        //
+        //    THIS AUTHORISES NO MATHS. `authority.rulesVersion` is a string the resolver
+        //    returns; nothing here reads, derives, compares or arithmetises a grade. The
+        //    calculation-token assertion below still applies unchanged — the only concession is
+        //    that the literal COLUMN NAME `mvgs_rules_version` and the resolver output field
+        //    `authority.rulesVersion` are stripped before it runs, exactly as the four B3
+        //    sub-grade column names already are. Bare `mvgs`, `pristine`, `centering`,
+        //    `gradeNum`, `calculateOverallGrade` and `scoreMvgs` all still fail.
+        const signatureH =
+          /mvgs_rules_version\s*=\s*\$\{authority\.rulesVersion\}/.test(addedCode) &&
+          /\bauthority\.rulesVersion\b/.test(addedJs);
         expect(
-          signatureA || signatureB || signatureC || signatureD || signatureE || signatureF || signatureG,
+          signatureA || signatureB || signatureC || signatureD || signatureE || signatureF || signatureG || signatureH,
           "server/grader.ts changed but matches no founder-authorised signature"
         ).toBe(true);
         const revisionBoundAddedCode = (
           signatureF ? addedCode.replace(/\bauthority\.subgrades\.(centering|corners|edges|surface)\b/g, "") : addedCode
         )
           .replace(/'(centering|corners|edges|surface)'/g, "")
-          .replace(/\b(centering_score|corners_score|edges_score|surface_score)\b/g, "");
+          .replace(/\b(centering_score|corners_score|edges_score|surface_score)\b/g, "")
+          .replace(/\bmvgs_rules_version\b/g, "")
+          .replace(/\bauthority\.rulesVersion\b/g, "");
         expect(revisionBoundAddedCode).not.toMatch(
           /mvgs|pristine|centering|calculateOverallGrade|scoreMvgs|cert_id|certificate_number/i
         );
@@ -1096,6 +1122,26 @@ describe("rendering + protected-system guarantees (items 20-22)", () => {
         expect(addedJs).not.toMatch(
           /mvgs|pristine|centering|calculateOverallGrade|scoreMvgs|certificate_number|certificateNumber/i
         );
+        continue;
+      }
+      // H) MVGS v1.4 half-grade reconciliation — founder-approved 2026-08-22, narrowly, for the
+      //    ONE defect that made the PUBLISHED grade 9.5 (Mint+) unissuable: the floor rule's
+      //    +0.5 bump required an aggregate gap of 4, which a lowest subgrade of 9 can never
+      //    reach because the other three subgrades top out at 10. Production held 0 of 714
+      //    certificates at 9.5 while 140 sat at a lowest subgrade of 9.
+      //
+      //    The authorisation is stated ONCE in tests/helpers/mvgs-v14-authorisation.ts and is
+      //    called by BOTH copies of this guard, so the pair cannot disagree the way signature G
+      //    once did — that defect is recorded in G's own comment in this file. It permits three
+      //    things and refuses everything else: the named floor-rule threshold, a purely
+      //    additive centering-chart renderer, and the AI prompts reading that renderer instead
+      //    of their four drifted hand-written copies. It authorises NO change to any deduction
+      //    weight, band boundary, grade bracket, cap, ceiling, calibration value or the
+      //    Pristine gate — the verdict refuses a diff that removes an unlisted line or adds a
+      //    scoring literal.
+      if ((MVGS_V14_FILES as readonly string[]).includes(f)) {
+        const verdict = mvgsV14Verdict(f, protectedDiffFor(f));
+        expect(verdict.authorised, `${f}: ${verdict.reason}`).toBe(true);
         continue;
       }
       expect(f, `unexpected grading-engine change: ${f}`).not.toMatch(engine);

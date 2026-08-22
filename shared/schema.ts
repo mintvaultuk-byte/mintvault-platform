@@ -498,6 +498,10 @@ export const certificates = pgTable("certificates", {
   qrPayloadUrl: text("qr_payload_url"),
   labelType: text("label_type").notNull().default("Standard"),
   gradeType: text("grade_type").notNull().default("numeric"),
+  /** MVGS ruleset the stored grade was computed under (e.g. "v1.4"). NULL on
+   *  rows written before the column existed; the 0111 migration backfills those
+   *  to the ruleset they were actually issued under. Never recalculated. */
+  mvgsRulesVersion: text("mvgs_rules_version"),
   cardGame: text("card_game"),
   setName: text("set_name"),
   cardName: text("card_name"),

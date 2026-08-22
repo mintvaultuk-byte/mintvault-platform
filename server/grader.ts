@@ -1222,6 +1222,10 @@ export async function applyCertGradeDraft(certId: number, body: any, extraWhere:
       corners_score   = ${isNonNum ? null : authority.subgrades.corners},
       edges_score     = ${isNonNum ? null : authority.subgrades.edges},
       surface_score   = ${isNonNum ? null : authority.subgrades.surface},
+      -- Stamp the ruleset this grade was computed under. Draft writes only:
+      -- the WHERE clause below refuses any row with grade_approved_at set, so
+      -- an approved certificate's version can never be rewritten.
+      mvgs_rules_version = ${authority.rulesVersion},
       centering_front_lr = ${pick(body.centering_front_lr, cert.centeringFrontLr)},
       centering_front_tb = ${pick(body.centering_front_tb, cert.centeringFrontTb)},
       centering_back_lr  = ${pick(body.centering_back_lr, cert.centeringBackLr)},

@@ -13,7 +13,13 @@
  */
 import { centeringSubgrade, centeringSubgradeStrict } from "@shared/centering";
 import { scoreMvgsV2 } from "@shared/mvgs-input-builder";
-import { gradeFromMvgsScore, legacyCeilingForFlags, mvgsTierName } from "@shared/mvgs-scoring";
+import {
+  gradeFromMvgsScore,
+  legacyCeilingForFlags,
+  mvgsTierName,
+  MVGS_RULES_VERSION,
+  remainingToGrade,
+} from "@shared/mvgs-scoring";
 import { isPristine } from "@shared/pristine";
 import { kindOfGradeType } from "./grade-kind";
 import { loadMvgsCalibration } from "./mvgs-calibration";
@@ -31,6 +37,9 @@ export interface DraftGradeAuthority {
   pristine: boolean;
   score: number | null;
   deductions: Record<string, number>;
+  /** MVGS ruleset this result was computed under. Persisted with the grade so a
+   *  future rules change cannot retroactively reinterpret an issued grade. */
+  rulesVersion: string;
 }
 
 type AnyRecord = Record<string, any>;
@@ -62,18 +71,6 @@ function selectedZoneMinimum(values: unknown): number {
     (value): value is number => typeof value === "number" && Number.isFinite(value) && value > 0
   );
   return selected.length === 0 ? 10 : Math.min(...selected);
-}
-
-function remainingToGrade(remaining: number): number {
-  if (remaining >= 23) return 10;
-  if (remaining >= 20) return 9;
-  if (remaining >= 17) return 8;
-  if (remaining >= 14) return 7;
-  if (remaining >= 11) return 6;
-  if (remaining >= 8) return 5;
-  if (remaining >= 3) return 3;
-  if (remaining >= 1) return 2;
-  return 1;
 }
 
 function legacyOverall(
@@ -173,6 +170,7 @@ export async function resolveDraftGradeAuthority(cert: AnyRecord, body: AnyRecor
       pristine: false,
       score: null,
       deductions: result.deductions,
+      rulesVersion: MVGS_RULES_VERSION,
     };
   }
   if (resolvedKind === "NO") {
@@ -184,6 +182,7 @@ export async function resolveDraftGradeAuthority(cert: AnyRecord, body: AnyRecor
       pristine: false,
       score: null,
       deductions: result.deductions,
+      rulesVersion: MVGS_RULES_VERSION,
     };
   }
 
@@ -200,5 +199,6 @@ export async function resolveDraftGradeAuthority(cert: AnyRecord, body: AnyRecor
     pristine: isPristine(subgrades, overall, result.deductions),
     score: result.score,
     deductions: result.deductions,
+    rulesVersion: MVGS_RULES_VERSION,
   };
 }

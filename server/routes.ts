@@ -2649,6 +2649,14 @@ export async function handleCertificateGradeUpdate(req: any, res: any): Promise<
           -- Preserves the stored kind when the caller did not state one (see nextGradeType
           -- above): an autosave must never convert an authentication-only record to numeric.
           grade_type          = ${nextGradeType},
+          -- Ruleset the grade was computed under, from the same server authority
+          -- that produced the grade itself. Preserve-on-omission is deliberate:
+          -- a metadata-only autosave must not restamp a grade it did not compute.
+          mvgs_rules_version  = ${
+            isNonNum || effOverallGrade == null
+              ? sql`mvgs_rules_version`
+              : sql`${authoritativeGrade.rulesVersion}`
+          },
           grade_strength_score = ${gradeChanged ? sql`NULL` : sql`grade_strength_score`},
           corner_values       = COALESCE(${jsn(b.corners)}::jsonb, corner_values),
           edge_values         = COALESCE(${jsn(b.edges)}::jsonb,   edge_values),

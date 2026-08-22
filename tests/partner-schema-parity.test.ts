@@ -320,6 +320,7 @@ describe("partner schema ↔ migration parity", () => {
       // widening that stops a customer-chosen key matching a Super Admin action.
       "0106_lineage_convergence_public_presence.sql",
       "0107_partner_management_audit_idempotency_scope.sql",
+      "0111_mvgs_rules_version.sql",
     ]);
   });
 

@@ -216,3 +216,43 @@ export function centeringScoreDeductions(
   const back = Math.min(centeringAxisDeduction(backLR, "back"), centeringAxisDeduction(backTB, "back"));
   return { front, back };
 }
+
+/**
+ * Render one side's band table as human-readable lines, straight FROM the
+ * tables above.
+ *
+ * Prose restatements of the centering chart used to be hand-copied into
+ * server/grading-prompt.ts (four separate copies) and every one of them had
+ * drifted from the engine in a different way — two claimed a 10 required
+ * 52/48 or better (the engine and the published /standard both allow 55/45),
+ * and the low bands and the whole back chart were wrong in all four. An AI
+ * advisory grade computed from a chart the engine does not use is a grade the
+ * grader has to argue with.
+ *
+ * Callers interpolate this instead of restating the numbers, so a band edit
+ * here reaches every consumer at once and a silent divergence is not
+ * expressible.
+ */
+export function centeringChartLines(side: CenteringSide): string[] {
+  const bands = bandsFor(side);
+  return bands.map((band, i) => {
+    const prev = i === 0 ? null : bands[i - 1].maxBigger;
+    if (band.maxBigger === Infinity) return `- ${band.grade}: worse than ${prev}/${100 - (prev as number)}`;
+    const upper = `${band.maxBigger}/${100 - band.maxBigger}`;
+    if (prev === null) return `- ${band.grade}: ${upper} or better`;
+    return `- ${band.grade}: worse than ${prev}/${100 - prev}, up to and including ${upper}`;
+  });
+}
+
+/** Both charts as one prompt-ready block. Server-side callers only. */
+export function centeringChartText(): string {
+  return [
+    "FRONT centering grade thresholds (strict; whole numbers only) — keyed on the WIDER side's share:",
+    ...centeringChartLines("front"),
+    "",
+    "BACK centering grade thresholds (deliberately lenient; whole numbers only):",
+    ...centeringChartLines("back"),
+    "",
+    "Final centering subgrade = the WORST of the four axis grades (front L/R, front T/B, back L/R, back T/B), each read from its own side's chart above.",
+  ].join("\n");
+}

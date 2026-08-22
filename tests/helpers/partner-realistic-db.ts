@@ -311,6 +311,11 @@ export const APPLICATION_SCOPE_MIGRATIONS = [
   // payment/fulfilment authority. A partner-only harness has neither the
   // canonical submission lifecycle nor the review/conversion ownership model.
   "0101_growth_reviews_and_conversion",
+  // APPLICATION scope, unambiguously: 0111 is a bare `ALTER TABLE certificates ADD COLUMN` plus a
+  // backfill UPDATE over that same core table. A partner-only disposable database has no
+  // `certificates` table at all, so it would fail closed there — the 0073 failure mode this
+  // contract exists to catch. Classified on what it TOUCHES, not on which feature motivated it.
+  "0111_mvgs_rules_version",
 ] as const;
 
 /**
