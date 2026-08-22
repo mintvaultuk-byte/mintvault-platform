@@ -785,6 +785,29 @@ export function partnerApiRouter(): Router {
     try {
       const { getPartnerOnboardingReadiness } = await import("./partner-management-service");
       const readiness = await getPartnerOnboardingReadiness(req.partner!.tenantId);
+      /*
+       * PROJECT THE ROSTER OUT unless the caller may actually see the team.
+       *
+       * getPartnerOnboardingReadiness is the SUPER ADMIN projection: its `users[]` carries every
+       * colleague's email, name, role, last login, live session count and — through
+       * buildLoginReadiness — whether they have configured a password and enrolled an
+       * authenticator. This route is gated on `partner.dashboard.view`, which
+       * MVGS_ASSESSMENT_TECHNICIAN, PARTNER_RECEPTION, PARTNER_FINANCE_VIEWER and PARTNER_TRAINEE
+       * all hold, whereas the roster endpoint `GET /users` is gated on `partner.users.view`, held
+       * only by Owner and Manager. So the weaker route was returning strictly MORE than the
+       * stronger one — and handing a low-trust insider a list of exactly which colleagues have no
+       * second factor yet, which is targeting information for the grinding attack
+       * partnerMfaAccountLimiter exists to bound.
+       *
+       * The Partner surface renders only `operational` (readiness-panel.tsx), and no partner-side
+       * client reads `users[]`, so withholding it changes nothing a legitimate caller can see. The
+       * Super Admin route keeps the full projection behind requireSuperAdmin.
+       */
+      if (!req.partner!.permissions.has("partner.users.view")) {
+        const { users: _withheld, ...rest } = readiness as Record<string, unknown> & { users?: unknown };
+        res.json({ ...rest, users: [] });
+        return;
+      }
       res.json(readiness);
     } catch (err) {
       console.error("[partner dashboard] readiness read failed:", (err as Error).message);
@@ -1262,6 +1285,24 @@ export function partnerApiRouter(): Router {
         }
       );
       if (!result.ok) {
+        /*
+         * Evidence, not just a bound. The account-keyed limiter above caps a grinding campaign
+         * against this step-up gate, but until now a refused step-up wrote nothing at all — so an
+         * attacker holding a live MFA-passed session and guessing at the password (or at the second
+         * factor) was invisible to the account holder and to us. Recorded best-effort so a failed
+         * audit can never turn a 403 into a 500. `second_factor_required` is NOT recorded: it is the
+         * ordinary first leg of the two-step prompt, not a failure.
+         */
+        if (result.reason !== "second_factor_required") {
+          await withTenant({ tenantId: principal.tenantId }, async (c) =>
+            writePartnerSecurity(c, {
+              tenantId: principal.tenantId,
+              severity: "medium",
+              kind: "partner_step_up_failed",
+              detail: { userId: principal.userId },
+            })
+          ).catch(() => {});
+        }
         // A wrong password and a missing second factor are told apart, because the user can act on
         // the difference. Neither answer reveals whether the ACCOUNT exists — the session already
         // proves that, so there is nothing left to enumerate here.
@@ -1408,6 +1449,18 @@ export function partnerApiRouter(): Router {
       normalizedCode
     );
     if (!out.ok) {
+      // Same reasoning as /auth/mfa and /auth/step-up: a rejected authenticator code during
+      // enrolment is a second-factor failure and must leave evidence. Best-effort.
+      if (out.reason === "invalid_code") {
+        await withTenant({ tenantId: req.partner.tenantId }, async (c) =>
+          writePartnerSecurity(c, {
+            tenantId: req.partner!.tenantId,
+            severity: "medium",
+            kind: "partner_mfa_failed",
+            detail: { userId: req.partner!.userId, method: "totp_enrolment" },
+          })
+        ).catch(() => {});
+      }
       res.status(out.reason === "requires_current_factor" ? 403 : 400).json({ error: out.reason });
       return;
     }
