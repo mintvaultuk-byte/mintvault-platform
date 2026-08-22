@@ -326,9 +326,9 @@ describe("canonical Partner/Scanner production-journal rehearsal", () => {
     // supplies authority and the additive structured delivery address on partner_locations.
     // 0105 rewrites the management-audit vocabulary constraint, so it is a declared,
     // owner-approved destructive entry and must be planned as one.
-    const firstShopFiles = files.filter((file) => file.filename !== MVGS_RULES_VERSION_MIGRATION);
-    const firstShopBefore = await planMigrations(migrator as never, firstShopFiles);
-    const firstShopFiles = files.filter((file) => !isDeletionStage(file.filename));
+    const firstShopFiles = files.filter(
+      (file) => file.filename !== MVGS_RULES_VERSION_MIGRATION && !isDeletionStage(file.filename)
+    );
     const firstShopBefore = await planMigrations(migrator as never, firstShopFiles);
     expect(firstShopBefore.alreadyApplied).toHaveLength(67);
     expect(firstShopBefore.pending).toEqual([
@@ -350,14 +350,14 @@ describe("canonical Partner/Scanner production-journal rehearsal", () => {
     // NON-destructive — it drops nothing, rewrites no constraint, and touches no grade value —
     // so if this migration ever starts planning as destructive, that is a real regression and
     // this assertion is what catches it before it reaches production.
-    const mvgsRulesVersionBefore = await planMigrations(migrator as never, files);
+    const mvgsFiles = files.filter((file) => !isDeletionStage(file.filename));
+    const mvgsRulesVersionBefore = await planMigrations(migrator as never, mvgsFiles);
     expect(mvgsRulesVersionBefore.alreadyApplied).toHaveLength(71);
     expect(mvgsRulesVersionBefore.pending).toEqual([MVGS_RULES_VERSION_MIGRATION]);
     expect(mvgsRulesVersionBefore.inconsistent).toEqual([]);
     expect(mvgsRulesVersionBefore.checksumMismatches).toEqual([]);
     expect(mvgsRulesVersionBefore.destructive).toEqual([]);
-    mvgsRulesVersionApplied = (await applyMigrations(migrator as never, files)).applied;
-    firstShopApplied = (await applyMigrations(migrator as never, firstShopFiles, { allowDestructive: true })).applied;
+    mvgsRulesVersionApplied = (await applyMigrations(migrator as never, mvgsFiles)).applied;
 
     /*
      * The setup-only deletion stage, applied WITHOUT --allow-destructive on purpose. 0108 and 0110
@@ -367,11 +367,11 @@ describe("canonical Partner/Scanner production-journal rehearsal", () => {
      * have proven nothing about those approvals.
      */
     const deletionBefore = await planMigrations(migrator as never, files);
-    expect(deletionBefore.alreadyApplied).toHaveLength(71);
+    expect(deletionBefore.alreadyApplied).toHaveLength(72);
     expect(deletionBefore.pending).toEqual([...DELETION_STAGE_MIGRATIONS]);
     expect(deletionBefore.inconsistent).toEqual([]);
     expect(deletionBefore.checksumMismatches).toEqual([]);
-    // 0111 is purely additive — new tables, grants and RLS — so it contributes no destructive entry.
+    // 0112 is purely additive — new tables, grants and RLS — so it contributes no destructive entry.
     expect(deletionBefore.destructive.map((entry) => entry.filename)).toEqual([
       SETUP_ONLY_DELETION_MIGRATION,
       DELETION_AUDIT_VOCABULARY_MIGRATION,
@@ -401,9 +401,9 @@ describe("canonical Partner/Scanner production-journal rehearsal", () => {
     expect(after.pending).toEqual([]);
     expect(after.inconsistent).toEqual([]);
     expect(after.checksumMismatches).toEqual([]);
-    expect(after.alreadyApplied).toHaveLength(72);
     expect(deletionApplied).toEqual([...DELETION_STAGE_MIGRATIONS]);
-    expect(after.alreadyApplied).toHaveLength(75);
+    // 71 pre-existing + 0111 (MVGS rules version) + the four deletion-stage migrations.
+    expect(after.alreadyApplied).toHaveLength(76);
   });
 
   it("applies growth 0100/0101, then public 0102/0103, then first-shop 0104/0105 in order", async () => {
