@@ -34,29 +34,40 @@ interface PartnerSessionContextValue {
 
 const PartnerSessionContext = createContext<PartnerSessionContextValue | null>(null);
 
+/**
+ * The ONE place that turns a call to GET /api/partner/session into a SessionResult.
+ *
+ * Shared by the query and by refresh() on purpose. refresh() used to be `invalidateQueries` alone,
+ * which only marks the query stale and starts a refetch — the caller could reach the route guard
+ * before the new value was observable, so the guard evaluated the PRE-MFA session and bounced a
+ * just-authenticated owner back to /partner/login. refresh() now performs this same canonical fetch
+ * and writes the result into the cache synchronously, so when it resolves the cache already holds
+ * the authoritative answer and no stale value can be read in between.
+ *
+ * "Unavailable" covers every way of NOT getting an answer from the Portal: 503 (feature flag off,
+ * emergency stop, backend not provisioned), 502/504 (edge up, backend restarting) and status 0,
+ * which is what req() reports when fetch itself fails — an offline client or a dropped connection.
+ * None of those mean the user was signed out, and treating them as such wrongly claims "your
+ * session has ended" mid-session, or bounces a first load to a sign-in page that cannot work
+ * either. Only a real answer from the server (401) is signed-out.
+ */
+async function fetchSessionResult(): Promise<SessionResult> {
+  try {
+    return { kind: "session", session: await partnerAuth.session() };
+  } catch (err) {
+    if (err instanceof PartnerApiError && (err.status === 0 || err.status >= 502)) {
+      return { kind: "unavailable" };
+    }
+    return { kind: "signed-out" };
+  }
+}
+
 export function PartnerSessionProvider({ children }: { children: ReactNode }) {
   const qc = useQueryClient();
   const [ready, setReady] = useState(false);
   const { data: result, isLoading } = useQuery<SessionResult>({
     queryKey: ["/api/partner/session"],
-    queryFn: async () => {
-      try {
-        return { kind: "session", session: await partnerAuth.session() };
-      } catch (err) {
-        // TanStack Query v5 rejects `undefined` from queryFn, so every outcome is a value.
-        // "Unavailable" covers every way of NOT getting an answer from the Portal: 503 (feature
-        // flag off, emergency stop, backend not provisioned), 502/504 (edge up, backend restarting)
-        // and status 0, which is what req() reports when fetch itself fails — an offline client or
-        // a dropped connection. None of those mean the user was signed out, and treating them as
-        // such wrongly claims "your session has ended" mid-session, or bounces a first load to a
-        // sign-in page that cannot work either. Only a real answer from the server (401) is
-        // signed-out.
-        if (err instanceof PartnerApiError && (err.status === 0 || err.status >= 502)) {
-          return { kind: "unavailable" };
-        }
-        return { kind: "signed-out" };
-      }
-    },
+    queryFn: fetchSessionResult,
     staleTime: 30_000,
   });
 
@@ -74,7 +85,9 @@ export function PartnerSessionProvider({ children }: { children: ReactNode }) {
   }, [isLoading]);
 
   const refresh = useCallback(async () => {
-    await qc.invalidateQueries({ queryKey: ["/api/partner/session"] });
+    // Write-through, not invalidate-and-hope. See fetchSessionResult above: the post-MFA
+    // navigation must never be able to observe the pre-MFA session.
+    qc.setQueryData<SessionResult>(["/api/partner/session"], await fetchSessionResult());
   }, [qc]);
 
   const hasPermission = useCallback((perm: string) => !!session?.permissions?.includes(perm), [session]);
