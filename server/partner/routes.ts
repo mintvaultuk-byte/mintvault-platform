@@ -578,10 +578,27 @@ export function partnerApiRouter(): Router {
     requirePartnerCapability("partner.credits.purchase"),
     requireNotViewOnly,
     requireNotSensitiveFrozen,
-    // AG-3: spending the shop's money is the single most consequential thing a partner session can
-    // do, and it is irreversible once Stripe has the payment. Placed AFTER the capability guard so
-    // a role that may never buy is told that, rather than asked for a password that would not help.
-    requireRecentAuth(),
+    /*
+     * NO STEP-UP ON CHECKOUT CREATION — owner decision, 2026-08-22.
+     *
+     * AG-3 originally required a fresh password here because "spending the shop's money is the most
+     * consequential thing a partner session can do". Creating a Checkout Session is not that act.
+     * It GRANTS NOTHING: the quantity and price are resolved server-side from the canonical pack,
+     * the response is a URL, and credits appear only when the verified Stripe webhook fulfils the
+     * payment. The payment itself is authenticated by Stripe, on Stripe's page, with the buyer's own
+     * card or Apple Pay — so the extra MintVault password bought no protection that Stripe was not
+     * already providing, and cost every purchase an interstitial the operator read as a fault.
+     *
+     * Everything that actually protects the money is untouched and still applies above and below:
+     * an authenticated, MFA-complete session; an ACTIVE Partner; tenant scoping from the session
+     * (never the request); partner.credits.purchase; the role rule that a grading role never buys;
+     * view-only and sensitive-freeze; the canonical pack and its server-resolved price/quantity;
+     * the declared Stripe environment; and webhook-only granting with replay protection.
+     *
+     * requireRecentAuth() remains on every OTHER sensitive partner route — team invitation, role
+     * change, status change, session revocation and Google Business connect/confirm — because those
+     * change who can act, and none of them has Stripe standing between the click and the effect.
+     */
     async (req, res) => {
       const principal = req.partner!;
       try {

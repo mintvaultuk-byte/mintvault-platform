@@ -46,4 +46,17 @@ describe("guided first-shop console sends what it displays", () => {
     expect(BILLING).toContain("refetchInterval: (query) => (awaitingWebhook && !query.state.error ? 4000 : false)");
     expect(BILLING).not.toContain("refetchInterval: awaitingWebhook ? 4000 : false");
   });
+
+  it("takes BUY straight to Stripe with no MintVault password prompt in the way", () => {
+    // Case 2. The prompt was produced by the generic runProtected wrapper reacting to the server's
+    // 403 step_up_required. With the server gate gone, wrapping here would leave a prompt that can
+    // never fire and a comment claiming a protection that no longer exists.
+    const checkout = BILLING.slice(BILLING.indexOf("const checkout = useMutation"), BILLING.indexOf("return ("));
+    expect(checkout).toContain("mutationFn: (packCode: string) => partnerCredits.checkout(packCode),");
+    expect(checkout).not.toMatch(/runProtected\(/);
+    expect(BILLING).not.toContain("usePartnerStepUp");
+    // The step-up mechanism itself is untouched and still used by the surfaces that need it.
+    const users = readFileSync(join(process.cwd(), "client/src/pages/partner/users.tsx"), "utf8");
+    expect(users).toContain("runProtected");
+  });
 });
