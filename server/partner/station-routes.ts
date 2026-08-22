@@ -1,4 +1,5 @@
 import { Router, type Request, type Response, type NextFunction } from "express";
+import { partnerAdminQuery } from "./db";
 import rateLimit from "express-rate-limit";
 import {
   resolvePartnerSession,
@@ -460,6 +461,72 @@ export function partnerStationRouter(): Router {
   // rate-limit ORDER by matching the argument list with `\s*` between the middleware names,
   // and `\s*` cannot span a comment. Sitting between `requireSignedStationOperator` and
   // `partnerStationHeartbeatRateLimit` it broke that assertion while changing no behaviour.
+  /**
+   * WHO THIS STATION EXPECTS TO SIGN IN — answered BEFORE anyone signs in.
+   *
+   * An operator standing at a shop-floor Mac had no way to know which MintVault account this station
+   * belongs to. On 2026-08-22 that cost hours: the owner account for a DIFFERENT partner was used
+   * against MV-STN-6DIISWMIEU2IKRG4, authenticated perfectly, and was refused 403 by the station
+   * scope — a correct refusal that looked exactly like a broken login.
+   *
+   * STATION-SIGNED, never public. The caller proves possession of an enrolled station's private key,
+   * so this is not an email-disclosure endpoint keyed on a guessable station code: it tells an
+   * already-approved device, bound to one tenant and one location, which of that location's own
+   * operators may drive it.
+   *
+   * DISPLAY ONLY. Nothing here authorises anything. The returned addresses are a hint for the login
+   * form; authorisation still resolves server-side from session -> user -> tenant -> location ->
+   * capability on every request, and a client-supplied email grants nothing.
+   */
+  /*
+   * POST, not GET, purely because the station request signature covers a body and the Scanner's
+   * signed transport always sends one — a GET carrying a body is rejected by fetch. This reads
+   * nothing and writes nothing.
+   */
+  r.post("/stations/context", requireSignedStation, partnerStationReadRateLimit, async (req, res) => {
+    try {
+      const station = req.station!;
+      const { rows } = await partnerAdminQuery<{
+        organisation_name: string | null;
+        location_name: string | null;
+        operator_emails: string[] | null;
+      }>(
+        `SELECT o.legal_name AS organisation_name,
+                l.name       AS location_name,
+                ARRAY(
+                  SELECT u.email
+                    FROM partner_users u
+                    JOIN partner_user_locations ul ON ul.user_id = u.id AND ul.location_id = s.location_id
+                    JOIN partner_user_roles ur     ON ur.user_id = u.id
+                    JOIN partner_role_permissions rp ON rp.role_id = ur.role_id
+                    JOIN partner_permissions p     ON p.id = rp.permission_id AND p.code = 'partner.cards.scan'
+                   WHERE u.tenant_id = s.tenant_id AND u.status = 'ACTIVE'
+                   ORDER BY u.email
+                ) AS operator_emails
+           FROM partner_stations s
+           LEFT JOIN partner_organisations o ON o.id = s.tenant_id
+           LEFT JOIN partner_locations l     ON l.id = s.location_id
+          WHERE s.id = $1
+          LIMIT 1`,
+        [station.id]
+      );
+      const row = rows[0];
+      const operators = Array.from(new Set(row?.operator_emails ?? []));
+      res.json({
+        context: {
+          stationCode: station.code,
+          organisationName: row?.organisation_name ?? null,
+          locationName: row?.location_name ?? null,
+          authorisedOperators: operators,
+          /** Exactly one authorised operator means the login form can prefill and lock the address. */
+          soleOperatorEmail: operators.length === 1 ? operators[0] : null,
+        },
+      });
+    } catch (error) {
+      stationError(res, error);
+    }
+  });
+
   r.post(
     "/stations/heartbeat",
     requireSignedStation,
