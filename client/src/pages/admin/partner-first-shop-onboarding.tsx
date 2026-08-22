@@ -35,6 +35,18 @@ type FirstShop = {
   operational: PartnerOperationalReadiness;
 };
 
+type StaffUser = {
+  id: string;
+  email: string;
+  status: string;
+  role?: string;
+  role_codes?: string[];
+  location_eligible?: boolean;
+};
+type FleetStation = { stationCode?: string; station_code?: string; status: string; tenantId?: string; tenant_id?: string };
+
+const ORG_WIDE_ROLE_CODES = ["PARTNER_OWNER", "PARTNER_MANAGER", "PARTNER_FINANCE_VIEWER"];
+
 function requestKey(): string {
   return `first-shop-${crypto.randomUUID()}`;
 }
@@ -207,6 +219,71 @@ export default function PartnerFirstShopOnboardingPage() {
     setValue(value);
   };
 
+  /*
+   * Staff + station data the wizard needs to ACT rather than link out. Both come from the existing
+   * canonical admin endpoints; nothing here re-derives an authority.
+   */
+  const staffQuery = useQuery<{ users: StaffUser[] }>({
+    queryKey: [`${BASE}/partners/${partnerId}/users`],
+    enabled: Boolean(partnerId),
+  });
+  const locationsQuery = useQuery<{ locations: Location[] }>({
+    queryKey: [`${BASE}/partners/${partnerId}/locations`],
+    enabled: Boolean(partnerId),
+  });
+  const stationsQuery = useQuery<{ stations: FleetStation[] }>({
+    queryKey: [`/api/super-admin/fleet/stations?tenantId=${partnerId}`],
+    enabled: Boolean(partnerId),
+    refetchInterval: 15_000,
+  });
+
+  const activeLocations = (locationsQuery.data?.locations ?? []).filter((l) => l.status === "ACTIVE");
+  /*
+   * Operators the Scanner cannot serve: ACTIVE, NOT org-wide, and not eligible at any location.
+   * Same rule the server readiness dimension uses — this only decides who to OFFER a fix for.
+   */
+  const unassignedOperators = (staffQuery.data?.users ?? []).filter(
+    (u) =>
+      u.status === "ACTIVE" &&
+      !(u.role_codes ?? []).some((c) => ORG_WIDE_ROLE_CODES.includes(c)) &&
+      u.location_eligible !== true
+  );
+  const pendingStations = (stationsQuery.data?.stations ?? []).filter((st) => st.status === "PENDING");
+  const stationCodeOf = (st: FleetStation) => st.stationCode ?? st.station_code ?? "";
+
+  const [assignLocationId, setAssignLocationId] = useState<string>("");
+  const assignLocation = useMutation({
+    mutationFn: async (userId: string) => {
+      const locationId = assignLocationId || activeLocations[0]?.id;
+      if (!locationId) throw new Error("No ACTIVE location is available to assign.");
+      // Canonical, audited authority (partner_user_locations_changed). No direct SQL.
+      return runAdminProtected(() =>
+        apiRequest("POST", `${BASE}/partners/${partnerId}/users/${userId}/locations`, {
+          locationIds: [locationId],
+          reason: "First-shop onboarding: authorise operator location",
+        }).then((r) => r.json())
+      );
+    },
+    onSuccess: () => {
+      void queryClient.invalidateQueries({ queryKey: [`${BASE}/partners/${partnerId}/users`] });
+      void queryClient.invalidateQueries({ queryKey: [`${BASE}/partners/${partnerId}/first-shop`] });
+    },
+  });
+
+  const approveStation = useMutation({
+    mutationFn: async (stationCode: string) =>
+      // The EXISTING station transition authority, behind its existing admin step-up.
+      runAdminProtected(() =>
+        apiRequest("POST", `/api/super-admin/fleet/stations/${encodeURIComponent(stationCode)}/active`, {
+          reason: "First-shop onboarding: approve shop Scanner",
+        }).then((r) => r.json())
+      ),
+    onSuccess: () => {
+      void queryClient.invalidateQueries({ queryKey: [`/api/super-admin/fleet/stations?tenantId=${partnerId}`] });
+      void queryClient.invalidateQueries({ queryKey: [`${BASE}/partners/${partnerId}/first-shop`] });
+    },
+  });
+
   return (
     <AdminShell activeTab="dashboard" onTabChange={() => navigate("/admin")} onLogout={() => navigate("/admin")} title="First-shop onboarding" crumb="Partner Network">
       <div data-testid="first-shop-onboarding-root" style={{ maxWidth: 980 }}>
@@ -289,13 +366,104 @@ export default function PartnerFirstShopOnboardingPage() {
               <p>{shop.owner ? `Owner: ${shop.owner.email} — ${shop.owner.readiness?.onboardingState ?? shop.owner.userStatus}` : "No Partner Owner has been invited."}</p>
               <Link href={`/admin/partners/${shop.organisation.id}/staff`} data-testid="first-shop-owner-action">Open Owner setup</Link>
             </Step>
-            <Step number={5} title="Station" complete={shop.operational.dimensions.station.status === "PASS"}>
-              <p>Station enrolment must come from the real shop Scanner. Approval remains a protected Super Admin action.</p>
-              <Link href={`/admin/partners/${shop.organisation.id}/stations`} data-testid="first-shop-station-action">Open station setup</Link>
+            <Step number={5} title="Staff and operator access" complete={shop.operational.dimensions.staff?.status === "PASS"}>
+              <p data-testid="first-shop-staff-message">{shop.operational.dimensions.staff?.message ?? "Operator access could not be confirmed."}</p>
+              {unassignedOperators.length > 0 && (
+                <div data-testid="first-shop-staff-unassigned" style={{ marginTop: 10 }}>
+                  <p style={{ fontSize: 12, opacity: 0.85 }}>
+                    A location-scoped operator has every scanning capability but no authorised location, so their
+                    Scanner is offered nothing to enrol against. Assign a location here.
+                  </p>
+                  {activeLocations.length === 0 ? (
+                    <p role="alert" data-testid="first-shop-staff-no-location">
+                      This shop has no ACTIVE location yet — complete the location step first.
+                    </p>
+                  ) : (
+                    <>
+                      <label style={{ display: "grid", gap: 4, maxWidth: 320, marginBottom: 8 }}>
+                        <span style={{ fontSize: 12, opacity: 0.8 }}>Authorised location *</span>
+                        <select
+                          data-testid="first-shop-staff-location-select"
+                          value={assignLocationId || activeLocations[0].id}
+                          onChange={(event) => setAssignLocationId(event.target.value)}
+                          style={{ background: "#0d0d0d", color: "#fff", border: "1px solid #555", borderRadius: 7, padding: "8px 10px" }}
+                        >
+                          {activeLocations.map((l) => (
+                            <option key={l.id} value={l.id}>{l.name}</option>
+                          ))}
+                        </select>
+                      </label>
+                      {unassignedOperators.map((u) => (
+                        <div key={u.id} style={{ display: "flex", alignItems: "center", gap: 10, marginTop: 6, flexWrap: "wrap" }}>
+                          <span data-testid={`first-shop-staff-user-${u.id}`}>{u.email}{u.role ? ` — ${u.role}` : ""}</span>
+                          <AdminButton
+                            size="sm"
+                            variant="gold"
+                            disabled={assignLocation.isPending}
+                            onClick={() => assignLocation.mutate(u.id)}
+                            data-testid={`first-shop-assign-location-${u.id}`}
+                          >
+                            Assign location
+                          </AdminButton>
+                        </div>
+                      ))}
+                    </>
+                  )}
+                </div>
+              )}
+              <div style={{ marginTop: 10 }}>
+                <Link href={`/admin/partners/${shop.organisation.id}/staff`} data-testid="first-shop-staff-action">Open Staff</Link>
+              </div>
             </Step>
-            <Step number={6} title="Readiness" complete={shop.operational.overall.ready}>
+            <Step number={6} title="Scanner station" complete={shop.operational.dimensions.station.status === "PASS"}>
+              <p data-testid="first-shop-station-message">{shop.operational.dimensions.station.message}</p>
+              {pendingStations.length > 0 ? (
+                <div data-testid="first-shop-station-pending" style={{ marginTop: 10 }}>
+                  {/* The wizard answers "what do I do next?" here, instead of sending the operator
+                      to hunt through Station Fleet. Approval itself is still the existing canonical
+                      station transition behind its existing admin step-up. */}
+                  <p style={{ fontWeight: 700, letterSpacing: "0.04em" }}>SCANNER WAITING FOR APPROVAL</p>
+                  {pendingStations.map((st) => (
+                    <div key={stationCodeOf(st)} style={{ display: "flex", alignItems: "center", gap: 10, marginTop: 6, flexWrap: "wrap" }}>
+                      <code>{stationCodeOf(st)}</code>
+                      <AdminButton
+                        size="sm"
+                        variant="gold"
+                        disabled={approveStation.isPending}
+                        onClick={() => approveStation.mutate(stationCodeOf(st))}
+                        data-testid={`first-shop-approve-station-${stationCodeOf(st)}`}
+                      >
+                        Approve Scanner
+                      </AdminButton>
+                    </div>
+                  ))}
+                </div>
+              ) : (
+                <p style={{ marginTop: 8, fontSize: 12, opacity: 0.85 }}>
+                  Station enrolment must come from the real shop Scanner: the operator signs in on the Mac and
+                  registers it. This step updates by itself when a request arrives.
+                </p>
+              )}
+              <div style={{ marginTop: 10 }}>
+                <Link href={`/admin/partners/${shop.organisation.id}/stations`} data-testid="first-shop-station-action">Open station setup</Link>
+              </div>
+            </Step>
+            <Step number={7} title="Calibration and Scanner health" complete={shop.operational.dimensions.scanner.status === "PASS"}>
+              <p data-testid="first-shop-scanner-message">{shop.operational.dimensions.scanner.message}</p>
+              <p style={{ marginTop: 8, fontSize: 12, opacity: 0.85 }}>
+                Calibration happens physically in the Scanner app on the shop Mac. This step turns green once the
+                station reports a VALID calibration.
+              </p>
+            </Step>
+            <Step number={8} title="Credits" complete={shop.operational.dimensions.credits.status === "PASS"}>
+              <p data-testid="first-shop-credits-message">{shop.operational.dimensions.credits.message}</p>
+              <div style={{ marginTop: 10 }}>
+                <Link href={`/admin/partners/${shop.organisation.id}/credits`} data-testid="first-shop-credits-action">Open credits / billing readiness</Link>
+              </div>
+            </Step>
+            <Step number={9} title="Ready to grade" complete={shop.operational.overall.ready}>
+              {/* Server-authoritative: rendered verbatim from derivePartnerOperationalReadiness. */}
               <ReadinessPanel readiness={shop.operational} audience="SUPER_ADMIN" />
-              <div style={{ marginTop: 10 }}><Link href={`/admin/partners/${shop.organisation.id}/credits`} data-testid="first-shop-credits-action">Open credits / billing readiness</Link></div>
             </Step>
           </>
         )}

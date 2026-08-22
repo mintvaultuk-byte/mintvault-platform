@@ -56,6 +56,24 @@ export interface PartnerReadinessFacts {
     } | null;
   } | null;
   /**
+   * STAFF who can actually operate a Scanner.
+   *
+   * `locationScopedWithoutLocation` counts ACTIVE users holding a LOCATION-SCOPED role that has no
+   * `partner_user_locations` assignment. Such an operator carries every scanning capability and
+   * still resolves to ZERO eligible locations, so the Scanner offers nothing to enrol against —
+   * observed on staging 2026-08-21, where it cost an onboarding session. It is a BLOCKED state, not
+   * a warning: nothing downstream can succeed until it is assigned.
+   *
+   * Org-wide roles (OWNER/MANAGER/FINANCE_VIEWER) are deliberately NOT counted — they are eligible
+   * at every ACTIVE location by design and must keep that semantic.
+   *
+   * null when the role/assignment authority could not be consulted — UNKNOWN, never PASS.
+   */
+  staff: {
+    scanCapableCount: number;
+    locationScopedWithoutLocation: number;
+  } | null;
+  /**
    * Ledger-derived usable credit balance. `"NO_WALLET"` is a real, actionable state (a legacy
    * partner never provisioned one); null means the wallet authority could not be consulted.
    */
@@ -84,6 +102,7 @@ const DIMENSION_ORDER: ReadinessDimensionKey[] = [
   "delivery",
   "operationsContact",
   "owner",
+  "staff",
   "station",
   "scanner",
   "credits",
@@ -104,6 +123,7 @@ export function derivePartnerOperationalReadiness(facts: PartnerReadinessFacts):
     delivery: deriveDeliveryAddress(facts),
     operationsContact: deriveOperationsContact(facts),
     owner: deriveOwner(facts),
+    staff: deriveStaff(facts),
     station: deriveStation(facts),
     scanner: deriveScanner(facts),
     credits: deriveCredits(facts),
@@ -375,4 +395,41 @@ function deriveCredits(f: PartnerReadinessFacts): ReadinessDimension {
     return dim("BLOCKED", "CREDITS_REQUIRED", "This shop has no Grading Credits left, so grading cannot start.", buy);
   }
   return pass("READY", "This shop has Grading Credits available.");
+}
+
+/**
+ * STAFF — is there an operator who can actually run a Scanner at this shop?
+ *
+ * Two distinct failures, deliberately separated because the fix differs:
+ *   STAFF_OPERATOR_REQUIRED            nobody scan-capable exists yet -> create one.
+ *   STAFF_LOCATION_ASSIGNMENT_REQUIRED one exists but is location-scoped with no location -> assign.
+ *
+ * The second is the silent one. The user looks correct in every list, holds every scanning
+ * capability, and still sees "No active authorised location is available for this account" at the
+ * Scanner, because listPermittedStationLocations intersects location-scoped users with their
+ * explicit assignments. Readiness now states that condition instead of leaving it to be discovered
+ * at the glass.
+ */
+function deriveStaff(f: PartnerReadinessFacts): ReadinessDimension {
+  // `== null` deliberately covers undefined too: an omitted fact is "not established", and this
+  // contract must never resolve an unasked question to PASS.
+  if (f.staff == null) {
+    return dim("UNKNOWN", "CONFIGURATION_UNAVAILABLE", "MintVault could not confirm this shop's operators.");
+  }
+  if (f.staff.locationScopedWithoutLocation > 0) {
+    return dim(
+      "BLOCKED",
+      "STAFF_LOCATION_ASSIGNMENT_REQUIRED",
+      f.staff.locationScopedWithoutLocation === 1
+        ? "An operator has no authorised location, so their Scanner cannot be set up."
+        : `${f.staff.locationScopedWithoutLocation} operators have no authorised location, so their Scanners cannot be set up.`,
+      [{ audience: "SUPER_ADMIN", label: "Assign an authorised location" }]
+    );
+  }
+  if (f.staff.scanCapableCount < 1) {
+    return dim("BLOCKED", "STAFF_OPERATOR_REQUIRED", "This shop has no operator who can scan cards.", [
+      { audience: "SUPER_ADMIN", label: "Add an operator" },
+    ]);
+  }
+  return pass("READY", "This shop has an operator who can scan cards.");
 }

@@ -297,6 +297,12 @@ async function readOnboardingCandidates(
             minimumSupportedVersion: row.minimum_supported_version,
           };
     const factsForPartner: PartnerReadinessFacts = {
+      /*
+       * The Command Centre adapter reads a projection that does not carry per-user role/assignment
+       * rows, so it cannot answer the staff question. `null` is the correct answer here — UNKNOWN,
+       * never PASS — so this surface can never claim a shop is ready on a question it did not ask.
+       */
+      staff: null,
       orgStatus: row.org_status,
       portalEnabled,
       loginFlagEnabled,

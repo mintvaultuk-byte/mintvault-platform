@@ -33,6 +33,7 @@ const DIMENSION_LABEL: Record<string, string> = {
   delivery: "Delivery address",
   operationsContact: "Operations contact",
   owner: "Owner login",
+  staff: "Operator access",
   station: "Scanner station",
   scanner: "Scanner health",
   credits: "Grading Credits",

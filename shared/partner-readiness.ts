@@ -94,6 +94,9 @@ export type PartnerReadinessCode =
   | "SCANNER_OFFLINE"
   | "SCANNER_UPDATE_REQUIRED"
   | "CALIBRATION_REQUIRED"
+  // Staff
+  | "STAFF_OPERATOR_REQUIRED"
+  | "STAFF_LOCATION_ASSIGNMENT_REQUIRED"
   // Credits
   | "CREDITS_REQUIRED"
   // Any authority that could not be consulted
@@ -105,6 +108,7 @@ export type ReadinessDimensionKey =
   | "delivery"
   | "operationsContact"
   | "owner"
+  | "staff"
   | "station"
   | "scanner"
   | "credits";

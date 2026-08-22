@@ -2102,6 +2102,28 @@ export async function getPartnerOnboardingReadiness(partnerId: string) {
    * provisioning) and is distinguished from "the wallet authority could not be consulted", which is
    * UNKNOWN. Collapsing the two would let an outage read as "no credits", or worse, as zero-is-fine.
    */
+  /*
+   * STAFF facts, derived from the SAME `location_eligible` expression the user query already
+   * computes — which is itself the rule listPermittedStationLocations applies (org-wide roles are
+   * eligible everywhere ACTIVE; everyone else needs an explicit partner_user_locations row). Reusing
+   * it means readiness and the Scanner's own location discovery cannot disagree; re-deriving it here
+   * is exactly the two-authorities drift this package exists to prevent.
+   */
+  const ORG_WIDE_ROLE_CODES = ["PARTNER_OWNER", "PARTNER_MANAGER", "PARTNER_FINANCE_VIEWER"];
+  let staff: PartnerReadinessFacts["staff"];
+  try {
+    const activeUsers = rows.filter((u: any) => u.user_status === "ACTIVE");
+    const isOrgWide = (u: any) => (u.role_codes ?? []).some((c: string) => ORG_WIDE_ROLE_CODES.includes(c));
+    staff = {
+      // Could this person actually be offered a location to enrol a station at?
+      scanCapableCount: activeUsers.filter((u: any) => u.location_eligible === true).length,
+      // Location-scoped, ACTIVE, and pinned to nothing — capabilities but nowhere to use them.
+      locationScopedWithoutLocation: activeUsers.filter((u: any) => !isOrgWide(u) && u.location_eligible !== true).length,
+    };
+  } catch {
+    staff = null;
+  }
+
   let credits: PartnerReadinessFacts["credits"];
   try {
     const { getBalance } = await import("./partner-wallet-service");
@@ -2122,6 +2144,7 @@ export async function getPartnerOnboardingReadiness(partnerId: string) {
 
   const operational = attachGuidedReadinessActions(derivePartnerOperationalReadiness({
     orgStatus: org.status,
+    staff,
     portalEnabled: flagsReadable ? portalEnabled : null,
     loginFlagEnabled: flagsReadable ? loginFlagEnabled : null,
     emergencyStop: flagsReadable ? emergencyStop : null,

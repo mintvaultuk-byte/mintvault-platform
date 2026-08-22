@@ -72,3 +72,63 @@ describe("first-shop guided onboarding UI contract", () => {
     expect(dashboard).toContain("Complete shop setup");
   });
 });
+
+/**
+ * The two confirmed Shop #1 blockers, proven at the wizard.
+ *
+ * Staging 2026-08-21 cost a whole onboarding session to these: a location-scoped operator with no
+ * location (the Scanner offered nothing to enrol against) and a station approval that could only be
+ * reached by hunting through Station Fleet. Both are now actions inside onboarding.
+ */
+describe("first-shop onboarding owns staff assignment and station approval", () => {
+  const page = () => read("client/src/pages/admin/partner-first-shop-onboarding.tsx");
+
+  it("has a Staff step that assigns an authorised location to a location-scoped operator", () => {
+    const p = page();
+    expect(p).toContain("Staff and operator access");
+    expect(p).toContain("first-shop-staff-unassigned");
+    expect(p).toContain("first-shop-staff-location-select");
+    expect(p).toContain("first-shop-assign-location-");
+    // Canonical audited authority — never a direct write.
+    expect(p).toContain("/users/${userId}/locations");
+    expect(p).toContain("locationIds");
+    expect(p).toContain("reason:");
+  });
+
+  it("only offers assignment for LOCATION-SCOPED operators — org-wide roles keep their semantics", () => {
+    const p = page();
+    expect(p).toContain("ORG_WIDE_ROLE_CODES");
+    expect(p).toContain('"PARTNER_OWNER", "PARTNER_MANAGER", "PARTNER_FINANCE_VIEWER"');
+    expect(p).toContain("location_eligible !== true");
+  });
+
+  it("blocks assignment when the shop has no ACTIVE location, instead of offering a dead control", () => {
+    expect(page()).toContain("first-shop-staff-no-location");
+  });
+
+  it("surfaces SCANNER WAITING FOR APPROVAL with an inline Approve Scanner action", () => {
+    const p = page();
+    expect(p).toContain("SCANNER WAITING FOR APPROVAL");
+    expect(p).toContain("Approve Scanner");
+    expect(p).toContain("first-shop-approve-station-");
+    // The EXISTING canonical station transition, behind the EXISTING admin step-up.
+    expect(p).toContain("/api/super-admin/fleet/stations/");
+    expect(p).toContain("/active");
+    expect(p).toContain("runAdminProtected");
+  });
+
+  it("refreshes onboarding state after approval rather than requiring a manual reload", () => {
+    const p = page();
+    expect(p).toContain("invalidateQueries");
+    expect(p).toContain("refetchInterval");
+  });
+
+  it("renders calibration and credits state from the server readiness, not a client calculation", () => {
+    const p = page();
+    expect(p).toContain("dimensions.scanner.message");
+    expect(p).toContain("dimensions.credits.message");
+    expect(p).toContain("dimensions.staff?.message");
+    // Ready remains server-authoritative.
+    expect(p).toContain("shop.operational.overall.ready");
+  });
+});
