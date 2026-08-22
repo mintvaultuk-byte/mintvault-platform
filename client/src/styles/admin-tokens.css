@@ -1311,11 +1311,17 @@
    `[data-canonical-section="rarity"]` is now VISIBLE on Card Details rather than
    getting its own stage, and Grade/Review shifted down 2→1 and 3→2.
 
-   NESTING-SAFE: grading-controls is the right column; grade-result + sub-grades +
-   footer-actions (Approve/Submit) are SIBLINGS inside it. So grading-controls is
-   only hidden on the stage that needs NONE of its children (Card Details); on
-   Grade/Review it stays visible and only specific sibling children are hidden —
-   the submit button is always reachable on Review.
+   NESTING-SAFE: grading-controls is the right column; defect-marking, grade-result,
+   sub-grades and footer-actions (Approve/Submit) are SIBLINGS inside it. So
+   grading-controls is only hidden on the stage that needs NONE of its children
+   (Card Details); on Grade/Review it stays visible and only specific sibling
+   children are hidden — the submit button is always reachable on Review.
+
+   defect-marking moved into grading-controls (2026-08-22) so the left rail holds
+   the card alone. Its per-stage visibility is UNCHANGED: hidden on Card Details
+   (its own rule and its parent's), visible on Grade, hidden on Review by its own
+   rule. Keep its stage-0 and stage-2 entries below even though the parent covers
+   stage 0 — they are what make the rule survive the block moving again.
 
    Card Details = identity (identification + identity-fields) AND the canonical
                   structured variant picker (data-canonical-section=rarity).

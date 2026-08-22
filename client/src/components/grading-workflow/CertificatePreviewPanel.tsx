@@ -22,7 +22,14 @@ import { useEffect, useRef, useState } from "react";
  * DISPLAY WIDTH ONLY. The certificate document, its print dimensions and its resolution
  * are untouched.
  */
-export const CERTIFICATE_PREVIEW_MAX_WIDTH_PX = 285;
+/*
+ * Raised 285 -> 320 (2026-08-22) alongside moving the defect list out of the rail.
+ * The cap is still load-bearing and still far below the 431px uncapped width that
+ * pushed the header onto the card. At the owner's own 845x685 viewport the rail card
+ * is 368.8px, so 320 fits with margin; the ~10px of extra height this costs is repaid
+ * many times over by the defect panel no longer sitting under the card.
+ */
+export const CERTIFICATE_PREVIEW_MAX_WIDTH_PX = 320;
 
 export interface CertificatePreviewFields {
   // When set, the server starts the preview from this saved cert's real grade /

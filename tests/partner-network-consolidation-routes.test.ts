@@ -23,8 +23,13 @@ describe("Partner Network P7 route contract", () => {
     expect(app.indexOf('path="/admin/partners/:partnerId/stations"')).toBeLessThan(partner);
   });
 
-  it("has one exposure-only feature flag and preserves legacy redirect meaning", () => {
-    expect(app).toContain("VITE_PARTNER_NETWORK_CONSOLIDATION");
+  it("has NO consolidation feature flag, and preserves legacy redirect meaning", () => {
+    /*
+     * The flag is deliberately gone rather than flipped on. It shipped `false`, which left the
+     * consolidated surfaces unreachable while six navigation links collapsed onto two legacy pages —
+     * the flag WAS the duplication mechanism. A surface cannot drift from one that no longer exists.
+     */
+    expect(app).not.toContain("VITE_PARTNER_NETWORK_CONSOLIDATION");
     expect(app).toContain("window.location.search");
     expect(app).toContain("window.location.hash");
     expect(app).toContain("/admin/partner-network/partners/:partnerId");

@@ -151,12 +151,13 @@ const AdminProjectControlScannerPage = lazy(() => import("@/pages/admin/project-
 const AdminPartnerDashboardPage = lazy(() => import("@/pages/admin/partner-dashboard"));
 const AdminPartnerNetworkStationsPage = lazy(() => import("@/pages/admin/partner-network-stations"));
 const AdminPartnerNetworkOverviewPage = lazy(() => import("@/pages/admin/partner-network-overview"));
+const AdminPartnerNetworkShopsPage = lazy(() => import("@/pages/admin/partner-network-shops"));
 const AdminPartnerSuppliesOrdersPage = lazy(() => import("@/pages/admin/partner-supplies-orders"));
+const AdminPartnerSuppliesPage = lazy(() => import("@/pages/admin/partner-supplies"));
 
 // Exposure-only kill switch for the consolidated Super Admin IA. It does not alter APIs,
 // permissions or mutations: with the flag off, canonical URLs simply lead back to their legacy
 // equivalents; with it on, legacy URLs redirect to the canonical routes.
-const PARTNER_NETWORK_CONSOLIDATION_ENABLED = import.meta.env.VITE_PARTNER_NETWORK_CONSOLIDATION === "true";
 
 // Partner Portal (Phase 2, Increments A+B) — isolated /partner/* surface. Fails closed at the
 // backend (partner_portal_enabled flag + emergency stop) if the flag is off; not enabled in any
@@ -276,11 +277,15 @@ function PartnerNetworkRoute({
   legacy: string | ((pathname: string) => string);
   children: React.ReactNode;
 }) {
-  const [pathname] = useLocation();
-  if (PARTNER_NETWORK_CONSOLIDATION_ENABLED) return <>{children}</>;
-  const suffix = `${window.location.search}${window.location.hash}`;
-  const target = typeof legacy === "function" ? legacy(pathname) : legacy;
-  return <Redirect to={`${target}${suffix}`} />;
+  /*
+   * The consolidated Partner Network is now the only Partner Network, so this wrapper always
+   * renders. It is kept (rather than deleted at ~20 call sites) because it is also the documented
+   * seam where a Partner surface could be gated again; `legacy` is retained for the same reason.
+   * What it must never do again is send a live navigation link back to a page the nav replaced.
+   */
+  void legacy;
+  void useLocation;
+  return <>{children}</>;
 }
 
 function PartnerNetworkLegacyRoute({ canonical, children }: { canonical: string; children: React.ReactNode }) {
@@ -292,13 +297,13 @@ function PartnerNetworkLegacyRoute({ canonical, children }: { canonical: string;
     window.location.hash
   );
   useEffect(() => {
-    if (PARTNER_NETWORK_CONSOLIDATION_ENABLED && destination) {
+    if (destination) {
       // Route telemetry is an application log only. It is intentionally not an audit event:
       // following an old bookmark does not mutate partner, wallet, station or grading data.
       console.info("[partner-network] legacy route redirected", { from: pathname, to: destination });
     }
   }, [destination, pathname]);
-  return PARTNER_NETWORK_CONSOLIDATION_ENABLED && destination ? <Redirect to={destination} /> : <>{children}</>;
+  return destination ? <Redirect to={destination} /> : <>{children}</>;
 }
 
 function PageLoader() {
@@ -499,30 +504,57 @@ function Router() {
           {/* Partner Network static routes MUST remain above /admin/partners/:partnerId:
               a Partner id is a UUID, so literals such as stations/infrastructure/settings must
               never be treated as an identifier or cause a Partner lookup. */}
-          <Route path="/admin/partners/supplies" component={AdminPartnerSuppliesOrdersPage} />
-          <Route path="/admin/partners/stations">
-            <PartnerNetworkRoute legacy="/admin/partners/dashboard">
-              <AdminPartnerNetworkStationsPage />
-            </PartnerNetworkRoute>
+          {/*
+           * SUPPLIES = the priced catalogue (Products) plus fulfilment (Orders). The earlier
+           * request-and-email supplies surface is kept reachable at its own url so nothing that
+           * links to it breaks, but it is no longer the Supplies destination.
+           */}
+          <Route path="/admin/partners/supplies" component={AdminPartnerSuppliesPage} />
+          <Route path="/admin/partners/supplies/requests" component={AdminPartnerSuppliesOrdersPage} />
+          {/* SHOPS — the one canonical network-wide list. */}
+          <Route path="/admin/partners/shops">
+            <AdminPartnerNetworkShopsPage />
           </Route>
-          <Route path="/admin/partners/infrastructure">
-            <PartnerNetworkRoute legacy="/admin/partner-network">
-              <AdminPartnerNetworkPage />
-            </PartnerNetworkRoute>
+          {/*
+           * SETTINGS → ADVANCED. Station Fleet and the connector/infrastructure console keep every
+           * capability they had; they simply stop occupying two of six everyday navigation slots.
+           * Their canonical urls now live under /settings so the information architecture matches
+           * where an operator is told to look.
+           */}
+          <Route path="/admin/partners/settings/stations">
+            <AdminPartnerNetworkStationsPage />
+          </Route>
+          <Route path="/admin/partners/settings/infrastructure">
+            <AdminPartnerNetworkPage />
           </Route>
           <Route path="/admin/partners/settings">
-            <PartnerNetworkRoute legacy="/admin/partner-network/partners">
-              <AdminPartnerManagementPage />
-            </PartnerNetworkRoute>
+            <AdminPartnerManagementPage />
+          </Route>
+          {/* Old everyday urls kept working, pointed at their new homes. */}
+          <Route path="/admin/partners/stations">
+            <PartnerNetworkLegacyRoute canonical="/admin/partners/settings/stations">
+              <AdminPartnerNetworkStationsPage />
+            </PartnerNetworkLegacyRoute>
+          </Route>
+          <Route path="/admin/partners/infrastructure">
+            <PartnerNetworkLegacyRoute canonical="/admin/partners/settings/infrastructure">
+              <AdminPartnerNetworkPage />
+            </PartnerNetworkLegacyRoute>
           </Route>
           <Route path="/admin/partners/directory">
-            <PartnerNetworkRoute legacy="/admin/partner-network/partners">
-              <AdminPartnerManagementPage />
-            </PartnerNetworkRoute>
+            <PartnerNetworkLegacyRoute canonical="/admin/partners/shops">
+              <AdminPartnerNetworkShopsPage />
+            </PartnerNetworkLegacyRoute>
           </Route>
           <Route path="/admin/partners/onboarding">
             <AdminPartnerFirstShopOnboardingPage />
           </Route>
+          {/*
+           * The old Partner Master Dashboard. It rendered the network summary TWICE, an
+           * always-zero pipeline band, its own alert list and its own copy of the shop table —
+           * every one of which Overview now renders once, from the same projection. The route is
+           * kept as a redirect so bookmarks survive.
+           */}
           <Route path="/admin/partners/dashboard">
             <PartnerNetworkLegacyRoute canonical="/admin/partners">
               <AdminPartnerDashboardPage />
@@ -616,12 +648,12 @@ function Router() {
             )}
           </Route>
           <Route path="/admin/partner-network/partners">
-            <PartnerNetworkLegacyRoute canonical="/admin/partners/directory">
-              <AdminPartnerManagementPage />
+            <PartnerNetworkLegacyRoute canonical="/admin/partners/shops">
+              <AdminPartnerNetworkShopsPage />
             </PartnerNetworkLegacyRoute>
           </Route>
           <Route path="/admin/partner-network">
-            <PartnerNetworkLegacyRoute canonical="/admin/partners/infrastructure">
+            <PartnerNetworkLegacyRoute canonical="/admin/partners/settings/infrastructure">
               <AdminPartnerNetworkPage />
             </PartnerNetworkLegacyRoute>
           </Route>

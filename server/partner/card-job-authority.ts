@@ -42,7 +42,8 @@ export class CardJobAuthorityError extends Error {
       | "EMERGENCY_STOP"
       | "IDEMPOTENCY_CONFLICT"
       | "CARD_UNIT_INVALID"
-      | "IDENTITY_UNAVAILABLE",
+      | "IDENTITY_UNAVAILABLE"
+      | "TEST_CARD_ALREADY_OPEN",
     message: string
   ) {
     super(message);
@@ -434,7 +435,24 @@ export interface StartNewCardJobAtStationInput {
   actorEmail: string;
   /** Optional operator label. Identity is confirmed later at grading; this is only a handle. */
   cardName?: string | null;
+  /**
+   * EXPLICIT declaration that this NEW is the shop's onboarding test card (migration 0109).
+   *
+   * Omitted or "NORMAL" on every ordinary press, which is why the marker can never be acquired by
+   * accident. Supplying "ONBOARDING_TEST" is the client saying so outright; the OTHER canonical
+   * route is the armed onboarding intent, which MintVault sets in advance and this transaction
+   * consumes. Nothing else — not a timestamp, not "the newest job", not "the first card a new shop
+   * scanned" — can produce a test card.
+   */
+  purpose?: CardJobPurpose | null;
 }
+
+/**
+ * WHY a Card Job was started. NORMAL is ordinary paid work; ONBOARDING_TEST is the single card a
+ * shop scans during setup to prove the chain end to end. It changes no credit, grading, evidence or
+ * identity rule — see migration 0109.
+ */
+export type CardJobPurpose = "NORMAL" | "ONBOARDING_TEST";
 
 export interface StartNewCardJobAtStationResult extends StartNewCardJobResult {
   /** Always non-null on this path — the station cannot capture without it. */
@@ -444,10 +462,106 @@ export interface StartNewCardJobAtStationResult extends StartNewCardJobResult {
   cardId: string;
   /** The sides the station is authorised to capture for this job. */
   sides: ReadonlyArray<"front" | "back">;
+  /** What this job was classified as at creation. Immutable thereafter (0109's trigger). */
+  purpose: CardJobPurpose;
 }
 
 /** Placeholder used when the operator names nothing. Identity is confirmed at grading, not intake. */
 const WALK_IN_CARD_NAME = "Unidentified card";
+
+/** The Card Job states 0109's single-open-test index treats as still in flight. */
+const OPEN_CARD_JOB_STATES = "('COMPLETED','CANCELLED')";
+
+/**
+ * Does THIS database carry the onboarding test-card marker (migration 0109)?
+ *
+ * MIXED-VERSION SAFETY (invariant I17), and not a hypothetical one. Project policy applies
+ * migrations before the deploy, but the reverse order — new code briefly meeting an older schema —
+ * is exactly what a rollback produces, and the failure mode would be severe: reading a column that
+ * does not exist aborts the whole NEW transaction, so every shop in the estate would be unable to
+ * start a card because of a feature none of them had asked for.
+ *
+ * The answer is therefore MEASURED rather than assumed. Without the column, cards are NORMAL, which
+ * is the correct answer for a database that has no concept of a test card.
+ */
+async function cardJobPurposeSupported(client: PoolClient): Promise<boolean> {
+  const { rows } = await client.query<{ present: boolean }>(
+    `SELECT EXISTS (
+       SELECT 1 FROM information_schema.columns
+        WHERE table_schema='public' AND table_name='partner_card_jobs' AND column_name='purpose'
+     ) AS present`
+  );
+  return rows[0]?.present === true;
+}
+
+/**
+ * DECIDE, INSIDE THE NEW TRANSACTION, whether this card is the shop's onboarding test.
+ *
+ * Two canonical inputs and no third:
+ *   1. the caller said so outright (`input.purpose === "ONBOARDING_TEST"`), or
+ *   2. MintVault ARMED the shop's next card beforehand, and this transaction consumes that arm.
+ *
+ * The arm is consumed with `UPDATE ... WHERE onboarding_test_card_armed_at IS NOT NULL RETURNING`,
+ * so it is a one-shot CLAIM rather than a read-then-write: two simultaneous NEW presses cannot both
+ * win it, and the loser correctly creates an ordinary NORMAL card. It runs inside the same
+ * transaction as the job insert, so a rollback returns the arm along with everything else.
+ *
+ * ALREADY-OPEN TEST CARD. 0109 permits only ONE non-terminal onboarding test per shop, and hitting
+ * that index would abort the entire NEW — cancelling a legitimate press over a bookkeeping detail.
+ * So it is checked first, and the two callers are answered differently on purpose:
+ *   * An EXPLICIT declaration is REFUSED (TEST_CARD_ALREADY_OPEN). The caller asked for something
+ *     specific and must be told it cannot have it, not quietly handed something else.
+ *   * An ARMED intent is CONSUMED AND DISCARDED, and the card is created NORMAL. A test card is
+ *     already in flight, so the declaration is satisfied; leaving the arm set would silently
+ *     reclassify whichever customer's card came next.
+ */
+async function resolveCardJobPurpose(
+  client: PoolClient,
+  tenantId: string,
+  requested: CardJobPurpose | null | undefined
+): Promise<{ supported: boolean; purpose: CardJobPurpose }> {
+  if (!(await cardJobPurposeSupported(client))) {
+    if (requested === "ONBOARDING_TEST") {
+      // Refused rather than silently downgraded: a caller that asked for a test card and was handed
+      // an ordinary one would go on to report a test that never happened.
+      throw new CardJobAuthorityError(
+        "IDENTITY_UNAVAILABLE",
+        "Onboarding test cards are not available on this deployment yet."
+      );
+    }
+    return { supported: false, purpose: "NORMAL" };
+  }
+
+  const open = await client.query(
+    `SELECT 1 FROM partner_card_jobs
+      WHERE tenant_id = $1 AND purpose = 'ONBOARDING_TEST' AND status NOT IN ${OPEN_CARD_JOB_STATES}
+      LIMIT 1`,
+    [tenantId]
+  );
+  const testAlreadyOpen = (open.rowCount ?? 0) > 0;
+
+  if (requested === "ONBOARDING_TEST") {
+    if (testAlreadyOpen) {
+      throw new CardJobAuthorityError(
+        "TEST_CARD_ALREADY_OPEN",
+        "This shop already has an onboarding test card in progress. Finish or cancel it first."
+      );
+    }
+    return { supported: true, purpose: "ONBOARDING_TEST" };
+  }
+
+  const consumed = await client.query(
+    `UPDATE partner_profiles
+        SET onboarding_test_card_armed_at = NULL,
+            onboarding_test_card_armed_by = NULL,
+            updated_at = now()
+      WHERE tenant_id = $1 AND onboarding_test_card_armed_at IS NOT NULL
+      RETURNING tenant_id`,
+    [tenantId]
+  );
+  if ((consumed.rowCount ?? 0) === 0) return { supported: true, purpose: "NORMAL" };
+  return { supported: true, purpose: testAlreadyOpen ? "NORMAL" : "ONBOARDING_TEST" };
+}
 
 /**
  * Fingerprint for a station start. Deliberately does NOT include the submission or card ids: on this
@@ -464,6 +578,11 @@ function stationFingerprintOf(input: StartNewCardJobAtStationInput): string {
         l: input.locationId,
         s: input.stationId,
         o: input.clientOpId,
+        // Normalised so an omitted field and an explicit "NORMAL" are the SAME request — otherwise
+        // an older Scanner build retrying a newer one's press would look like a different operation
+        // and be refused. What it DOES catch is the genuinely different request: reusing one retry
+        // token to ask first for an ordinary card and then for a test card.
+        p: input.purpose === "ONBOARDING_TEST" ? "ONBOARDING_TEST" : "NORMAL",
       })
     )
     .digest("hex");
@@ -621,6 +740,9 @@ export async function startNewCardJobAtStation(
             "This client operation id was already used for a different NEW request."
           );
         }
+        // Same schema tolerance as the create path: a replay must not fail merely because this
+        // database has no marker column, and a database without one has only NORMAL cards.
+        const purposeColumn = (await cardJobPurposeSupported(client)) ? "purpose" : "'NORMAL'::text AS purpose";
         const job = await client.query<{
           id: string;
           reservation_id: string | null;
@@ -629,8 +751,9 @@ export async function startNewCardJobAtStation(
           status: string;
           submission_id: string;
           card_id: string;
+          purpose: CardJobPurpose;
         }>(
-          `SELECT id, reservation_id, mv_number, certificate_id, status, submission_id, card_id
+          `SELECT id, reservation_id, mv_number, certificate_id, status, submission_id, card_id, ${purposeColumn}
            FROM partner_card_jobs WHERE id=$1 AND tenant_id=$2`,
           [existing.card_job_id, input.tenantId]
         );
@@ -650,6 +773,10 @@ export async function startNewCardJobAtStation(
           submissionId: row.submission_id,
           cardId: row.card_id,
           sides: ["front", "back"] as const,
+          // Read back, never recomputed: a replay must report what the ORIGINAL press created. The
+          // arm it consumed is long gone, so re-deriving here would answer NORMAL and make a retry
+          // look like a different kind of card from the one it actually is.
+          purpose: row.purpose,
           replayed: true,
         };
       }
@@ -720,6 +847,17 @@ export async function startNewCardJobAtStation(
         throw err;
       }
 
+      /*
+       * ---- 4b. Is this the shop's onboarding test card? ------------------------------------------
+       * Resolved BEFORE the insert because 0109 makes `purpose` immutable: a job is born classified
+       * or it is never classified at all. Deliberately AFTER the credit reservation, so an
+       * ONBOARDING_TEST costs exactly the same one Grading Credit as any other card and a shop at
+       * zero balance is refused identically — a free test card would be a different product
+       * decision, and this is not it.
+       */
+      const classification = await resolveCardJobPurpose(client, input.tenantId, input.purpose);
+      const purpose = classification.purpose;
+
       // ---- 5. Permanent identity, after the wallet has reserved the paid card unit ---------------
       const identity = await mintPartnerCertificate(client, {
         tenantId: input.tenantId,
@@ -731,11 +869,13 @@ export async function startNewCardJobAtStation(
       // Stamped on INSERT rather than a later UPDATE: the immutability trigger is BEFORE UPDATE, and
       // the only role granted UPDATE on (certificate_id, mv_number) is the connector's definer. A job
       // is therefore born complete, and chk_partner_card_jobs_mv_pairing is satisfied from the start.
+      // The marker column is NAMED only where it exists, so this same statement stays valid against
+      // a database that predates 0109 — where every card is NORMAL, which is the right answer there.
       const job = await client.query<{ id: string; status: string }>(
         `INSERT INTO partner_card_jobs
          (tenant_id, submission_id, card_id, ordinal, card_reference, reservation_id,
-          certificate_id, mv_number, location_id, created_by, status)
-       VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,'NEEDS_SCAN')
+          certificate_id, mv_number, location_id, created_by, status${classification.supported ? ", purpose" : ""})
+       VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,'NEEDS_SCAN'${classification.supported ? ",$11" : ""})
        RETURNING id, status`,
         [
           input.tenantId,
@@ -748,6 +888,7 @@ export async function startNewCardJobAtStation(
           identity.mvNumber,
           input.locationId,
           input.actorUserId,
+          ...(classification.supported ? [purpose] : []),
         ]
       );
 
@@ -789,9 +930,13 @@ export async function startNewCardJobAtStation(
           submissionId,
           reservationId: reservation.reservation.id,
           status: job.rows[0].status,
+          purpose,
           walkIn: true,
         },
-        reason: "NEW card started at a station. One Grading Credit reserved.",
+        reason:
+          purpose === "ONBOARDING_TEST"
+            ? "Onboarding TEST card started at a station. One Grading Credit reserved."
+            : "NEW card started at a station. One Grading Credit reserved.",
       });
 
       return {
@@ -803,6 +948,7 @@ export async function startNewCardJobAtStation(
         submissionId,
         cardId,
         sides: ["front", "back"] as const,
+        purpose,
         replayed: false,
       };
     }

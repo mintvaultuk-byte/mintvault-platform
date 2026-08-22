@@ -24,7 +24,9 @@ describe("Partner Network P8 workspace contract", () => {
       "Cards",
       "Staff",
       "Locations",
-      "Stations",
+      // Renamed to the operator's word for the Mac on their counter. The ROUTE KEY is still
+      // `stations`, so every deep link, redirect and readiness action href keeps resolving.
+      "Scanner",
       "Credits",
       "Activity",
       "Security",

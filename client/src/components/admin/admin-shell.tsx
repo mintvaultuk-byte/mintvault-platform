@@ -173,8 +173,24 @@ export function navigationForCommandCentre(commandCentreAvailable: boolean): Nav
   });
 }
 
-const PARTNER_NETWORK_CONSOLIDATION_ENABLED = import.meta.env.VITE_PARTNER_NETWORK_CONSOLIDATION === "true";
-const PARTNER_NETWORK_HOME = PARTNER_NETWORK_CONSOLIDATION_ENABLED ? "/admin/partners" : "/admin/partners/dashboard";
+/**
+ * The consolidated Partner Network is now the ONLY Partner Network.
+ *
+ * It used to be gated behind VITE_PARTNER_NETWORK_CONSOLIDATION, which shipped as `false` — so the
+ * consolidated surfaces existed, were tested, and were unreachable, while six navigation links
+ * collapsed onto two legacy pages. Overview and Partners pointed at the SAME url; Settings opened
+ * the partner list. That flag was the direct cause of the duplication this navigation removes, so
+ * it is gone rather than flipped: one surface cannot drift from another that no longer exists.
+ */
+const PARTNER_NETWORK_HOME = "/admin/partners";
+
+/** The whole Partner Network, in four destinations. Exported so tests assert the real list. */
+export const PARTNER_NAV = [
+  { key: "overview", label: "Overview", href: "/admin/partners" },
+  { key: "shops", label: "Shops", href: "/admin/partners/shops" },
+  { key: "supplies", label: "Supplies", href: "/admin/partners/supplies" },
+  { key: "settings", label: "Settings", href: "/admin/partners/settings" },
+] as const;
 
 // Topbar crumb path label per section the active tab belongs to.
 function crumbForTab(tab: AdminTab): { title: string; path: string } {
@@ -411,27 +427,18 @@ export default function AdminShell({
               aria-label="Partner Network"
             >
               <span className="font-semibold">Partner Network</span>
-              <Link href={PARTNER_NETWORK_HOME} className="underline">
-                Overview
-              </Link>
-              <Link
-                href={PARTNER_NETWORK_CONSOLIDATION_ENABLED ? "/admin/partners/directory" : PARTNER_NETWORK_HOME}
-                className="underline"
-              >
-                Partners
-              </Link>
-              <Link href="/admin/partners/stations" className="underline">
-                Stations
-              </Link>
-              <Link href="/admin/partners/infrastructure" className="underline">
-                Infrastructure
-              </Link>
-              <Link href="/admin/partners/settings" className="underline">
-                Settings
-              </Link>
-              <Link href="/admin/partners/supplies" className="underline">
-                Supplies Orders
-              </Link>
+              {/*
+               * FOUR destinations. Stations and Infrastructure were removed from everyday navigation
+               * rather than deleted: network-wide station problems now surface on Overview's Needs
+               * Attention with an Approve Scanner action, individual station work lives in the shop's
+               * own workspace, and both full fleet/connector consoles remain reachable under
+               * Settings → Advanced. No capability was removed; two everyday clicks were.
+               */}
+              {PARTNER_NAV.map((item) => (
+                <Link key={item.href} href={item.href} className="underline" data-testid={`pn-nav-${item.key}`}>
+                  {item.label}
+                </Link>
+              ))}
             </nav>
           )}
           <header className="admin-top">

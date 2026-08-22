@@ -28,7 +28,8 @@ describe("Partner Network P10 parity and retirement contract", () => {
   });
 
   it("does not send a canonical control through a legacy Partner Network URL", () => {
-    expect(management).toContain('href="/admin/partners/directory"');
+    // Settings links at the canonical shop list, not at the url that merely redirects to it.
+    expect(management).toContain('href="/admin/partners/shops"');
     expect(management).toContain("Open Partner Credits");
     expect(management).not.toContain('href="/admin/partners/dashboard"');
     expect(detail).toContain('navigate("/admin/partners/infrastructure")');
@@ -49,9 +50,15 @@ describe("Partner Network P10 parity and retirement contract", () => {
     }
     for (const outcome of ["MIGRATED", "REDIRECTED", "RETAINED"]) expect(inventory).toContain(outcome);
     expect(inventory).toContain("two releases or 90 days");
-    expect(inventory).toContain("/admin/partners/directory");
+    /*
+     * `/admin/partners/directory` is no longer the canonical shop list — `/admin/partners/shops` is,
+     * named for what an operator calls it. The old url must still RESOLVE (bookmarks), so it is kept
+     * as a route that redirects, and the legacy /admin/partner-network/partners url now points
+     * straight at the new canonical rather than hopping through the old one.
+     */
+    expect(inventory).toContain("/admin/partners/shops");
     expect(app).toContain('path="/admin/partners/directory"');
-    expect(app).toContain('PartnerNetworkLegacyRoute canonical="/admin/partners/directory"');
+    expect(app).toContain('PartnerNetworkLegacyRoute canonical="/admin/partners/shops"');
   });
 
   it("keeps the inherited connector and station mutation guards intact", () => {

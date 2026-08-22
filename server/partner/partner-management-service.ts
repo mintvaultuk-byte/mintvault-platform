@@ -15,6 +15,7 @@ import { hashPassword, isValidPartnerPassword } from "./auth";
 import { deliverInvitationToken, invitationDeliveryConfigured } from "./delivery";
 import { ensureWallet, ensureWalletWithClient } from "./partner-wallet-service";
 import { derivePartnerOperationalReadiness, type PartnerReadinessFacts } from "./operational-readiness";
+import { loadOnboardingTestCardArmedAt, loadPartnerTestCardFacts } from "./test-card-authority";
 import { APP_BASE_URL } from "../app-url";
 import type { PoolClient } from "pg";
 import crypto from "node:crypto";
@@ -175,7 +176,11 @@ type AuditAction =
   | "partner_location_created"
   | "partner_location_updated"
   | "partner_location_status_changed"
-  | "partner_user_locations_changed";
+  | "partner_user_locations_changed"
+  // Declaring that a shop's NEXT new card is its onboarding test (migration 0109/0110). It
+  // authorises one Grading Credit to be spent as a test, so it is recorded honestly rather than
+  // folded into profile_updated — the same reason 0033 exists.
+  | "partner_onboarding_test_card_armed";
 
 // ---------------------------------------------------------------------------
 // Partner + profile lookups (admin pool, explicit tenant scoping).
@@ -640,8 +645,31 @@ export async function createFirstShopOnboarding(actor: ActorContext, input: Firs
         "A Partner with that legal or shop name already exists. Open its guided readiness instead of creating a duplicate."
       );
     }
-    if ((await client.query("SELECT 1 FROM partner_users WHERE lower(email)=lower($1) LIMIT 1", [ownerEmail])).rows.length) {
-      throw new G5RequestError("DUPLICATE_PARTNER_USER", "That team member cannot be invited.");
+    // Partner emails are unique across EVERY Partner (uq_partner_users_email_lower, migration 0003),
+    // and that reservation survives revocation because a REVOKED user keeps its row. So this block is
+    // correct — but the wording was not. "That team member cannot be invited." is the PARTNER-facing
+    // team-service message, deliberately opaque there because naming another tenant would be a
+    // cross-tenant "does this person work for another shop?" oracle. This surface is Super Admin only
+    // (requireSuperAdmin + step-up) and already lists every Partner, so there is no oracle to protect
+    // and the opaque wording told the one operator entitled to the answer nothing — the guided flow
+    // read as a broken button. The sibling super-admin invite (invitePartnerUser) has always been
+    // explicit; this now matches it, and names the owning Partner so the block is actionable.
+    const ownerClash = await client.query<{ status: string; legal_name: string }>(
+      `SELECT u.status, o.legal_name
+         FROM partner_users u
+         JOIN partner_organisations o ON o.id = u.tenant_id
+        WHERE lower(u.email)=lower($1)
+        LIMIT 1`,
+      [ownerEmail]
+    );
+    if (ownerClash.rows.length) {
+      const clashName = ownerClash.rows[0].legal_name.slice(0, 80);
+      throw new G5RequestError(
+        "DUPLICATE_PARTNER_USER",
+        `That Owner email already belongs to an existing Partner user (${clashName} — status ${ownerClash.rows[0].status}). ` +
+          "Partner emails are unique across every Partner, and a revoked user still holds its email. " +
+          `Use a different Owner email, or remove that user from ${clashName} first.`
+      );
     }
     const ownerRole = await client.query<{ id: string }>("SELECT id FROM partner_roles WHERE code='PARTNER_OWNER'");
     if (ownerRole.rows.length !== 1) {
@@ -2102,6 +2130,28 @@ export async function getPartnerOnboardingReadiness(partnerId: string) {
    * provisioning) and is distinguished from "the wallet authority could not be consulted", which is
    * UNKNOWN. Collapsing the two would let an outage read as "no credits", or worse, as zero-is-fine.
    */
+  /*
+   * STAFF facts, derived from the SAME `location_eligible` expression the user query already
+   * computes — which is itself the rule listPermittedStationLocations applies (org-wide roles are
+   * eligible everywhere ACTIVE; everyone else needs an explicit partner_user_locations row). Reusing
+   * it means readiness and the Scanner's own location discovery cannot disagree; re-deriving it here
+   * is exactly the two-authorities drift this package exists to prevent.
+   */
+  const ORG_WIDE_ROLE_CODES = ["PARTNER_OWNER", "PARTNER_MANAGER", "PARTNER_FINANCE_VIEWER"];
+  let staff: PartnerReadinessFacts["staff"];
+  try {
+    const activeUsers = rows.filter((u: any) => u.user_status === "ACTIVE");
+    const isOrgWide = (u: any) => (u.role_codes ?? []).some((c: string) => ORG_WIDE_ROLE_CODES.includes(c));
+    staff = {
+      // Could this person actually be offered a location to enrol a station at?
+      scanCapableCount: activeUsers.filter((u: any) => u.location_eligible === true).length,
+      // Location-scoped, ACTIVE, and pinned to nothing — capabilities but nowhere to use them.
+      locationScopedWithoutLocation: activeUsers.filter((u: any) => !isOrgWide(u) && u.location_eligible !== true).length,
+    };
+  } catch {
+    staff = null;
+  }
+
   let credits: PartnerReadinessFacts["credits"];
   try {
     const { getBalance } = await import("./partner-wallet-service");
@@ -2109,6 +2159,13 @@ export async function getPartnerOnboardingReadiness(partnerId: string) {
   } catch (err) {
     credits = (err as { code?: string })?.code === "WALLET_NOT_FOUND" ? "NO_WALLET" : null;
   }
+
+  /*
+   * THE ONBOARDING TEST CARD. Read from the explicit `purpose = 'ONBOARDING_TEST'` marker only, and
+   * left as null — UNKNOWN — when that authority cannot be consulted. The loader never falls back to
+   * "the newest Card Job", so a shop that has genuinely not tested cannot be reported as having done.
+   */
+  const testCard = await loadPartnerTestCardFacts(org.id);
 
   /*
    * The OWNER row backing the readiness decision. Chosen deterministically: the PARTNER_OWNER if
@@ -2122,6 +2179,7 @@ export async function getPartnerOnboardingReadiness(partnerId: string) {
 
   const operational = attachGuidedReadinessActions(derivePartnerOperationalReadiness({
     orgStatus: org.status,
+    staff,
     portalEnabled: flagsReadable ? portalEnabled : null,
     loginFlagEnabled: flagsReadable ? loginFlagEnabled : null,
     emergencyStop: flagsReadable ? emergencyStop : null,
@@ -2143,6 +2201,7 @@ export async function getPartnerOnboardingReadiness(partnerId: string) {
     operationsContactReady,
     station: stationFacts,
     credits,
+    testCard,
     nowMs: Date.now(),
   }), org.id);
 
@@ -3216,6 +3275,14 @@ export async function getFirstShopOnboarding(partnerId: string) {
       (contact) => contact.active && contact.is_primary
     ) ?? null;
   const owner = readiness.users.find((user: { role: string }) => user.role === "OWNER") ?? null;
+  /*
+   * Armed-but-not-yet-scanned is a state the Card Job facts CANNOT express — no job exists yet — and
+   * it is the one the operator most needs to distinguish. "Nothing has happened" and "we have told
+   * this shop's next card to be the test and are waiting for the Mac" look identical without it.
+   * `undefined` means the arming authority itself was unreadable, and the wizard says so rather than
+   * claiming nothing is armed.
+   */
+  const testCardArmedAt = await loadOnboardingTestCardArmedAt(org.id);
   return {
     organisation: readiness.organisation,
     profileVersion: profile.rows[0]?.version ?? 1,
@@ -3223,7 +3290,75 @@ export async function getFirstShopOnboarding(partnerId: string) {
     primaryContact,
     owner,
     operational: readiness.operational,
+    testCardArmedAt: testCardArmedAt === undefined ? null : testCardArmedAt,
+    testCardArmingReadable: testCardArmedAt !== undefined,
   };
+}
+
+/**
+ * DECLARE that this shop's next new Card Job is its onboarding test card.
+ *
+ * This is the canonical initiation the marker requires. MintVault Scanner has no concept of a test
+ * card and should not need one: an operator arms the shop here, the very next NEW at that shop is
+ * stamped ONBOARDING_TEST inside the transaction that mints it (card-job-authority's
+ * resolveCardJobPurpose), and the arm is consumed in the same breath. The classification is
+ * therefore still made at the moment of creation by an explicit instruction — never applied to a
+ * card that already exists, and never inferred from timing.
+ *
+ * COSTS. Arming spends nothing. The card the shop then scans costs exactly one Grading Credit, like
+ * any other card, because a test card IS an ordinary card; only its label differs.
+ *
+ * IDEMPOTENT. Arming an already-armed shop is a successful no-op that writes no second audit row —
+ * recording an event that did not occur would put a false entry in the one ledger an investigation
+ * would trust. Arming a shop that already has an OPEN test card is refused with a cause the operator
+ * can act on, rather than silently queueing a second one that 0109 would later reject.
+ */
+export async function armOnboardingTestCard(actor: ActorContext, partnerId: string, reason: string) {
+  const org = await loadPartner(partnerId);
+  await loadOrInitProfileVersion(org.id);
+
+  const open = await partnerAdminQuery(
+    `SELECT 1 FROM partner_card_jobs
+      WHERE tenant_id = $1 AND purpose = 'ONBOARDING_TEST' AND status NOT IN ('COMPLETED','CANCELLED')
+      LIMIT 1`,
+    [org.id]
+  );
+  if (open.rows.length > 0) {
+    throw new G5RequestError(
+      "TEST_CARD_ALREADY_OPEN",
+      "This shop already has an onboarding test card in progress. Finish or cancel that card first."
+    );
+  }
+
+  const already = await loadOnboardingTestCardArmedAt(org.id);
+  if (already === undefined) {
+    throw new G5RequestError(
+      "TEST_CARD_UNAVAILABLE",
+      "The onboarding test-card authority is not available on this deployment."
+    );
+  }
+  if (already !== null) return { result: { armedAt: already, changed: false }, alreadyCompleted: false };
+
+  return withAudit(actor, org.id, "partner_onboarding_test_card_armed", reason, { armedAt: null }, async () => {
+    // Conditional on the column still being clear, so two operators arming at once write one arm and
+    // one no-op rather than two audit rows describing one state change.
+    const armed = await partnerAdminQuery<{ armed_at: string }>(
+      `UPDATE partner_profiles
+          SET onboarding_test_card_armed_at = now(),
+              onboarding_test_card_armed_by = $2,
+              updated_at = now()
+        WHERE tenant_id = $1 AND onboarding_test_card_armed_at IS NULL
+        RETURNING onboarding_test_card_armed_at AS armed_at`,
+      [org.id, actor.actorUserId]
+    );
+    const armedAt = armed.rows[0]?.armed_at ?? (await loadOnboardingTestCardArmedAt(org.id)) ?? null;
+    return {
+      result: { armedAt, changed: armed.rows.length > 0 },
+      entityType: "partner",
+      entityId: org.id,
+      afterState: { armedAt },
+    };
+  });
 }
 
 /**

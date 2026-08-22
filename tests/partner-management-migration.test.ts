@@ -171,7 +171,12 @@ async function asPartner(tenant: string | null, fn: () => Promise<void>): Promis
     expect(await idx("partner_contacts")).toEqual(["idx_partner_contacts_tenant", "partner_contacts_pkey", "uq_partner_contacts_primary"]);
     expect(await idx("partner_branding")).toEqual(["partner_branding_pkey", "partner_branding_tenant_id_key"]);
     expect(await idx("partner_internal_notes")).toEqual(["idx_partner_internal_notes_tenant", "partner_internal_notes_pkey"]);
+    // 0108 adds the partial deleted_tenant_id index: once a setup-only Partner is permanently
+    // deleted its audit rows survive with tenant_id NULL, and deleted_tenant_id is the durable
+    // key they are then queried by. This inventory is exact ON PURPOSE — a new index has to be
+    // declared here deliberately, which is what caught this one.
     expect(await idx("partner_management_audit")).toEqual([
+      "idx_partner_management_audit_deleted_tenant",
       "idx_partner_management_audit_tenant",
       "partner_management_audit_pkey",
       "uq_partner_management_audit_idem",

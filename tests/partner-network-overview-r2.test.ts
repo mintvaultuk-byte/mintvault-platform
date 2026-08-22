@@ -6,6 +6,13 @@ const read = (file: string) => readFileSync(join(process.cwd(), file), "utf8");
 const router = read("server/partner/dashboard-routes.ts");
 const service = read("server/partner/dashboard-service.ts");
 const overview = read("client/src/pages/admin/partner-network-overview.tsx");
+/*
+ * The per-shop table and the alert-destination mapping MOVED out of Overview during the four-tab
+ * consolidation: the table is now built once, on Shops, and the mapping is a pure function shared by
+ * both surfaces. These assertions follow them rather than being deleted.
+ */
+const shops = read("client/src/pages/admin/partner-network-shops.tsx");
+const attention = read("client/src/pages/admin/partner-network-attention.ts");
 const app = read("client/src/App.tsx");
 const workspace = read("client/src/pages/admin/partner-management-detail.tsx");
 
@@ -34,24 +41,30 @@ describe("Partner Network R2 consolidated overview", () => {
 
   it("mounts the canonical overview and provides real workspace destinations", () => {
     expect(app).toContain("AdminPartnerNetworkOverviewPage");
-    expect(overview).toContain("/onboarding");
-    expect(overview).toContain("/cards");
-    expect(overview).toContain("/staff");
-    expect(overview).toContain("/credits");
-    expect(overview).toContain("/security");
-    expect(overview).toContain("—, never as zero");
+    // Per-shop destinations now hang off the Shops table, which owns the shop list.
+    for (const destination of ["/onboarding", "/cards", "/staff", "/credits", "/security"]) {
+      expect(shops).toContain(destination);
+    }
+    // Overview keeps the honesty rule for its own summary numbers.
+    expect(overview).toContain("never as zero");
     expect(workspace).toContain("/api/admin/grading-queue?status=all&partnerId=");
     expect(workspace).toContain("/admin/staff?certId=${item.certId}");
     expect(workspace).toContain('item.graderStatus === "pending_review"');
   });
 
   it("uses the stable alert source contract and authoritative location/station signals", () => {
-    expect(overview).toContain('alert.id.startsWith("sec-")');
-    expect(overview).toContain('alert.id.startsWith("credit-")');
-    expect(overview).toContain('alert.id.startsWith("lock-")');
-    expect(overview).toContain('alert.id.startsWith("esc-")');
-    expect(overview).toContain("/locations");
-    expect(overview).toContain("/stations");
+    expect(attention).toContain('alert.id.startsWith("sec-")');
+    expect(attention).toContain('alert.id.startsWith("credit-")');
+    expect(attention).toContain('alert.id.startsWith("lock-")');
+    expect(attention).toContain('alert.id.startsWith("esc-")');
+    /*
+     * The Shops table carries the founder's agreed columns and no longer has a Locations column, so
+     * the authoritative "no active location" signal surfaces where it can be ACTED on: as a critical
+     * Needs Attention row linking straight to that shop's Locations. The Scanner column still links
+     * to the station workspace directly.
+     */
+    expect(attention).toContain("/locations");
+    expect(shops).toContain("/stations");
     expect(service).toContain("active_locations");
     expect(service).toContain("station_attention");
     expect(service).toContain("FROM partner_stations GROUP BY tenant_id");
