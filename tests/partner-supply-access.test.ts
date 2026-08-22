@@ -108,6 +108,18 @@ describe("tenant isolation is enforced by the database, not by a query rememberi
 });
 
 describe("the Super Admin catalogue surface", () => {
+  it("calls the base url the admin router is actually mounted on", () => {
+    /*
+     * A wrong base is invisible to tsc and to every source assertion that only greps for control
+     * ids — it ships and every catalogue call 404s. This pins the two together: the page's BASE and
+     * the mount in supply-admin-routes.ts. (Observed on staging 2026-08-22: the page used
+     * /api/super-admin/partner-supply, which is not mounted.)
+     */
+    const mountPath = adminRoutes.match(/app\.use\("([^"]+)", partnerSupplyAdminRouter\(\)\)/)?.[1];
+    expect(mountPath).toBe("/api/super-admin/supplies");
+    expect(adminPage).toContain(`const BASE = "${mountPath}"`);
+  });
+
   it("is the Supplies destination and offers add / edit / disable / image", () => {
     expect(app).toContain('path="/admin/partners/supplies" component={AdminPartnerSuppliesPage}');
     for (const control of [

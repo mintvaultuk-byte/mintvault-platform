@@ -22,7 +22,12 @@ import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { AdminButton, AdminShell, Badge, Chip, Panel } from "@/components/admin";
 import { apiRequest } from "@/lib/queryClient";
 
-const BASE = "/api/super-admin/partner-supply";
+/*
+ * The path the supply admin router is ACTUALLY mounted on (supply-admin-routes.ts). Distinct from
+ * /api/super-admin/partner-supplies, which serves the earlier request-and-email supplies surface —
+ * two different bases for two different systems, deliberately not merged.
+ */
+const BASE = "/api/super-admin/supplies";
 
 interface AdminProduct {
   code: string;
