@@ -1,7 +1,12 @@
 import { useState, useEffect, useMemo } from "react";
 import { useQuery, useMutation } from "@tanstack/react-query";
 import { apiRequest, queryClient } from "@/lib/queryClient";
-import { SUBMISSION_STATUS_LABELS, SUBMISSION_STATUS_TRANSITIONS, pricingTiers, submissionTypes } from "@shared/schema";
+import {
+  SUBMISSION_STATUS_LABELS,
+  SUBMISSION_STATUS_TRANSITIONS,
+  pricingTiers,
+  submissionTypes,
+} from "@shared/commerce";
 import {
   CARRIERS,
   carrierIdFromLegacyName,

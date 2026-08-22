@@ -21,7 +21,8 @@ import {
   Calendar,
   Trash2,
 } from "lucide-react";
-import { IG_POST_TYPES, type IgPostStatus, type IgPostType } from "@shared/schema";
+import { IG_POST_TYPES } from "@shared/vocabulary";
+import type { IgPostStatus, IgPostType } from "@shared/schema";
 
 // Match the existing admin-page convention — no AdminLayout wrapper, plain
 // React component that renders its own header. Auth guard runs on the API

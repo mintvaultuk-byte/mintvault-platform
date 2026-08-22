@@ -1,7 +1,7 @@
 import { useState } from "react";
 import { useQuery, useMutation } from "@tanstack/react-query";
 import { apiRequest, queryClient } from "@/lib/queryClient";
-import { submissionTypes } from "@shared/schema";
+import { submissionTypes } from "@shared/commerce";
 import { Save, DollarSign, Clock, Shield, ToggleLeft, ToggleRight } from "lucide-react";
 
 interface ServiceTierRow {

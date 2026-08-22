@@ -20,7 +20,7 @@ import {
   ExternalLink,
 } from "lucide-react";
 import type { PublicCertificate, PopulationData } from "@shared/schema";
-import { isNonNumericGrade } from "@shared/schema";
+import { isNonNumericGrade } from "@shared/grade-presentation";
 import SeoHead, { SITE_URL } from "@/components/seo-head";
 
 const CERT_URL_BASE = "https://mintvaultuk.com/cert/";

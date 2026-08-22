@@ -6,7 +6,7 @@ import HeaderV2 from "@/components/v2/header-v2";
 import FooterV2 from "@/components/v2/footer-v2";
 import SectionEyebrow from "@/components/v2/section-eyebrow";
 import { apiRequest } from "@/lib/queryClient";
-import { VAULT_CLUB_SILVER_DISCOUNT_PERCENT } from "@shared/schema";
+import { VAULT_CLUB_SILVER_DISCOUNT_PERCENT } from "@shared/commerce";
 
 // Silver Vault Club perk values — mirrors server/vault-club-tiers.ts Silver
 // config. v1 active perks (all enforced in code): grading discount, AI credits,

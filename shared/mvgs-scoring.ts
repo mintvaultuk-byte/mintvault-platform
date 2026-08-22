@@ -774,32 +774,11 @@ export function gradeFromMvgsScore(score: number): number {
   return 1; // Poor
 }
 
-/**
- * MVGS tier NAME for a numeric 1-10 grade (no score, no trailing number).
- * Single source of truth for grade→name on the physical slab and the cert
- * page, so the two can never disagree. Mirrors gradeLabelForScore /
- * gradeFromMvgsScore but keyed by the grade itself, so a half-grade renders
- * its TRUE tier instead of being rounded up into the next whole tier.
- * Callers uppercase as needed.
- */
-export function mvgsTierName(grade: number): string {
-  if (grade >= 10) return "Gem Mint";
-  if (grade >= 9.5) return "Mint+";
-  if (grade >= 9) return "Mint";
-  if (grade >= 8.5) return "NM-Mint+";
-  if (grade >= 8) return "NM-Mint";
-  if (grade >= 7.5) return "NM+";
-  if (grade >= 7) return "Near Mint";
-  if (grade >= 6.5) return "EX-Mint+";
-  if (grade >= 6) return "EX-Mint";
-  if (grade >= 5.5) return "Excellent+";
-  if (grade >= 5) return "Excellent";
-  if (grade >= 4.5) return "VG-EX+";
-  if (grade >= 4) return "VG-EX";
-  if (grade >= 3.5) return "VG+";
-  if (grade >= 3) return "Very Good";
-  if (grade >= 2.5) return "Good+";
-  if (grade >= 2) return "Good";
-  if (grade >= 1.5) return "Fair";
-  return "Poor";
-}
+// ── Presentation ──────────────────────────────────────────────────────────
+// `mvgsTierName` (grade -> tier NAME) MOVED to shared/grade-presentation.ts.
+// It is a lookup over the published band table, not proprietary scoring, and
+// shared/schema.ts needs it — so leaving it here forced that barrel to import
+// this engine module, which is what put the engine's module boundary into the
+// public client bundle. Re-exported so every existing server call site is
+// unchanged and there remains exactly ONE definition of the ladder.
+export { mvgsTierName } from "./grade-presentation";
