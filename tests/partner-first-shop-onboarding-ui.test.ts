@@ -9,19 +9,22 @@ describe("first-shop guided onboarding UI contract", () => {
   it("collects the canonical delivery/contact/Owner fields and labels the current scope", () => {
     const page = read("client/src/pages/admin/partner-first-shop-onboarding.tsx");
     for (const required of [
-      "Legal / shop name",
+      // ONE create form: shop, Owner, delivery address. The operations contact is revealed only
+      // when a different one is wanted, and the Main location name is not asked for at all.
+      "Shop / legal name",
       "Address line 1",
       "Town / city",
       "Postcode",
       "Country",
-      "Primary operations contact",
+      "Use a different operations contact",
       "Operational email",
-      "Partner Owner",
       "Current Partner:",
       "Current location:",
       "Station enrolment must come from the real shop Scanner",
       "Open credits / billing readiness",
     ]) expect(page).toContain(required);
+    // The form must NOT ask for these: the server supplies both.
+    expect(page).not.toContain('label="Main location name"');
     expect(page).toContain("/first-shop/location");
     expect(page).toContain("/first-shop/operations-contact");
     expect(page).toContain("first-shop-create-submit");
@@ -309,7 +312,7 @@ describe("next-action controller UI contract", () => {
   it("keeps the 10 authoritative checks, collapsed by default under one disclosure", () => {
     const src = page();
     expect(src).toContain("first-shop-all-checks");
-    expect(src).toContain("View all setup checks");
+    expect(src).toContain("Advanced setup diagnostics");
     // Collapsed by default: `open` is bound to state that starts false.
     expect(src).toContain("const [checksOpen, setChecksOpen] = useState(false);");
     expect(src).toContain("open={checksOpen}");
@@ -369,6 +372,122 @@ describe("no duplicate client blocker logic", () => {
       expect(src).toContain("PARTNER_READINESS_DIMENSION_ORDER");
       // No local copy of the nine keys.
       expect(codeOnly(src)).not.toMatch(/=\s*\[\s*"organisation",\s*"location",\s*"delivery"/);
+    }
+  });
+});
+
+describe("five-stage setup controller UI contract", () => {
+  const page = () => read("client/src/pages/admin/partner-first-shop-onboarding.tsx");
+
+  it("shows CREATE -> ACTIVATE -> CONNECT -> TEST -> LIVE, from the server's stage", () => {
+    const src = page();
+    expect(src).toContain("first-shop-stage-bar");
+    expect(src).toContain('["CREATE", "ACTIVATE", "CONNECT", "TEST", "LIVE"]');
+    // Rendered from the verdict, never computed here — a client stage would be a second opinion.
+    expect(src).toContain("shop.operational.nextAction.stage");
+    expect(codeOnly(src)).not.toMatch(/function\s+deriveStage|computeStage/);
+  });
+
+  it("does not render ten setup cards by default — diagnostics are collapsed", () => {
+    const src = page();
+    expect(src).toContain("Advanced setup diagnostics");
+    expect(src).toContain("const [checksOpen, setChecksOpen] = useState(false);");
+    expect(src).toContain("open={checksOpen}");
+  });
+
+  it("gives each stage one standing instruction in the operator's words", () => {
+    const src = page();
+    expect(src).toContain("The Owner needs to open the MintVault email");
+    expect(src).toContain("Open MintVault Scanner on this Mac and sign in");
+    expect(src).toContain("Scan one test card");
+  });
+
+  it("resends the invitation from the canonical authority, without a trip into Staff", () => {
+    const src = page();
+    expect(src).toContain("/resend-invitation");
+    expect(src).toContain("Resend invitation");
+    expect(src).toContain('setBanner("Invitation sent.")');
+    // One invitation system: the route is the same one the Staff screen calls.
+    const routes = read("server/partner/partner-management-routes.ts");
+    expect(routes).toContain('r.post("/partners/:partnerId/users/:userId/resend-invitation"');
+  });
+
+  it("approves a single pending Scanner inline, and defers a real choice between Macs", () => {
+    const src = page();
+    expect(src).toContain("pendingStations.length === 1");
+    // Behind the SAME canonical step-up, which retries the same action after the challenge.
+    expect(src).toContain("runAdminProtected");
+  });
+
+  it("never pre-provisions a station identity — enrolment comes from the Mac itself", () => {
+    const src = page();
+    expect(src).toContain("Station enrolment must come from the real shop Scanner");
+    // No client path that creates or copies a station identity.
+    expect(codeOnly(src)).not.toMatch(/createStation|stationPrivateKey|copyStationIdentity/);
+  });
+});
+
+describe("create form asks once", () => {
+  const page = () => read("client/src/pages/admin/partner-first-shop-onboarding.tsx");
+
+  it("does not ask for the Main location name, and does not send one", () => {
+    const src = page();
+    expect(src).not.toContain('label="Main location name"');
+    expect(codeOnly(src)).not.toMatch(/^\s*locationName,\s*$/m);
+  });
+
+  it("only sends an operations contact when a different one was deliberately chosen", () => {
+    const src = page();
+    expect(src).toContain("operationsContact: useDifferentContact ?");
+    expect(src).toContain("const [useDifferentContact, setUseDifferentContact] = useState(false);");
+  });
+
+  it("keeps the single atomic create button", () => {
+    const src = page();
+    expect(src).toContain("first-shop-create-submit");
+    expect(src).toContain("Create shop & send invitation");
+    expect(src).toContain("If any part fails, nothing is saved.");
+  });
+
+  it("defaults live on the SERVER, so every caller writes the same canonical record", () => {
+    const service = read("server/partner/partner-management-service.ts");
+    expect(service).toContain('export const DEFAULT_MAIN_LOCATION_NAME = "Main location";');
+    expect(service).toContain("input.locationName ?? \"\"");
+    // Owner becomes the operations contact, through the SAME validator as a supplied one.
+    expect(service).toContain("requireOperationalContact(`${ownerFirstName} ${ownerLastName}`, ownerEmail)");
+  });
+});
+
+describe("shop workspace and network surfaces stay on one verdict", () => {
+  it("the Shop workspace leads with SETUP STATUS + NEXT ACTION, diagnostics collapsed", () => {
+    const src = read("client/src/pages/admin/partner-management-detail.tsx");
+    expect(src).toContain("pm-setup-status");
+    expect(src).toContain("pm-setup-stage");
+    expect(src).toContain("pm-setup-next-action");
+    expect(src).toContain("pm-advanced-diagnostics");
+    // Nothing was deleted: the detail moved under the disclosure.
+    expect(src).toContain("pm-setup-checklist");
+    expect(src).toContain("ReadinessPanel");
+    // It renders the verdict rather than deciding one.
+    expect(src).toContain("onboarding.data?.operational?.nextAction");
+  });
+
+  it("the Shops NEXT link opens the simplified setup controller, not a sub-workspace", () => {
+    const src = read("client/src/pages/admin/partner-network-shops.tsx");
+    expect(src).toContain("shop-next-action-");
+    expect(src).toContain("/onboarding`}");
+    expect(src).toContain("NEXT: ");
+    expect(src).toContain('"READY"');
+  });
+
+  it("Overview, Shops and the workspace all read the same nextAction field", () => {
+    for (const surface of [
+      "client/src/pages/admin/partner-network-attention.ts",
+      "client/src/pages/admin/partner-network-shops.tsx",
+      "client/src/pages/admin/partner-management-detail.tsx",
+      "client/src/pages/admin/partner-first-shop-onboarding.tsx",
+    ]) {
+      expect(read(surface)).toMatch(/nextAction/);
     }
   });
 });

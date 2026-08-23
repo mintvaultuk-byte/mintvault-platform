@@ -30,7 +30,6 @@ import {
   statusBadgeVariant,
 } from "./partner-dashboard-helpers";
 import { LOW_CREDIT_THRESHOLD } from "./partner-network-attention";
-import { nextActionHref } from "./partner-network-lifecycle";
 
 const BASE = "/api/super-admin/partner-dashboard";
 
@@ -107,7 +106,13 @@ function ShopRow({ shop }: { shop: PartnerTableRow }) {
           * rather than dressed up as a stage.
           */}
         <Link
-          href={shop.nextAction ? nextActionHref(shop.partnerId, shop.nextAction) : `/admin/partners/${shop.partnerId}/onboarding`}
+          /*
+            * Always the simplified setup controller. The next action is ACTIONED there now — it
+            * holds resend, inline Scanner approval, arming the test card and the collapsed
+            * diagnostics — so sending an operator to a sub-workspace instead would be sending them
+            * away from the one screen that can finish the job.
+            */
+          href={`/admin/partners/${shop.partnerId}/onboarding`}
           className="underline"
           data-testid={`shop-next-action-${shop.partnerId}`}
           data-state={shop.nextAction?.state ?? "UNAVAILABLE"}

@@ -15,6 +15,7 @@ import type {
   PartnerNextAction,
   PartnerOperationalReadiness,
   PartnerReadinessCode,
+  PartnerSetupStage,
   ReadinessStatus,
 } from "@shared/partner-readiness";
 
@@ -146,6 +147,62 @@ function checkGlyph(status: ReadinessStatus | "NOT_STARTED"): { mark: string; la
 }
 
 /**
+ * THE FIVE-STAGE INDICATOR.
+ *
+ * CREATE -> ACTIVATE -> CONNECT -> TEST -> LIVE, with the current stage marked. It renders the
+ * server's `nextAction.stage` and computes nothing: a client that decided its own stage would be a
+ * second readiness opinion, which is the thing this whole package exists to prevent.
+ */
+const SETUP_STAGES: PartnerSetupStage[] = ["CREATE", "ACTIVATE", "CONNECT", "TEST", "LIVE"];
+
+function StageBar({ current }: { current: PartnerSetupStage }) {
+  const currentIndex = SETUP_STAGES.indexOf(current);
+  return (
+    <div
+      data-testid="first-shop-stage-bar"
+      data-stage={current}
+      style={{ display: "flex", gap: 18, flexWrap: "wrap", alignItems: "center", margin: "0 0 16px" }}
+    >
+      {SETUP_STAGES.map((stage, index) => {
+        const done = index < currentIndex;
+        const active = index === currentIndex;
+        return (
+          <span
+            key={stage}
+            data-stage-step={stage}
+            data-stage-state={done ? "done" : active ? "active" : "todo"}
+            style={{
+              fontSize: 11,
+              letterSpacing: 1.4,
+              textTransform: "uppercase",
+              fontWeight: active ? 800 : 600,
+              color: done ? "#7fd6a0" : active ? "#D4AF37" : "var(--admin-ink-faint)",
+              opacity: done || active ? 1 : 0.55,
+            }}
+          >
+            {done ? "\u2713" : active ? "\u25cf" : "\u25cb"} {stage}
+          </span>
+        );
+      })}
+    </div>
+  );
+}
+
+/**
+ * What the operator is told at each stage, in their words rather than the system's.
+ *
+ * The SENTENCE still comes from the server for anything condition-specific; this only supplies the
+ * stage headline and the standing instruction, which are the same whatever the underlying code is.
+ */
+const STAGE_INSTRUCTION: Record<PartnerSetupStage, string> = {
+  CREATE: "Enter the shop's details.",
+  ACTIVATE: "The Owner needs to open the MintVault email, create their password and set up their authenticator.",
+  CONNECT: "Open MintVault Scanner on this Mac and sign in with the Owner account.",
+  TEST: "Scan one test card on the shop's Mac.",
+  LIVE: "This shop can grade cards.",
+};
+
+/**
  * THE ONE NEXT ACTION.
  *
  * The 10 checks below are the authority and stay exactly as they were; this is the operator's
@@ -243,8 +300,9 @@ export default function PartnerFirstShopOnboardingPage() {
    * Next Action card does for any blocker whose fix needs a choice the card cannot make for you.
    */
   const [checksOpen, setChecksOpen] = useState(false);
+  /** Off by default: the operations contact is the Owner unless the operator says otherwise. */
+  const [useDifferentContact, setUseDifferentContact] = useState(false);
   const [legalName, setLegalName] = useState("");
-  const [locationName, setLocationName] = useState("Main location");
   const [address, setAddress] = useState(emptyAddress);
   const [contactName, setContactName] = useState("");
   const [contactEmail, setContactEmail] = useState("");
@@ -278,9 +336,11 @@ export default function PartnerFirstShopOnboardingPage() {
     mutationFn: () =>
       apiRequest("POST", `${BASE}/first-shop`, {
         legalName,
-        locationName,
+        // locationName and operationsContact are deliberately omitted: the SERVER defaults the
+        // Main location name and makes the Owner the operations contact, so every caller produces
+        // the same canonical record.
         deliveryAddress: address,
-        operationsContact: { fullName: contactName, email: contactEmail },
+        operationsContact: useDifferentContact ? { fullName: contactName, email: contactEmail } : undefined,
         owner: { firstName: ownerFirstName, lastName: ownerLastName, email: ownerEmail },
         idempotencyKey: createIdempotencyKey.current,
         reason: "first-shop guided onboarding",
@@ -448,6 +508,23 @@ export default function PartnerFirstShopOnboardingPage() {
    * that declaration inside the NEW transaction and stamps the Card Job, which is why this step can
    * be truthful about a card nobody here has touched.
    */
+  /*
+   * RESEND, from the EXISTING canonical authority. Same route the Staff screen calls; no second
+   * invitation system, and no trip into Staff to reach it during onboarding.
+   */
+  const resendInvitation = useMutation({
+    mutationFn: async (userId: string) =>
+      apiRequest("POST", `${BASE}/partners/${partnerId}/users/${userId}/resend-invitation`, {
+        reason: "First-shop onboarding: resend Owner invitation",
+      }).then((r) => r.json()),
+    onSuccess: () => {
+      setBanner("Invitation sent.");
+      void queryClient.invalidateQueries({ queryKey: [`${BASE}/partners/${partnerId}/users`] });
+      void onboarding.refetch();
+    },
+    onError: (error) => setBanner(errorMessage(error, "The invitation could not be sent.")),
+  });
+
   const armTestCard = useMutation({
     mutationFn: async () =>
       apiRequest("POST", `${BASE}/partners/${partnerId}/first-shop/test-card/arm`, {
@@ -484,6 +561,34 @@ export default function PartnerFirstShopOnboardingPage() {
     if (code === "TEST_CARD_REQUIRED" && shop?.operational.testCard.state === "NOT_STARTED" && shop?.testCardArmingReadable && !shop?.testCardArmedAt) {
       return { run: () => armTestCard.mutate(), label: "Arm the test card", pending: armTestCard.isPending, failed: armTestCard.isError };
     }
+    /*
+     * An expired or failed invitation has exactly one remedy and exactly one Owner to apply it to,
+     * so it runs from the card. Super Admin should not have to go into Staff to resend.
+     */
+    if ((code === "INVITATION_EXPIRED" || code === "OWNER_SETUP_REQUIRED") && shop?.owner?.id) {
+      const ownerId = shop.owner.id;
+      return {
+        run: () => resendInvitation.mutate(ownerId),
+        label: "Resend invitation",
+        pending: resendInvitation.isPending,
+        failed: resendInvitation.isError,
+      };
+    }
+    /*
+     * ONE pending Scanner is unambiguous, so approval runs from the card behind the SAME canonical
+     * step-up. More than one is a real choice between Macs, so that reveals the step instead.
+     */
+    if (code === "STATION_APPROVAL_PENDING" && pendingStations.length === 1) {
+      const code0 = stationCodeOf(pendingStations[0]);
+      if (code0) {
+        return {
+          run: () => approveStation.mutate(code0),
+          label: "Approve Scanner",
+          pending: approveStation.isPending,
+          failed: approveStation.isError,
+        };
+      }
+    }
     return null;
   })();
 
@@ -507,32 +612,65 @@ export default function PartnerFirstShopOnboardingPage() {
             }}
             data-testid="first-shop-create-form"
           >
-            <Step number={1} title="Shop" complete={false}>
+            {/*
+              * ONE FORM. This used to be four numbered "steps" for shop, address, contact and
+              * Owner, which read like a technical checklist for something that is really one
+              * decision: open this shop. Nothing about the canonical record changed — the server
+              * still writes the same organisation, location, contact, Owner, role, wallet and
+              * invitation in one transaction. The form just stopped asking for what the server
+              * already knows.
+              */}
+            <Panel title="Create shop" sub="One form. MintVault creates the shop, its Main location, the Owner and the invitation together.">
+              <div style={{ fontSize: 11, letterSpacing: 1.4, opacity: 0.7, textTransform: "uppercase", marginBottom: 6 }}>Shop</div>
               <div style={{ display: "flex", gap: 10, flexWrap: "wrap" }}>
-                <Input label="Legal / shop name" value={legalName} onChange={resetCreateIntent(setLegalName)} />
-                <Input label="Main location name" value={locationName} onChange={resetCreateIntent(setLocationName)} />
+                <Input label="Shop / legal name" value={legalName} onChange={resetCreateIntent(setLegalName)} />
               </div>
-            </Step>
-            <Step number={2} title="Main location delivery address" complete={false}>
+
+              <div style={{ fontSize: 11, letterSpacing: 1.4, opacity: 0.7, textTransform: "uppercase", margin: "16px 0 6px" }}>Owner</div>
+              <p style={{ marginTop: 0, fontSize: 12, opacity: 0.85 }}>
+                The Owner receives the invitation and sets their own password and authenticator. Neither secret is ever
+                shown to MintVault staff.
+              </p>
+              <div style={{ display: "flex", gap: 10, flexWrap: "wrap" }}>
+                <Input label="First name" value={ownerFirstName} onChange={resetCreateIntent(setOwnerFirstName)} />
+                <Input label="Last name" value={ownerLastName} onChange={resetCreateIntent(setOwnerLastName)} />
+                <Input label="Email" value={ownerEmail} onChange={resetCreateIntent(setOwnerEmail)} type="email" />
+              </div>
+
+              <div style={{ fontSize: 11, letterSpacing: 1.4, opacity: 0.7, textTransform: "uppercase", margin: "16px 0 6px" }}>Delivery address</div>
               <AddressFields value={addressValue} onChange={setAddressField} />
-            </Step>
-            <Step number={3} title="Primary operations contact" complete={false}>
-              <div style={{ display: "flex", gap: 10, flexWrap: "wrap" }}>
-                <Input label="Contact name" value={contactName} onChange={resetCreateIntent(setContactName)} />
-                <Input label="Operational email" value={contactEmail} onChange={resetCreateIntent(setContactEmail)} type="email" />
+
+              {/*
+                * The operations contact is the Owner unless somebody says otherwise. Revealed only
+                * when asked for, so the normal path never types the same name and email twice —
+                * which is how a shop ended up with two contacts differing by a typo.
+                */}
+              <div style={{ marginTop: 16 }}>
+                <label style={{ display: "flex", gap: 8, alignItems: "center", fontSize: 12, cursor: "pointer" }}>
+                  <input
+                    type="checkbox"
+                    checked={useDifferentContact}
+                    onChange={(event) => {
+                      // Changing WHAT is being created changes the request, so the idempotency key
+                      // must move with it — same rule every other field on this form follows.
+                      createIdempotencyKey.current = requestKey();
+                      setUseDifferentContact(event.target.checked);
+                    }}
+                    data-testid="first-shop-use-different-contact"
+                  />
+                  Use a different operations contact
+                </label>
+                {useDifferentContact && (
+                  <div style={{ display: "flex", gap: 10, flexWrap: "wrap", marginTop: 10 }} data-testid="first-shop-contact-fields">
+                    <Input label="Contact name" value={contactName} onChange={resetCreateIntent(setContactName)} />
+                    <Input label="Operational email" value={contactEmail} onChange={resetCreateIntent(setContactEmail)} type="email" />
+                  </div>
+                )}
               </div>
-            </Step>
-            <Step number={4} title="Partner Owner" complete={false}>
-              <p style={{ marginTop: 0 }}>Submitting sends this Owner the existing invitation flow. They set their own password and MFA; neither secret is shown to MintVault staff.</p>
-              <div style={{ display: "flex", gap: 10, flexWrap: "wrap" }}>
-                <Input label="Owner first name" value={ownerFirstName} onChange={resetCreateIntent(setOwnerFirstName)} />
-                <Input label="Owner last name" value={ownerLastName} onChange={resetCreateIntent(setOwnerLastName)} />
-                <Input label="Owner email" value={ownerEmail} onChange={resetCreateIntent(setOwnerEmail)} type="email" />
-              </div>
-            </Step>
-            <Panel title="Create first shop" sub="Creates canonical records atomically before the Owner invitation is delivered.">
+            </Panel>
+            <Panel title="" sub="Everything is created in one transaction. If any part fails, nothing is saved.">
               <AdminButton type="submit" variant="gold" disabled={create.isPending} data-testid="first-shop-create-submit">
-                {create.isPending ? "Creating…" : "Create shop and send Owner invitation"}
+                {create.isPending ? "Creating\u2026" : "Create shop & send invitation"}
               </AdminButton>
             </Panel>
           </form>
@@ -542,6 +680,10 @@ export default function PartnerFirstShopOnboardingPage() {
           <div role="alert">This Partner could not be loaded.</div>
         ) : (
           <>
+            <StageBar current={shop.operational.nextAction.stage} />
+            <p data-testid="first-shop-stage-instruction" style={{ margin: "0 0 14px", opacity: 0.85 }}>
+              {STAGE_INSTRUCTION[shop.operational.nextAction.stage]}
+            </p>
             <NextActionCard
               next={shop.operational.nextAction}
               onRun={nextRun ? nextRun.run : null}
@@ -581,7 +723,7 @@ export default function PartnerFirstShopOnboardingPage() {
               data-testid="first-shop-all-checks"
             >
               <summary style={{ cursor: "pointer", padding: "10px 0", fontWeight: 600 }}>
-                View all setup checks
+                Advanced setup diagnostics — view all checks
                 <span style={{ opacity: 0.7, fontWeight: 400 }}>
                   {" "}
                   — {PARTNER_READINESS_DIMENSION_ORDER.filter((key) => shop.operational.dimensions[key]?.status === "PASS").length} of{" "}
