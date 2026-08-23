@@ -29,6 +29,7 @@ contextBridge.exposeInMainWorld("scanner", {
   stationCompleteMfa: (payload) => ipcRenderer.invoke("station-complete-mfa", payload),
   registerStation: (payload) => ipcRenderer.invoke("register-station", payload),
   stationSignOut: () => ipcRenderer.invoke("station-sign-out"),
+  quitScanner: () => ipcRenderer.invoke("quit-scanner"),
   setEnvironment: (value) => ipcRenderer.invoke("set-environment", value),
   updateApp: () => ipcRenderer.invoke("update-app"),
   resetScanner: () => ipcRenderer.invoke("reset-scanner"),

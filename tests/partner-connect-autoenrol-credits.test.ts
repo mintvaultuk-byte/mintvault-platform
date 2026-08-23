@@ -792,3 +792,127 @@ describe("CONNECT — welcome credits and first-run station enrolment", () => {
     expect(main).toContain("reconcileTenantScopedState(session.body?.tenantId)");
   });
 });
+
+/**
+ * THE PHYSICAL FAILURES, as tests.
+ *
+ * Every check here reads the COMPILED app under dist/mac-arm64, not the source tree. Three separate
+ * launches were reported as "done" while nothing had happened, and in each case the source was
+ * correct — what shipped, what ran, and what the operator could actually press were the open
+ * questions. So these assert the artifact.
+ */
+describe("Scanner — trapped-state recovery, isolation and launcher proof (compiled artifact)", () => {
+  const APP = "scripts/scanner-app/dist/mac-arm64/MintVault Scanner.app/Contents/Resources/app";
+  const read = (relative: string) => fs.readFileSync(path.join(process.cwd(), APP, relative), "utf8");
+  const launcher = () =>
+    fs.readFileSync("/Users/cornelius/mintvault-shopgames/launch-shop-games-scanner.command", "utf8");
+
+  it("M1–M5 — the launcher identifies, terminates and then VERIFIES, never assumes", () => {
+    const s = launcher();
+    expect(s).toContain("pgrep -f");                       // enumerate every running Scanner
+    expect(s).toContain("runtime.json");                   // identify by the app's own claim
+    expect(s).toContain("kill -TERM");                     // terminate a genuine conflict
+    expect(s).toContain("would not exit");                 // and prove it exited, or stop
+    // Verifies each field of the process that actually came up.
+    for (const field of ["version", "scansDir", "userDataPath", "apiBase", "environment"]) {
+      expect(s).toContain(`manifest_field "$OUR_MANIFEST" ${field}`);
+    }
+    expect(s).toContain("never declared itself");          // fails loudly rather than assuming
+    // A window appearing is never treated as success.
+    expect(s).not.toMatch(/open -a .*MintVault Scanner/);
+  });
+
+  it("M6/M7/M8 — Quit exists, genuinely exits, and is not the same as closing the window", () => {
+    const main = read("main.js");
+    expect(main).toContain("Quit MintVault Scanner");
+    expect(main).toContain("async function quitScanner()");
+    expect(main).toContain("app.quit()");
+    // Closing the window still does NOT quit — the menu-bar app deliberately survives it.
+    expect(main).toContain('app.on("window-all-closed"');
+    expect(main).toContain("e.preventDefault()");
+    // Quit must not destroy identity, calibration or the server-side station.
+    const quit = main.slice(main.indexOf("async function quitScanner()"), main.indexOf("async function refreshStationSetupFromTray"));
+    expect(quit).not.toContain("clearEnrollment");
+    expect(quit).not.toContain("unlinkSync");
+    expect(quit).not.toContain("stations/");
+  });
+
+  it("M8b/M9 — Sign out, Refresh, Diagnostics and Quit are reachable from a blocking screen", () => {
+    const main = read("main.js");
+    for (const item of ["Refresh status", "Sign out…", "Show diagnostics", "Quit MintVault Scanner"]) {
+      expect(main).toContain(item);
+    }
+    // ...and from inside the modal itself, which cannot be dismissed.
+    const html = read("renderer/index.html");
+    for (const id of ["stationRefreshBtn", "stationSignOutBtn", "stationDiagnosticsBtn", "stationQuitBtn"]) {
+      expect(html).toContain(id);
+    }
+    const renderer = read("renderer/app.js");
+    expect(renderer).toContain("wireStationRecoveryControls()");
+    // The recovery row is never hidden or disabled by station stage.
+    expect(renderer).not.toContain("stationSetupRecovery.hidden");
+    expect(renderer).not.toContain("stationQuitBtn.disabled");
+  });
+
+  it("M10/M11/M12 — zero credits blocks only a new card, never sign-in, enrolment or calibration", () => {
+    const renderer = read("renderer/app.js");
+    // The blocking top-up modal is scoped to an operational station.
+    expect(renderer).toContain('const stationOperational = stationSetup?.stage === "active"');
+    expect(renderer).toContain("if (stationOperational && shouldShowBillingLock(state))");
+    // NEW CARD's own zero-credit gate is untouched.
+    expect(renderer).toContain("billingLocked(");
+  });
+
+  it("M13/M14 — pending is a wait, a foreign Mac is named, and only the unknown is 'unavailable'", () => {
+    const renderer = read("renderer/app.js");
+    const pending = renderer.slice(renderer.indexOf('stage === "pending"'), renderer.indexOf('stage === "identity_mismatch"'));
+    expect(pending).toContain("Waiting for MintVault approval");
+    expect(pending).not.toContain("Station unavailable");
+
+    const mismatch = renderer.slice(renderer.indexOf('stage === "identity_mismatch"'), renderer.indexOf('stage === "update_required"'));
+    expect(mismatch).toContain("This Mac belongs to another shop");
+    expect(mismatch).not.toContain("registerThisMac");   // never silently re-homes the station
+
+    // Rejected/withdrawn and suspended are their own states, each with a way out.
+    expect(renderer).toContain("This Mac's registration was withdrawn");
+    expect(renderer).toContain("This Mac is suspended");
+    // "Station status unavailable" now covers ONLY the genuinely unknown case.
+    expect(renderer).toContain("Station status unavailable");
+  });
+
+  it("M15 — one shop's cards cannot appear under another shop", () => {
+    const main = read("main.js");
+    expect(main).toContain("reconcileTenantScopedState(session.body?.tenantId)");
+    const fn = main.slice(main.indexOf("function reconcileTenantScopedState"), main.indexOf("/** Sanitised first-run state only"));
+    for (const cleared of ["lastUploadedCert: null", "recent: []", "openCardJob: null", "calibrationRecovery: null"]) {
+      expect(fn).toContain(cleared);
+    }
+    // Forensics and station identity survive: this scopes display state, it does not purge.
+    expect(fn).not.toContain("stationIdentity");
+    expect(fn).not.toContain("rmSync");
+  });
+
+  it("M-iso — an isolated instance owns its Electron profile, and production still does not", () => {
+    const main = read("main.js");
+    expect(main).toContain("if (process.env.MINTVAULT_SCANS_DIR)");
+    expect(main).toContain('app.setPath("userData", isolatedProfile)');
+    // The lock is still requested — it is the PROFILE that scopes it, not the absence of a lock.
+    expect(main).toContain("app.requestSingleInstanceLock()");
+  });
+
+  it("M-manifest — the running instance declares itself, and withdraws it on quit", () => {
+    const main = read("main.js");
+    expect(main).toContain("function writeRuntimeManifest()");
+    expect(main).toContain("function clearRuntimeManifest()");
+    expect(main).toContain("writeRuntimeManifest();");
+    expect(main).toContain("clearRuntimeManifest();");
+    // Only ever removes its OWN claim.
+    expect(main).toContain("raw.pid === process.pid");
+  });
+
+  it("M-version — the compiled build is 1.4.0, distinguishable from the enrolled Shop 0 Mac", () => {
+    const pkg = JSON.parse(read("package.json")) as { version: string };
+    expect(pkg.version).toBe("1.4.0");
+    expect(pkg.version).not.toBe("1.2.1");
+  });
+});

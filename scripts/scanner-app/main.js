@@ -42,7 +42,95 @@ const lide400 = require("./lib/lide400-controller");
 // macOS: this is a menu-bar-only app, no Dock icon.
 if (process.platform === "darwin" && app.dock) app.dock.hide();
 
-// Prevent multiple instances stacking up if launchd misbehaves.
+/*
+ * AN ISOLATED INSTANCE OWNS ITS ELECTRON PROFILE TOO — and therefore its own lock.
+ *
+ * MINTVAULT_SCANS_DIR already isolates station identity and app state (lib/station-identity.js,
+ * lib/state.js), which is what lets a second shop enrol on a Mac that another shop already uses.
+ * The Electron profile was NOT isolated, and Electron keys its single-instance lock on the userData
+ * path — so an isolated instance asked for the SHARED lock, lost it to the running Scanner, and
+ * quit instantly while merely re-opening the other shop's window. The launch looked like it worked
+ * and nothing had happened.
+ *
+ * Deriving userData from the same variable fixes that at the source rather than in a launcher: an
+ * isolated instance is isolated in every dimension, by declaring one thing.
+ *
+ * PRODUCTION IS UNCHANGED. With MINTVAULT_SCANS_DIR unset — every real shop Mac — userData is
+ * Electron's default and the lock is exactly as global as it has always been. One Scanner per Mac.
+ */
+if (process.env.MINTVAULT_SCANS_DIR) {
+  const isolatedProfile = path.join(process.env.MINTVAULT_SCANS_DIR, "electron-profile");
+  try {
+    fs.mkdirSync(isolatedProfile, { recursive: true });
+    app.setPath("userData", isolatedProfile);
+    console.log(`[instance] isolated profile: ${isolatedProfile}`);
+  } catch (err) {
+    console.error(`[instance] could not create the isolated profile at ${isolatedProfile}: ${err.message}`);
+    app.exit(1);
+  }
+}
+
+/*
+ * THIS INSTANCE, DECLARED TO DISK — so a launcher can VERIFY rather than assume.
+ *
+ * macOS does not expose another process's environment (`ps eww` prints the command and nothing
+ * else on a modern system), so there is no way from outside to ask a running Scanner which profile
+ * it belongs to. That mattered: an isolated launch that silently forwarded to the shared instance
+ * was indistinguishable from one that worked, because "a window appeared" was the only available
+ * evidence.
+ *
+ * So the process states its own identity. Written once at startup and removed on a clean quit, it
+ * is the only claim about a running Scanner that comes from the Scanner itself.
+ *
+ * Contains no secret: a pid, paths already known to whoever can read this file, and a version.
+ */
+// The same per-instance support directory lib/state.js and lib/station-identity.js resolve, so all
+// three agree on where "this instance" keeps its things.
+const INSTANCE_SUPPORT_DIR = process.env.MINTVAULT_SCANS_DIR
+  ? path.join(process.env.MINTVAULT_SCANS_DIR, "app-state")
+  : path.join(os.homedir(), "Library", "Application Support", "MintVaultScanner");
+const RUNTIME_MANIFEST = path.join(INSTANCE_SUPPORT_DIR, "runtime.json");
+
+function writeRuntimeManifest() {
+  let environmentLabel = "unconfigured";
+  let apiBase = null;
+  try {
+    const resolved = environment.resolveEnvironment();
+    environmentLabel = resolved.ok ? resolved.label : `${resolved.label || "unresolved"}-refusing`;
+    apiBase = resolved.ok ? resolved.apiBase : null;
+  } catch {
+    /* an unresolved environment is itself worth recording */
+  }
+  const manifest = {
+    pid: process.pid,
+    executable: process.execPath,
+    version: APP_VERSION,
+    userDataPath: app.getPath("userData"),
+    scansDir: process.env.MINTVAULT_SCANS_DIR || null,
+    environment: environmentLabel,
+    apiBase,
+    startedAt: new Date().toISOString(),
+  };
+  try {
+    fs.mkdirSync(path.dirname(RUNTIME_MANIFEST), { recursive: true });
+    fs.writeFileSync(RUNTIME_MANIFEST, JSON.stringify(manifest, null, 2));
+    console.log(`[instance] runtime manifest: ${RUNTIME_MANIFEST}`);
+  } catch (err) {
+    console.error(`[instance] could not write the runtime manifest: ${err.message}`);
+  }
+}
+
+function clearRuntimeManifest() {
+  try {
+    const raw = JSON.parse(fs.readFileSync(RUNTIME_MANIFEST, "utf8"));
+    // Only ever remove OUR OWN claim. A crashed predecessor's manifest is stale, not ours to erase.
+    if (raw && raw.pid === process.pid) fs.unlinkSync(RUNTIME_MANIFEST);
+  } catch {
+    /* nothing to clear */
+  }
+}
+
+// Prevent multiple instances stacking up if launchd misbehaves. Scoped to this profile — see above.
 const gotLock = app.requestSingleInstanceLock();
 if (!gotLock) {
   app.quit();
@@ -256,17 +344,103 @@ function refreshTray() {
 function buildTrayMenu() {
   if (!tray) return;
   const s = stateMod.get();
+  /*
+   * THE WAY OUT, always present.
+   *
+   * This menu had no Quit. The app is menu-bar-only and deliberately survives its window closing
+   * (see the window-all-closed handler), so with no Quit item there was NO way for a person to stop
+   * it — and every instruction to "quit the Scanner first" described a control that did not exist.
+   * An operator could be looking at a blocking modal with no exit from either the window or here.
+   *
+   * Environment is named for the same reason: a Mac pointed at STAGING that looks identical to one
+   * pointed at PRODUCTION is a trap of its own.
+   */
+  let environmentLabel = "Environment: unconfigured";
+  try {
+    const resolved = environment.resolveEnvironment();
+    environmentLabel = `Environment: ${resolved.ok ? resolved.label : `${resolved.label || "unresolved"} — refusing`}`;
+  } catch {
+    /* an unreadable environment must not stop the menu that lets you leave */
+  }
   const menu = Menu.buildFromTemplate([
     { label: `MintVault Scanner — ${s.state}`, enabled: false },
     { label: `Last: ${s.lastUploadedCert || "—"}`, enabled: false },
+    { label: environmentLabel, enabled: false },
     { type: "separator" },
     { label: "Show window", click: () => showPopover() },
+    { label: "Refresh status", click: () => void refreshStationSetupFromTray() },
+    { type: "separator" },
+    { label: "Sign out…", click: () => void signOutFromTray() },
+    { type: "separator" },
+    { label: "Show diagnostics", click: () => shell.openPath(SCANNER_LOG) },
     { label: "Show service logs", click: () => shell.openPath(SCANNER_LOG) },
     { label: "Restart scanner service", click: () => rebootScanner() },
     { type: "separator" },
     { label: "About", click: () => showPopover() },
+    { type: "separator" },
+    { label: "Quit MintVault Scanner", accelerator: "Command+Q", click: () => void quitScanner() },
   ]);
   tray.setContextMenu(menu);
+}
+
+/**
+ * Genuinely exit — the counterpart to a window-all-closed handler that deliberately does not.
+ *
+ * WHAT THIS DOES NOT DO, on purpose. It removes no station identity, no calibration, no logs and no
+ * scans, and it tells the server nothing: quitting an app is not a statement about whether a
+ * physical station is authorised. A Mac that is switched off overnight must come back as the same
+ * approved station in the morning, so `partner_stations` is left entirely alone.
+ *
+ * It DOES stop the file watcher this instance owns, because a watcher outliving the app that
+ * supervises it is how a "quit" Scanner goes on ingesting scans. The LiDE bridge needs no handling:
+ * lide400-controller spawns it per operation, awaits it, and SIGTERMs it on its own timeout, so
+ * there is no long-lived scanner-service child to stop and this does not pretend to stop one.
+ */
+async function quitScanner() {
+  isQuitting = true;
+  console.log("[quit] stopping this Scanner instance (station identity, calibration and logs are untouched)");
+  try {
+    if (watcher && typeof watcher.stop === "function") await watcher.stop();
+  } catch (err) {
+    console.error(`[quit] watcher stop failed: ${err && err.message}`);
+  }
+  app.quit();
+}
+
+/** Tray "Refresh status" — the same read the pending screen polls, on demand. */
+async function refreshStationSetupFromTray() {
+  try {
+    const setup = await stationSetupState();
+    popover?.webContents?.send?.("station-setup", setup);
+    refreshTray();
+  } catch (err) {
+    console.error(`[tray] refresh failed: ${err && err.message}`);
+  }
+}
+
+/**
+ * Tray "Sign out" — reachable even when the window is showing a modal the operator cannot dismiss.
+ *
+ * Refuses mid-card for the same reason the in-app control does: switching operator with a paid,
+ * half-captured card on the bench loses the thread. That refusal is surfaced, never silent.
+ */
+async function signOutFromTray() {
+  const s = stateMod.get();
+  if (s.activeCapture || s.openCardJob || watcher?.targetedPendingUploadCount()) {
+    showPopover();
+    popover?.webContents?.send?.(
+      "station-setup",
+      { ok: true, stage: "sign_in", error: "Finish or safely retry the current card before switching operator" }
+    );
+    return;
+  }
+  try {
+    stationIdentity.clearOperatorSession();
+  } catch (err) {
+    console.error(`[tray] sign out failed: ${err && err.message}`);
+  }
+  showPopover();
+  await refreshStationSetupFromTray();
 }
 
 function setupTray() {
@@ -573,8 +747,27 @@ function reconcileTenantScopedState(tenantId) {
   pushStateToRenderer();
 }
 
-/** Sanitised first-run state only — no cookie, private key, UUID or fingerprint crosses IPC. */
+/**
+ * Stamp the environment onto every setup answer, whichever branch produced it.
+ *
+ * A wrapper rather than a field added to a dozen return sites: the label must be present on the
+ * error paths too — those are exactly the screens where "am I even pointed at the right MintVault?"
+ * is the question — and one of a dozen returns forgetting it is how that guarantee rots.
+ */
 async function stationSetupState() {
+  const setup = await stationSetupStateInner();
+  let environmentLabel = "UNCONFIGURED";
+  try {
+    const resolved = environment.resolveEnvironment();
+    environmentLabel = resolved.ok ? resolved.label : `${resolved.label || "UNRESOLVED"} — REFUSING`;
+  } catch {
+    /* an unreadable environment must not stop the screen that lets you leave */
+  }
+  return { ...setup, environmentLabel };
+}
+
+/** Sanitised first-run state only — no cookie, private key, UUID or fingerprint crosses IPC. */
+async function stationSetupStateInner() {
   let session;
   try {
     session = await stationClient.stationSession();
@@ -650,7 +843,7 @@ async function stationSetupState() {
         const enrolled = await stationClient.registerThisMac({ locationId: eligible[0].id, appVersion: APP_VERSION });
         if (enrolled.ok && enrolled.body?.station?.stationCode) {
           console.log(`[station] auto-enrolled this Mac as ${enrolled.body.station.stationCode} (awaiting approval)`);
-          return await stationSetupState();
+          return await stationSetupStateInner();
         }
         const failure = (enrolled.body && enrolled.body.error) || {};
         return {
@@ -1219,6 +1412,16 @@ function setupIpc() {
   });
 
   ipcMain.handle("get-station-setup", () => stationSetupState());
+  /*
+   * QUIT, from the window as well as the tray.
+   *
+   * The blocking setup modal cannot be dismissed and the window has no close button, so without
+   * this an operator in an unresolvable station state had no exit inside the app at all.
+   */
+  ipcMain.handle("quit-scanner", () => {
+    void quitScanner();
+    return { ok: true };
+  });
   ipcMain.handle("station-sign-in", async (_event, payload) => {
     const email = typeof payload?.email === "string" ? payload.email.trim() : "";
     const password = typeof payload?.password === "string" ? payload.password : "";
@@ -1650,6 +1853,8 @@ app.whenReady().then(async () => {
   setInterval(() => watcher.drainInbox().catch(() => {}), 10 * 60 * 1000);
   refreshTray();
   surfacePriorResetStatus();
+  // Last, so the manifest only ever claims an instance that actually finished starting.
+  writeRuntimeManifest();
 });
 
 app.on("window-all-closed", (e) => {
@@ -1659,4 +1864,6 @@ app.on("window-all-closed", (e) => {
 
 app.on("before-quit", () => {
   isQuitting = true;
+  // Withdraw this instance's claim, so a launcher never verifies against a dead process.
+  clearRuntimeManifest();
 });

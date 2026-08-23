@@ -395,6 +395,24 @@
           <button class="btn primary" type="button" id="stationRegisterBtn">REGISTER THIS MAC</button>
         </div>
         <p class="hint station-setup-error" id="stationSetupError"></p>
+        <!--
+          THE WAY OUT, on the screen that used to have none.
+
+          Every stage of this modal is blocking by design — an unauthorised Mac must not scan. But
+          "blocking" was implemented as "no controls at all", so an operator who reached a state they
+          could not resolve (a Mac registered to another shop, a station awaiting an approval that
+          had not come) had nothing to press, in a window they could not close, in an app whose tray
+          had no Quit. These four are always rendered and never disabled by station state.
+        -->
+        <div class="station-setup-recovery" id="stationSetupRecovery">
+          <span class="station-setup-environment" id="stationSetupEnvironment"></span>
+          <div class="station-setup-recovery-actions">
+            <button class="linklike" type="button" id="stationRefreshBtn">REFRESH STATUS</button>
+            <button class="linklike" type="button" id="stationSignOutBtn">SIGN OUT</button>
+            <button class="linklike" type="button" id="stationDiagnosticsBtn">DIAGNOSTICS</button>
+            <button class="linklike" type="button" id="stationQuitBtn">QUIT</button>
+          </div>
+        </div>
       </div>
     </div>
 

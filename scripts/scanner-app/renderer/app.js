@@ -38,6 +38,12 @@ const els = {
   billingLockError: document.getElementById("billingLockError"),
   billingLockStatus: document.getElementById("billingLockStatus"),
   billingLockClose: document.getElementById("billingLockClose"),
+  stationSetupRecovery: document.getElementById("stationSetupRecovery"),
+  stationSetupEnvironment: document.getElementById("stationSetupEnvironment"),
+  stationRefreshBtn: document.getElementById("stationRefreshBtn"),
+  stationSignOutBtn: document.getElementById("stationSignOutBtn"),
+  stationDiagnosticsBtn: document.getElementById("stationDiagnosticsBtn"),
+  stationQuitBtn: document.getElementById("stationQuitBtn"),
   billingOpenBrowser: document.getElementById("billingOpenBrowser"),
   lastCertBtn: document.getElementById("lastCertBtn"),
   logsBtn: document.getElementById("logsBtn"),
@@ -361,7 +367,20 @@ function renderBillingLock(state) {
     setBillingModalCopy("manual");
     return;
   }
-  if (shouldShowBillingLock(state)) {
+  /*
+   * AN EMPTY WALLET IS A REASON NOT TO START A CARD. It is not a reason to be unable to sign in.
+   *
+   * This ran on every state push regardless of what the station was doing, so a shop with a zero
+   * balance — which is every shop before its first top-up — got "NO GRADING CREDITS AVAILABLE / TOP
+   * UP TO CONTINUE" over the sign-in and awaiting-approval screens. Nothing on that path spends a
+   * credit: signing in, enrolling a Mac, waiting for approval and calibrating are all free. The
+   * modal was blocking the very steps that lead to being able to buy credits at all.
+   *
+   * Scoped to an operational station, which is the only state in which starting a card is even
+   * possible. NEW CARD remains hard-disabled at zero by its own control — that gate is untouched.
+   */
+  const stationOperational = stationSetup?.stage === "active";
+  if (stationOperational && shouldShowBillingLock(state)) {
     // A reservation already paid for this Card Job can finish safely. Keep the canonical zero panel
     // visible, but make it non-blocking so SCAN/FIX remains usable while NEW stays hard-disabled.
     openBillingModal("zero", { nonBlocking: stationHasReservedCardInProgress(state) });
@@ -591,6 +610,7 @@ function renderStationSetup(next) {
   const stage = String(stationSetup.stage || "sign_in");
   const active = stage === "active";
   renderStationIdentity(stationSetup);
+  renderStationEnvironment(stationSetup);
   els.stationSetupModal.classList.toggle("visible", !active);
   els.stationSignInForm.hidden = stage !== "sign_in";
   els.stationMfaForm.hidden = stage !== "mfa";
@@ -669,10 +689,35 @@ function renderStationSetup(next) {
     els.stationSetupText.textContent = stationSetup.minimumSupportedVersion
       ? `This Mac must run MintVault Scanner ${stationSetup.minimumSupportedVersion} or later. Install the current signed MintVault Scanner release, then reopen the app.`
       : "Install the current signed MintVault Scanner release, then reopen the app.";
-  } else if (stage === "suspended" || stage === "revoked" || stage === "station_unavailable") {
-    els.stationSetupTitle.textContent = "Station unavailable";
+  } else if (stage === "revoked") {
+    /*
+     * REVOKED covers both a withdrawn station and a REJECTED enrolment: rejectPendingStation sets
+     * REVOKED with action `rejected`, so there is no separate status to read. Either way this Mac
+     * will not scan again under this identity, and the honest next step is to sign out — not to
+     * stare at a generic failure.
+     */
+    els.stationSetupTitle.textContent = "This Mac's registration was withdrawn";
     els.stationSetupText.textContent =
-      "This station is not currently authorised for scanning. Contact a MintVault Super Admin.";
+      `${stationSetup.stationCode || "This Mac"} is no longer authorised to scan for ` +
+      `${stationSetup.summary?.organisationName || "this shop"}. It was either rejected during approval or ` +
+      "withdrawn afterwards. Sign out below; MintVault must register this Mac again before it can scan.";
+  } else if (stage === "suspended") {
+    els.stationSetupTitle.textContent = "This Mac is suspended";
+    els.stationSetupText.textContent =
+      `${stationSetup.stationCode || "This Mac"} is registered to ` +
+      `${stationSetup.summary?.organisationName || "this shop"} but is currently suspended, so it cannot scan. ` +
+      "MintVault can lift a suspension without re-registering the Mac — nothing here needs undoing.";
+  } else if (stage === "station_unavailable") {
+    /*
+     * The genuinely unknown case, and the only one that still says so: MintVault answered something
+     * this app cannot interpret, or could not be reached at all. Every state that HAS a name — a
+     * pending approval, another shop's Mac, a withdrawal, a suspension — is now named above, so
+     * this no longer absorbs four different situations under one unhelpful sentence.
+     */
+    els.stationSetupTitle.textContent = "Station status unavailable";
+    els.stationSetupText.textContent =
+      (stationSetup.error || "MintVault could not confirm this Mac's status right now.") +
+      " Press Refresh status below. If it persists, contact MintVault.";
   } else if (active) {
     els.stationSetupTitle.textContent = "Station ready";
     els.stationSetupText.textContent =
@@ -692,6 +737,27 @@ function renderStationSetup(next) {
      */
     stationSetupPoll = setTimeout(() => void refreshStationSetup(), 6_000);
   }
+}
+
+/*
+ * The four controls that are always available, wired once and never disabled by station state.
+ * Sign out routes through the SAME canonical handler as the in-app control, so its mid-card refusal
+ * still applies — an always-reachable control is not an unconditional one.
+ */
+function wireStationRecoveryControls() {
+  els.stationRefreshBtn?.addEventListener("click", () => void refreshStationSetup());
+  els.stationSignOutBtn?.addEventListener("click", () =>
+    runStationSetupAction(() => window.scanner.stationSignOut())
+  );
+  els.stationDiagnosticsBtn?.addEventListener("click", () => void window.scanner.openLogs());
+  els.stationQuitBtn?.addEventListener("click", () => void window.scanner.quitScanner());
+}
+
+/** Name the environment on the setup screen too — a STAGING Mac must never look like a live one. */
+function renderStationEnvironment(setup) {
+  if (!els.stationSetupEnvironment) return;
+  const label = setup?.summary?.environmentLabel || setup?.environmentLabel || "";
+  els.stationSetupEnvironment.textContent = label ? `${label}` : "";
 }
 
 async function refreshStationSetup() {
@@ -2084,6 +2150,7 @@ setInterval(() => {
     renderState(lastState);
   }
 }, 1_000);
+wireStationRecoveryControls();
 void refreshStationSetup();
 window.addEventListener("resize", () => {
   if (!lastState?.positioningPreview) return;
