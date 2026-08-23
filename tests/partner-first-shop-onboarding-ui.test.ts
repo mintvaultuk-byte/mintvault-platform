@@ -445,8 +445,10 @@ describe("create form asks once", () => {
   it("keeps the single atomic create button", () => {
     const src = page();
     expect(src).toContain("first-shop-create-submit");
-    expect(src).toContain("Create shop & send invitation");
     expect(src).toContain("If any part fails, nothing is saved.");
+    // The label now comes from the tested decision module rather than being inlined in JSX.
+    expect(src).toContain("createButtonLabel(");
+    expect(read("client/src/pages/admin/owner-email-eligibility.ts")).toContain("Create shop & send invitation");
   });
 
   it("defaults live on the SERVER, so every caller writes the same canonical record", () => {
@@ -499,33 +501,68 @@ describe("owner email blocker UX", () => {
     const src = page();
     expect(src).toContain("/first-shop/owner-email-eligibility");
     expect(src).toContain("setDebouncedOwnerEmail");
-    expect(src).toContain("owner-email-checking");
   });
 
-  it("shows the conflict inline under the email field, with shop, status and next action", () => {
+  it("renders the duplicate warning AT THE FIELD, between the email input and the next section", () => {
     const src = page();
-    expect(src).toContain("owner-email-conflict");
-    expect(src).toContain("This email is already used by");
-    expect(src).toContain("conflict.partnerName");
-    expect(src).toContain("conflict.userStatus");
-    expect(src).toContain("conflict.reason");
-    expect(src).toContain("conflict.nextAction");
-    expect(src).toContain("owner-email-available");
+    const emailInput = src.indexOf('label="Email"');
+    const conflict = src.indexOf('data-testid="owner-email-conflict"');
+    const nextSection = src.indexOf("Delivery address</div>");
+    expect(emailInput).toBeGreaterThan(-1);
+    // The whole reported bug was having to scroll UP to find out why Create did nothing.
+    expect(conflict).toBeGreaterThan(emailInput);
+    expect(conflict).toBeLessThan(nextSection);
   });
 
-  it("blocks Create on a positive NO only — a pending or failed check must not disable the form", () => {
+  it("shows the required wording: shop, status, and one plain instruction", () => {
     const src = page();
-    expect(src).toContain("ownerEmailCheck.data?.available === false");
-    expect(src).toContain("disabled={create.isPending || ownerEmailBlocked}");
-    expect(src).toContain("Owner email unavailable");
+    expect(src).toContain("Owner email already in use");
+    expect(src).toContain("Existing shop");
+    expect(src).toContain("User status");
+    expect(src).toContain("Use a different Owner email.");
+    expect(src).toContain("owner-email-conflict-shop");
+    expect(src).toContain("owner-email-conflict-status");
   });
 
-  it("a failed create keeps the form, names the error and offers retry", () => {
+  it("offers an amendment path ONLY where a canonical authority exists", () => {
+    const src = page();
+    // Gated on the server's own `releasable`, which is true only for INVITED.
+    expect(src).toContain("ownerEmailConflict.releasable &&");
+    expect(src).toContain("owner-email-conflict-amend");
+  });
+
+  it("guards the SUBMIT handler, not just the button's disabled attribute", () => {
+    const src = page();
+    // A disabled button does not stop an Enter keypress inside a text field.
+    expect(src).toContain("if (createBlocked) return;");
+    expect(src).toContain("disabled={create.isPending || createBlocked}");
+  });
+
+  it("covers every eligibility state at the field", () => {
+    const src = page();
+    for (const id of [
+      "owner-email-checking",
+      "owner-email-available",
+      "owner-email-check-failed",
+      "owner-email-conflict",
+    ]) expect(src).toContain(id);
+    // A failed lookup must offer a retry rather than silently reading as available.
+    expect(src).toContain("owner-email-retry");
+  });
+
+  it("clears a stale refusal the moment any field changes", () => {
+    const src = page();
+    expect(src).toContain("if (create.isError) create.reset();");
+    expect(src).toContain("setBanner(null);");
+  });
+
+  it("does NOT put create failures in the page banner any more", () => {
     const src = page();
     expect(src).toContain("first-shop-create-error");
-    expect(src).toContain("create shop & send invitation");
-    // Field state is React state that the error path never clears.
-    expect(codeOnly(src)).not.toMatch(/onError[\s\S]{0,200}setLegalName\(""\)/);
+    // The banner is above the fold; the operator is looking at the button.
+    // Scoped to the CREATE mutation: other mutations legitimately use the banner for success notes.
+    const createBlock = src.slice(src.indexOf("const create = useMutation"), src.indexOf("const saveAddress = useMutation"));
+    expect(codeOnly(createBlock)).not.toContain("setBanner(errorMessage");
   });
 
   it("success leaves the form for the controller and names who was invited", () => {
@@ -538,7 +575,6 @@ describe("owner email blocker UX", () => {
   it("the pre-check and the create share ONE finder, so they cannot disagree", () => {
     const service = read("server/partner/partner-management-service.ts");
     expect(service).toContain("async function findOwnerEmailClash");
-    // Used by the transaction AND by the read-only check.
     expect(service.match(/findOwnerEmailClash\(/g)?.length ?? 0).toBeGreaterThanOrEqual(3);
     expect(service).toContain("export async function checkOwnerEmailEligibility");
   });
@@ -552,7 +588,6 @@ describe("owner email blocker UX", () => {
   });
 
   it("keeps the vague Partner-facing wording off this Super Admin surface", () => {
-    // The detail is deliberate here and must NOT leak into a Partner-facing file.
     const partnerFacing = read("client/src/pages/partner/login.tsx");
     expect(partnerFacing).not.toContain("already used by");
     expect(partnerFacing).not.toContain("owner-email-conflict");

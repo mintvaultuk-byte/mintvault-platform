@@ -12,6 +12,7 @@ import { apiRequest, queryClient } from "@/lib/queryClient";
 import { runAdminProtected } from "@/components/admin/admin-step-up";
 import { PARTNER_READINESS_DIMENSION_ORDER } from "@shared/partner-readiness";
 import type { OwnerEmailEligibility } from "@shared/partner-owner-email";
+import { createBlockedBy, createButtonLabel, ownerEmailState } from "./owner-email-eligibility";
 import type {
   PartnerNextAction,
   PartnerOperationalReadiness,
@@ -357,7 +358,12 @@ export default function PartnerFirstShopOnboardingPage() {
       void queryClient.invalidateQueries({ queryKey: [BASE, "partners"] });
       navigate(`/admin/partners/${id}/onboarding`);
     },
-    onError: (error) => setBanner(errorMessage(error, "First-shop onboarding could not be created. Nothing was partially saved.")),
+    /*
+     * Deliberately NOT setBanner. The failure is rendered at the Owner email field and beside the
+     * Create button; putting it at the top of the page as well is what taught the operator to look
+     * in the wrong place.
+     */
+    onError: () => undefined,
   });
   const saveAddress = useMutation({
     mutationFn: () =>
@@ -460,14 +466,27 @@ export default function PartnerFirstShopOnboardingPage() {
     retry: false,
   });
   /*
-   * Blocked ONLY on a positive "no". A check that has not answered yet, or that failed, must not
-   * disable Create: the create transaction is the authority and will refuse on its own. Failing
-   * closed here would turn a flaky lookup into an unusable form.
+   * The lifecycle of that lookup, and the rule the submit handler obeys, live in one pure module so
+   * every combination is pinned by a test rather than read out of JSX. See owner-email-eligibility.
    */
-  const ownerEmailBlocked = ownerEmailCheck.data?.available === false;
+  const ownerEmailState_ = ownerEmailState({
+    query: debouncedOwnerEmail,
+    isFetching: ownerEmailCheck.isFetching,
+    isError: ownerEmailCheck.isError,
+    available: ownerEmailCheck.data?.available,
+  });
+  const ownerEmailConflict = ownerEmailCheck.data?.conflict ?? null;
+    const createBlocked = createBlockedBy(ownerEmailState_);
 
   const resetCreateIntent = (setValue: (value: string) => void) => (value: string) => {
     createIdempotencyKey.current = requestKey();
+    /*
+     * A refusal describes the values that were submitted. The moment any of them changes it is
+     * describing something that no longer exists, and leaving it on screen is what made a fixed
+     * form still look broken. Cleared here rather than only on the next submit.
+     */
+    if (create.isError) create.reset();
+    setBanner(null);
     setValue(value);
   };
 
@@ -642,6 +661,13 @@ export default function PartnerFirstShopOnboardingPage() {
           <form
             onSubmit={(event) => {
               event.preventDefault();
+              /*
+               * The guard lives HERE, not only on the button's `disabled`. A disabled button does
+               * not stop an Enter keypress inside a text field, and a fast paste-then-click can beat
+               * the debounced lookup. Refusing at the submit boundary is what makes "no POST is
+               * fired when blocked" true rather than merely likely.
+               */
+              if (createBlocked) return;
               create.mutate();
             }}
             data-testid="first-shop-create-form"
@@ -670,38 +696,75 @@ export default function PartnerFirstShopOnboardingPage() {
                 <Input label="Last name" value={ownerLastName} onChange={resetCreateIntent(setOwnerLastName)} />
                 <Input label="Email" value={ownerEmail} onChange={resetCreateIntent(setOwnerEmail)} type="email" />
               </div>
-              {ownerEmailCheck.isFetching && debouncedOwnerEmail && (
-                <p data-testid="owner-email-checking" style={{ margin: "8px 0 0", fontSize: 12, opacity: 0.7 }}>
-                  Checking this email\u2026
+              {/*
+                * THE ANSWER, AT THE FIELD. This deliberately does not live in the page banner: an
+                * operator who has just pressed Create is looking at the button, and making them
+                * scroll up to find out why nothing happened is the whole reported bug.
+                */}
+              {ownerEmailState_ === "checking" && (
+                <p data-testid="owner-email-checking" style={{ margin: "8px 0 0", fontSize: 12, opacity: 0.75 }}>
+                  Checking Owner email…
                 </p>
               )}
-              {ownerEmailCheck.data?.available === true && (
-                <p data-testid="owner-email-available" style={{ margin: "8px 0 0", fontSize: 12, color: "#7fd6a0" }}>
-                  ✓ This email is available.
+              {ownerEmailState_ === "available" && (
+                <p data-testid="owner-email-available" style={{ margin: "8px 0 0", fontSize: 13, color: "#7fd6a0", fontWeight: 600 }}>
+                  ✓ Owner email available
                 </p>
               )}
-              {ownerEmailCheck.data?.conflict && (
+              {ownerEmailState_ === "error" && (
+                <div
+                  role="alert"
+                  data-testid="owner-email-check-failed"
+                  style={{ margin: "8px 0 0", fontSize: 13, color: "#ffcf8a" }}
+                >
+                  Could not check Owner email.{" "}
+                  <button
+                    type="button"
+                    onClick={() => void ownerEmailCheck.refetch()}
+                    data-testid="owner-email-retry"
+                    style={{ background: "none", border: "none", color: "inherit", textDecoration: "underline", cursor: "pointer", padding: 0, font: "inherit" }}
+                  >
+                    Try again
+                  </button>
+                  . If you continue, MintVault will still refuse a duplicate when the shop is created.
+                </div>
+              )}
+              {ownerEmailState_ === "unavailable" && ownerEmailConflict && (
                 <div
                   role="alert"
                   data-testid="owner-email-conflict"
-                  data-user-status={ownerEmailCheck.data.conflict.userStatus}
+                  data-user-status={ownerEmailConflict.userStatus}
                   style={{
                     margin: "10px 0 0",
-                    padding: "10px 12px",
-                    border: "1px solid var(--admin-red, #d46a6a)",
+                    padding: "12px 14px",
+                    border: "2px solid #d46a6a",
                     borderRadius: 8,
-                    background: "rgba(212,106,106,0.08)",
+                    background: "rgba(212,106,106,0.12)",
                     fontSize: 13,
                   }}
                 >
-                  <div style={{ fontSize: 11, letterSpacing: 1.3, opacity: 0.8, textTransform: "uppercase" }}>
-                    This email is already used by
+                  <div style={{ fontWeight: 800, letterSpacing: 0.6, textTransform: "uppercase", marginBottom: 10 }}>
+                    Owner email already in use
                   </div>
-                  <div style={{ fontWeight: 700, margin: "2px 0 6px" }}>{ownerEmailCheck.data.conflict.partnerName}</div>
-                  <div style={{ fontSize: 11, letterSpacing: 1.3, opacity: 0.8, textTransform: "uppercase" }}>Status</div>
-                  <div style={{ fontWeight: 700, margin: "2px 0 8px" }}>{ownerEmailCheck.data.conflict.userStatus}</div>
-                  <p style={{ margin: "0 0 6px" }}>{ownerEmailCheck.data.conflict.reason}</p>
-                  <p style={{ margin: 0, fontWeight: 600 }}>{ownerEmailCheck.data.conflict.nextAction}</p>
+                  <div style={{ fontSize: 11, letterSpacing: 1.3, opacity: 0.8, textTransform: "uppercase" }}>Existing shop</div>
+                  <div data-testid="owner-email-conflict-shop" style={{ fontWeight: 700, margin: "2px 0 8px" }}>
+                    {ownerEmailConflict.partnerName}
+                  </div>
+                  <div style={{ fontSize: 11, letterSpacing: 1.3, opacity: 0.8, textTransform: "uppercase" }}>User status</div>
+                  <div data-testid="owner-email-conflict-status" style={{ fontWeight: 700, margin: "2px 0 10px" }}>
+                    {ownerEmailConflict.userStatus}
+                  </div>
+                  <p style={{ margin: 0, fontWeight: 700 }}>Use a different Owner email.</p>
+                  {/*
+                    * The amendment path is offered ONLY where a canonical authority exists — an
+                    * INVITED user, whose pending invitation amendPendingInvitation can still move.
+                    * A REVOKED user is terminal and is never offered reuse.
+                    */}
+                  {ownerEmailConflict.releasable && (
+                    <p data-testid="owner-email-conflict-amend" style={{ margin: "8px 0 0" }}>
+                      {ownerEmailConflict.nextAction}
+                    </p>
+                  )}
                 </div>
               )}
 
@@ -740,19 +803,19 @@ export default function PartnerFirstShopOnboardingPage() {
               <AdminButton
                 type="submit"
                 variant="gold"
-                disabled={create.isPending || ownerEmailBlocked}
+                disabled={create.isPending || createBlocked}
                 data-testid="first-shop-create-submit"
+                data-eligibility={ownerEmailState_}
               >
-                {create.isPending
-                  ? "Creating\u2026"
-                  : ownerEmailBlocked
-                    ? "Owner email unavailable"
-                    : create.isError
-                      ? "Retry \u2014 create shop & send invitation"
-                      : "Create shop & send invitation"}
+                {createButtonLabel(ownerEmailState_, { pending: create.isPending, failed: create.isError })}
               </AdminButton>
+              {/*
+                * The refusal, again, next to the control that was pressed. The page banner is no
+                * longer used for create failures at all — it is above the fold and the operator is
+                * looking down here.
+                */}
               {create.isError && (
-                <p role="alert" data-testid="first-shop-create-error" style={{ margin: "10px 0 0", color: "#ff8a8a" }}>
+                <p role="alert" data-testid="first-shop-create-error" style={{ margin: "10px 0 0", color: "#ff8a8a", fontWeight: 600 }}>
                   {errorMessage(create.error, "The shop was not created. Nothing was saved.")}
                 </p>
               )}
