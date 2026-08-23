@@ -695,6 +695,18 @@ describe("the resend control is on the screen the operator actually lands on", (
     expect(src).toContain('userStatus === "INVITED"');
   });
 
+  it("derives the Owner from the payload THIS page fetches, not from /first-shop's shape", () => {
+    const src = read("client/src/pages/admin/partner-management-detail.tsx");
+    /*
+     * This screen reads /onboarding-readiness, which returns { operational, users } and has NO
+     * `owner` key. Reading `.owner` here silently yields undefined, the control never renders, and
+     * the button "does nothing" — which is exactly how this failed a third time.
+     */
+    expect(src).toContain('/onboarding-readiness');
+    expect(src).toContain('(u) => u.role === "OWNER"');
+    expect(codeOnly(src)).not.toContain("onboarding.data?.owner");
+  });
+
   it("uses the SAME canonical route, behind the same step-up, and never a second flow", () => {
     const src = read("client/src/pages/admin/partner-management-detail.tsx");
     expect(src).toContain("/resend-invitation");

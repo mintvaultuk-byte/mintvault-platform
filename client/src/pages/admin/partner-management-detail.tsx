@@ -567,7 +567,19 @@ export default function PartnerManagementDetailPage() {
 
   /** The ONE verdict. Same field the onboarding controller and the Shops column render. */
   const nextAction = onboarding.data?.operational?.nextAction ?? null;
-  const ownerUser = onboarding.data?.owner ?? null;
+  /*
+   * THE OWNER, FROM THE PAYLOAD THIS PAGE ACTUALLY FETCHES.
+   *
+   * This screen reads /onboarding-readiness, which returns { operational, users } and has NO `owner`
+   * key — that convenience field belongs to /first-shop, which the onboarding controller uses.
+   * Reading `.owner` here silently produced undefined, so the resend control never rendered and the
+   * button appeared to do nothing for a third time. The owner is derived the same way
+   * getFirstShopOnboarding derives it: the user carrying the OWNER role.
+   */
+  const ownerUser =
+    ((onboarding.data as { users?: Array<{ role?: string }> } | undefined)?.users ?? []).find(
+      (u) => u.role === "OWNER"
+    ) ?? null;
   /** Waiting on the Owner to finish their own setup — the only case a resend can help. */
   const ownerAwaitingSetup = (ownerUser as { userStatus?: string } | null)?.userStatus === "INVITED";
 
