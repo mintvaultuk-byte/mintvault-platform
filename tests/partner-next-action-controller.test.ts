@@ -10,9 +10,9 @@
  * single answer, so a future surface has nothing left to guess.
  */
 import { describe, expect, it } from "vitest";
+import { PARTNER_READINESS_DIMENSION_ORDER } from "@shared/partner-readiness";
 import {
   derivePartnerOperationalReadiness,
-  PARTNER_READINESS_DIMENSION_ORDER,
   type PartnerReadinessFacts,
 } from "../server/partner/operational-readiness";
 

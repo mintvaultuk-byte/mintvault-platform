@@ -171,6 +171,27 @@ export interface PartnerTestCardReadiness {
 }
 
 /**
+ * THE canonical fix-first order — the ONE priority every surface must use.
+ *
+ * It lives in the shared contract rather than on the server because the clients need it too, and
+ * the alternative is what shipped before: the Super Admin lifecycle helper ranked blockers by
+ * `Object.keys(dimensions)` — JavaScript insertion order — which agreed with the authority only by
+ * coincidence and would have diverged the first time a dimension was added anywhere but the end.
+ * Import it; never re-declare it.
+ */
+export const PARTNER_READINESS_DIMENSION_ORDER = [
+  "organisation",
+  "location",
+  "delivery",
+  "operationsContact",
+  "owner",
+  "staff",
+  "station",
+  "scanner",
+  "credits",
+] as const satisfies readonly ReadinessDimensionKey[];
+
+/**
  * THE ONE NEXT ACTION — what the operator should do about this shop, right now.
  *
  * WHY THIS IS ON THE SERVER. The 10 checks below are correct but procedural, and every surface that

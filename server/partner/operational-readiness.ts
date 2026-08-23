@@ -1,6 +1,7 @@
 /** Server-authoritative Partner operational readiness (P5). */
 import { appVersionSatisfies } from "./station-service";
 import { STATION_STALE_MINUTES } from "./dashboard-operations-service";
+import { PARTNER_READINESS_DIMENSION_ORDER } from "@shared/partner-readiness";
 import type {
   PartnerOperationalReadiness,
   PartnerReadinessCode,
@@ -132,26 +133,7 @@ const dim = (
 ): ReadinessDimension => ({ status, code, message, actions });
 
 /** Order matters: the first non-PASS dimension becomes the overall verdict — the thing to fix first. */
-/**
- * THE canonical fix-first order. Exported because it is the ONE priority every surface must use:
- * before this was shared, the Super Admin lifecycle helper ranked blockers by
- * `Object.keys(dimensions)` — JavaScript insertion order — which agreed with this list only by
- * coincidence and would have diverged silently the first time a dimension was added anywhere but
- * the end. Import it; never re-declare it.
- */
-export const PARTNER_READINESS_DIMENSION_ORDER: readonly ReadinessDimensionKey[] = [
-  "organisation",
-  "location",
-  "delivery",
-  "operationsContact",
-  "owner",
-  "staff",
-  "station",
-  "scanner",
-  "credits",
-];
-
-/** Internal alias kept so the existing derivation body reads unchanged. */
+/** Internal alias so the derivation body reads unchanged. The order itself is shared. */
 const DIMENSION_ORDER = PARTNER_READINESS_DIMENSION_ORDER;
 
 /**
