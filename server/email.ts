@@ -16,7 +16,21 @@ const POSTAL_ADDRESS_HTML = formatPostalAddress(COMPANY.postalAddress, {
 
 const FROM_EMAIL = "MintVault UK <noreply@mintvaultuk.com>";
 const FALLBACK_FROM = "MintVault UK <onboarding@resend.dev>";
-const REPLY_TO = "mintvaultuk@gmail.com";
+/**
+ * REPLY-TO, and why it is no longer a Gmail address.
+ *
+ * Mail sent From noreply@mintvaultuk.com carrying Reply-To on a free provider is a classic
+ * phishing shape, and Gmail weights it. MintVault's invitations were landing in Spam with SPF, DKIM
+ * and DMARC all passing, which points at content signals rather than authentication.
+ *
+ * Set PARTNER_EMAIL_REPLY_TO to a mailbox on the sending domain (support@mintvaultuk.com) once that
+ * mailbox is confirmed to receive. UNSET means NO Reply-To header at all, which is the safe default:
+ * an absent header is neutral, whereas a mismatched one actively costs reputation.
+ */
+function replyToHeader(): string | undefined {
+  const configured = (process.env.PARTNER_EMAIL_REPLY_TO ?? "").trim();
+  return configured.length > 0 ? configured : undefined;
+}
 
 let resendClient: Resend | null = null;
 
@@ -49,6 +63,8 @@ async function sendViaResend(
     from: string;
     to: string | string[];
     replyTo?: string;
+    /** text/plain alternative. HTML-only mail is a spam signal in its own right. */
+    text?: string;
     subject: string;
     html: string;
     bcc?: string | string[];
@@ -385,7 +401,7 @@ ${
   try {
     const sent = await sendViaResend(resend, {
       from: getFromEmail(),
-      replyTo: REPLY_TO,
+      replyTo: replyToHeader(),
       to: data.email,
       subject: `MintVault — Submission Confirmed (${data.submissionId})`,
       html: baseHtml("Submission Confirmed", body),
@@ -471,7 +487,7 @@ ${data.termsVersion ? `<p style="color:#666;font-size:10px;margin:8px 0 0 0;">Yo
   try {
     const sent = await sendViaResend(resend, {
       from: getFromEmail(),
-      replyTo: REPLY_TO,
+      replyTo: replyToHeader(),
       to: data.email,
       subject: `MintVault — Submission Confirmed (${data.submissionId})`,
       html: baseHtml("Submission Confirmed", body),
@@ -519,7 +535,7 @@ ${photosHtml}
   try {
     const sent = await sendViaResend(resend, {
       from: getFromEmail(),
-      replyTo: REPLY_TO,
+      replyTo: replyToHeader(),
       to: data.email,
       subject: `MintVault — Cards Received (${data.submissionId})`,
       html: baseHtml("Cards Received", body),
@@ -567,7 +583,7 @@ ${turnaroundLine}
   try {
     const sent = await sendViaResend(resend, {
       from: getFromEmail(),
-      replyTo: REPLY_TO,
+      replyTo: replyToHeader(),
       to: data.email,
       subject: `MintVault — Grading Started (${data.submissionId})`,
       html: baseHtml("Grading Started", body),
@@ -603,7 +619,7 @@ export async function sendGradingComplete(data: {
   try {
     const sent = await sendViaResend(resend, {
       from: getFromEmail(),
-      replyTo: REPLY_TO,
+      replyTo: replyToHeader(),
       to: data.email,
       subject: `MintVault — Grading Complete (${data.submissionId})`,
       html: baseHtml("Grading Complete", body),
@@ -670,7 +686,7 @@ ${trackingBtn}
   try {
     const sent = await sendViaResend(resend, {
       from: getFromEmail(),
-      replyTo: REPLY_TO,
+      replyTo: replyToHeader(),
       to: data.email,
       subject: `MintVault — Your Cards Have Been Shipped (${data.submissionId})`,
       html: baseHtml("Your Cards Have Been Shipped", body),
@@ -706,7 +722,7 @@ export async function sendSubmissionDelivered(data: {
   try {
     const sent = await sendViaResend(resend, {
       from: getFromEmail(),
-      replyTo: REPLY_TO,
+      replyTo: replyToHeader(),
       to: data.email,
       subject: `Your MintVault slab has arrived — ${data.submissionId}`,
       html: baseHtml("Slab Delivered", body),
@@ -748,7 +764,7 @@ export async function sendReviewRequestEmail(data: {
     resend,
     {
       from: getFromEmail(),
-      replyTo: REPLY_TO,
+      replyTo: replyToHeader(),
       to: data.email,
       subject: `Share your honest MintVault experience — ${safeSubmission}`,
       html: baseHtml("How was your MintVault experience?", body),
@@ -875,7 +891,7 @@ ${ctaButton(data.verifyUrl, "Verify &amp; Register Ownership")}
   try {
     await sendViaResend(resend, {
       from: getFromEmail(),
-      replyTo: REPLY_TO,
+      replyTo: replyToHeader(),
       to: data.email,
       subject: `MintVault — Verify Ownership Registration for ${data.certId}`,
       html: ownershipBaseHtml("Ownership Registration — Email Verification", body),
@@ -914,7 +930,7 @@ ${ctaButton(data.confirmUrl, "Authorise Transfer")}
   try {
     await sendViaResend(resend, {
       from: getFromEmail(),
-      replyTo: REPLY_TO,
+      replyTo: replyToHeader(),
       to: data.fromEmail,
       subject: `MintVault — Authorise Ownership Transfer for ${data.certId}`,
       html: ownershipBaseHtml("Ownership Transfer — Your Authorisation Required", body),
@@ -953,7 +969,7 @@ ${ctaButton(data.confirmUrl, "Accept Ownership")}
   try {
     await sendViaResend(resend, {
       from: getFromEmail(),
-      replyTo: REPLY_TO,
+      replyTo: replyToHeader(),
       to: data.toEmail,
       subject: `MintVault — Accept Ownership of ${data.certId}`,
       html: ownershipBaseHtml("Ownership Transfer — Acceptance Required", body),
@@ -994,7 +1010,7 @@ ${ctaButton(data.confirmUrl, "Authorise Transfer")}
   try {
     await sendViaResend(resend, {
       from: getFromEmail(),
-      replyTo: REPLY_TO,
+      replyTo: replyToHeader(),
       to: data.fromEmail,
       subject: `MintVault — Authorise Keepership Transfer for ${data.certId}`,
       html: ownershipBaseHtml("Keepership Transfer — Your Authorisation Required", body),
@@ -1053,7 +1069,7 @@ ${ctaButton(data.disputeUrl, "Dispute this transfer")}
   try {
     await sendViaResend(resend, {
       from: getFromEmail(),
-      replyTo: REPLY_TO,
+      replyTo: replyToHeader(),
       to: data.ownerEmail,
       subject: `Transfer requested for your MintVault certificate ${data.certId}`,
       html: ownershipBaseHtml("Transfer Requested — Action Required", body),
@@ -1087,7 +1103,7 @@ ${certBlock(data.certId)}`;
   try {
     await sendViaResend(resend, {
       from: getFromEmail(),
-      replyTo: REPLY_TO,
+      replyTo: replyToHeader(),
       to: data.claimantEmail,
       subject: `MintVault — Transfer of ${data.certId} confirmed by previous keeper`,
       html: ownershipBaseHtml("Owner confirmed your transfer — dispute window started", body),
@@ -1120,7 +1136,7 @@ ${data.reason ? `<p style="color:rgba(255,255,255,0.40);font-size:12px;line-heig
   try {
     await sendViaResend(resend, {
       from: getFromEmail(),
-      replyTo: REPLY_TO,
+      replyTo: replyToHeader(),
       to: data.claimantEmail,
       subject: `MintVault — Transfer of ${data.certId} disputed`,
       html: ownershipBaseHtml("Transfer disputed by current keeper", body),
@@ -1161,7 +1177,7 @@ ${ctaButton(data.confirmUrl, "Accept &amp; Verify")}
   try {
     await sendViaResend(resend, {
       from: getFromEmail(),
-      replyTo: REPLY_TO,
+      replyTo: replyToHeader(),
       to: data.toEmail,
       subject: `MintVault — Accept Keepership of ${data.certId}`,
       html: ownershipBaseHtml("Keepership Transfer — Verification Required", body),
@@ -1203,7 +1219,7 @@ ${certBlock(data.certId)}
   try {
     await sendViaResend(resend, {
       from: getFromEmail(),
-      replyTo: REPLY_TO,
+      replyTo: replyToHeader(),
       to: data.email,
       subject: `MintVault — Transfer Dispute Window Open for ${data.certId}`,
       html: ownershipBaseHtml("Keepership Transfer — Dispute Window", body),
@@ -1243,7 +1259,7 @@ ${certBlock(data.certId)}
   try {
     await sendViaResend(resend, {
       from: getFromEmail(),
-      replyTo: REPLY_TO,
+      replyTo: replyToHeader(),
       to: data.email,
       subject: `MintVault — Keepership Transfer Complete for ${data.certId}`,
       html: ownershipBaseHtml(title, body),
@@ -1268,7 +1284,7 @@ ${certBlock(data.certId)}
   try {
     await sendViaResend(resend, {
       from: getFromEmail(),
-      replyTo: REPLY_TO,
+      replyTo: replyToHeader(),
       to: data.email,
       subject: `MintVault — Transfer Cancelled for ${data.certId}`,
       html: ownershipBaseHtml("Keepership Transfer Cancelled", body),
@@ -1296,7 +1312,7 @@ ${certBlock(data.certId)}
   try {
     await sendViaResend(resend, {
       from: getFromEmail(),
-      replyTo: REPLY_TO,
+      replyTo: replyToHeader(),
       to: data.email,
       subject: `MintVault — Transfer Disputed for ${data.certId}`,
       html: ownershipBaseHtml("Keepership Transfer — Dispute Raised", body),
@@ -1320,7 +1336,7 @@ ${certBlock(data.certId)}
   try {
     await sendViaResend(resend, {
       from: getFromEmail(),
-      replyTo: REPLY_TO,
+      replyTo: replyToHeader(),
       to: data.email,
       subject: `MintVault — Transfer Expired for ${data.certId}`,
       html: ownershipBaseHtml("Keepership Transfer Expired", body),
@@ -1349,7 +1365,7 @@ ${ctaButton(data.confirmUrl, "Verify & Accept")}
   try {
     await sendViaResend(resend, {
       from: getFromEmail(),
-      replyTo: REPLY_TO,
+      replyTo: replyToHeader(),
       to: data.email,
       subject: `MintVault — Reminder: Accept Keepership of ${data.certId} (${data.daysRemaining} days left)`,
       html: ownershipBaseHtml("Keepership Transfer — Reminder", body),
@@ -1377,7 +1393,7 @@ ${ctaButton(data.loginUrl, "Log In to Dashboard")}
   try {
     await sendViaResend(resend, {
       from: getFromEmail(),
-      replyTo: REPLY_TO,
+      replyTo: replyToHeader(),
       to: data.email,
       subject: "MintVault — Your Dashboard Login Link",
       html: ownershipBaseHtml("Dashboard Login Link", body),
@@ -1408,7 +1424,7 @@ ${ctaButton(data.resetUrl, "Reset Your PIN")}
   try {
     await sendViaResend(resend, {
       from: getFromEmail(),
-      replyTo: REPLY_TO,
+      replyTo: replyToHeader(),
       to: data.email,
       subject: "MintVault — Reset Your PIN",
       html: ownershipBaseHtml("Reset Your PIN", body),
@@ -1456,7 +1472,7 @@ export async function sendCertificatePdf(data: {
   try {
     await sendViaResend(resend, {
       from: getFromEmail(),
-      replyTo: REPLY_TO,
+      replyTo: replyToHeader(),
       to: data.email,
       subject: `Your MintVault Certificate — ${data.certId}`,
       html: baseHtml(`Certificate of Authenticity — ${data.certId}`, body),
@@ -1510,7 +1526,7 @@ export async function sendStolenVerificationEmail(
   try {
     await sendViaResend(resend, {
       from: getFromEmail(),
-      replyTo: REPLY_TO,
+      replyTo: replyToHeader(),
       to: email,
       subject: `Confirm Your Stolen Card Report — ${certId}`,
       html: baseHtml(`Stolen Card Report — ${certId}`, body),
@@ -1545,7 +1561,7 @@ export async function sendWelcomeVerificationEmail(
   try {
     await sendViaResend(resend, {
       from: getFromEmail(),
-      replyTo: REPLY_TO,
+      replyTo: replyToHeader(),
       to: email,
       subject: "Verify your MintVault account",
       html: baseHtml("Verify Your Email", body),
@@ -1570,7 +1586,7 @@ export async function sendAccountMagicLinkEmail(email: string, loginUrl: string)
   try {
     await sendViaResend(resend, {
       from: getFromEmail(),
-      replyTo: REPLY_TO,
+      replyTo: replyToHeader(),
       to: email,
       subject: "Your MintVault login link",
       html: baseHtml("Your Login Link", body),
@@ -1595,7 +1611,7 @@ export async function sendPasswordResetEmail(email: string, resetUrl: string): P
   try {
     await sendViaResend(resend, {
       from: getFromEmail(),
-      replyTo: REPLY_TO,
+      replyTo: replyToHeader(),
       to: email,
       subject: "Reset your MintVault password",
       html: baseHtml("Password Reset", body),
@@ -1615,7 +1631,7 @@ export async function sendPasswordChangedEmail(email: string): Promise<void> {
   try {
     await sendViaResend(resend, {
       from: getFromEmail(),
-      replyTo: REPLY_TO,
+      replyTo: replyToHeader(),
       to: email,
       subject: "Your MintVault password was changed",
       html: baseHtml("Password Changed", body),
@@ -1636,7 +1652,7 @@ export async function sendEmailChangedNotification(oldEmail: string, newEmail: s
   try {
     await sendViaResend(resend, {
       from: getFromEmail(),
-      replyTo: REPLY_TO,
+      replyTo: replyToHeader(),
       to: oldEmail,
       subject: "Your MintVault email address was changed",
       html: baseHtml("Email Address Changed", body),
@@ -1656,7 +1672,7 @@ export async function sendAccountDeletedEmail(email: string): Promise<void> {
   try {
     await sendViaResend(resend, {
       from: getFromEmail(),
-      replyTo: REPLY_TO,
+      replyTo: replyToHeader(),
       to: email,
       subject: "Your MintVault account has been deleted",
       html: baseHtml("Account Deleted", body),
@@ -1692,7 +1708,7 @@ export async function sendVaultClubWelcomeEmail(data: {
   try {
     await sendViaResend(resend, {
       from: getFromEmail(),
-      replyTo: REPLY_TO,
+      replyTo: replyToHeader(),
       to: data.email,
       subject: `Welcome to Vault Club ${tierLabel} — MintVault`,
       html: baseHtml(`Welcome to Vault Club ${tierLabel}`, body),
@@ -1718,7 +1734,7 @@ export async function sendVaultClubCancelledEmail(data: { email: string; display
   try {
     await sendViaResend(resend, {
       from: getFromEmail(),
-      replyTo: REPLY_TO,
+      replyTo: replyToHeader(),
       to: data.email,
       subject: "Your Vault Club membership has been cancelled — MintVault",
       html: baseHtml("Vault Club Cancelled", body),
@@ -1747,7 +1763,7 @@ export async function sendVaultClubPaymentFailedEmail(data: {
   try {
     await sendViaResend(resend, {
       from: getFromEmail(),
-      replyTo: REPLY_TO,
+      replyTo: replyToHeader(),
       to: data.email,
       subject: "Action required — Vault Club payment failed",
       html: baseHtml("Payment Failed", body),
@@ -1775,7 +1791,7 @@ export async function sendVaultClubGraceExpiredEmail(data: {
   try {
     await sendViaResend(resend, {
       from: getFromEmail(),
-      replyTo: REPLY_TO,
+      replyTo: replyToHeader(),
       to: data.email,
       subject: "We miss you — Vault Club membership ended",
       html: baseHtml("Membership Ended", body),
@@ -1809,7 +1825,7 @@ export async function sendPartnerResetEmail(data: {
 <p style="color:#888;font-size:12px;line-height:1.6;margin:18px 0 0;">If you did not request this, ignore this email. Your password has not been changed.</p>`;
   return sendViaResend(resend, {
     from: getFromEmail(),
-    replyTo: REPLY_TO,
+    replyTo: replyToHeader(),
     to: data.email,
     subject: "MintVault Partner — password reset",
     html: baseHtml("Partner Portal Password Reset", body),
@@ -1831,23 +1847,48 @@ export async function sendPartnerInvitationEmail(data: {
   const safePartner = escapeHtmlForEmail(data.partnerName);
   const safeRole = escapeHtmlForEmail(data.roleCode.replace(/^PARTNER_/, "").replace(/_/g, " "));
   const safeUrl = escapeHtmlForEmail(data.invitationUrl);
-  const safeExpiry = escapeHtmlForEmail(data.expiresAt.toISOString());
+  const safeExpiry = escapeHtmlForEmail(data.expiresAt.toUTCString());
   const body = `
 <p style="margin:0 0 16px 0;">Hello ${safeName},</p>
 <p style="margin:0 0 16px 0;">You have been invited to access the MintVault Partner Portal for <strong style="color:#fff;">${safePartner}</strong>.</p>
 <p style="margin:0 0 16px 0;">Invited role: <strong style="color:#D4AF37;">${safeRole}</strong></p>
-<p style="margin:0 0 20px 0;">This secure invitation expires at <strong style="color:#fff;">${safeExpiry}</strong>.</p>
+<p style="margin:0 0 16px 0;">MintVault grades and certifies collectibles. This invitation lets you set your own password and authenticator so you can run grading for this shop; MintVault staff never see either.</p>
+<p style="margin:0 0 20px 0;">This invitation expires on <strong style="color:#fff;">${safeExpiry}</strong>. If you have been sent more than one, only the most recent link will work.</p>
 <p style="margin:20px 0;">
 <a href="${safeUrl}" style="display:inline-block;padding:12px 24px;background:#D4AF37;color:#111;text-decoration:none;border-radius:4px;font-weight:bold;letter-spacing:1px;">SET UP PARTNER ACCESS</a>
 </p>
 <p style="margin:0 0 6px 0;font-size:13px;color:#bbb;">If the button does not work, copy this link into your browser:</p>
 <p style="margin:0 0 20px 0;font-size:13px;word-break:break-all;"><a href="${safeUrl}" style="color:#D4AF37;">${safeUrl}</a></p>
 <p style="color:#888;font-size:12px;line-height:1.6;margin:18px 0 0;">If you were not expecting this invitation, ignore this email. No password has been created.</p>`;
+  /*
+   * A text/plain alternative, deliberately.
+   *
+   * HTML-only mail carrying one tokenised link and little prose is structurally indistinguishable
+   * from phishing, and MintVault's invitations were landing in Gmail's Spam folder with SPF, DKIM
+   * and DMARC all passing — which points at shape, not authentication. A real multipart message
+   * with the same information in plain words is one of the few content levers that actually moves.
+   */
+  const text = [
+    `Hello ${data.recipientName},`,
+    "",
+    `You have been invited to access the MintVault Partner Portal for ${data.partnerName}.`,
+    `Invited role: ${data.roleCode.replace(/^PARTNER_/, "").replace(/_/g, " ")}`,
+    "",
+    "Set up your access here:",
+    data.invitationUrl,
+    "",
+    `This invitation expires on ${data.expiresAt.toUTCString()}.`,
+    "If you were not expecting it, ignore this email. No password has been created.",
+    "",
+    "MintVault UK — collectibles grading and certification.",
+  ].join("\n");
+
   return sendViaResend(resend, {
     from: getFromEmail(),
-    replyTo: REPLY_TO,
+    replyTo: replyToHeader(),
     to: data.email,
-    subject: `MintVault Partner invitation — ${data.partnerName}`,
+    subject: `Set up your MintVault Partner access for ${data.partnerName}`,
     html: baseHtml("Partner Portal Invitation", body),
+    text,
   });
 }

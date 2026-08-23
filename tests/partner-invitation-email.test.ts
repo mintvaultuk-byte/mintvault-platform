@@ -214,3 +214,45 @@ describe("the resend path is reachable and provable", () => {
     expect(page).not.toContain('"Invitation sent to"');
   });
 });
+
+describe("deliverability: the shape Gmail judges", () => {
+  const read = (rel) =>
+    require("node:fs").readFileSync(require("node:path").resolve(import.meta.dirname, "..", rel), "utf8");
+
+  it("sends a text/plain alternative — HTML-only is a spam signal in itself", () => {
+    const src = read("server/email.ts");
+    const fn = src.slice(src.indexOf("export async function sendPartnerInvitationEmail"));
+    // Read to the end of THIS function: the body contains nested braces, so a naive "\n}" stops early.
+    const scope = fn.slice(0, fn.indexOf("\nexport ") === -1 ? fn.length : fn.indexOf("\nexport "));
+    expect(scope).toContain("const text = [");
+    expect(scope).toContain("text,");
+    // The plain part must carry the SAME link, not just prose.
+    expect(scope).toContain("data.invitationUrl");
+  });
+
+  it("never puts a free-mail Reply-To on a branded From", () => {
+    const src = read("server/email.ts");
+    /*
+     * From noreply@mintvaultuk.com with Reply-To on gmail.com is a classic phishing shape and Gmail
+     * weights it. Invitations were landing in Spam with SPF, DKIM and DMARC ALL PASSING, which
+     * points at content signals rather than authentication.
+     */
+    expect(src).not.toContain('"mintvaultuk@gmail.com"');
+    expect(src).toContain("PARTNER_EMAIL_REPLY_TO");
+    // Unset means NO header: absent is neutral, mismatched actively costs reputation.
+    expect(src).toContain("configured.length > 0 ? configured : undefined");
+  });
+
+  it("warns the recipient that only the newest link works", () => {
+    const src = read("server/email.ts");
+    expect(src).toContain("only the most recent link will work");
+  });
+
+  it("the invite page names the real cause instead of blaming expiry", () => {
+    const page = read("client/src/pages/partner/invite.tsx");
+    expect(page).toContain("only the MOST RECENT one works");
+    // The SERVER must stay vague — distinguishing cases would be a token oracle.
+    const routes = read("server/partner/public-routes.ts");
+    expect(routes).toContain('res.status(400).json({ error: "invalid invitation" })');
+  });
+});

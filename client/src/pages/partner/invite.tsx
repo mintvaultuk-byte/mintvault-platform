@@ -37,7 +37,20 @@ export default function PartnerInvitePage() {
         setError(null);
       })
       .catch(() => {
-        if (live) setError("This invitation is invalid or has expired. Ask MintVault to resend it.");
+        /*
+         * NAMES THE COMMONEST REAL CAUSE, without the server having to say which it was.
+         *
+         * Every resend REVOKES the previous invitation, so a mailbox holding three MintVault emails
+         * has two dead links in it. The old wording ("invalid or has expired") sent people looking
+         * for an expiry problem when the truth was simply that they opened the wrong email. The
+         * server still answers a single flat "invalid invitation" for every case — distinguishing
+         * superseded from expired from never-existed would hand an unauthenticated caller a token
+         * oracle — so the guidance lives here, where it costs nothing.
+         */
+        if (live)
+          setError(
+            "This invitation link is no longer valid. If MintVault has sent you more than one email, only the MOST RECENT one works — open the newest and try again. Otherwise ask MintVault to resend it."
+          );
       })
       .finally(() => {
         if (live) setPreviewLoading(false);
