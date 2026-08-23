@@ -2,34 +2,35 @@ import { useState, type ReactNode } from "react";
 import { Link, useLocation } from "wouter";
 import { useQuery } from "@tanstack/react-query";
 import {
-  LayoutDashboard,
-  List,
-  Package,
-  ScanLine,
-  DollarSign,
-  Database,
-  Printer,
-  PrinterCheck,
-  Film,
+  Activity,
+  ArrowRightLeft,
   BarChart3,
   Brain,
-  Activity,
-  TrendingUp,
-  SlidersHorizontal,
-  ArrowRightLeft,
-  History,
-  Search,
-  LogOut,
   Check,
-  Tag,
-  Users,
-  Sparkles,
-  ShieldCheck,
-  Library,
-  PackageCheck,
-  Share2,
   ChevronDown,
+  Database,
+  DollarSign,
+  Film,
+  History,
+  KeyRound,
+  LayoutDashboard,
+  Library,
+  List,
+  LogOut,
+  Package,
+  PackageCheck,
+  Printer,
+  PrinterCheck,
+  ScanLine,
+  Search,
+  Share2,
+  ShieldCheck,
+  SlidersHorizontal,
+  Sparkles,
+  Tag,
   TreePine,
+  TrendingUp,
+  Users,
 } from "lucide-react";
 import GrainOverlay from "./grain-overlay";
 import InstallAppButton from "../install-app-button";
@@ -53,7 +54,8 @@ export type AdminTab =
   | "scans"
   | "sets"
   | "growth"
-  | "command-centre";
+  | "command-centre"
+  | "claim-register";
 
 interface DbInfo {
   env: string;
@@ -100,6 +102,7 @@ const NAV: NavSection[] = [
       { key: "printing", label: "Printing", icon: Printer },
       { key: "print-queue", label: "Print Queue", icon: PrinterCheck },
       { href: "/admin/staff", label: "Staff", icon: Users },
+      { href: "/admin/claim-register", label: "Claim Register", icon: KeyRound },
       { href: "/admin/security", label: "Security", icon: ShieldCheck },
       { href: "/admin/partners", label: "Partner Network", icon: PackageCheck },
     ],

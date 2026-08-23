@@ -60,6 +60,7 @@ const StaffLoginPage = lazy(() => import("@/pages/staff-login"));
 const StaffPage = lazy(() => import("@/pages/staff"));
 const AdminStaffPage = lazy(() => import("@/pages/admin-staff"));
 const AdminSecurityPage = lazy(() => import("@/pages/admin-security"));
+const AdminClaimRegisterPage = lazy(() => import("@/pages/admin-claim-register"));
 const AdminSetsPage = lazy(() => import("@/pages/admin-sets"));
 const AdminLegacyReviewPage = lazy(() => import("@/pages/admin-legacy-review"));
 const AdminPokemonKnowledgePage = lazy(() => import("@/pages/admin-pokemon-knowledge"));
@@ -474,6 +475,7 @@ function Router() {
           <Route path="/admin/graders" component={AdminStaffPage} />
           <Route path="/admin/staff" component={AdminStaffPage} />
           <Route path="/admin/security" component={AdminSecurityPage} />
+          <Route path="/admin/claim-register" component={AdminClaimRegisterPage} />
           <Route path="/admin/sets" component={AdminSetsPage} />
           <Route path="/admin/legacy-review" component={AdminLegacyReviewPage} />
           <Route path="/admin/pokemon-knowledge" component={AdminPokemonKnowledgePage} />

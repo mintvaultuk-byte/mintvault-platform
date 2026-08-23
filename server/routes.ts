@@ -90,6 +90,7 @@ import { registerVaultQuestAdminRoutes } from "./routes/vault-quest-admin";
 import { registerVaultQuestProductionRoutes } from "./routes/vault-quest-production";
 import { registerVaultQuestCardFactoryRoutes } from "./routes/vault-quest-card-factory";
 import { registerStolenRoutes } from "./routes/stolen";
+import { registerClaimRegisterRoutes } from "./routes/admin/claim-register";
 import { registerRedirectRoutes } from "./routes/redirects";
 import { getSitemapEntries } from "./seo-config";
 import {
@@ -2918,6 +2919,7 @@ export async function registerRoutes(httpServer: Server, app: Express): Promise<
   registerTransferRoutes(app);
   registerPreGradeRoutes(app);
   registerStolenRoutes(app);
+  registerClaimRegisterRoutes(app);
   registerPromotionRoutes(app);
   registerEmbeddingRoutes(app);
 
