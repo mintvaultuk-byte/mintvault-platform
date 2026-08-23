@@ -45,6 +45,8 @@ export type Lide400CaptureProvenance = {
   scannerModel: string;
   scannerDeviceId: string;
   scannerSerial: string | null;
+  /** Native-reported platen, raw, with its unit. Optional: absent from pre-2026-08-22 bridges. */
+  platenPhysicalSize: { width?: unknown; height?: unknown; unit?: unknown } | null;
   workstationId: string;
   requestedDpi: number;
   driverResolutionDpi: number;
@@ -93,6 +95,16 @@ export function parseLide400CaptureProvenance(input: unknown): Lide400CapturePro
     scannerDeviceId: requiredText("scannerDeviceId"),
     scannerSerial:
       typeof value.scannerSerial === "string" && value.scannerSerial.trim() ? value.scannerSerial.trim() : null,
+    /*
+     * The platen the NATIVE capture declared, raw, with the unit the bridge reported. OPTIONAL: a
+     * capture from a bridge that predates this field is still valid evidence — it simply cannot
+     * qualify for a narrow station policy, which is the correct fail-closed outcome rather than a
+     * refusal. Never reconstructed here from profile constants.
+     */
+    platenPhysicalSize:
+      value.platenPhysicalSize && typeof value.platenPhysicalSize === "object"
+        ? (value.platenPhysicalSize as { width?: unknown; height?: unknown; unit?: unknown })
+        : null,
     workstationId: requiredText("workstationId"),
     requestedDpi,
     driverResolutionDpi,

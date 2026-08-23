@@ -349,6 +349,21 @@ export default function PartnerFirstShopOnboardingPage() {
   const mainLocation = shop?.mainLocation ?? null;
   const contact = shop?.primaryContact ?? null;
 
+  // Existing Partner records arrive populated. Prefill only once per loaded current location/contact;
+  // we never submit automatically or write a duplicate because a read succeeded.
+  const existingAddress = useMemo(
+    () => ({
+      line1: mainLocation?.addressLine1 ?? "",
+      line2: mainLocation?.addressLine2 ?? "",
+      city: mainLocation?.addressCity ?? "",
+      postcode: mainLocation?.addressPostcode ?? "",
+      country: mainLocation?.addressCountry ?? "United Kingdom",
+    }),
+    [mainLocation]
+  );
+  const addressValue = partnerId && address.line1 === "" ? existingAddress : address;
+  const contactNameValue = partnerId && contactName === "" ? contact?.full_name ?? "" : contactName;
+  const contactEmailValue = partnerId && contactEmail === "" ? contact?.email ?? "" : contactEmail;
   const create = useMutation({
     mutationFn: () =>
       apiRequest("POST", `${BASE}/first-shop`, {
@@ -383,7 +398,15 @@ export default function PartnerFirstShopOnboardingPage() {
   const saveAddress = useMutation({
     mutationFn: () =>
       apiRequest("PATCH", `${BASE}/partners/${partnerId}/first-shop/location`, {
-        // Same defect, same fix: the field shows addressValue, so that is what must be sent.
+        /*
+         * `addressValue`, NOT `address`. The inputs render `addressValue` — the saved address
+         * whenever the operator has not retyped line 1 — while this mutation used to send the raw
+         * `address` edit state, which is EMPTY until something is typed. Opening a shop and pressing
+         * Save therefore posted five blank fields, requireNonEmpty rejected them with 400 before any
+         * write, and the banner said the address "was not changed" while the form still displayed
+         * the address the operator thought they had just saved. The value on screen and the value
+         * sent must be the same value.
+         */
         deliveryAddress: addressValue,
         idempotencyKey: addressIdempotencyKey.current,
         reason: "guided Main location delivery address update",
@@ -400,13 +423,14 @@ export default function PartnerFirstShopOnboardingPage() {
     mutationFn: () =>
       apiRequest("PUT", `${BASE}/partners/${partnerId}/first-shop/operations-contact`, {
         /*
-         * THE DISPLAYED value, not the raw state.
+         * THE DISPLAYED value, same defect as the address and worse here: the two fields are
+         * independent, so editing only the email left the name blank and the whole save was refused.
          *
          * `contactName` is "" until the operator types, while the field SHOWS the saved contact via
-         * contactNameValue. Sending the raw state therefore submitted an empty name for a form that
-         * looked filled in, and the server correctly answered "fullName is required" — which landed
-         * in the page banner and was then still on screen when the operator pressed something else.
-         * That is the whole "Save does nothing / Resend says fullName is required" report.
+         * contactNameValue. An untouched Save therefore submitted an empty name for a form that
+         * looked filled in, the server correctly answered "fullName is required", and that landed in
+         * the shared page banner — where it was still sitting when the operator pressed Resend. That
+         * is the whole "Save does nothing / Resend says fullName is required" report.
          */
         fullName: contactNameValue,
         email: contactEmailValue,
@@ -440,21 +464,6 @@ export default function PartnerFirstShopOnboardingPage() {
     onError: (error) => setBanner(errorMessage(error, "Partner status was not changed.")),
   });
 
-  // Existing Partner records arrive populated. Prefill only once per loaded current location/contact;
-  // we never submit automatically or write a duplicate because a read succeeded.
-  const existingAddress = useMemo(
-    () => ({
-      line1: mainLocation?.addressLine1 ?? "",
-      line2: mainLocation?.addressLine2 ?? "",
-      city: mainLocation?.addressCity ?? "",
-      postcode: mainLocation?.addressPostcode ?? "",
-      country: mainLocation?.addressCountry ?? "United Kingdom",
-    }),
-    [mainLocation]
-  );
-  const addressValue = partnerId && address.line1 === "" ? existingAddress : address;
-  const contactNameValue = partnerId && contactName === "" ? contact?.full_name ?? "" : contactName;
-  const contactEmailValue = partnerId && contactEmail === "" ? contact?.email ?? "" : contactEmail;
   const setAddressField = (key: keyof typeof emptyAddress, value: string) => {
     addressIdempotencyKey.current = requestKey();
     setAddress((current) => ({ ...current, ...(partnerId && current.line1 === "" ? existingAddress : {}), [key]: value }));

@@ -5,7 +5,6 @@ import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { partnerCredits, partnerErrorMessage, type PartnerCreditLedgerEntry } from "@/lib/partner-api";
 import { PartnerErrorState, PartnerLoadingState } from "@/components/partner/partner-shell";
-import { usePartnerStepUp, isStepUpCancelled } from "@/components/partner/partner-step-up";
 import { usePartnerSession } from "@/hooks/use-partner-session";
 import { ArrowRight, Loader2, Lock } from "lucide-react";
 
@@ -41,8 +40,18 @@ export default function PartnerBillingPage() {
   const query = useQuery({
     queryKey: ["/api/partner/credits"],
     queryFn: () => partnerCredits.view(),
-    // Poll only while we are waiting for a webhook we did not trigger and cannot confirm client-side.
-    refetchInterval: awaitingWebhook ? 4000 : false,
+    /*
+     * Poll only while we are waiting for a webhook we did not trigger and cannot confirm
+     * client-side — and STOP the moment a poll fails.
+     *
+     * Without the error condition this interval has no terminal state. A tab left in the
+     * post-checkout "processing" view whose session later ended kept requesting /api/partner/credits
+     * every four seconds indefinitely, rendering "authentication required" forever and never
+     * recovering. On staging that single tab produced a continuous 401 every four seconds across the
+     * whole day and buried the real requests in the application log. A failed poll means this page
+     * can no longer learn anything by asking again.
+     */
+    refetchInterval: (query) => (awaitingWebhook && !query.state.error ? 4000 : false),
   });
 
   const packs = useQuery({
@@ -53,7 +62,6 @@ export default function PartnerBillingPage() {
 
   const [checkoutError, setCheckoutError] = useState<string | null>(null);
   const [pendingPack, setPendingPack] = useState<string | null>(null);
-  const { runProtected } = usePartnerStepUp();
 
   /**
    * Hands the operator to Stripe. The server decides the price and the quantity; this mutation's
@@ -61,10 +69,14 @@ export default function PartnerBillingPage() {
    * the wallet — a client that could "apply" a purchase locally would be a second balance authority.
    */
   const checkout = useMutation({
-    // AG-3: spending the shop's money is step-up protected server-side. `runProtected` performs the
-    // call, and ONLY if the server answers 403 step_up_required does it prompt and retry this exact
-    // checkout once. A cancelled prompt leaves no charge started and no Stripe session created.
-    mutationFn: (packCode: string) => runProtected(() => partnerCredits.checkout(packCode)),
+    /*
+     * Straight to Stripe. Checkout creation is no longer step-up protected server-side (see the
+     * route in server/partner/routes.ts), so wrapping this in runProtected would leave a password
+     * prompt that can never fire and a comment claiming a protection that no longer exists. The
+     * call still grants nothing: price and quantity are the server's, and credits arrive only with
+     * the verified webhook. Other sensitive partner actions keep their step-up.
+     */
+    mutationFn: (packCode: string) => partnerCredits.checkout(packCode),
     onMutate: (packCode: string) => {
       setCheckoutError(null);
       setPendingPack(packCode);
@@ -82,9 +94,8 @@ export default function PartnerBillingPage() {
     },
     onError: (err) => {
       setPendingPack(null);
-      // Dismissing the confirmation is not a failure — nothing was bought and nothing was charged,
-      // so the operator is returned to the page silently rather than shown an error they caused.
-      if (isStepUpCancelled(err)) return;
+      // There is no confirmation prompt to dismiss any more, so every error reaching here is a real
+      // one and is shown. Nothing was bought and nothing was charged in any of those cases.
       setCheckoutError(partnerErrorMessage(err));
     },
   });

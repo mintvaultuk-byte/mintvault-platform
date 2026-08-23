@@ -1,4 +1,5 @@
 import { Router, type Request, type Response, type NextFunction } from "express";
+import { partnerAdminQuery } from "./db";
 import rateLimit from "express-rate-limit";
 import {
   resolvePartnerSession,
@@ -460,6 +461,72 @@ export function partnerStationRouter(): Router {
   // rate-limit ORDER by matching the argument list with `\s*` between the middleware names,
   // and `\s*` cannot span a comment. Sitting between `requireSignedStationOperator` and
   // `partnerStationHeartbeatRateLimit` it broke that assertion while changing no behaviour.
+  /**
+   * WHO THIS STATION EXPECTS TO SIGN IN — answered BEFORE anyone signs in.
+   *
+   * An operator standing at a shop-floor Mac had no way to know which MintVault account this station
+   * belongs to. On 2026-08-22 that cost hours: the owner account for a DIFFERENT partner was used
+   * against MV-STN-6DIISWMIEU2IKRG4, authenticated perfectly, and was refused 403 by the station
+   * scope — a correct refusal that looked exactly like a broken login.
+   *
+   * STATION-SIGNED, never public. The caller proves possession of an enrolled station's private key,
+   * so this is not an email-disclosure endpoint keyed on a guessable station code: it tells an
+   * already-approved device, bound to one tenant and one location, which of that location's own
+   * operators may drive it.
+   *
+   * DISPLAY ONLY. Nothing here authorises anything. The returned addresses are a hint for the login
+   * form; authorisation still resolves server-side from session -> user -> tenant -> location ->
+   * capability on every request, and a client-supplied email grants nothing.
+   */
+  /*
+   * POST, not GET, purely because the station request signature covers a body and the Scanner's
+   * signed transport always sends one — a GET carrying a body is rejected by fetch. This reads
+   * nothing and writes nothing.
+   */
+  r.post("/stations/context", requireSignedStation, partnerStationReadRateLimit, async (req, res) => {
+    try {
+      const station = req.station!;
+      const { rows } = await partnerAdminQuery<{
+        organisation_name: string | null;
+        location_name: string | null;
+        operator_emails: string[] | null;
+      }>(
+        `SELECT o.legal_name AS organisation_name,
+                l.name       AS location_name,
+                ARRAY(
+                  SELECT u.email
+                    FROM partner_users u
+                    JOIN partner_user_locations ul ON ul.user_id = u.id AND ul.location_id = s.location_id
+                    JOIN partner_user_roles ur     ON ur.user_id = u.id
+                    JOIN partner_role_permissions rp ON rp.role_id = ur.role_id
+                    JOIN partner_permissions p     ON p.id = rp.permission_id AND p.code = 'partner.cards.scan'
+                   WHERE u.tenant_id = s.tenant_id AND u.status = 'ACTIVE'
+                   ORDER BY u.email
+                ) AS operator_emails
+           FROM partner_stations s
+           LEFT JOIN partner_organisations o ON o.id = s.tenant_id
+           LEFT JOIN partner_locations l     ON l.id = s.location_id
+          WHERE s.id = $1
+          LIMIT 1`,
+        [station.id]
+      );
+      const row = rows[0];
+      const operators = Array.from(new Set(row?.operator_emails ?? []));
+      res.json({
+        context: {
+          stationCode: station.code,
+          organisationName: row?.organisation_name ?? null,
+          locationName: row?.location_name ?? null,
+          authorisedOperators: operators,
+          /** Exactly one authorised operator means the login form can prefill and lock the address. */
+          soleOperatorEmail: operators.length === 1 ? operators[0] : null,
+        },
+      });
+    } catch (error) {
+      stationError(res, error);
+    }
+  });
+
   r.post(
     "/stations/heartbeat",
     requireSignedStation,
@@ -569,6 +636,81 @@ export function partnerStationRouter(): Router {
    */
   // One line, for the same reason: tests/partner-scanner-fix.test.ts slices from
   // `indexOf('r.get("/stations/fix-queue"')` and reads the next 300 characters.
+  /**
+   * THE CANONICAL STATE OF ONE CARD JOB, so a station can correct its own local state.
+   *
+   * A Scanner persists what it believes about a card. That belief can be wrong and can outlive the
+   * code that produced it: MV837 carried `completedCard {front:true, back:true}` written on
+   * 2026-08-22T15:01:54Z by a build that inferred completion from a NOTHING_TO_CAPTURE refusal. The
+   * inference was fixed hours later, but the poisoned record survived on disk and the repaired
+   * renderer went on honouring it, because it contained an explicit `true`. Fixing the producer and
+   * the reader does nothing for a store already poisoned.
+   *
+   * This is the authority that lets a station throw such a belief away. It answers from the EVIDENCE
+   * LEDGER — the same rows that decide READY_TO_GRADE — never from session or job-status heuristics.
+   *
+   * READ ONLY. It arms nothing, creates nothing and mutates nothing, deliberately: repairing a local
+   * display must never be able to start a capture or touch a credit. Station-signed and confined to
+   * the caller's own tenant and location.
+   *
+   * POST rather than GET only because the station request signature covers a body and fetch rejects
+   * a GET carrying one — the same reason as /stations/context.
+   */
+  r.post(
+    "/stations/card-jobs/:cardJobId/state",
+    requireSignedStation,
+    requireSignedStationOperator,
+    partnerStationReadRateLimit,
+    async (req, res) => {
+      const station = req.station!;
+      try {
+        const { rows } = await partnerAdminQuery<{
+          status: string;
+          mv_number: string;
+          certificate_id: number;
+          completed_at: string | null;
+          cancelled_at: string | null;
+          evidence_sides: string[] | null;
+        }>(
+          `SELECT j.status, j.mv_number, j.certificate_id, j.completed_at, j.cancelled_at,
+                  ARRAY(
+                    SELECT DISTINCT e.side
+                      FROM certificate_image_evidence e
+                     WHERE e.certificate_id = j.certificate_id AND e.is_current = true
+                     ORDER BY e.side
+                  ) AS evidence_sides
+             FROM partner_card_jobs j
+            WHERE j.id = $1 AND j.tenant_id = $2 AND j.location_id = $3
+            LIMIT 1`,
+          [String(req.params.cardJobId), station.tenantId, station.locationId]
+        );
+        const job = rows[0];
+        if (!job) {
+          res.status(404).json({ error: { code: "CARD_JOB_NOT_FOUND", message: "That card was not found for this station." } });
+          return;
+        }
+        const sides = job.evidence_sides ?? [];
+        const missing = (["front", "back"] as const).filter((side) => !sides.includes(side));
+        res.json({
+          cardJob: {
+            cardJobId: String(req.params.cardJobId),
+            mvNumber: job.mv_number,
+            certificateId: job.certificate_id,
+            status: job.status,
+            completedAt: job.completed_at,
+            cancelledAt: job.cancelled_at,
+            /** Accepted, current evidence. The ONLY thing that may tick a side. */
+            evidenceSides: sides,
+            requiredSide: missing[0] ?? null,
+            bothSidesAccepted: missing.length === 0,
+          },
+        });
+      } catch (error) {
+        stationError(res, error);
+      }
+    }
+  );
+
   r.get(
     "/stations/fix-queue",
     requireSignedStation,
@@ -763,7 +905,10 @@ export function partnerStationRouter(): Router {
                 ? 400
                 : error.code === "JOB_NOT_CAPTURABLE" ||
                     error.code === "SIDE_ALREADY_PRESENT" ||
-                    error.code === "NOTHING_TO_CAPTURE"
+                    error.code === "NOTHING_TO_CAPTURE" ||
+                    // Busy, not finished. Same 409 shape; the CODE is what stops a caller reading
+                    // "wait" as "complete", which is the whole point of splitting it out.
+                    error.code === "CAPTURE_IN_FLIGHT"
                   ? 409
                   : 403;
           res.status(status).json({ error: { code: error.code, message: error.message } });

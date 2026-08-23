@@ -801,12 +801,27 @@ describe("P7 integration surfaces", () => {
   });
 
   it("the station FIX routes are guarded by BOTH station and operator", () => {
-    const queue = stationRoutes.slice(stationRoutes.indexOf('r.get("/stations/fix-queue"'));
-    expect(queue.slice(0, 300)).toContain("requireSignedStation");
-    expect(queue.slice(0, 300)).toContain("requireSignedStationOperator");
-    const authorise = stationRoutes.slice(stationRoutes.indexOf('"/card-jobs/:cardJobId/fix-authorise"'));
-    expect(authorise.slice(0, 300)).toContain("requireSignedStation");
-    expect(authorise.slice(0, 300)).toContain("requireSignedStationOperator");
+    /*
+     * Anchored on the quoted PATH, and read to the start of the handler.
+     *
+     * This previously anchored on `r.get("/stations/fix-queue"` and read a fixed 300 characters.
+     * Both halves were fragile: a prose mention of that same call expression elsewhere in the file
+     * captured the match instead of the route, and any doc comment added above the middleware
+     * pushed the guards past the window. Either one turns a real security assertion into a false
+     * alarm, which is the worst kind — it teaches you to ignore it.
+     */
+    const guardsFor = (path: string): string => {
+      const at = stationRoutes.indexOf(`"${path}",`);
+      expect(at, `route ${path} must be registered`).toBeGreaterThan(-1);
+      const handlerAt = stationRoutes.indexOf("async (req", at);
+      expect(handlerAt, `route ${path} must have a handler`).toBeGreaterThan(at);
+      return stationRoutes.slice(at, handlerAt);
+    };
+    for (const path of ["/stations/fix-queue", "/card-jobs/:cardJobId/fix-authorise"]) {
+      const guards = guardsFor(path);
+      expect(guards, `${path} must require a signed station`).toContain("requireSignedStation");
+      expect(guards, `${path} must require a signed operator`).toContain("requireSignedStationOperator");
+    }
   });
 
   it("the dashboard invalidation route is session-guarded and blocked for view-only principals", () => {

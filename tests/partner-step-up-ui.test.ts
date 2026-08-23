@@ -259,8 +259,19 @@ describe("Partner step-up prompt (real rendering)", () => {
   });
 });
 
-describe("Buy Grading Credits survives a step-up challenge (the revenue path)", () => {
-  it("challenges, proves, retries checkout once and hands off to Stripe", async () => {
+describe("Buy Grading Credits goes straight to Stripe (the revenue path)", () => {
+  /*
+   * REWRITTEN, not deleted. This case used to prove the opposite: that checkout was refused once
+   * with 403 step_up_required, prompted for the password, and retried exactly once. Owner decision
+   * 2026-08-22 removed requireRecentAuth() from checkout creation — the act grants nothing, and the
+   * payment itself is authenticated by Stripe on Stripe's page — so the behaviour this asserted no
+   * longer exists and asserting it would pin a prompt the operator is not supposed to see.
+   *
+   * The step-up MECHANISM is unchanged and still covered by every case above, and
+   * tests/partner-credit-checkout-no-step-up.test.ts proves server-side that the routes which change
+   * who can act still demand a fresh password.
+   */
+  it("hands off to Stripe on the first click, with no password dialog", async () => {
     const { PartnerStepUpProvider } = await import("@/components/partner/partner-step-up");
     const PartnerBillingPage = (await import("@/pages/partner/billing")).default;
 
@@ -276,7 +287,6 @@ describe("Buy Grading Credits survives a step-up challenge (the revenue path)", 
         return Promise.resolve({
           status: 200,
           json: () =>
-            // The real PartnerCreditView shape: summary + ledger + purchaseHistory.
             Promise.resolve({
               summary: {
                 configured: true,
@@ -295,8 +305,6 @@ describe("Buy Grading Credits survives a step-up challenge (the revenue path)", 
       if (url === "/api/partner/credits/packs")
         return Promise.resolve({
           status: 200,
-          // `purchasable` is what gates the Buy control, and `id` is the React key — a pack missing
-          // either renders no button and the test would fail for a reason unrelated to step-up.
           json: () =>
             Promise.resolve({
               packs: [
@@ -306,18 +314,12 @@ describe("Buy Grading Credits survives a step-up challenge (the revenue path)", 
         });
       if (url === "/api/partner/credits/checkout") {
         checkoutAttempts += 1;
-        // FIRST attempt is refused by requireRecentAuth; the second, after a real proof, succeeds.
-        if (checkoutAttempts === 1) return Promise.reject(httpError(403, "step_up_required"));
         return Promise.resolve({ status: 200, json: () => Promise.resolve({ url: "https://stripe.test/session" }) });
       }
-      if (url === "/api/partner/auth/step-up")
-        return Promise.resolve({ status: 200, json: () => Promise.resolve({ ok: true, windowMinutes: 15 }) });
       return Promise.resolve({ status: 200, json: () => Promise.resolve({}) });
     });
 
     await mount(createElement(PartnerStepUpProvider, null, createElement(PartnerBillingPage)));
-    // Let the two credit queries settle so the pack grid is rendered. react-query resolves across
-    // macrotasks, so microtask ticks alone leave the page on "Loading credits…".
     for (let i = 0; i < 5; i++) {
       await act(async () => {
         await new Promise((r) => setTimeout(r, 0));
@@ -330,18 +332,16 @@ describe("Buy Grading Credits survives a step-up challenge (the revenue path)", 
     await act(async () => {
       buy!.dispatchEvent(new MouseEvent("click", { bubbles: true }));
     });
+    for (let i = 0; i < 5; i++) {
+      await act(async () => {
+        await new Promise((r) => setTimeout(r, 0));
+      });
+    }
 
-    // Refused once, prompt shown, and NO Stripe hand-off has happened.
+    // ONE attempt, NO dialog, and the operator is already on their way to Stripe.
     expect(checkoutAttempts).toBe(1);
-    expect(q("dialog-partner-step-up")).not.toBeNull();
-    expect(assign).not.toHaveBeenCalled();
-
-    await type("input-step-up-password", "correct-horse-battery");
-    await click("button-step-up-confirm");
-
-    // Proved, retried exactly once, and only now is the operator handed to Stripe.
-    expect(apiRequest.mock.calls.filter((c) => c[1] === "/api/partner/auth/step-up")).toHaveLength(1);
-    expect(checkoutAttempts).toBe(2);
+    expect(q("dialog-partner-step-up")).toBeNull();
+    expect(apiRequest.mock.calls.filter((c) => c[1] === "/api/partner/auth/step-up")).toHaveLength(0);
     expect(assign).toHaveBeenCalledWith("https://stripe.test/session");
   });
 });
