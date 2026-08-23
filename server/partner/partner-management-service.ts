@@ -15,7 +15,12 @@ import { partnerDisplayName } from "@shared/partner-person-name";
 import { G5RequestError, canTransitionStatus, isPartnerStatus, type PartnerStatus } from "./partner-management-errors";
 import { hashPassword, isValidPartnerPassword } from "./auth";
 import { deliverInvitationToken, invitationDeliveryConfigured } from "./delivery";
-import { ensureWallet, ensureWalletWithClient } from "./partner-wallet-service";
+import { ensureWallet, ensureWalletWithClient, appendFoundationCreditWithClient } from "./partner-wallet-service";
+import {
+  PARTNER_WELCOME_CREDIT_AMOUNT,
+  PARTNER_WELCOME_CREDIT_REASON,
+  partnerWelcomeCreditIdempotencyKey,
+} from "@shared/partner-welcome-credits";
 import { derivePartnerOperationalReadiness, type PartnerReadinessFacts } from "./operational-readiness";
 import { loadOnboardingTestCardArmedAt, loadPartnerTestCardFacts } from "./test-card-authority";
 import { APP_BASE_URL } from "../app-url";
@@ -764,6 +769,40 @@ export async function createFirstShopOnboarding(actor: ActorContext, input: Firs
       "First-shop Owner invitation"
     );
     const wallet = await ensureWalletWithClient(client, { actorUserId: actor.actorUserId, actorEmail: actor.actorEmail }, partnerId);
+    /*
+     * FIVE WELCOME CREDITS, granted here and nowhere else.
+     *
+     * PINNED TO THIS TRANSACTION. appendFoundationCreditWithClient takes the open client, so the
+     * grant commits with the organisation, the location, the Owner and the invitation, or it does
+     * not happen at all. A creation that rolls back cannot leave a ghost credit behind — which is
+     * the whole reason this is not a follow-up call after the transaction closes.
+     *
+     * EXACTLY ONCE, by key. The key is derived from the partner id alone, so every later event that
+     * might plausibly re-run onboarding logic — a refresh, a create retry, an invitation resend, the
+     * Owner activating, a Scanner enrolling, a Mac being reinstalled — computes the same key and is
+     * absorbed by uq_partner_credit_ledger_idem. `alreadyApplied` is deliberately not treated as an
+     * error: losing that race is the correct outcome, not a fault.
+     *
+     * EXISTING PARTNERS ARE UNAFFECTED. This runs only inside the creation of a brand-new partner,
+     * and `source='system'` has never been written before, so no deployment or migration can
+     * retroactively grant credits to a shop that already exists. A backfill would be a separate,
+     * explicitly owner-approved act.
+     */
+    await appendFoundationCreditWithClient(
+      client,
+      { actorUserId: actor.actorUserId, actorEmail: actor.actorEmail },
+      {
+        tenantId: partnerId,
+        amount: PARTNER_WELCOME_CREDIT_AMOUNT,
+        entryType: "opening_balance",
+        source: "system",
+        actorType: "system",
+        reason: PARTNER_WELCOME_CREDIT_REASON,
+        idempotencyKey: partnerWelcomeCreditIdempotencyKey(partnerId),
+        correlationId: actor.requestId ?? null,
+        metadata: { grantedBy: "partner_first_shop_onboarded" },
+      }
+    );
     await client.query(
       `INSERT INTO partner_management_audit
          (tenant_id, action_type, actor_user_id, actor_email, request_id, idempotency_key, entity_type, entity_id, after_state, reason, result)
@@ -2304,6 +2343,7 @@ export async function getPartnerOnboardingReadiness(partnerId: string) {
    * "the newest Card Job", so a shop that has genuinely not tested cannot be reported as having done.
    */
   const testCard = await loadPartnerTestCardFacts(org.id);
+
 
   /*
    * The OWNER row backing the readiness decision. Chosen deterministically: the PARTNER_OWNER if

@@ -530,6 +530,49 @@ async function armNextOutstandingSide(trigger) {
   }
 }
 
+/*
+ * FIRST-RUN ENROLMENT RUNS ITSELF, ONCE.
+ *
+ * stationSetupState() is called from the renderer's poll, from the tray, and after every sign-in
+ * step, so without this guard a first run would fire several concurrent enrolment requests at the
+ * same moment. The server now absorbs repeats within the tenant (requestStationEnrollment reuses a
+ * station with the same Mac key), but firing four requests to have three ignored is not a design —
+ * it is a defect the server happens to survive.
+ */
+let autoEnrolInFlight = false;
+
+/**
+ * Drop card state belonging to a different shop. No-op for the same shop, and for a first sign-in.
+ *
+ * Deliberately does NOT touch station identity: whether this Mac may act as a station is the
+ * server's decision, reached through enrolment, and clearing it here would silently re-home one
+ * shop's station into another. See the identity_mismatch stage, which explains rather than acts.
+ */
+function reconcileTenantScopedState(tenantId) {
+  const incoming = typeof tenantId === "string" && tenantId ? tenantId : null;
+  if (!incoming) return;
+  const current = stateMod.get();
+  const bound = typeof current.boundTenantId === "string" && current.boundTenantId ? current.boundTenantId : null;
+  if (bound === incoming) return;
+  if (!bound) {
+    stateMod.set({ boundTenantId: incoming });
+    return;
+  }
+  console.log(`[station] shop changed on this Mac — clearing the previous shop's card state`);
+  stateMod.set({
+    boundTenantId: incoming,
+    lastUploadedCert: null,
+    recent: [],
+    openCardJob: null,
+    activeCapture: null,
+    bufferedFront: null,
+    manualPending: null,
+    lastError: null,
+    calibrationRecovery: null,
+  });
+  pushStateToRenderer();
+}
+
 /** Sanitised first-run state only — no cookie, private key, UUID or fingerprint crosses IPC. */
 async function stationSetupState() {
   let session;
@@ -548,6 +591,20 @@ async function stationSetupState() {
     }
     return { ok: true, stage: session.body?.mfaRequired ? "mfa" : "sign_in" };
   }
+  /*
+   * ONE SHOP'S WORK MUST NOT SHOW UP ON ANOTHER SHOP'S SCREEN.
+   *
+   * A Mac that has been used before still holds the previous shop's operational state — the last
+   * cert it uploaded, its recent captures, its open card, its calibration recovery note. Signing in
+   * as a DIFFERENT shop used to inherit all of it, so a brand-new shop's first screen could show a
+   * historical failure banner for a card it has never seen and cannot act on. That is a cross-tenant
+   * display leak as well as a bad first impression.
+   *
+   * SCOPED, NOT PURGED. This clears the operational fields that describe cards, and nothing else:
+   * the scans on disk, the app's logs and the previous station's own identity are untouched, so the
+   * forensic trail survives. Reconciliation, not deletion.
+   */
+  reconcileTenantScopedState(session.body?.tenantId);
   // Committed to shared state as well as returned, so the identity row and the capture panel are
   // reading ONE number rather than two that drift apart the moment a card is started.
   const summary = stationSummary(session.body, await refreshAvailableCredits());
@@ -565,21 +622,86 @@ async function stationSetupState() {
             : "MintVault could not confirm this station’s authorised location.",
       };
     }
-    return {
-      ok: true,
-      stage: "register",
-      summary,
-      locations:
-        locations.ok && Array.isArray(locations.body?.locations)
-          ? locations.body.locations.map((location) => ({
-              id: String(location.id),
-              name: String(location.name),
-            }))
-          : [],
-    };
+    const eligible =
+      locations.ok && Array.isArray(locations.body?.locations)
+        ? locations.body.locations.map((location) => ({ id: String(location.id), name: String(location.name) }))
+        : [];
+    /*
+     * ONE ELIGIBLE LOCATION MEANS THERE IS NOTHING TO ASK.
+     *
+     * A shop MintVault has just created has exactly one ACTIVE location, and its Owner is eligible
+     * at all of them, so the "register" panel was showing a hidden dropdown, a single obvious
+     * choice already made, and a button whose only job was to say yes to it. That is not a decision;
+     * it is a dead click between the operator and a working Mac, and it is the reason a normal first
+     * run looked like something had gone wrong.
+     *
+     * WHAT IS AND IS NOT DECIDED HERE. The client decides only that it need not ASK. Every question
+     * that matters — which tenant, which location, whether this operator may enrol at all, whether
+     * this Mac is already known — is answered by /stations/enrol on the server, from the session,
+     * against the Mac's own key. The client sends no tenant, no station code and no authority; a
+     * refusal is still a refusal, and it fails closed to the panel below.
+     *
+     * TWO OR MORE LOCATIONS IS A REAL CHOICE and is never guessed: the panel renders, the dropdown
+     * is shown, and the operator picks. Zero eligible locations is an error state, handled below.
+     */
+    if (eligible.length === 1 && !autoEnrolInFlight) {
+      autoEnrolInFlight = true;
+      try {
+        const enrolled = await stationClient.registerThisMac({ locationId: eligible[0].id, appVersion: APP_VERSION });
+        if (enrolled.ok && enrolled.body?.station?.stationCode) {
+          console.log(`[station] auto-enrolled this Mac as ${enrolled.body.station.stationCode} (awaiting approval)`);
+          return await stationSetupState();
+        }
+        const failure = (enrolled.body && enrolled.body.error) || {};
+        return {
+          ok: true,
+          stage: "register",
+          summary,
+          locations: eligible,
+          error:
+            failure.message ||
+            "MintVault could not register this Mac automatically. Try Connect this station.",
+        };
+      } catch (error) {
+        return {
+          ok: true,
+          stage: "register",
+          summary,
+          locations: eligible,
+          error: error?.message || "MintVault could not be reached to register this Mac.",
+        };
+      } finally {
+        autoEnrolInFlight = false;
+      }
+    }
+    return { ok: true, stage: "register", summary, locations: eligible };
   }
   const status = await stationClient.enrolmentStatus(code);
   if (!status.ok || !status.body?.station) {
+    /*
+     * THIS MAC IS ENROLLED — TO SOMEBODY ELSE.
+     *
+     * The server answers a station code it will not honour for this session with a flat 403
+     * `forbidden`, and deliberately says no more: telling an unauthenticated-to-that-tenant caller
+     * "this belongs to another shop" would be a cross-tenant oracle. That opacity is right on the
+     * wire and wrong on this screen. The Scanner is not learning anything here — it is holding that
+     * station code on its own disk — so it can say what it already knows, and it must, because
+     * "Station unavailable / contact a Super Admin" sent an operator to MintVault for a Mac that was
+     * simply still registered to the previous shop.
+     *
+     * NOT SELF-HEALING, deliberately. Nothing here clears the local identity or re-enrols: that
+     * would silently migrate one shop's station — and its calibration history — into another. The
+     * remedy is a decision (a fresh Scanner instance, or a Super Admin releasing the old station),
+     * so this state explains and stops.
+     */
+    if (status.status === 403 || status.status === 404) {
+      return {
+        ok: true,
+        stage: "identity_mismatch",
+        summary,
+        stationCode: code,
+      };
+    }
     return { ok: true, stage: "station_unavailable", summary, stationCode: code };
   }
   const station = status.body.station;

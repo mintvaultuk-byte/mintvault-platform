@@ -46,6 +46,15 @@ const DEFAULT = Object.freeze({
   bufferedFront:    null,
   manualPending:    null,
   lastUploadedCert: null,
+  /*
+   * WHOSE WORK IS ON THIS SCREEN. The tenant whose card state the fields below describe.
+   *
+   * A Mac outlives the shop that first used it — it gets re-sold, re-purposed, or lent to a second
+   * shop — and every operational field here (the last cert, the recent list, the open card, the
+   * calibration recovery note) is about ONE shop's cards. Recording which shop lets a different
+   * shop's sign-in clear them instead of inheriting them. Null on a Mac that has never signed in.
+   */
+  boundTenantId:    null,
   lastError:        null,
   sessionPaired:    0,
   recent:           [],

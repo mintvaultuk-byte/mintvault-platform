@@ -236,7 +236,7 @@ async function resolvePermittedLocation(
 export async function requestStationEnrollment(
   principal: PartnerPrincipal,
   input: { locationId?: unknown; publicKeyPem: unknown; installationFingerprint?: unknown; appVersion?: unknown }
-): Promise<{ id: string; stationCode: string; status: "PENDING"; locationId: string }> {
+): Promise<{ id: string; stationCode: string; status: StationStatus; locationId: string; reused: boolean }> {
   const publicKeyPem = normalizeStationPublicKey(boundedText(input.publicKeyPem, "publicKeyPem", 8_000));
   const publicKeyFingerprint = stationPublicKeyFingerprint(publicKeyPem);
   const installationFingerprint =
@@ -249,6 +249,41 @@ export async function requestStationEnrollment(
   const appVersion = optionalText(input.appVersion, 64);
   return withPartnerAdminTransaction(async (client) => {
     const locationId = await resolvePermittedLocation(client, principal, input.locationId);
+    /*
+     * ENROLLING THE SAME MAC TWICE IS A REPEAT, NOT A CLONE.
+     *
+     * The Scanner now asks for enrolment automatically on a first run rather than waiting for an
+     * operator to find a button, so "ask twice" stopped being a slip and became an ordinary event:
+     * a double click, a retry after a timeout, or — the case that actually strands a Mac — an
+     * enrolment that COMMITTED here while the reply was lost, leaving the Mac with no local station
+     * code and no way back. Every one of those used to come back as station_key_conflict, i.e. an
+     * error, for a Mac that was already correctly enrolled.
+     *
+     * So: the same key, in the SAME tenant, returns the station that already exists. The caller
+     * reads its real status and renders the truth (PENDING keeps waiting; a revoked station still
+     * says revoked) — this hands back a record, it does not resurrect one.
+     *
+     * THE CLONE GUARD IS UNTOUCHED. This lookup is tenant-scoped, so the same key presented under a
+     * DIFFERENT tenant still falls through to the INSERT and still trips the global unique index on
+     * public_key_fingerprint below. One Mac key cannot become two shops' stations.
+     */
+    const existing = await client.query<{ id: string; station_code: string; status: StationStatus; location_id: string }>(
+      `SELECT id, station_code, status, location_id
+         FROM partner_stations
+        WHERE public_key_fingerprint = $1 AND tenant_id = $2
+        LIMIT 1`,
+      [publicKeyFingerprint, principal.tenantId]
+    );
+    if (existing.rows[0]) {
+      const row = existing.rows[0];
+      return {
+        id: row.id,
+        stationCode: row.station_code,
+        status: row.status,
+        locationId: row.location_id,
+        reused: true,
+      };
+    }
     for (let attempt = 0; attempt < 4; attempt += 1) {
       const stationCode = createStationCode();
       try {
@@ -273,7 +308,7 @@ export async function requestStationEnrollment(
            VALUES ($1,$2,$3,$4,'station_enrolment_requested',$5::jsonb)`,
           [principal.tenantId, locationId, id, principal.userId, JSON.stringify({ appVersion, publicKeyFingerprint })]
         );
-        return { id, stationCode, status: "PENDING", locationId };
+        return { id, stationCode, status: "PENDING" as StationStatus, locationId, reused: false };
       } catch (error: any) {
         if (error?.code !== "23505") throw error;
         if (String(error?.constraint || "").includes("public_key_fingerprint")) {

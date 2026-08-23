@@ -606,7 +606,14 @@ function renderStationSetup(next) {
       "Enter your authenticator or recovery code. This Mac cannot scan until both you and the station are authorised.";
   } else if (stage === "register") {
     const locations = Array.isArray(stationSetup.locations) ? stationSetup.locations : [];
-    els.stationSetupTitle.textContent = "Connect this station";
+    /*
+     * The single-location case normally never renders: main.js enrols automatically and this screen
+     * is replaced by "Waiting for MintVault approval" before anyone reads it. It survives as the
+     * fail-closed fallback for when that automatic attempt was refused, which is exactly when a
+     * manual control and the server's own reason need to be visible.
+     */
+    els.stationSetupTitle.textContent =
+      locations.length === 1 && !stationSetup.error ? "Connecting this Mac" : "Connect this station";
     els.stationSetupText.textContent = stationSetup.summary?.organisationName
       ? `${stationSetup.summary.organisationName}${stationSetup.summary.locationName ? ` — ${stationSetup.summary.locationName}` : ""}. Register this Mac for its authorised location.`
       : "Register this Mac for an authorised MintVault location.";
@@ -623,8 +630,40 @@ function renderStationSetup(next) {
       els.stationRegisterBtn.disabled = true;
     }
   } else if (stage === "pending") {
+    /*
+     * A NORMAL, EXPECTED WAIT — written like one.
+     *
+     * This is where a brand-new shop spends its first few minutes, so it names the three things the
+     * person standing at the Mac wants confirmed (the right shop, the right location, this actual
+     * Mac) and says plainly that MintVault is doing the next bit. It is not an error, it asks for
+     * nothing, and it does not mention support: the screen refreshes itself the moment approval
+     * lands.
+     */
     els.stationSetupTitle.textContent = "Waiting for MintVault approval";
-    els.stationSetupText.textContent = `${stationSetup.stationCode || "This Mac"} is registered and awaiting Super Admin approval. Keep the app open; no card can be scanned yet.`;
+    const where = [stationSetup.summary?.organisationName, stationSetup.summary?.locationName]
+      .filter(Boolean)
+      .join(" — ");
+    const credits = stationSetup.summary?.availableCredits;
+    els.stationSetupText.textContent =
+      `${where ? `${where}. ` : ""}This Mac (${stationSetup.stationCode || "registered"}) is registered and MintVault is approving it now. ` +
+      // The balance is the server's, read this session — never a hard-coded welcome figure, which
+      // would go on claiming five long after the first card had spent one.
+      (typeof credits === "number" ? `${credits} grading ${credits === 1 ? "credit" : "credits"} available. ` : "") +
+      "Keep the app open — this screen updates by itself.";
+  } else if (stage === "identity_mismatch") {
+    /*
+     * REGISTERED TO A DIFFERENT SHOP. Not an outage, and not this operator's mistake.
+     *
+     * The old copy for this case was "Station unavailable / contact a MintVault Super Admin", which
+     * is what a Mac carrying a previous shop's station identity showed a brand-new Owner signing in
+     * for the first time. It reads as a fault in MintVault; it is actually a Mac that has been used
+     * before. Naming that is the difference between a support call and a thirty-second fix.
+     */
+    els.stationSetupTitle.textContent = "This Mac belongs to another shop";
+    els.stationSetupText.textContent =
+      `This Mac is already registered to a different MintVault shop as ${stationSetup.stationCode || "another station"}, ` +
+      `so it cannot scan for ${stationSetup.summary?.organisationName || "this shop"}. ` +
+      "MintVault must release the old registration, or this shop needs its own Mac. Nothing has been changed.";
   } else if (stage === "update_required") {
     els.stationSetupTitle.textContent = "UPDATE REQUIRED";
     els.stationSetupText.textContent = stationSetup.minimumSupportedVersion
@@ -645,7 +684,13 @@ function renderStationSetup(next) {
 
   if (stationSetupPoll) clearTimeout(stationSetupPoll);
   if (stage === "pending") {
-    stationSetupPoll = setTimeout(() => void refreshStationSetup(), 15_000);
+    /*
+     * Six seconds, not fifteen. This poll is the ONLY thing standing between a Super Admin pressing
+     * Approve and the shop being able to work, and it runs on one modal on one Mac — the cost is a
+     * tenth of the old traffic's worth of attention and the difference between "it just went green"
+     * and hunting for a refresh that does not exist.
+     */
+    stationSetupPoll = setTimeout(() => void refreshStationSetup(), 6_000);
   }
 }
 
