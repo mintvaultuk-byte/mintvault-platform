@@ -491,3 +491,70 @@ describe("shop workspace and network surfaces stay on one verdict", () => {
     }
   });
 });
+
+describe("owner email blocker UX", () => {
+  const page = () => read("client/src/pages/admin/partner-first-shop-onboarding.tsx");
+
+  it("checks the Owner email before create, debounced rather than per keystroke", () => {
+    const src = page();
+    expect(src).toContain("/first-shop/owner-email-eligibility");
+    expect(src).toContain("setDebouncedOwnerEmail");
+    expect(src).toContain("owner-email-checking");
+  });
+
+  it("shows the conflict inline under the email field, with shop, status and next action", () => {
+    const src = page();
+    expect(src).toContain("owner-email-conflict");
+    expect(src).toContain("This email is already used by");
+    expect(src).toContain("conflict.partnerName");
+    expect(src).toContain("conflict.userStatus");
+    expect(src).toContain("conflict.reason");
+    expect(src).toContain("conflict.nextAction");
+    expect(src).toContain("owner-email-available");
+  });
+
+  it("blocks Create on a positive NO only — a pending or failed check must not disable the form", () => {
+    const src = page();
+    expect(src).toContain("ownerEmailCheck.data?.available === false");
+    expect(src).toContain("disabled={create.isPending || ownerEmailBlocked}");
+    expect(src).toContain("Owner email unavailable");
+  });
+
+  it("a failed create keeps the form, names the error and offers retry", () => {
+    const src = page();
+    expect(src).toContain("first-shop-create-error");
+    expect(src).toContain("create shop & send invitation");
+    // Field state is React state that the error path never clears.
+    expect(codeOnly(src)).not.toMatch(/onError[\s\S]{0,200}setLegalName\(""\)/);
+  });
+
+  it("success leaves the form for the controller and names who was invited", () => {
+    const src = page();
+    expect(src).toContain("navigate(`/admin/partners/${id}/onboarding`)");
+    expect(src).toContain("first-shop-invited-email");
+    expect(src).toContain("Invitation sent to");
+  });
+
+  it("the pre-check and the create share ONE finder, so they cannot disagree", () => {
+    const service = read("server/partner/partner-management-service.ts");
+    expect(service).toContain("async function findOwnerEmailClash");
+    // Used by the transaction AND by the read-only check.
+    expect(service.match(/findOwnerEmailClash\(/g)?.length ?? 0).toBeGreaterThanOrEqual(3);
+    expect(service).toContain("export async function checkOwnerEmailEligibility");
+  });
+
+  it("is Super Admin only, and registered before the parameterised sibling", () => {
+    const routes = read("server/partner/partner-management-routes.ts");
+    const eligibility = routes.indexOf('r.get("/first-shop/owner-email-eligibility"');
+    const byId = routes.indexOf('r.get("/partners/:partnerId"');
+    expect(eligibility).toBeGreaterThan(-1);
+    expect(eligibility).toBeLessThan(byId);
+  });
+
+  it("keeps the vague Partner-facing wording off this Super Admin surface", () => {
+    // The detail is deliberate here and must NOT leak into a Partner-facing file.
+    const partnerFacing = read("client/src/pages/partner/login.tsx");
+    expect(partnerFacing).not.toContain("already used by");
+    expect(partnerFacing).not.toContain("owner-email-conflict");
+  });
+});

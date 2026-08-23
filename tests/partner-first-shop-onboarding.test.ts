@@ -488,4 +488,113 @@ describe("first-shop guided onboarding (real PostgreSQL)", () => {
     expect(eligible.rows[0]?.eligible).toBe(true);
   });
 
+
+  /*
+   * OWNER EMAIL ELIGIBILITY. The create path always refused a clashing address correctly; what it
+   * could not do was say so before the operator filled in a whole form. These prove the pre-flight
+   * check gives the SAME answer the create transaction gives, per status.
+   */
+  it("reports a free Owner email as available", async () => {
+    const result = await service.checkOwnerEmailEligibility("nobody-has-this@free-email.test");
+    expect(result).toMatchObject({ available: true, conflict: null });
+  });
+
+  it("reports an ACTIVE user's email as unavailable and not releasable", async () => {
+    const key = "first-shop-eligibility-active-0201";
+    const created = await service.createFirstShopOnboarding(
+      actor(key),
+      {
+        legalName: "Eligibility Active Ltd",
+        deliveryAddress: { line1: "6 Active Way", city: "York", postcode: "YO1 1AA", country: "United Kingdom" },
+        owner: { firstName: "Ava", lastName: "Active", email: "ava@eligibility-active.test" },
+      } as never,
+      "eligibility active"
+    );
+    const partnerId = (created.result as { partnerId: string }).partnerId;
+    await admin.query("UPDATE partner_users SET status='ACTIVE' WHERE tenant_id=$1", [partnerId]);
+
+    const result = await service.checkOwnerEmailEligibility("ava@eligibility-active.test");
+    expect(result.available).toBe(false);
+    expect(result.conflict).toMatchObject({
+      partnerName: "Eligibility Active Ltd",
+      userStatus: "ACTIVE",
+      releasable: false,
+      nextAction: "Use a different Owner email.",
+    });
+  });
+
+  it("reports an INVITED user's email as unavailable but RELEASABLE, because a real authority exists", async () => {
+    const key = "first-shop-eligibility-invited-0202";
+    await service.createFirstShopOnboarding(
+      actor(key),
+      {
+        legalName: "Eligibility Invited Ltd",
+        deliveryAddress: { line1: "7 Invited Row", city: "Hull", postcode: "HU1 1AA", country: "United Kingdom" },
+        owner: { firstName: "Ivy", lastName: "Invited", email: "ivy@eligibility-invited.test" },
+      } as never,
+      "eligibility invited"
+    );
+    const result = await service.checkOwnerEmailEligibility("ivy@eligibility-invited.test");
+    expect(result.available).toBe(false);
+    // A freshly created Owner is INVITED, and amendPendingInvitation can still move that invitation.
+    expect(result.conflict).toMatchObject({ userStatus: "INVITED", releasable: true });
+    expect(result.conflict?.nextAction).toContain("pending invitation");
+    // The live invitation is reported, so Super Admin can see one exists.
+    expect(result.conflict?.invitationStatus).not.toBeNull();
+  });
+
+  it("reports a REVOKED user's email as permanently held — the case that looked like a dead button", async () => {
+    const key = "first-shop-eligibility-revoked-0203";
+    const created = await service.createFirstShopOnboarding(
+      actor(key),
+      {
+        legalName: "Pokemon Kings Proof",
+        deliveryAddress: { line1: "8 Revoked Street", city: "Derby", postcode: "DE1 1AA", country: "United Kingdom" },
+        owner: { firstName: "Rex", lastName: "Revoked", email: "rex@eligibility-revoked.test" },
+      } as never,
+      "eligibility revoked"
+    );
+    const partnerId = (created.result as { partnerId: string }).partnerId;
+    await admin.query("UPDATE partner_users SET status='REVOKED' WHERE tenant_id=$1", [partnerId]);
+
+    const result = await service.checkOwnerEmailEligibility("rex@eligibility-revoked.test");
+    expect(result.available).toBe(false);
+    expect(result.conflict).toMatchObject({
+      partnerName: "Pokemon Kings Proof",
+      userStatus: "REVOKED",
+      // Terminal by design: no canonical authority releases it.
+      releasable: false,
+      nextAction: "Use a different Owner email.",
+    });
+    expect(result.conflict?.reason).toContain("revoked user keeps its email");
+  });
+
+  it("the pre-flight answer and the create refusal agree — no ghost records from the blocked attempt", async () => {
+    const eligibility = await service.checkOwnerEmailEligibility("rex@eligibility-revoked.test");
+    expect(eligibility.available).toBe(false);
+
+    const before = await admin.query<{ n: number }>("SELECT count(*)::int AS n FROM partner_organisations");
+    await expect(
+      service.createFirstShopOnboarding(
+        actor("first-shop-eligibility-clash-0204"),
+        {
+          legalName: "Should Never Exist Ltd",
+          deliveryAddress: { line1: "9 Ghost Lane", city: "Leeds", postcode: "LS2 2AA", country: "United Kingdom" },
+          owner: { firstName: "Rex", lastName: "Revoked", email: "rex@eligibility-revoked.test" },
+        } as never,
+        "clash proof"
+      )
+    ).rejects.toThrow(/already belongs to an existing Partner user/);
+
+    // ATOMICITY: the refusal happens inside the transaction, so nothing at all was written.
+    const after = await admin.query<{ n: number }>("SELECT count(*)::int AS n FROM partner_organisations");
+    expect(after.rows[0].n).toBe(before.rows[0].n);
+    const ghost = await admin.query("SELECT 1 FROM partner_organisations WHERE legal_name='Should Never Exist Ltd'");
+    expect(ghost.rows).toHaveLength(0);
+  });
+
+  it("refuses an invalid address rather than reporting it available", async () => {
+    await expect(service.checkOwnerEmailEligibility("not-an-email")).rejects.toThrow(/valid email/i);
+  });
+
 });

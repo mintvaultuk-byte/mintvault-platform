@@ -11,6 +11,7 @@ import { ReadinessPanel } from "@/components/partner/readiness-panel";
 import { apiRequest, queryClient } from "@/lib/queryClient";
 import { runAdminProtected } from "@/components/admin/admin-step-up";
 import { PARTNER_READINESS_DIMENSION_ORDER } from "@shared/partner-readiness";
+import type { OwnerEmailEligibility } from "@shared/partner-owner-email";
 import type {
   PartnerNextAction,
   PartnerOperationalReadiness,
@@ -351,7 +352,7 @@ export default function PartnerFirstShopOnboardingPage() {
         setBanner("The onboarding request completed, but its Partner identifier was not returned. Refresh the Partner directory before retrying.");
         return;
       }
-      setBanner(`First shop created. Owner invitation delivery: ${data.result?.invitationDeliveryStatus ?? "recorded"}.`);
+      setBanner("Shop created. Invitation sent to the Owner.");
       createIdempotencyKey.current = requestKey();
       void queryClient.invalidateQueries({ queryKey: [BASE, "partners"] });
       navigate(`/admin/partners/${id}/onboarding`);
@@ -432,6 +433,39 @@ export default function PartnerFirstShopOnboardingPage() {
     contactIdempotencyKey.current = requestKey();
     setContactEmail(value);
   };
+  /*
+   * OWNER EMAIL ELIGIBILITY, asked while the operator is still filling the form.
+   *
+   * Debounced rather than per-keystroke, and skipped until the address looks like an address, so
+   * typing does not fire a request per character. The SERVER decides; this only asks early. The
+   * create transaction still runs the same check, so a race between typing and submitting cannot
+   * produce a shop the pre-check thought was fine.
+   */
+  const [debouncedOwnerEmail, setDebouncedOwnerEmail] = useState("");
+  useEffect(() => {
+    const value = ownerEmail.trim();
+    const timer = window.setTimeout(() => setDebouncedOwnerEmail(/^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(value) ? value : ""), 400);
+    return () => window.clearTimeout(timer);
+  }, [ownerEmail]);
+
+  const ownerEmailCheck = useQuery<OwnerEmailEligibility>({
+    queryKey: [`${BASE}/first-shop/owner-email-eligibility`, debouncedOwnerEmail],
+    enabled: !shop && debouncedOwnerEmail.length > 0,
+    queryFn: async () =>
+      (await apiRequest(
+        "GET",
+        `${BASE}/first-shop/owner-email-eligibility?email=${encodeURIComponent(debouncedOwnerEmail)}`
+      )).json(),
+    staleTime: 30_000,
+    retry: false,
+  });
+  /*
+   * Blocked ONLY on a positive "no". A check that has not answered yet, or that failed, must not
+   * disable Create: the create transaction is the authority and will refuse on its own. Failing
+   * closed here would turn a flaky lookup into an unusable form.
+   */
+  const ownerEmailBlocked = ownerEmailCheck.data?.available === false;
+
   const resetCreateIntent = (setValue: (value: string) => void) => (value: string) => {
     createIdempotencyKey.current = requestKey();
     setValue(value);
@@ -636,6 +670,40 @@ export default function PartnerFirstShopOnboardingPage() {
                 <Input label="Last name" value={ownerLastName} onChange={resetCreateIntent(setOwnerLastName)} />
                 <Input label="Email" value={ownerEmail} onChange={resetCreateIntent(setOwnerEmail)} type="email" />
               </div>
+              {ownerEmailCheck.isFetching && debouncedOwnerEmail && (
+                <p data-testid="owner-email-checking" style={{ margin: "8px 0 0", fontSize: 12, opacity: 0.7 }}>
+                  Checking this email\u2026
+                </p>
+              )}
+              {ownerEmailCheck.data?.available === true && (
+                <p data-testid="owner-email-available" style={{ margin: "8px 0 0", fontSize: 12, color: "#7fd6a0" }}>
+                  ✓ This email is available.
+                </p>
+              )}
+              {ownerEmailCheck.data?.conflict && (
+                <div
+                  role="alert"
+                  data-testid="owner-email-conflict"
+                  data-user-status={ownerEmailCheck.data.conflict.userStatus}
+                  style={{
+                    margin: "10px 0 0",
+                    padding: "10px 12px",
+                    border: "1px solid var(--admin-red, #d46a6a)",
+                    borderRadius: 8,
+                    background: "rgba(212,106,106,0.08)",
+                    fontSize: 13,
+                  }}
+                >
+                  <div style={{ fontSize: 11, letterSpacing: 1.3, opacity: 0.8, textTransform: "uppercase" }}>
+                    This email is already used by
+                  </div>
+                  <div style={{ fontWeight: 700, margin: "2px 0 6px" }}>{ownerEmailCheck.data.conflict.partnerName}</div>
+                  <div style={{ fontSize: 11, letterSpacing: 1.3, opacity: 0.8, textTransform: "uppercase" }}>Status</div>
+                  <div style={{ fontWeight: 700, margin: "2px 0 8px" }}>{ownerEmailCheck.data.conflict.userStatus}</div>
+                  <p style={{ margin: "0 0 6px" }}>{ownerEmailCheck.data.conflict.reason}</p>
+                  <p style={{ margin: 0, fontWeight: 600 }}>{ownerEmailCheck.data.conflict.nextAction}</p>
+                </div>
+              )}
 
               <div style={{ fontSize: 11, letterSpacing: 1.4, opacity: 0.7, textTransform: "uppercase", margin: "16px 0 6px" }}>Delivery address</div>
               <AddressFields value={addressValue} onChange={setAddressField} />
@@ -669,9 +737,25 @@ export default function PartnerFirstShopOnboardingPage() {
               </div>
             </Panel>
             <Panel title="" sub="Everything is created in one transaction. If any part fails, nothing is saved.">
-              <AdminButton type="submit" variant="gold" disabled={create.isPending} data-testid="first-shop-create-submit">
-                {create.isPending ? "Creating\u2026" : "Create shop & send invitation"}
+              <AdminButton
+                type="submit"
+                variant="gold"
+                disabled={create.isPending || ownerEmailBlocked}
+                data-testid="first-shop-create-submit"
+              >
+                {create.isPending
+                  ? "Creating\u2026"
+                  : ownerEmailBlocked
+                    ? "Owner email unavailable"
+                    : create.isError
+                      ? "Retry \u2014 create shop & send invitation"
+                      : "Create shop & send invitation"}
               </AdminButton>
+              {create.isError && (
+                <p role="alert" data-testid="first-shop-create-error" style={{ margin: "10px 0 0", color: "#ff8a8a" }}>
+                  {errorMessage(create.error, "The shop was not created. Nothing was saved.")}
+                </p>
+              )}
             </Panel>
           </form>
         ) : onboarding.isLoading ? (
@@ -684,6 +768,20 @@ export default function PartnerFirstShopOnboardingPage() {
             <p data-testid="first-shop-stage-instruction" style={{ margin: "0 0 14px", opacity: 0.85 }}>
               {STAGE_INSTRUCTION[shop.operational.nextAction.stage]}
             </p>
+            {/*
+              * WHO the invitation went to. The only piece of invitation state worth showing an
+              * operator at this stage — tokens, delivery ids, session counts and expiry timestamps
+              * stay in Advanced diagnostics, because none of them change what anybody does next.
+              */}
+            {shop.operational.nextAction.stage === "ACTIVATE" && shop.owner?.email && (
+              <p data-testid="first-shop-invited-email" style={{ margin: "0 0 14px", fontSize: 13 }}>
+                <span style={{ fontSize: 11, letterSpacing: 1.3, opacity: 0.75, textTransform: "uppercase" }}>
+                  Invitation sent to
+                </span>
+                <br />
+                <b>{shop.owner.email}</b>
+              </p>
+            )}
             <NextActionCard
               next={shop.operational.nextAction}
               onRun={nextRun ? nextRun.run : null}

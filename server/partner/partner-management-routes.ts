@@ -256,6 +256,26 @@ export function partnerManagementRouter(): Router {
     }
   });
 
+  /**
+   * READ-ONLY Owner-email eligibility for the CREATE SHOP form.
+   *
+   * ROUTE ORDER, same reason as duplicate-check above: a literal path must be registered before any
+   * parameterised sibling that could swallow it.
+   *
+   * Super Admin only, like every route on this router, so it answers plainly — which Partner holds
+   * the address, that user's status, and the one supported resolution. The Partner-facing surfaces
+   * keep their deliberately vague wording; this is the operator entitled to the answer, and telling
+   * them nothing is what made a correct refusal look like a broken button.
+   */
+  r.get("/first-shop/owner-email-eligibility", async (req, res) => {
+    try {
+      const email = typeof req.query.email === "string" ? req.query.email.trim().slice(0, 320) : "";
+      res.json(await svc.checkOwnerEmailEligibility(email));
+    } catch (err) {
+      sendError(res, err);
+    }
+  });
+
   r.get("/partners/:partnerId", async (req, res) => {
     try {
       res.json(await svc.getPartnerDetail(req.params.partnerId));

@@ -10,6 +10,7 @@
  * is ever read or written; the actor is always server-derived.
  */
 import { databaseIdentity, partnerAdminQuery, withPartnerAdminTransaction } from "./db";
+import type { OwnerEmailEligibility, PartnerOwnerEmailClash } from "@shared/partner-owner-email";
 import { G5RequestError, canTransitionStatus, isPartnerStatus, type PartnerStatus } from "./partner-management-errors";
 import { hashPassword, isValidPartnerPassword } from "./auth";
 import { deliverInvitationToken, invitationDeliveryConfigured } from "./delivery";
@@ -681,19 +682,20 @@ export async function createFirstShopOnboarding(actor: ActorContext, input: Firs
     // and the opaque wording told the one operator entitled to the answer nothing — the guided flow
     // read as a broken button. The sibling super-admin invite (invitePartnerUser) has always been
     // explicit; this now matches it, and names the owning Partner so the block is actionable.
-    const ownerClash = await client.query<{ status: string; legal_name: string }>(
-      `SELECT u.status, o.legal_name
-         FROM partner_users u
-         JOIN partner_organisations o ON o.id = u.tenant_id
-        WHERE lower(u.email)=lower($1)
-        LIMIT 1`,
-      [ownerEmail]
+    /*
+     * The SAME finder the pre-flight eligibility check uses, run inside this transaction where it is
+     * actually authoritative. The form asks early so the operator is not surprised; this is what
+     * decides. Two implementations of one uniqueness rule is how a pre-check starts lying.
+     */
+    const ownerClash = await findOwnerEmailClash(
+      (sql, params) => client.query(sql, params) as never,
+      ownerEmail
     );
-    if (ownerClash.rows.length) {
-      const clashName = ownerClash.rows[0].legal_name.slice(0, 80);
+    if (ownerClash) {
+      const clashName = ownerClash.partnerName.slice(0, 80);
       throw new G5RequestError(
         "DUPLICATE_PARTNER_USER",
-        `That Owner email already belongs to an existing Partner user (${clashName} — status ${ownerClash.rows[0].status}). ` +
+        `That Owner email already belongs to an existing Partner user (${clashName} — status ${ownerClash.userStatus}). ` +
           "Partner emails are unique across every Partner, and a revoked user still holds its email. " +
           `Use a different Owner email, or remove that user from ${clashName} first.`
       );
@@ -874,6 +876,96 @@ export interface DuplicateCandidate {
   email?: string;
   postcode?: string;
   phone?: string;
+}
+
+
+/**
+ * OWNER EMAIL ELIGIBILITY — one rule, asked twice.
+ *
+ * The create path has always refused a clashing Owner email, correctly. What it could not do is say
+ * so BEFORE the operator filled in a whole form and pressed the button, which made a correct
+ * refusal read as a dead Create button.
+ *
+ * This is the SAME query the create transaction runs, deliberately extracted rather than
+ * reimplemented: a pre-flight check that disagrees with the thing it is checking is worse than no
+ * pre-flight check at all. The create path still runs it inside its transaction — this only lets the
+ * form ask the same question early. Nothing here writes, and nothing here relaxes uniqueness.
+ */
+type OwnerEmailClash = Omit<PartnerOwnerEmailClash, "releasable" | "reason" | "nextAction">;
+
+async function findOwnerEmailClash(
+  run: <T extends Record<string, unknown>>(sql: string, params: unknown[]) => Promise<{ rows: T[] }>,
+  email: string
+): Promise<OwnerEmailClash | null> {
+  const { rows } = await run<{
+    tenant_id: string;
+    legal_name: string;
+    status: string;
+    invitation_status: string | null;
+    invitation_expires_at: Date | string | null;
+  }>(
+    `SELECT u.tenant_id::text AS tenant_id, o.legal_name, u.status,
+            i.status AS invitation_status, i.expires_at AS invitation_expires_at
+       FROM partner_users u
+       JOIN partner_organisations o ON o.id = u.tenant_id
+       LEFT JOIN LATERAL (
+         SELECT status, expires_at FROM partner_invitations pi
+          WHERE pi.tenant_id = u.tenant_id AND pi.user_id = u.id
+          ORDER BY pi.created_at DESC LIMIT 1
+       ) i ON true
+      WHERE lower(u.email) = lower($1)
+      LIMIT 1`,
+    [email]
+  );
+  const row = rows[0];
+  if (!row) return null;
+  return {
+    partnerId: row.tenant_id,
+    partnerName: row.legal_name,
+    userStatus: row.status,
+    invitationStatus: row.invitation_status,
+    invitationExpiresAt:
+      row.invitation_expires_at == null ? null : new Date(row.invitation_expires_at as string | Date).toISOString(),
+  };
+}
+
+
+/**
+ * Super-Admin-only. The router mounts this behind the same requireSuperAdmin the rest of Partner
+ * management uses, so naming the owning Partner and the user's status leaks nothing that operator
+ * cannot already read from the partners list. The Partner-facing surfaces keep their deliberately
+ * vague disclosure wording; this is not that surface.
+ */
+export async function checkOwnerEmailEligibility(rawEmail: string): Promise<OwnerEmailEligibility> {
+  const email = normalisePartnerOperationalEmail(rawEmail);
+  if (!PARTNER_OPERATIONAL_EMAIL_RE.test(email)) {
+    throw new G5RequestError("VALIDATION_ERROR", "Enter a valid email address.");
+  }
+  const clash = await findOwnerEmailClash(
+    (sql, params) => partnerAdminQuery(sql, params) as never,
+    email
+  );
+  if (!clash) return { email, available: true, conflict: null };
+
+  /*
+   * WHAT CAN ACTUALLY BE DONE, per status. Every branch names an authority that exists.
+   *
+   * REVOKED is TERMINAL by design: `setPartnerUserStatus` refuses `from === "REVOKED"`, removal only
+   * sets REVOKED rather than deleting the row, and no authority changes a non-INVITED user's email.
+   * The address stays attached to that person's audit, security, grading, station and financial
+   * history, which is exactly what makes it safe to keep and unsafe to quietly hand to somebody new.
+   */
+  const releasable = clash.userStatus === "INVITED";
+  const reason =
+    clash.userStatus === "REVOKED"
+      ? `This email belongs to a revoked user on ${clash.partnerName}. A revoked user keeps its email permanently, because that address is what ties their audit, security, grading and station history to a person. MintVault has no authority that releases it.`
+      : clash.userStatus === "INVITED"
+        ? `This email has a pending invitation on ${clash.partnerName}.`
+        : `This email belongs to a ${clash.userStatus.toLowerCase()} user on ${clash.partnerName}.`;
+  const nextAction = releasable
+    ? `Change or revoke that pending invitation on ${clash.partnerName} first, or use a different Owner email.`
+    : "Use a different Owner email.";
+  return { email, available: false, conflict: { ...clash, releasable, reason, nextAction } };
 }
 
 export interface DuplicateMatchRow {
