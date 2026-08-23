@@ -109,4 +109,12 @@ export async function deliverInvitationToken(data: {
     expiresAt: data.expiresAt,
   });
   if (!sent) throw new Error("no invitation delivery provider configured — failing closed");
+  /*
+   * The provider's own message id, so an accepted send can be reconciled against the provider's
+   * dashboard later. Logged rather than stored: partner_invitations has no column for it, and
+   * adding one is a migration decision rather than something to slip into a bug fix.
+   *
+   * This id is NOT the token and carries nothing secret.
+   */
+  console.log(`[invitation] provider accepted message id=${sent.id} recipient=${data.email}`);
 }

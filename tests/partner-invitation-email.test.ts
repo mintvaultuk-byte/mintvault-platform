@@ -174,3 +174,43 @@ describe("delivery status is the provider's verdict, not an optimistic guess", (
     expect(scope).toContain("superseded_by=$1");
   });
 });
+
+describe("the resend path is reachable and provable", () => {
+  const read = (rel: string) =>
+    require("node:fs").readFileSync(require("node:path").resolve(import.meta.dirname, "..", rel), "utf8");
+
+  it("logs at the route boundary, so a missing log PROVES the click never arrived", () => {
+    const routes = read("server/partner/partner-management-routes.ts");
+    const at = routes.indexOf('r.post("/partners/:partnerId/users/:userId/resend-invitation"');
+    expect(at).toBeGreaterThan(-1);
+    const head = routes.slice(at, at + 1400);
+    expect(head).toContain("[invitation] resend requested");
+    // Written BEFORE the service call, or its absence would prove nothing.
+    expect(head.indexOf("[invitation] resend requested")).toBeLessThan(head.indexOf("resendPartnerInvitation"));
+  });
+
+  it("records the provider's message id, and never the token", () => {
+    const delivery = read("server/partner/delivery.ts");
+    expect(delivery).toContain("[invitation] provider accepted message id=");
+    for (const line of delivery.split("\n").filter((l) => l.includes("console."))) {
+      expect(line).not.toContain("data.token");
+      expect(line).not.toMatch(/\btoken\b/);
+    }
+  });
+
+  it("the resend control does not depend on the derived stage being right", () => {
+    const page = read("client/src/pages/admin/partner-first-shop-onboarding.tsx");
+    // Keyed on the Owner's own status, not on nextAction.stage.
+    expect(page).toContain('const ownerAwaitingSetup = shop?.owner?.userStatus === "INVITED";');
+    expect(page).toContain("{ownerAwaitingSetup && shop.owner?.email && (");
+    // And when it genuinely cannot work, it says so rather than rendering nothing.
+    expect(page).toContain("first-shop-resend-unavailable");
+  });
+
+  it("does not call provider acceptance 'delivered'", () => {
+    const page = read("client/src/pages/admin/partner-first-shop-onboarding.tsx");
+    expect(page).toContain("Email accepted for delivery");
+    // The old wording claimed something the application cannot prove.
+    expect(page).not.toContain('"Invitation sent to"');
+  });
+});

@@ -555,6 +555,18 @@ export function partnerManagementRouter(): Router {
   r.post("/partners/:partnerId/users/:userId/resend-invitation", async (req, res) => {
     try {
       const actor = actorOf(req);
+      /*
+       * REACHABILITY, logged at the boundary.
+       *
+       * A resend that produced no email was traced for an hour on the strength of database state
+       * alone, and the one question the database could not answer was whether the click had ever
+       * arrived. It can now: this line is written before any work, so its absence is proof the
+       * request never reached the server, and its presence narrows the fault to what follows.
+       * No token is involved at this point and none is logged.
+       */
+      console.log(
+        `[invitation] resend requested partner=${req.params.partnerId} user=${req.params.userId} actor=${actor.actorEmail} request=${actor.requestId}`
+      );
       const reason = optionalReason(req.body?.reason, "partner invitation resent");
       mutationResponse(
         res,

@@ -666,14 +666,16 @@ describe("honest invitation delivery status", () => {
     expect(src).toContain("shop?.owner?.invitationStatus");
     expect(src).toContain('invitationStatus === "SENT"');
     expect(src).toContain('invitationStatus === "DELIVERY_FAILED"');
-    expect(src).toContain("Invitation delivery failed for");
+    expect(src).toContain("Invitation delivery FAILED for");
+    // Acceptance by the provider is not inbox delivery, and must not be worded as if it were.
+    expect(src).toContain("Email accepted for delivery to");
   });
 
   it("offers Resend inside the controller, with sending and outcome states", () => {
     const src = page();
     expect(src).toContain("first-shop-resend-invitation");
     expect(src).toContain("Sending…");
-    expect(src).toContain("✓ Invitation sent");
+    expect(src).toContain("✓ Email accepted for delivery");
     expect(src).toContain("Resend failed");
     // Disabled while in flight, so a double click cannot mint two invitations.
     expect(src).toContain("disabled={resendInvitation.isPending}");

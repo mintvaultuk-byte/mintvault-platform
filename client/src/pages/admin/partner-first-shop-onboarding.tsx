@@ -483,12 +483,21 @@ export default function PartnerFirstShopOnboardingPage() {
    * SENT after the provider actually accepted the message; a failure writes DELIVERY_FAILED and the
    * error. It is deliberately not inferred from "an invitation row exists".
    */
+  /*
+   * SHOW THE INVITATION PANEL WHENEVER THE OWNER HAS NOT FINISHED SETUP.
+   *
+   * It used to render only at stage ACTIVATE. That was correct reasoning about the stage machine and
+   * still the wrong condition: it made a repair control depend on a derived value being right, so
+   * any disagreement about the stage silently removed the only way to fix the thing that was wrong.
+   * The Owner's own status is the fact that matters, and it is read directly.
+   */
+  const ownerAwaitingSetup = shop?.owner?.userStatus === "INVITED";
   const invitationStatus = shop?.owner?.invitationStatus ?? null;
   const invitationHeadline =
     invitationStatus === "SENT"
-      ? "Invitation sent to"
+      ? "Email accepted for delivery to"
       : invitationStatus === "DELIVERY_FAILED"
-        ? "Invitation delivery failed for"
+        ? "Invitation delivery FAILED for"
         : invitationStatus === "PENDING"
           ? "Sending invitation to"
           : "Invitation for";
@@ -657,7 +666,7 @@ export default function PartnerFirstShopOnboardingPage() {
        * reports SENT when the message was accepted, and DELIVERY_FAILED with the reason otherwise.
        */
       const status = data?.result?.deliveryStatus;
-      setResendNotice(status === "DELIVERY_FAILED" ? "Resend failed — MintVault could not deliver the email." : "✓ Invitation sent");
+      setResendNotice(status === "DELIVERY_FAILED" ? "Resend failed — the email provider rejected the message." : "✓ Email accepted for delivery");
       void queryClient.invalidateQueries({ queryKey: [`${BASE}/partners/${partnerId}/users`] });
       void onboarding.refetch();
     },
@@ -922,7 +931,7 @@ export default function PartnerFirstShopOnboardingPage() {
               * operator at this stage — tokens, delivery ids, session counts and expiry timestamps
               * stay in Advanced diagnostics, because none of them change what anybody does next.
               */}
-            {shop.operational.nextAction.stage === "ACTIVATE" && shop.owner?.email && (
+            {ownerAwaitingSetup && shop.owner?.email && (
               <div data-testid="first-shop-invited-email" data-invitation-status={invitationStatus} style={{ margin: "0 0 14px", fontSize: 13 }}>
                 <span style={{ fontSize: 11, letterSpacing: 1.3, opacity: 0.75, textTransform: "uppercase" }}>
                   {invitationHeadline}
@@ -939,7 +948,11 @@ export default function PartnerFirstShopOnboardingPage() {
                     {resendNotice}
                   </p>
                 )}
-                {shop.owner.id && (
+                {!shop.owner.id ? (
+                  <p role="alert" data-testid="first-shop-resend-unavailable" style={{ margin: "10px 0 0", color: "#ffcf8a", fontSize: 13 }}>
+                    MintVault cannot identify this Owner account, so Resend is unavailable here. Open Staff to resend.
+                  </p>
+                ) : (
                   <AdminButton
                     size="sm"
                     disabled={resendInvitation.isPending}
