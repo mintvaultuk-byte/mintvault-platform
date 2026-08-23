@@ -1855,6 +1855,39 @@ app.whenReady().then(async () => {
   surfacePriorResetStatus();
   // Last, so the manifest only ever claims an instance that actually finished starting.
   writeRuntimeManifest();
+
+  /*
+   * A SCANNER THAT CANNOT WORK YET MUST SAY SO ON SCREEN.
+   *
+   * This app hides its Dock icon and only ever showed its window when the tray icon was clicked, so
+   * the tray was the single way in. That held until macOS declined to give a second instance a
+   * usable menu-bar slot — the isolated shop games instance reported tray bounds of
+   * {x:0, y:956, width:32, height:0} — at which point the app was running, healthy, and completely
+   * unreachable. It sat at a sign-in screen nobody could open for seventeen minutes, and the only
+   * evidence anything was wrong was a server that never saw a login attempt.
+   *
+   * So: if the station is not operational, present the window. Every non-active stage — sign in,
+   * MFA, connecting, waiting for approval, another shop's Mac — is a stage where a person is
+   * expected to look at this, and none of them should depend on finding an icon.
+   *
+   * An ACTIVE station stays quiet, exactly as before: a working Scanner must not steal focus from
+   * whatever the shop is doing.
+   */
+  try {
+    const bounds = tray?.getBounds?.();
+    if (bounds && (bounds.height === 0 || bounds.width === 0)) {
+      console.warn(`[tray] menu-bar slot looks unusable (${JSON.stringify(bounds)}) — the window is the way in`);
+    }
+    const setup = await stationSetupState();
+    if (setup?.stage !== "active") {
+      console.log(`[startup] station is not operational (${setup?.stage || "unknown"}) — showing the window`);
+      showPopover();
+    }
+  } catch (err) {
+    // Failing to READ the state is itself a reason to show the window rather than hide silently.
+    console.error(`[startup] could not resolve station state: ${err && err.message} — showing the window`);
+    showPopover();
+  }
 });
 
 app.on("window-all-closed", (e) => {

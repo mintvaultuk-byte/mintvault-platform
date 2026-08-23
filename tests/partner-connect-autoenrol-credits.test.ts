@@ -822,6 +822,28 @@ describe("Scanner — trapped-state recovery, isolation and launcher proof (comp
     expect(s).not.toMatch(/open -a .*MintVault Scanner/);
   });
 
+  it("M0 — a Scanner that cannot work yet presents itself instead of waiting to be found", () => {
+    const main = read("main.js");
+    // The app hides its Dock icon, so the tray was the only way in — until macOS gave a second
+    // instance a menu-bar slot of {height: 0} and the app became unreachable while perfectly
+    // healthy. Any non-active stage now shows the window.
+    expect(main).toContain('if (setup?.stage !== "active")');
+    expect(main).toContain("showPopover();");
+    expect(main).toContain("menu-bar slot looks unusable");
+    // An ACTIVE station must still stay quiet and not steal focus.
+    expect(main).toContain("An ACTIVE station stays quiet");
+  });
+
+  it("M5b — the launcher replaces a running instance that is the WRONG BUILD", () => {
+    const s = launcher();
+    // "Ours" answers isolation; it says nothing about which build is running. Both must match, or
+    // the running instance is replaced — this short-circuit once accepted a stale build and
+    // reported success while the fix under test was not running.
+    expect(s).toContain("ALREADY RUNNING IS NOT THE SAME AS ALREADY CORRECT");
+    expect(s).toContain('[ "$RUNNING_VER" = "$WANT_VERSION" ] && [ "$RUNNING_EXE" = "$APP" ]');
+    expect(s).toContain("replacing it so the verified build is what actually runs");
+  });
+
   it("M6/M7/M8 — Quit exists, genuinely exits, and is not the same as closing the window", () => {
     const main = read("main.js");
     expect(main).toContain("Quit MintVault Scanner");
@@ -910,9 +932,9 @@ describe("Scanner — trapped-state recovery, isolation and launcher proof (comp
     expect(main).toContain("raw.pid === process.pid");
   });
 
-  it("M-version — the compiled build is 1.4.0, distinguishable from the enrolled Shop 0 Mac", () => {
+  it("M-version — the compiled build is 1.4.1, distinguishable from the enrolled Shop 0 Mac", () => {
     const pkg = JSON.parse(read("package.json")) as { version: string };
-    expect(pkg.version).toBe("1.4.0");
+    expect(pkg.version).toBe("1.4.1");
     expect(pkg.version).not.toBe("1.2.1");
   });
 });
