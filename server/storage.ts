@@ -1927,16 +1927,34 @@ export class DatabaseStorage implements IStorage {
    */
   async getOrGenerateClaimCode(certId: string): Promise<string> {
     const result = await db.execute(sql`
-      SELECT claim_code FROM certificates
+      SELECT claim_code, (claim_code_hash IS NOT NULL) AS has_hash FROM certificates
       WHERE certificate_number = ${certId}
-        AND claim_code IS NOT NULL
         AND deleted_at IS NULL
       LIMIT 1
     `);
-    if (result.rows.length > 0) {
-      const row = result.rows[0] as any;
-      if (row.claim_code) return row.claim_code as string;
+    const row = result.rows[0] as { claim_code?: string | null; has_hash?: boolean } | undefined;
+    if (row?.claim_code) return row.claim_code;
+
+    /*
+     * HASH PRESENT BUT NO READABLE CODE — refuse, do not mint.
+     *
+     * A recovered historical credential can legitimately exist as a hash alone: the code is on a
+     * physical insert in a customer's hands and was restored here in its hashed form, which is the
+     * stronger representation and the one `validateClaimCode` actually compares against. Minting
+     * over it would rotate a credential that is live, in circulation, and — because we do not know
+     * who holds the card — impossible to reissue to anyone.
+     *
+     * We genuinely cannot reprint what we cannot read, so failing loudly is the only honest
+     * outcome. Rotating deliberately is still available through the admin regenerate route.
+     */
+    if (row?.has_hash) {
+      throw new Error(
+        `Refusing to issue a claim code for ${certId}: it already has a credential whose code is ` +
+          `not readable here (hash only). Reprinting would invalidate the code already on the ` +
+          `physical insert. Use the explicit rotation route if that is genuinely intended.`
+      );
     }
+
     return this.generateClaimCode(certId);
   }
 

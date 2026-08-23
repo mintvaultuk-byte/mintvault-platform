@@ -320,6 +320,41 @@ describe("claim code → ownership (real storage, real PostgreSQL 17)", () => {
     expect(await storage.validateClaimCode(CERT, rotated)).toBe(true);
   });
 
+  it("issuing a credential leaves 'claimed' and 'unclaimed' exactly as they were", async () => {
+    await resetCert(pool!);
+    await storage.generateClaimCode(CERT);
+    expect((await certRow(pool!)).ownership_status).toBe("unclaimed");
+
+    await pool!.query(`UPDATE certificates SET ownership_status = 'claimed' WHERE certificate_number = $1`, [CERT]);
+    await storage.generateClaimCode(CERT);
+    expect((await certRow(pool!)).ownership_status).toBe("claimed");
+  });
+
+  it("REGRESSION: refuses to reprint a recovered hash-only credential rather than rotating it", async () => {
+    await resetCert(pool!);
+    // A credential recovered from a physical insert exists as a hash alone — the code itself lives
+    // on paper in a customer's hands and is not readable here.
+    await pool!.query(`UPDATE certificates SET claim_code = NULL WHERE certificate_number = $1`, [CERT]);
+
+    await expect(storage.getOrGenerateClaimCode(CERT)).rejects.toThrow(/not readable here/);
+
+    // The credential must survive the refusal untouched.
+    const after = await pool!.query<{ h: string }>(
+      `SELECT claim_code_hash h FROM certificates WHERE certificate_number = $1`,
+      [CERT]
+    );
+    expect(after.rows[0].h).toBeTruthy();
+  });
+
+  it("a hash-only credential still validates the original printed code", async () => {
+    const original = await resetCert(pool!);
+    await pool!.query(`UPDATE certificates SET claim_code = NULL WHERE certificate_number = $1`, [CERT]);
+
+    // This is the whole point of a hash-only restore: the paper code keeps working.
+    expect(await storage.validateClaimCode(CERT, original)).toBe(true);
+    expect(await storage.validateClaimCode(CERT, "AAAABBBBCCCC")).toBe(false);
+  });
+
   it("a claim code is accepted case-insensitively and trimmed", async () => {
     const code = await resetCert(pool!);
     expect(await storage.validateClaimCode(CERT, `  ${code.toLowerCase()}  `)).toBe(true);
