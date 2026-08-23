@@ -671,14 +671,24 @@ describe("honest invitation delivery status", () => {
     expect(src).toContain("Email accepted for delivery to");
   });
 
-  it("offers Resend inside the controller, with sending and outcome states", () => {
+  it("offers EXACTLY ONE resend control, and it is the gold NEXT ACTION button", () => {
     const src = page();
-    expect(src).toContain("first-shop-resend-invitation");
-    expect(src).toContain("Sending…");
+    /*
+     * There were two: a small grey button in the invitation panel and the large gold NEXT ACTION
+     * control. The operator naturally pressed the gold one — which was wired to a SCROLL, because
+     * AWAITING_PASSWORD_SETUP was missing from the run map while still carrying the server action
+     * label "Resend the invitation". A gold primary button that names an action must perform it.
+     */
+    expect((src.match(/resendInvitation\.mutate/g) ?? []).length).toBe(1);
+    expect(src).toContain('code === "AWAITING_PASSWORD_SETUP"');
+    expect(src).toContain("run: () => resendInvitation.mutate(ownerId)");
+    // The reveal branch may never borrow an action's label and masquerade as one.
+    expect(src).not.toContain('{next.action?.label ?? "Show me"}');
+    // The gold control reports progress through NextActionCard's own pending label.
+    expect(src).toContain("Working");
     expect(src).toContain("✓ Email accepted for delivery");
     expect(src).toContain("Resend failed");
-    // Disabled while in flight, so a double click cannot mint two invitations.
-    expect(src).toContain("disabled={resendInvitation.isPending}");
+    expect(src).toContain("data?.result?.deliveryStatus");
   });
 });
 

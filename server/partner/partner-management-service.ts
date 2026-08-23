@@ -2387,6 +2387,49 @@ export async function resendPartnerInvitation(actor: ActorContext, partnerId: st
     if (org.status === "SUSPENDED" || org.status === "REVOKED" || rows[0].status !== "INVITED") {
       throw new G5RequestError("PARTNER_UNAVAILABLE", "Setup invitations are only available for invited accounts.");
     }
+
+    /*
+     * SERIALISE RESENDS FOR ONE USER, AND COLLAPSE AN ACCIDENTAL DOUBLE-CLICK.
+     *
+     * Measured before this existed: two concurrent clicks produced two 200s, two provider sends and
+     * two emails — of which only the second link worked, because each mint supersedes the last. The
+     * security invariant was never in danger (one live token), but sending somebody two invitations
+     * and silently killing the first is exactly the kind of thing that makes an operator distrust
+     * the button.
+     *
+     * A disabled button is not a fix: it protects one tab, not two, and not a retry. The lock is
+     * transaction-scoped, so it is released on commit or rollback either way.
+     *
+     * The window is deliberately short. It collapses a double-click into one email; a deliberate
+     * resend seconds later still mints a genuinely fresh invitation, which is the whole point of
+     * the control.
+     */
+    await client.query("SELECT pg_advisory_xact_lock(hashtextextended($1, 0))", [`partner-resend:${userId}`]);
+    /*
+     * Keyed on a recent RESEND, not on a recent invitation of any kind.
+     *
+     * Keying it on invitation age collapsed the first genuine resend against the invitation that
+     * shop creation had just minted — the operator pressed Resend and nothing was sent. The audit
+     * row is written inside the same transaction as the mint, so once the first request commits and
+     * releases this lock, the second sees it.
+     */
+    const recentResend = await client.query<{ entity_id: string }>(
+      `SELECT entity_id FROM partner_management_audit
+        WHERE tenant_id=$1 AND entity_id=$2
+          AND action_type='partner_invitation_resent' AND result='succeeded'
+          AND created_at > now() - interval '10 seconds'
+        ORDER BY created_at DESC LIMIT 1`,
+      [org.id, userId]
+    );
+    if (recentResend.rows[0]) {
+      const live = await client.query<{ id: string }>(
+        `SELECT id FROM partner_invitations
+          WHERE tenant_id=$1 AND user_id=$2 AND status IN ('PENDING','SENT')
+          ORDER BY created_at DESC LIMIT 1`,
+        [org.id, userId]
+      );
+      if (live.rows[0]) return { replayed: true as const, invitationId: live.rows[0].id };
+    }
     await client.query(
       `INSERT INTO partner_management_audit
          (tenant_id, action_type, actor_user_id, actor_email, request_id, idempotency_key, entity_type, entity_id, before_state, reason, result)
@@ -2412,6 +2455,10 @@ export async function resendPartnerInvitation(actor: ActorContext, partnerId: st
       reason
     );
   });
+  if ("replayed" in invite) {
+    // A duplicate click inside the window. Nothing was minted and nothing is sent again.
+    return { result: { invitationId: invite.invitationId, deliveryStatus: "ALREADY_SENT" }, alreadyCompleted: true };
+  }
   const { delivery, ...publicInvite } = invite;
   publicInvite.deliveryStatus = await recordInvitationDelivery({ ...publicInvite, delivery });
   return { result: publicInvite, alreadyCompleted: false };

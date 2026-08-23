@@ -280,7 +280,12 @@ function NextActionCard({
             </AdminButton>
           ) : step ? (
             <AdminButton variant="gold" onClick={() => onReveal(step)} data-testid="first-shop-next-action-reveal">
-              {next.action?.label ?? "Show me"}
+              {/*
+                * ALWAYS "Show me". It used to render the server's action label, which meant a button
+                * promising "Resend the invitation" would silently just scroll. A control that names
+                * an action must perform it; anything that only navigates must say so.
+                */}
+              Show me
             </AdminButton>
           ) : (
             /* Nothing MintVault can click — e.g. the owner has to set their own password. Say so
@@ -713,7 +718,19 @@ export default function PartnerFirstShopOnboardingPage() {
      * An expired or failed invitation has exactly one remedy and exactly one Owner to apply it to,
      * so it runs from the card. Super Admin should not have to go into Staff to resend.
      */
-    if ((code === "INVITATION_EXPIRED" || code === "OWNER_SETUP_REQUIRED") && shop?.owner?.id) {
+    /*
+     * EVERY owner-invitation code, not just the expired one.
+     *
+     * AWAITING_PASSWORD_SETUP carries the server action label "Resend the invitation", and it was
+     * NOT in this map — so the gold primary button fell through to the reveal branch and rendered a
+     * button that said "Resend the invitation" and merely scrolled. That is the whole "I pressed
+     * resend and nothing happened": the operator pressed exactly the right-looking control and it
+     * was wired to navigation.
+     */
+    if (
+      (code === "AWAITING_PASSWORD_SETUP" || code === "INVITATION_EXPIRED" || code === "OWNER_SETUP_REQUIRED") &&
+      shop?.owner?.id
+    ) {
       const ownerId = shop.owner.id;
       return {
         run: () => resendInvitation.mutate(ownerId),
@@ -948,20 +965,15 @@ export default function PartnerFirstShopOnboardingPage() {
                     {resendNotice}
                   </p>
                 )}
-                {!shop.owner.id ? (
+                {/*
+                  * NO BUTTON HERE. The single resend action is the gold NEXT ACTION control below —
+                  * two controls for one action is what made the operator hunt for the working one.
+                  * This block states WHO was invited and WHAT the provider said, and nothing else.
+                  */}
+                {!shop.owner.id && (
                   <p role="alert" data-testid="first-shop-resend-unavailable" style={{ margin: "10px 0 0", color: "#ffcf8a", fontSize: 13 }}>
-                    MintVault cannot identify this Owner account, so Resend is unavailable here. Open Staff to resend.
+                    MintVault cannot identify this Owner account, so Resend is unavailable. Open Staff to resend.
                   </p>
-                ) : (
-                  <AdminButton
-                    size="sm"
-                    disabled={resendInvitation.isPending}
-                    onClick={() => shop.owner?.id && resendInvitation.mutate(shop.owner.id)}
-                    data-testid="first-shop-resend-invitation"
-                    style={{ marginTop: 10 }}
-                  >
-                    {resendInvitation.isPending ? "Sending…" : "Resend invitation"}
-                  </AdminButton>
                 )}
               </div>
             )}
