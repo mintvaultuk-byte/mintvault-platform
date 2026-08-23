@@ -263,6 +263,54 @@ describe("claim code → ownership (real storage, real PostgreSQL 17)", () => {
     expect(orphan.rows[0].n).toBe(0);
   });
 
+  it("REGRESSION: issuing a claim credential must NOT reset a pending ownership transfer", async () => {
+    /*
+     * THE DEFECT. generateClaimCode wrote
+     *
+     *   ownership_status = CASE WHEN ownership_status = 'claimed' THEN ownership_status ELSE 'unclaimed' END
+     *
+     * which preserved `claimed` and flattened EVERYTHING ELSE to `unclaimed` — including
+     * `transfer_pending`. So issuing or rotating a credential on a card that was mid-transfer
+     * silently destroyed the transfer state: the pending handover simply stopped existing, with no
+     * audit of an ownership decision because nobody had made one.
+     *
+     * The invariant: a claim-credential operation is not an ownership decision. Printing,
+     * reprinting, recovering or rotating a credential must leave ownership exactly as it was.
+     */
+    await resetCert(pool!);
+    await pool!.query(
+      `UPDATE certificates SET ownership_status = 'transfer_pending' WHERE certificate_number = $1`,
+      [CERT]
+    );
+
+    await storage.generateClaimCode(CERT);
+
+    const after = await pool!.query<{ ownership_status: string }>(
+      `SELECT ownership_status FROM certificates WHERE certificate_number = $1`,
+      [CERT]
+    );
+    expect(after.rows[0].ownership_status).toBe("transfer_pending");
+  });
+
+  it("REGRESSION: the print path leaves every ownership state untouched", async () => {
+    // getOrGenerateClaimCode reuses an existing credential, but on a certificate that has none it
+    // mints one — and that mint must not become a back door into ownership either.
+    for (const state of ["unclaimed", "transfer_pending", "stolen"] as const) {
+      await resetCert(pool!);
+      await pool!.query(
+        `UPDATE certificates SET claim_code = NULL, claim_code_hash = NULL, ownership_status = $2
+          WHERE certificate_number = $1`,
+        [CERT, state]
+      );
+      await storage.getOrGenerateClaimCode(CERT);
+      const after = await pool!.query<{ ownership_status: string }>(
+        `SELECT ownership_status FROM certificates WHERE certificate_number = $1`,
+        [CERT]
+      );
+      expect(after.rows[0].ownership_status, `${state} must survive a first mint`).toBe(state);
+    }
+  });
+
   it("an explicit rotation still replaces the credential, and the old one stops working", async () => {
     const original = await resetCert(pool!);
     const rotated = await storage.generateClaimCode(CERT);

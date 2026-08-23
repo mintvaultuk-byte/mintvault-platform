@@ -1,0 +1,34 @@
+{
+  "version": "0.0.1",
+  "configurations": [
+    {
+      "name": "dev",
+      "runtimeExecutable": "npm",
+      "runtimeArgs": [
+        "run",
+        "dev"
+      ],
+      "port": 5173
+    },
+    {
+      "name": "growth-polish",
+      "runtimeExecutable": "npm",
+      "runtimeArgs": [
+        "--prefix",
+        "/Users/cornelius/mintvault-growth-polish",
+        "run",
+        "dev"
+      ],
+      "port": 5311,
+      "autoPort": true
+    },
+    {
+      "name": "mvgs-bundle-preview",
+      "runtimeExecutable": "node",
+      "runtimeArgs": [
+        "/tmp/mvgsprobe/preview-server.mjs"
+      ],
+      "port": 5399
+    }
+  ]
+}

@@ -1872,6 +1872,22 @@ export class DatabaseStorage implements IStorage {
    * cannot recover is unrecoverable by design: the code is random (12 chars from
    * a 32-symbol alphabet), stored nowhere else, and derivable from nothing.
    */
+  /**
+   * Mint a NEW claim credential for a certificate. Ownership is not its business.
+   *
+   * This used to also write
+   *   ownership_status = CASE WHEN ownership_status = 'claimed' THEN ... ELSE 'unclaimed' END
+   * which preserved `claimed` and flattened everything else — including `transfer_pending` — to
+   * `unclaimed`. Issuing or rotating a credential on a card that was mid-transfer therefore
+   * destroyed the pending handover silently, with no audit of an ownership decision because nobody
+   * had made one. A credential operation is not an ownership decision, and the two are separately
+   * authorised: transfers move ownership_status through their own guarded paths.
+   *
+   * Removing the write is safe for every caller. getOrGenerateClaimCode must not touch ownership at
+   * all; the backfill only selects certificates with claim_code_hash IS NULL, which are already
+   * unclaimed, so the CASE was a no-op there; and the admin regenerate route rotates a CREDENTIAL,
+   * which was never a reason to reset who owns the card.
+   */
   async generateClaimCode(certId: string): Promise<string> {
     const code = this._generateRandomCode(12);
     const hash = this._hashClaimCode(code);
@@ -1881,7 +1897,6 @@ export class DatabaseStorage implements IStorage {
           claim_code = ${code},
           claim_code_created_at = NOW(),
           claim_code_used_at = NULL,
-          ownership_status = CASE WHEN ownership_status = 'claimed' THEN ownership_status ELSE 'unclaimed' END,
           updated_at = NOW()
       WHERE certificate_number = ${certId}
     `);
