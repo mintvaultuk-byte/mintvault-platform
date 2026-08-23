@@ -37,6 +37,9 @@ function input(over: Partial<ClaimRegisterInput> = {}): ClaimRegisterInput {
     claimedAt: null,
     isControlledTestReset: false,
     hasPriorOwnershipEvent: false,
+    certificateIssuedAt: null,
+    priorGenerationPrintedAt: null,
+    shippingEvidence: "UNKNOWN",
     ...over,
   };
   // A card printed once has the same first and last print. Only a test that is
@@ -342,5 +345,107 @@ describe("claim credential classification", () => {
     const v = classifyClaimRegister(i);
     expect(isSafeToIssue(i, v)).toBe(false);
     expect(isSafeToIssue(i, v, { includeControlledTestReset: true })).toBe(true);
+  });
+  /*
+   * CERTIFICATE-NUMBER REUSE, PINNED.
+   *
+   * MV numbers are re-allocated. The pre-launch resets hard-deleted certificate rows
+   * and handed the numbers to new cards, but audit_log is keyed by the NUMBER, so the
+   * old card's prints still appear under it. MV51 was "Mew V / Fusion Strike" when it
+   * was printed on 2026-05-10; the row that lives there now was created 2026-05-28 and
+   * holds "Artazon / Obsidian Flames".
+   *
+   * Read without the identity boundary, all 16 apparent supersessions on production —
+   * every single one — were number reuse, and the register called them customer risk.
+   * An old insert for a card that no longer exists under this number is a DIFFERENT
+   * situation from a credential silently rotated under the same card.
+   */
+  it("REGRESSION: a print belonging to a previous occupant is not this card's supersession", () => {
+    const oldPrint = new Date("2026-05-10T18:40:53Z");
+    const rowCreated = new Date("2026-05-28T19:54:15Z");
+    const minted = new Date("2026-06-04T18:15:46Z");
+
+    const v = classifyClaimRegister(
+      input({
+        certId: "MV51",
+        certificateIssuedAt: rowCreated,
+        priorGenerationPrintedAt: oldPrint, // the previous card's insert
+        firstPrintedAt: minted, // this card's own first print, at mint time
+        lastPrintedAt: new Date("2026-07-16T12:03:04Z"),
+        credentialIssuedAt: minted,
+      })
+    );
+    expect(v.certificateRepurposed).toBe(true);
+    expect(v.supersededPrintedCredential).toBe(false);
+    expect(v.customerRisk).toBe(false);
+    expect(v.shippingRiskUnknown).toBe(false);
+    // The current identity is healthy: printed, and the stored code is the printed one.
+    expect(v.category).toBe("A_PRINTED_VALID");
+  });
+
+  it("a reused number with nothing printed for the current card is surfaced, not hidden", () => {
+    const v = classifyClaimRegister(
+      input({
+        certificateIssuedAt: new Date("2026-06-09T18:53:18Z"),
+        priorGenerationPrintedAt: new Date("2026-04-02T09:09:58Z"),
+        firstPrintedAt: null,
+        lastPrintedAt: null,
+      })
+    );
+    expect(v.category).toBe("P_CERTIFICATE_REPURPOSED");
+    expect(v.certificateRepurposed).toBe(true);
+    expect(v.customerRisk).toBe(false);
+    expect(v.action).toBe("REVIEW");
+    // REVIEW and "nothing to do" cannot both be true — but it is not customer risk.
+    expect(v.actionRequired).toBe(true);
+  });
+
+  it("a GENUINE same-identity supersession is still caught, and is still customer risk", () => {
+    // Same card throughout: the row predates its own first print, and the credential
+    // was minted after it. Nothing about the identity boundary may soften this.
+    const v = classifyClaimRegister(
+      input({
+        certificateIssuedAt: new Date("2026-04-01T00:00:00Z"),
+        priorGenerationPrintedAt: null,
+        firstPrintedAt: PRINTED,
+        lastPrintedAt: PRINTED,
+        credentialIssuedAt: LATER,
+      })
+    );
+    expect(v.category).toBe("S_PRINTED_SUPERSEDED");
+    expect(v.certificateRepurposed).toBe(false);
+    expect(v.customerRisk).toBe(true);
+    expect(v.shippingRiskUnknown).toBe(true); // dispatch unproven
+  });
+
+  it("shipping risk clears only on PROVEN evidence, never on print_state", () => {
+    const base = {
+      certificateIssuedAt: new Date("2026-04-01T00:00:00Z"),
+      firstPrintedAt: PRINTED,
+      lastPrintedAt: PRINTED,
+      credentialIssuedAt: LATER,
+    };
+    expect(classifyClaimRegister(input({ ...base, shippingEvidence: "UNKNOWN" })).shippingRiskUnknown).toBe(true);
+    expect(
+      classifyClaimRegister(input({ ...base, shippingEvidence: "PROVEN_DEAD_INSERT_SHIPPED" })).shippingRiskUnknown
+    ).toBe(true);
+    expect(
+      classifyClaimRegister(input({ ...base, shippingEvidence: "PROVEN_LIVE_INSERT_COULD_SHIP" })).shippingRiskUnknown
+    ).toBe(false);
+  });
+
+  it("SAFETY: a reused number is never automatically safe to issue", () => {
+    const i = input({
+      hasCredentialHash: false,
+      hasReadableCode: false,
+      firstPrintedAt: null,
+      lastPrintedAt: null,
+      certificateIssuedAt: new Date("2026-06-09T00:00:00Z"),
+      priorGenerationPrintedAt: new Date("2026-04-02T00:00:00Z"),
+    });
+    const v = classifyClaimRegister(i);
+    // An old insert bearing this number may exist. Issuing is a decision, not a default.
+    expect(isSafeToIssue(i, v)).toBe(false);
+    expect(isSafeToIssue(i, v, { includeControlledTestReset: true })).toBe(false);
   });
 });

@@ -64,6 +64,31 @@ export interface ClaimRegisterInput {
    * linkage rather than a Vault Club claim.
    */
   hasPriorOwnershipEvent: boolean;
+  /**
+   * When THIS certificate row was created (`certificates.issued_at`, written only at
+   * INSERT and never updated). It is the identity boundary.
+   *
+   * MV numbers are RE-ALLOCATED. The pre-launch resets hard-deleted certificate rows
+   * and the numbers were handed to new cards, but `audit_log` is keyed by the MV
+   * NUMBER, not the row — so an old card's print events still appear under the
+   * number. Measured on production, all 18 certificates whose first print predates
+   * their own issued_at are reuse, and every one names a different card: MV51 was
+   * "Mew V / Fusion Strike" when it was printed and is "Artazon / Obsidian Flames"
+   * now. The other 461 printed certificates were printed after issuance, as normal.
+   */
+  certificateIssuedAt: Date | null;
+  /**
+   * Latest print belonging to a PREVIOUS occupant of this certificate number, i.e. one
+   * that predates `certificateIssuedAt`. Recorded so the register can show the reuse
+   * rather than silently discarding the evidence.
+   */
+  priorGenerationPrintedAt: Date | null;
+  /**
+   * For a genuine same-identity supersession only: whether we can show the live
+   * replacement insert could have travelled with the card. Never inferred from
+   * print_state — MV98 proved that column does not track reality.
+   */
+  shippingEvidence: "PROVEN_LIVE_INSERT_COULD_SHIP" | "PROVEN_DEAD_INSERT_SHIPPED" | "UNKNOWN";
 }
 
 export type ClaimRegisterCategory =
@@ -71,6 +96,7 @@ export type ClaimRegisterCategory =
   | "B_PRINTED_RECOVERABLE"
   | "C_PRINTED_BROKEN"
   | "S_PRINTED_SUPERSEDED"
+  | "P_CERTIFICATE_REPURPOSED"
   | "D_NEVER_PRINTED_NO_CREDENTIAL"
   | "E_CLAIMED"
   | "F_TRANSFER_PENDING"
@@ -108,6 +134,15 @@ export interface ClaimRegisterVerdict {
    * appearing outside that set would mean ownership is being lost for real.
    */
   ownershipConflict: boolean;
+  /**
+   * This certificate NUMBER carried a different card that was printed before this row
+   * existed. The old insert refers to a card that no longer exists under this record,
+   * so it is NOT a silently rotated credential — a different situation with a
+   * different remedy, and it must never be counted as customer risk.
+   */
+  certificateRepurposed: boolean;
+  /** A genuine same-identity supersession whose dispatch we cannot establish. */
+  shippingRiskUnknown: boolean;
 }
 
 /**
@@ -132,10 +167,25 @@ export function classifyClaimRegister(input: ClaimRegisterInput): ClaimRegisterV
    * voided AND still have a dead insert in someone's hands. Folding these into
    * `category` would hide exactly the rows that matter most.
    */
+  /*
+   * IDENTITY FIRST. A print that predates this certificate row belongs to a previous
+   * occupant of the number, not to the card sitting here now. Treating the two as the
+   * same thing turns ordinary number reuse into a fabricated customer emergency:
+   * measured on production, it accounted for every single apparent supersession.
+   */
+  const certificateRepurposed = input.priorGenerationPrintedAt !== null;
+
   const supersededPrintedCredential =
     printed && input.hasCredentialHash && issuedAfter(input, input.firstPrintedAt);
   const printedNoCredential = printed && !input.hasCredentialHash;
   const customerRisk = (supersededPrintedCredential || printedNoCredential) && !input.isControlledTestReset;
+  /*
+   * Dispatch is only in question for a GENUINE same-identity supersession, and only
+   * while we cannot show the live replacement could have gone with the card. Never
+   * inferred from print_state.
+   */
+  const shippingRiskUnknown =
+    supersededPrintedCredential && input.shippingEvidence !== "PROVEN_LIVE_INSERT_COULD_SHIP";
   const ownershipConflict = input.hasPriorOwnershipEvent && input.ownershipStatus !== "claimed";
 
   /** Every return threads the orthogonal facts through unchanged. */
@@ -157,6 +207,8 @@ export function classifyClaimRegister(input: ClaimRegisterInput): ClaimRegisterV
     customerRisk,
     controlledTestReset: input.isControlledTestReset,
     ownershipConflict,
+    certificateRepurposed,
+    shippingRiskUnknown,
   });
 
   const testNote = input.isControlledTestReset
@@ -282,6 +334,26 @@ export function classifyClaimRegister(input: ClaimRegisterInput): ClaimRegisterV
     );
   }
 
+  if (certificateRepurposed) {
+    /*
+     * Nothing has been printed for the card that lives here now, but the NUMBER was
+     * printed for a previous occupant. Worth showing — an old insert bearing this
+     * number may exist — but it is not a defect in this certificate's credential.
+     */
+    return v(
+      "P_CERTIFICATE_REPURPOSED",
+      "Certificate number reused — earlier insert was a different card",
+      "REVIEW",
+      "This certificate number was printed for a different card before this record existed. " +
+        "That insert refers to a card that no longer exists under this number. This certificate's " +
+        "own credential is unaffected, but an old insert bearing this number may exist — worth " +
+        "one look before a new insert is printed." + testNote,
+      // REVIEW and \"nothing to do\" cannot both be true. It is one glance, not an alarm,
+      // and customerRisk stays false.
+      true
+    );
+  }
+
   return v(
     "R_READY_NOT_PRINTED",
     "Credential ready, not yet printed",
@@ -304,6 +376,9 @@ export interface ClaimRegisterMetrics {
   customerRisk: number;
   testReset: number;
   ownershipConflict: number;
+  certificateRepurposed: number;
+  shippingRiskUnknown: number;
+  genuineSameIdentitySuperseded: number;
   brokenPrintedCredential: number;
   transferPending: number;
   stolen: number;
@@ -333,6 +408,9 @@ export function summariseClaimRegister(
     customerRisk: 0,
     testReset: 0,
     ownershipConflict: 0,
+    certificateRepurposed: 0,
+    shippingRiskUnknown: 0,
+    genuineSameIdentitySuperseded: 0,
     brokenPrintedCredential: 0,
     transferPending: 0,
     stolen: 0,
@@ -354,6 +432,10 @@ export function summariseClaimRegister(
     if (verdict.customerRisk) m.customerRisk += 1;
     if (verdict.controlledTestReset) m.testReset += 1;
     if (verdict.ownershipConflict) m.ownershipConflict += 1;
+    if (verdict.certificateRepurposed) m.certificateRepurposed += 1;
+    if (verdict.shippingRiskUnknown) m.shippingRiskUnknown += 1;
+    if (verdict.supersededPrintedCredential && !verdict.certificateRepurposed)
+      m.genuineSameIdentitySuperseded += 1;
     if (verdict.category === "C_PRINTED_BROKEN" || verdict.category === "B_PRINTED_RECOVERABLE")
       m.brokenPrintedCredential += 1;
     if (verdict.category === "F_TRANSFER_PENDING") m.transferPending += 1;
@@ -383,6 +465,10 @@ export function isSafeToIssue(
   if (verdict.category !== "D_NEVER_PRINTED_NO_CREDENTIAL") return false;
   if (verdict.customerRisk || verdict.supersededPrintedCredential || verdict.printedNoCredential) return false;
   if (verdict.ownershipConflict) return false;
+  // A reused number may have an old insert in circulation bearing this number. Issuing
+  // is defensible but is a decision, not a default — fail closed.
+  if (verdict.certificateRepurposed) return false;
+  if (verdict.shippingRiskUnknown) return false;
   if (input.isControlledTestReset && !opts.includeControlledTestReset) return false;
   return true;
 }

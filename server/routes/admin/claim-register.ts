@@ -33,6 +33,31 @@ interface PrintFact {
   firstPrintedAt: Date;
   lastPrintedAt: Date;
   batchIds: string[];
+  /** Every print moment, so they can be split at the certificate's identity boundary. */
+  runs: Array<{ at: Date; batchId: string | null }>;
+}
+
+/**
+ * Split a number's print history at the moment THIS certificate row was created.
+ *
+ * MV numbers are re-allocated. audit_log is keyed by the NUMBER, so prints belonging
+ * to a previous occupant still appear under it. Anything before `issuedAt` describes
+ * a card that no longer exists here and must not be read as this card's insert.
+ */
+function splitAtIdentityBoundary(
+  fact: PrintFact | undefined,
+  issuedAt: Date | null
+): { first: Date | null; last: Date | null; prior: Date | null; batchIds: string[] } {
+  if (!fact) return { first: null, last: null, prior: null, batchIds: [] };
+  if (!issuedAt) return { first: fact.firstPrintedAt, last: fact.lastPrintedAt, prior: null, batchIds: fact.batchIds };
+  const mine = fact.runs.filter((r) => r.at.getTime() >= issuedAt.getTime());
+  const theirs = fact.runs.filter((r) => r.at.getTime() < issuedAt.getTime());
+  return {
+    first: mine.length ? new Date(Math.min(...mine.map((r) => r.at.getTime()))) : null,
+    last: mine.length ? new Date(Math.max(...mine.map((r) => r.at.getTime()))) : null,
+    prior: theirs.length ? new Date(Math.max(...theirs.map((r) => r.at.getTime()))) : null,
+    batchIds: [...new Set(mine.map((r) => r.batchId).filter((b): b is string => b !== null))],
+  };
 }
 
 /**
@@ -66,11 +91,18 @@ async function loadPrintHistory(): Promise<Map<string, PrintFact>> {
   const note = (certId: string, at: Date, batchId?: string | null) => {
     if (!certId) return;
     const prev = out.get(certId);
-    if (!prev) out.set(certId, { firstPrintedAt: at, lastPrintedAt: at, batchIds: batchId ? [batchId] : [] });
+    if (!prev)
+      out.set(certId, {
+        firstPrintedAt: at,
+        lastPrintedAt: at,
+        batchIds: batchId ? [batchId] : [],
+        runs: [{ at, batchId: batchId ?? null }],
+      });
     else {
       if (at.getTime() > prev.lastPrintedAt.getTime()) prev.lastPrintedAt = at;
       if (at.getTime() < prev.firstPrintedAt.getTime()) prev.firstPrintedAt = at;
       if (batchId && !prev.batchIds.includes(batchId)) prev.batchIds.push(batchId);
+      prev.runs.push({ at, batchId: batchId ?? null });
     }
   };
   for (const raw of rows.rows as Array<Record<string, unknown>>) {
@@ -135,6 +167,9 @@ export interface ClaimRegisterRow {
   controlledTestReset: boolean;
   ownershipConflict: boolean;
   printArtefactSurvives: boolean;
+  certificateRepurposed: boolean;
+  shippingRiskUnknown: boolean;
+  priorGenerationPrintedAt: string | null;
 }
 
 export function registerClaimRegisterRoutes(app: Express): void {
@@ -145,7 +180,7 @@ export function registerClaimRegisterRoutes(app: Express): void {
         db.execute(sql`
           SELECT certificate_number, card_name, set_name, grade, grade_type, status,
                  ownership_status, stolen_status, current_owner_user_id, owner_email,
-                 claim_code, claim_code_hash,
+                 claim_code, claim_code_hash, issued_at,
                  claim_code_created_at, claim_code_used_at
           FROM certificates
           WHERE deleted_at IS NULL
@@ -177,7 +212,10 @@ export function registerClaimRegisterRoutes(app: Express): void {
       // Pass 1 — classify with recoverability unknown, so we learn which rows are broken.
       const staged = (certResult.rows as Array<Record<string, unknown>>).map((r) => {
         const certId = String(r.certificate_number);
-        const print = printHistory.get(certId);
+        // issued_at is written only at INSERT and never updated, so it is the row's
+        // creation moment and therefore the identity boundary for this number.
+        const certificateIssuedAt = r.issued_at ? new Date(r.issued_at as string) : null;
+        const print = splitAtIdentityBoundary(printHistory.get(certId), certificateIssuedAt);
         /*
          * The plaintext/hash agreement check is done HERE rather than in SQL because
          * pgcrypto is not installed on this database — `digest()` does not exist, so a
@@ -200,15 +238,20 @@ export function registerClaimRegisterRoutes(app: Express): void {
           hasCredentialHash: storedHash !== null,
           hasReadableCode: plain !== null,
           credentialIssuedAt: r.claim_code_created_at ? new Date(r.claim_code_created_at as string) : null,
-          lastPrintedAt: print?.lastPrintedAt ?? null,
-          firstPrintedAt: print?.firstPrintedAt ?? null,
+          lastPrintedAt: print.last,
+          firstPrintedAt: print.first,
+          certificateIssuedAt,
+          priorGenerationPrintedAt: print.prior,
+          // Dispatch is only asked about for a genuine same-identity supersession, and
+          // is never inferred from print_state — MV98 proved that column unreliable.
+          shippingEvidence: "UNKNOWN",
           printArtefactSurvives: false,
           credentialSelfConsistent: selfConsistent,
           claimedAt: r.claim_code_used_at ? new Date(r.claim_code_used_at as string) : null,
           isControlledTestReset: isControlledTestReset(certId),
           hasPriorOwnershipEvent: ownershipEventCerts.has(certId),
         };
-        return { raw: r, input, batchIds: print?.batchIds ?? [] };
+        return { raw: r, input, batchIds: print.batchIds };
       });
 
       // Pass 2 — only the rows that need recovering get an R2 lookup.
@@ -262,6 +305,11 @@ export function registerClaimRegisterRoutes(app: Express): void {
           controlledTestReset: verdict.controlledTestReset,
           ownershipConflict: verdict.ownershipConflict,
           printArtefactSurvives: input.printArtefactSurvives,
+          certificateRepurposed: verdict.certificateRepurposed,
+          shippingRiskUnknown: verdict.shippingRiskUnknown,
+          priorGenerationPrintedAt: input.priorGenerationPrintedAt
+            ? input.priorGenerationPrintedAt.toISOString()
+            : null,
         };
       });
 
