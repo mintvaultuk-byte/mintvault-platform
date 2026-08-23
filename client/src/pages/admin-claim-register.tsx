@@ -44,6 +44,9 @@ interface RegisterRow {
   controlledTestReset: boolean;
   ownershipConflict: boolean;
   printArtefactSurvives: boolean;
+  certificateRepurposed: boolean;
+  shippingRiskUnknown: boolean;
+  priorGenerationPrintedAt: string | null;
 }
 
 interface RegisterMetrics {
@@ -60,6 +63,9 @@ interface RegisterMetrics {
   customerRisk: number;
   testReset: number;
   ownershipConflict: number;
+  certificateRepurposed: number;
+  shippingRiskUnknown: number;
+  genuineSameIdentitySuperseded: number;
   transferPending: number;
   stolen: number;
   void: number;
@@ -87,6 +93,9 @@ type FilterKey =
   | "customerRisk"
   | "testReset"
   | "ownershipConflict"
+  | "certificateRepurposed"
+  | "shippingRiskUnknown"
+  | "genuineSameIdentitySuperseded"
   | "transferPending"
   | "stolen"
   | "void"
@@ -102,6 +111,9 @@ const METRICS: Array<{ key: FilterKey; label: string; tone?: "warn" | "bad" }> =
   { key: "noCredential", label: "No credential", tone: "warn" },
   { key: "brokenPrintedCredential", label: "Broken printed", tone: "bad" },
   { key: "printedCredentialSuperseded", label: "Printed credential superseded", tone: "bad" },
+  { key: "genuineSameIdentitySuperseded", label: "Same-identity superseded", tone: "bad" },
+  { key: "certificateRepurposed", label: "Number reused", tone: "warn" },
+  { key: "shippingRiskUnknown", label: "Shipping unknown", tone: "warn" },
   { key: "printedNoCredential", label: "Printed / no credential", tone: "bad" },
   { key: "customerRisk", label: "Customer risk", tone: "bad" },
   { key: "testReset", label: "Test / reset" },
@@ -141,6 +153,14 @@ function matchesFilter(row: RegisterRow, key: FilterKey): boolean {
       return row.controlledTestReset;
     case "ownershipConflict":
       return row.ownershipConflict;
+    case "certificateRepurposed":
+      return row.certificateRepurposed;
+    case "shippingRiskUnknown":
+      return row.shippingRiskUnknown;
+    case "genuineSameIdentitySuperseded":
+      // The count that matters: a rotated credential on THIS card, not an earlier
+      // occupant of the same number.
+      return row.supersededPrintedCredential && !row.certificateRepurposed;
     case "transferPending":
       return row.transferPending;
     case "stolen":
@@ -162,6 +182,7 @@ const CATEGORY_TONE: Record<string, string> = {
   G_VOID: "muted",
   C_PRINTED_BROKEN: "bad",
   S_PRINTED_SUPERSEDED: "bad",
+  P_CERTIFICATE_REPURPOSED: "warn",
   H_STOLEN: "bad",
   I_CONFLICT: "bad",
 };
@@ -383,6 +404,18 @@ export default function AdminClaimRegisterPage() {
                           {r.categoryLabel}
                         </span>
                         {r.stolen && <ShieldAlert className="ml-1 inline h-3.5 w-3.5 text-red-300" aria-label="stolen" />}
+                        {r.certificateRepurposed && (
+                          <span
+                            className="ml-1 inline-block rounded border border-amber-500/30 bg-amber-500/10 px-1 py-0.5 text-[9px] font-bold uppercase tracking-wide text-amber-300"
+                            title={
+                              r.priorGenerationPrintedAt
+                                ? `This number was printed for a different card on ${new Date(r.priorGenerationPrintedAt).toLocaleDateString("en-GB")}`
+                                : "This certificate number carried a different card earlier"
+                            }
+                          >
+                            reused
+                          </span>
+                        )}
                         {r.printedAt && <Printer className="ml-1 inline h-3 w-3 text-white/25" aria-label="printed" />}
                       </td>
                       <td className="p-2 text-xs text-white/55">
