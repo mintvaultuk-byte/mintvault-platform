@@ -91,6 +91,24 @@ const INSTANCE_SUPPORT_DIR = process.env.MINTVAULT_SCANS_DIR
   : path.join(os.homedir(), "Library", "Application Support", "MintVaultScanner");
 const RUNTIME_MANIFEST = path.join(INSTANCE_SUPPORT_DIR, "runtime.json");
 
+/**
+ * sha256 over the sources this process is executing — see the buildId note in the manifest.
+ *
+ * The same four files, in the same order, that the launcher concatenates and hashes, so the two
+ * answers are comparable without either side knowing how the other computed it.
+ */
+function buildFingerprint() {
+  try {
+    const hash = require("node:crypto").createHash("sha256");
+    for (const file of ["main.js", "preload.js", path.join("renderer", "app.js"), path.join("renderer", "index.html")]) {
+      hash.update(fs.readFileSync(path.join(__dirname, file)));
+    }
+    return hash.digest("hex").slice(0, 16);
+  } catch {
+    return "unknown";
+  }
+}
+
 function writeRuntimeManifest() {
   let environmentLabel = "unconfigured";
   let apiBase = null;
@@ -105,6 +123,15 @@ function writeRuntimeManifest() {
     pid: process.pid,
     executable: process.execPath,
     version: APP_VERSION,
+    /*
+     * WHICH BUILD, not merely which version.
+     *
+     * A version string is bumped by a person and therefore lags: two different builds carried 1.5.0
+     * within a minute of each other, and a launcher comparing versions alone concluded the running
+     * one was already correct and left the older code in place, reporting success. A hash over the
+     * files that actually execute cannot lag, because nothing has to remember to change it.
+     */
+    buildId: buildFingerprint(),
     userDataPath: app.getPath("userData"),
     scansDir: process.env.MINTVAULT_SCANS_DIR || null,
     environment: environmentLabel,
@@ -117,6 +144,83 @@ function writeRuntimeManifest() {
     console.log(`[instance] runtime manifest: ${RUNTIME_MANIFEST}`);
   } catch (err) {
     console.error(`[instance] could not write the runtime manifest: ${err.message}`);
+  }
+}
+
+/*
+ * ONE VISIBLE SCANNER PER MAC — enforced by the app, not by whoever launched it.
+ *
+ * This Mac carries four separate MintVault Scanner.app bundles (four worktrees), and all four
+ * declare bundle id com.mintvault.scanner. So "MintVault Scanner" is ambiguous to LaunchServices:
+ * the Dock, Spotlight, `open -b` and AppleScript's `quit app "..."` each resolve it to whichever
+ * copy LaunchServices currently prefers, and that preference DRIFTS — it chose an old build twice,
+ * then a current one. Worse, a launch made that way carries no MINTVAULT_SCANS_DIR, so it lands on
+ * the shared profile: another shop's station identity, another shop's cards.
+ *
+ * That is how a correct, working shop games Scanner was replaced on screen by a stale Shop 0 one
+ * showing STATION UNAVAILABLE and a historical MV837 failure, with nothing in between to notice.
+ *
+ * THE CLAIM IS DELIBERATELY IN THE SHARED DIRECTORY, not the per-instance one — the whole point is
+ * that instances with DIFFERENT profiles must be able to see each other. First one to start owns
+ * the Mac; a second one with a different profile refuses and says why, rather than quietly taking
+ * over the screen. Same profile is a restart, which is allowed.
+ *
+ * This cannot bind a build that predates it. An older Scanner knows nothing of this file and will
+ * still take over, which is why an acceptance run must also make the older bundles unlaunchable.
+ */
+const SHARED_SUPPORT_DIR = path.join(os.homedir(), "Library", "Application Support", "MintVaultScanner");
+const ACTIVE_INSTANCE_CLAIM = path.join(SHARED_SUPPORT_DIR, "active-instance.json");
+
+function readActiveInstanceClaim() {
+  try {
+    const raw = JSON.parse(fs.readFileSync(ACTIVE_INSTANCE_CLAIM, "utf8"));
+    if (!raw || typeof raw.pid !== "number") return null;
+    // A claim naming a dead process is debris from a crash, not an owner.
+    try {
+      process.kill(raw.pid, 0);
+    } catch {
+      return null;
+    }
+    return raw;
+  } catch {
+    return null;
+  }
+}
+
+function claimThisMac() {
+  const ours = process.env.MINTVAULT_SCANS_DIR || null;
+  const existing = readActiveInstanceClaim();
+  if (existing && existing.pid !== process.pid && (existing.scansDir || null) !== ours) {
+    console.error(
+      `[instance] REFUSING TO START: MintVault Scanner is already running as pid ${existing.pid} ` +
+        `(${existing.version || "unknown version"}, profile ${existing.scansDir || "shared"}). ` +
+        `This one would be profile ${ours || "shared"}. Quit the running Scanner first — two Scanners ` +
+        "on one Mac is how one shop's screen gets replaced by another's."
+    );
+    return false;
+  }
+  try {
+    fs.mkdirSync(SHARED_SUPPORT_DIR, { recursive: true });
+    fs.writeFileSync(
+      ACTIVE_INSTANCE_CLAIM,
+      JSON.stringify(
+        { pid: process.pid, scansDir: ours, version: APP_VERSION, executable: process.execPath, startedAt: new Date().toISOString() },
+        null,
+        2
+      )
+    );
+  } catch (err) {
+    console.error(`[instance] could not record the active-instance claim: ${err.message}`);
+  }
+  return true;
+}
+
+function releaseThisMac() {
+  try {
+    const raw = JSON.parse(fs.readFileSync(ACTIVE_INSTANCE_CLAIM, "utf8"));
+    if (raw && raw.pid === process.pid) fs.unlinkSync(ACTIVE_INSTANCE_CLAIM);
+  } catch {
+    /* nothing to release */
   }
 }
 
@@ -772,7 +876,23 @@ async function stationSetupStateInner() {
   try {
     session = await stationClient.stationSession();
   } catch (error) {
-    return { ok: true, stage: "sign_in", error: error?.message || "Sign in to MintVault" };
+    /*
+     * No usable session at all — the stored one is gone, not merely stale. From the operator's side
+     * that is the same situation as an idle timeout and deserves the same reassurance: a Mac that
+     * already holds a station is not starting from scratch, whatever became of the session. Only a
+     * Mac with no station has genuinely never been set up.
+     */
+    let enrolled = false;
+    try {
+      enrolled = Boolean(stationIdentity.currentStationCode());
+    } catch {
+      /* fail closed to the plain sign-in screen */
+    }
+    return {
+      ok: true,
+      stage: enrolled ? "session_expired" : "sign_in",
+      error: enrolled ? "" : error?.message || "Sign in to MintVault",
+    };
   }
   if (!session.ok || !session.body?.mfaPassed) {
     if (session.status === 503) {
@@ -782,7 +902,26 @@ async function stationSetupStateInner() {
         error: "MintVault station service is temporarily unavailable. Contact a MintVault Super Admin.",
       };
     }
-    return { ok: true, stage: session.body?.mfaRequired ? "mfa" : "sign_in" };
+    if (session.body?.mfaRequired) return { ok: true, stage: "mfa" };
+    /*
+     * AN EXPIRED SESSION IS NOT A MAC THAT WAS NEVER SET UP.
+     *
+     * MintVault ends an idle Partner session after thirty minutes, which is correct and stays. But
+     * a Mac that had been signed in and then idled came back looking identical to one that had
+     * never been used — same bare sign-in screen — while its station, its approval and its
+     * calibration were all still perfectly valid on the server. The two need different words,
+     * because they need different reassurance: one is "carry on", the other is "start here".
+     *
+     * The station identity is the tell: a Mac holding one has been through setup before. It is
+     * read, never cleared — signing in again must not cost a Mac its station.
+     */
+    let hadSession = false;
+    try {
+      hadSession = Boolean(stationIdentity.currentStationCode());
+    } catch {
+      /* fail closed to the plain sign-in screen */
+    }
+    return { ok: true, stage: hadSession ? "session_expired" : "sign_in" };
   }
   /*
    * ONE SHOP'S WORK MUST NOT SHOW UP ON ANOTHER SHOP'S SCREEN.
@@ -1853,6 +1992,12 @@ app.whenReady().then(async () => {
   setInterval(() => watcher.drainInbox().catch(() => {}), 10 * 60 * 1000);
   refreshTray();
   surfacePriorResetStatus();
+  // Refuse to become a SECOND visible Scanner on this Mac — see claimThisMac.
+  if (!claimThisMac()) {
+    isQuitting = true;
+    app.exit(0);
+    return;
+  }
   // Last, so the manifest only ever claims an instance that actually finished starting.
   writeRuntimeManifest();
 
@@ -1897,6 +2042,7 @@ app.on("window-all-closed", (e) => {
 
 app.on("before-quit", () => {
   isQuitting = true;
-  // Withdraw this instance's claim, so a launcher never verifies against a dead process.
+  // Withdraw this instance's claims, so neither a launcher nor a sibling verifies against a corpse.
   clearRuntimeManifest();
+  releaseThisMac();
 });

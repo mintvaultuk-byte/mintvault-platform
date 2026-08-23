@@ -1126,3 +1126,12 @@ body {
   font-size: 11px;
   letter-spacing: 1.1px;
 }
+
+/*
+ * The waiting screen states Shop / Location / Mac on their own lines. Written as newlines in
+ * textContent rather than markup, so the copy stays one readable string in the renderer and cannot
+ * drift out of step with the element structure around it.
+ */
+#stationSetupText {
+  white-space: pre-line;
+}

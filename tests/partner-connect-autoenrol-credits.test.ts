@@ -710,9 +710,14 @@ describe("CONNECT — welcome credits and first-run station enrolment", () => {
     expect(pending).toContain("Waiting for MintVault approval");
     expect(pending).not.toContain("Station unavailable");
     expect(pending).not.toContain("Contact a MintVault Super Admin");
-    // The balance shown is the server's, never a literal five.
-    expect(pending).toContain("summary?.availableCredits");
-    expect(pending).not.toContain("5 free");
+    /*
+     * NO BALANCE HERE ANY MORE. It used to show the wallet, which was honest but wrong-headed:
+     * nothing on the CONNECT path spends a credit, so a figure — especially a zero — on the screen
+     * where a shop waits to be approved only invites a top-up it does not need yet. Credits belong
+     * where a card is actually started.
+     */
+    expect(pending).not.toContain("availableCredits");
+    expect(pending).not.toMatch(/TOP UP/i);
   });
 
   it("L18b — one eligible location auto-enrols; two render the picker", () => {
@@ -804,8 +809,13 @@ describe("CONNECT — welcome credits and first-run station enrolment", () => {
 describe("Scanner — trapped-state recovery, isolation and launcher proof (compiled artifact)", () => {
   const APP = "scripts/scanner-app/dist/mac-arm64/MintVault Scanner.app/Contents/Resources/app";
   const read = (relative: string) => fs.readFileSync(path.join(process.cwd(), APP, relative), "utf8");
+  /*
+   * The launcher lives IN THE REPO, and the machine's copy is a symlink to it. Reading an absolute
+   * path outside the checkout would have made these assertions pass locally and vanish in CI —
+   * which is precisely the "it works on the machine that built it" failure they exist to catch.
+   */
   const launcher = () =>
-    fs.readFileSync("/Users/cornelius/mintvault-shopgames/launch-shop-games-scanner.command", "utf8");
+    fs.readFileSync(path.join(process.cwd(), "scripts/scanner-app/acceptance/launch-isolated-instance.command"), "utf8");
 
   it("M1–M5 — the launcher identifies, terminates and then VERIFIES, never assumes", () => {
     const s = launcher();
@@ -834,13 +844,25 @@ describe("Scanner — trapped-state recovery, isolation and launcher proof (comp
     expect(main).toContain("An ACTIVE station stays quiet");
   });
 
+  it("M5c — build identity is a hash of what executes, not a version someone remembered to bump", () => {
+    const main = read("main.js");
+    expect(main).toContain("function buildFingerprint()");
+    expect(main).toContain("buildId: buildFingerprint()");
+    const s = launcher();
+    expect(s).toContain("WANT_BUILD=");
+    expect(s).toContain('manifest_field "$OUR_MANIFEST" buildId');
+    // The already-running short-circuit requires the BUILD to match too, not just the version.
+    expect(s).toContain('[ "$RUNNING_BUILD" = "$WANT_BUILD" ]');
+  });
+
   it("M5b — the launcher replaces a running instance that is the WRONG BUILD", () => {
     const s = launcher();
     // "Ours" answers isolation; it says nothing about which build is running. Both must match, or
     // the running instance is replaced — this short-circuit once accepted a stale build and
     // reported success while the fix under test was not running.
     expect(s).toContain("ALREADY RUNNING IS NOT THE SAME AS ALREADY CORRECT");
-    expect(s).toContain('[ "$RUNNING_VER" = "$WANT_VERSION" ] && [ "$RUNNING_EXE" = "$APP" ]');
+    expect(s).toContain('[ "$RUNNING_VER" = "$WANT_VERSION" ]');
+    expect(s).toContain('[ "$RUNNING_EXE" = "$APP" ]');
     expect(s).toContain("replacing it so the verified build is what actually runs");
   });
 
@@ -859,21 +881,74 @@ describe("Scanner — trapped-state recovery, isolation and launcher proof (comp
     expect(quit).not.toContain("stations/");
   });
 
-  it("M8b/M9 — Sign out, Refresh, Diagnostics and Quit are reachable from a blocking screen", () => {
+  it("M8b/M9 — Refresh, Sign out and Diagnostics are reachable; Quit is NOT on the onboarding modal", () => {
     const main = read("main.js");
+    // Quit still exists where quitting an app belongs.
     for (const item of ["Refresh status", "Sign out…", "Show diagnostics", "Quit MintVault Scanner"]) {
       expect(main).toContain(item);
     }
-    // ...and from inside the modal itself, which cannot be dismissed.
     const html = read("renderer/index.html");
-    for (const id of ["stationRefreshBtn", "stationSignOutBtn", "stationDiagnosticsBtn", "stationQuitBtn"]) {
+    for (const id of ["stationRefreshBtn", "stationSignOutBtn", "stationDiagnosticsBtn"]) {
       expect(html).toContain(id);
     }
+    /*
+     * NO QUIT ON THIS MODAL. It was pressed twice during a real onboarding — it is the most
+     * final-looking control on a screen whose job is to wait — and quitting left the Mac with no
+     * Scanner, after which re-opening "MintVault Scanner" the ordinary way resolved to a different
+     * bundle on a different profile and put the previous shop's state on screen.
+     */
+    expect(html).not.toContain("stationQuitBtn");
     const renderer = read("renderer/app.js");
+    expect(renderer).not.toContain("stationQuitBtn");
     expect(renderer).toContain("wireStationRecoveryControls()");
-    // The recovery row is never hidden or disabled by station stage.
     expect(renderer).not.toContain("stationSetupRecovery.hidden");
-    expect(renderer).not.toContain("stationQuitBtn.disabled");
+  });
+
+  it("M-wait — the waiting screen states shop, location and Mac, and sells nothing", () => {
+    const renderer = read("renderer/app.js");
+    const pending = renderer.slice(renderer.indexOf('stage === "pending"'), renderer.indexOf('stage === "session_expired"'));
+    expect(pending).toContain("Waiting for MintVault approval");
+    expect(pending).toContain("Shop: ");
+    expect(pending).toContain("Location: ");
+    expect(pending).toContain("Mac: ");
+    expect(pending).toContain("This screen updates automatically");
+    // Nothing on the CONNECT path costs a credit, so nothing here may ask for money.
+    expect(pending).not.toMatch(/TOP UP/i);
+    expect(pending).not.toContain("availableCredits");
+    expect(pending).not.toContain("Station unavailable");
+  });
+
+  it("M-expiry — an idled session is its own state, and keeps the station", () => {
+    const main = read("main.js");
+    expect(main).toContain('stage: hadSession ? "session_expired" : "sign_in"');
+    // Reads the station identity to decide; never clears it.
+    const block = main.slice(main.indexOf("AN EXPIRED SESSION IS NOT"), main.indexOf('stage: hadSession'));
+    expect(block).not.toContain("clearEnrollment");
+    const renderer = read("renderer/app.js");
+    expect(renderer).toContain("Session expired");
+    expect(renderer).toContain("this Mac stays registered");
+    // The sign-in form must be ON the expired screen, or its instruction is impossible to follow.
+    expect(renderer).toContain('stage !== "sign_in" && stage !== "session_expired"');
+  });
+
+  it("M-refresh — Refresh Status reports what it did", () => {
+    const renderer = read("renderer/app.js");
+    expect(renderer).toContain("CHECKING…");
+    expect(renderer).toContain("STILL WAITING");
+    expect(renderer).toContain("APPROVED — CONTINUING");
+  });
+
+  it("M-own — a second Scanner with a different profile refuses rather than taking over", () => {
+    const main = read("main.js");
+    expect(main).toContain("function claimThisMac()");
+    expect(main).toContain("REFUSING TO START");
+    expect(main).toContain("active-instance.json");
+    // The claim lives in the SHARED directory, so instances on different profiles can see it.
+    expect(main).toContain("SHARED_SUPPORT_DIR");
+    // A claim naming a dead pid is debris, not an owner.
+    expect(main).toContain("process.kill(raw.pid, 0)");
+    // Released on a clean quit.
+    expect(main).toContain("releaseThisMac();");
   });
 
   it("M10/M11/M12 — zero credits blocks only a new card, never sign-in, enrolment or calibration", () => {
@@ -887,7 +962,7 @@ describe("Scanner — trapped-state recovery, isolation and launcher proof (comp
 
   it("M13/M14 — pending is a wait, a foreign Mac is named, and only the unknown is 'unavailable'", () => {
     const renderer = read("renderer/app.js");
-    const pending = renderer.slice(renderer.indexOf('stage === "pending"'), renderer.indexOf('stage === "identity_mismatch"'));
+    const pending = renderer.slice(renderer.indexOf('stage === "pending"'), renderer.indexOf('stage === "session_expired"'));
     expect(pending).toContain("Waiting for MintVault approval");
     expect(pending).not.toContain("Station unavailable");
 
@@ -932,9 +1007,10 @@ describe("Scanner — trapped-state recovery, isolation and launcher proof (comp
     expect(main).toContain("raw.pid === process.pid");
   });
 
-  it("M-version — the compiled build is 1.4.1, distinguishable from the enrolled Shop 0 Mac", () => {
+  it("M-version — the compiled build is 1.5.0, distinguishable from the enrolled Shop 0 Mac", () => {
     const pkg = JSON.parse(read("package.json")) as { version: string };
-    expect(pkg.version).toBe("1.4.1");
+    expect(pkg.version).toBe("1.5.0");
     expect(pkg.version).not.toBe("1.2.1");
+    expect(pkg.version).not.toBe("1.4.1");
   });
 });

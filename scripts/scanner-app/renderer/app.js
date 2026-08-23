@@ -43,7 +43,7 @@ const els = {
   stationRefreshBtn: document.getElementById("stationRefreshBtn"),
   stationSignOutBtn: document.getElementById("stationSignOutBtn"),
   stationDiagnosticsBtn: document.getElementById("stationDiagnosticsBtn"),
-  stationQuitBtn: document.getElementById("stationQuitBtn"),
+  stationRefreshStatus: document.getElementById("stationRefreshStatus"),
   billingOpenBrowser: document.getElementById("billingOpenBrowser"),
   lastCertBtn: document.getElementById("lastCertBtn"),
   logsBtn: document.getElementById("logsBtn"),
@@ -612,7 +612,9 @@ function renderStationSetup(next) {
   renderStationIdentity(stationSetup);
   renderStationEnvironment(stationSetup);
   els.stationSetupModal.classList.toggle("visible", !active);
-  els.stationSignInForm.hidden = stage !== "sign_in";
+  // `session_expired` is a sign-in screen with different words — the form must be on it, or the
+  // one thing it tells you to do would be impossible.
+  els.stationSignInForm.hidden = stage !== "sign_in" && stage !== "session_expired";
   els.stationMfaForm.hidden = stage !== "mfa";
   els.stationRegisterPanel.hidden = stage !== "register";
   els.stationSetupError.textContent = stationSetup.error || "";
@@ -655,21 +657,27 @@ function renderStationSetup(next) {
      *
      * This is where a brand-new shop spends its first few minutes, so it names the three things the
      * person standing at the Mac wants confirmed (the right shop, the right location, this actual
-     * Mac) and says plainly that MintVault is doing the next bit. It is not an error, it asks for
-     * nothing, and it does not mention support: the screen refreshes itself the moment approval
-     * lands.
+     * Mac) and says plainly that MintVault is doing the next bit. It asks for nothing, mentions no
+     * support queue, and offers no Quit: the screen refreshes itself the moment approval lands.
+     *
+     * There is deliberately no balance and no top-up here. Nothing on this path costs a credit, and
+     * a shop with an empty wallet — every shop, before its first top-up — must be able to finish
+     * connecting a Mac without being sold anything.
      */
     els.stationSetupTitle.textContent = "Waiting for MintVault approval";
-    const where = [stationSetup.summary?.organisationName, stationSetup.summary?.locationName]
-      .filter(Boolean)
-      .join(" — ");
-    const credits = stationSetup.summary?.availableCredits;
+    const shop = stationSetup.summary?.organisationName || "this shop";
+    const where = stationSetup.summary?.locationName || "Main location";
     els.stationSetupText.textContent =
-      `${where ? `${where}. ` : ""}This Mac (${stationSetup.stationCode || "registered"}) is registered and MintVault is approving it now. ` +
-      // The balance is the server's, read this session — never a hard-coded welcome figure, which
-      // would go on claiming five long after the first card had spent one.
-      (typeof credits === "number" ? `${credits} grading ${credits === 1 ? "credit" : "credits"} available. ` : "") +
-      "Keep the app open — this screen updates by itself.";
+      `Shop: ${shop}\nLocation: ${where}\nMac: ${stationSetup.stationCode || "registered"}\n\n` +
+      "This Mac is connected. Approve it in MintVault Super Admin. This screen updates automatically.";
+  } else if (stage === "session_expired") {
+    /*
+     * The station, its approval and its calibration are all intact on the server; only the person's
+     * session lapsed. Say that, so nobody goes looking for a Mac to re-register.
+     */
+    els.stationSetupTitle.textContent = "Session expired";
+    els.stationSetupText.textContent =
+      "You have been signed out after a period of inactivity. Sign in again to continue — this Mac stays registered.";
   } else if (stage === "identity_mismatch") {
     /*
      * REGISTERED TO A DIFFERENT SHOP. Not an outage, and not this operator's mistake.
@@ -745,12 +753,42 @@ function renderStationSetup(next) {
  * still applies — an always-reachable control is not an unconditional one.
  */
 function wireStationRecoveryControls() {
-  els.stationRefreshBtn?.addEventListener("click", () => void refreshStationSetup());
+  els.stationRefreshBtn?.addEventListener("click", () => void manualRefreshStationSetup());
   els.stationSignOutBtn?.addEventListener("click", () =>
     runStationSetupAction(() => window.scanner.stationSignOut())
   );
   els.stationDiagnosticsBtn?.addEventListener("click", () => void window.scanner.openLogs());
-  els.stationQuitBtn?.addEventListener("click", () => void window.scanner.quitScanner());
+  /*
+   * NO QUIT HERE, deliberately.
+   *
+   * A Quit button sat on this modal and was pressed — twice — during onboarding, which is exactly
+   * what it invited: it is the most final-looking control on a screen whose real job is to wait.
+   * Quitting then left the Mac with no Scanner, and re-opening "MintVault Scanner" the ordinary way
+   * resolved to a different bundle on a different profile, putting the previous shop's station and
+   * its historical failures on screen.
+   *
+   * Quit still exists where quitting an app belongs: the macOS menu-bar item. It is not offered as
+   * a step in setting a shop up.
+   */
+}
+
+/**
+ * REFRESH STATUS, with something to see.
+ *
+ * The automatic poll is silent by design. A control a person presses is not: pressing it and
+ * watching nothing change is indistinguishable from a dead button, which is what sends someone
+ * looking for a Scanner to restart. This says what it did and what it found.
+ */
+async function manualRefreshStationSetup() {
+  const before = stationSetup?.stage;
+  if (els.stationRefreshStatus) els.stationRefreshStatus.textContent = "CHECKING…";
+  await refreshStationSetup();
+  if (!els.stationRefreshStatus) return;
+  const after = stationSetup?.stage;
+  if (after === "active") els.stationRefreshStatus.textContent = "APPROVED — CONTINUING";
+  else if (after === "pending") els.stationRefreshStatus.textContent = "STILL WAITING";
+  else if (after !== before) els.stationRefreshStatus.textContent = "";
+  else els.stationRefreshStatus.textContent = "STILL WAITING";
 }
 
 /** Name the environment on the setup screen too — a STAGING Mac must never look like a live one. */

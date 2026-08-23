@@ -1163,20 +1163,39 @@ export default function PartnerFirstShopOnboardingPage() {
                       to hunt through Station Fleet. Approval itself is still the existing canonical
                       station transition behind its existing admin step-up. */}
                   <p style={{ fontWeight: 700, letterSpacing: "0.04em" }}>SCANNER WAITING FOR APPROVAL</p>
+                  {/*
+                    * ONE APPROVE CONTROL, NOT TWO.
+                    *
+                    * With a single pending Mac this listed its own gold "Approve Scanner" beside the
+                    * gold "Approve Scanner" already in the NEXT ACTION card above — two identical
+                    * primary controls for one decision, which is the same confusion the duplicated
+                    * resend caused. When the card owns the action, this section names the Mac and
+                    * stays quiet.
+                    *
+                    * TWO OR MORE pending Macs is a genuine choice the card deliberately refuses to
+                    * guess, so each row keeps its own control — that is when this list earns them.
+                    */}
                   {pendingStations.map((st) => (
                     <div key={stationCodeOf(st)} style={{ display: "flex", alignItems: "center", gap: 10, marginTop: 6, flexWrap: "wrap" }}>
                       <code>{stationCodeOf(st)}</code>
-                      <AdminButton
-                        size="sm"
-                        variant="gold"
-                        disabled={approveStation.isPending}
-                        onClick={() => approveStation.mutate(stationCodeOf(st))}
-                        data-testid={`first-shop-approve-station-${stationCodeOf(st)}`}
-                      >
-                        Approve Scanner
-                      </AdminButton>
+                      {pendingStations.length > 1 && (
+                        <AdminButton
+                          size="sm"
+                          variant="gold"
+                          disabled={approveStation.isPending}
+                          onClick={() => approveStation.mutate(stationCodeOf(st))}
+                          data-testid={`first-shop-approve-station-${stationCodeOf(st)}`}
+                        >
+                          Approve Scanner
+                        </AdminButton>
+                      )}
                     </div>
                   ))}
+                  {pendingStations.length === 1 && (
+                    <p style={{ marginTop: 6, fontSize: 13, opacity: 0.8 }} data-testid="first-shop-approve-in-card">
+                      Approve it with the gold control at the top of this page.
+                    </p>
+                  )}
                 </div>
               ) : (
                 <p style={{ marginTop: 8, fontSize: 12, opacity: 0.85 }}>
