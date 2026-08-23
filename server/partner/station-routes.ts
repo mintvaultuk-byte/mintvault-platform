@@ -636,6 +636,81 @@ export function partnerStationRouter(): Router {
    */
   // One line, for the same reason: tests/partner-scanner-fix.test.ts slices from
   // `indexOf('r.get("/stations/fix-queue"')` and reads the next 300 characters.
+  /**
+   * THE CANONICAL STATE OF ONE CARD JOB, so a station can correct its own local state.
+   *
+   * A Scanner persists what it believes about a card. That belief can be wrong and can outlive the
+   * code that produced it: MV837 carried `completedCard {front:true, back:true}` written on
+   * 2026-08-22T15:01:54Z by a build that inferred completion from a NOTHING_TO_CAPTURE refusal. The
+   * inference was fixed hours later, but the poisoned record survived on disk and the repaired
+   * renderer went on honouring it, because it contained an explicit `true`. Fixing the producer and
+   * the reader does nothing for a store already poisoned.
+   *
+   * This is the authority that lets a station throw such a belief away. It answers from the EVIDENCE
+   * LEDGER — the same rows that decide READY_TO_GRADE — never from session or job-status heuristics.
+   *
+   * READ ONLY. It arms nothing, creates nothing and mutates nothing, deliberately: repairing a local
+   * display must never be able to start a capture or touch a credit. Station-signed and confined to
+   * the caller's own tenant and location.
+   *
+   * POST rather than GET only because the station request signature covers a body and fetch rejects
+   * a GET carrying one — the same reason as /stations/context.
+   */
+  r.post(
+    "/stations/card-jobs/:cardJobId/state",
+    requireSignedStation,
+    requireSignedStationOperator,
+    partnerStationReadRateLimit,
+    async (req, res) => {
+      const station = req.station!;
+      try {
+        const { rows } = await partnerAdminQuery<{
+          status: string;
+          mv_number: string;
+          certificate_id: number;
+          completed_at: string | null;
+          cancelled_at: string | null;
+          evidence_sides: string[] | null;
+        }>(
+          `SELECT j.status, j.mv_number, j.certificate_id, j.completed_at, j.cancelled_at,
+                  ARRAY(
+                    SELECT DISTINCT e.side
+                      FROM certificate_image_evidence e
+                     WHERE e.certificate_id = j.certificate_id AND e.is_current = true
+                     ORDER BY e.side
+                  ) AS evidence_sides
+             FROM partner_card_jobs j
+            WHERE j.id = $1 AND j.tenant_id = $2 AND j.location_id = $3
+            LIMIT 1`,
+          [String(req.params.cardJobId), station.tenantId, station.locationId]
+        );
+        const job = rows[0];
+        if (!job) {
+          res.status(404).json({ error: { code: "CARD_JOB_NOT_FOUND", message: "That card was not found for this station." } });
+          return;
+        }
+        const sides = job.evidence_sides ?? [];
+        const missing = (["front", "back"] as const).filter((side) => !sides.includes(side));
+        res.json({
+          cardJob: {
+            cardJobId: String(req.params.cardJobId),
+            mvNumber: job.mv_number,
+            certificateId: job.certificate_id,
+            status: job.status,
+            completedAt: job.completed_at,
+            cancelledAt: job.cancelled_at,
+            /** Accepted, current evidence. The ONLY thing that may tick a side. */
+            evidenceSides: sides,
+            requiredSide: missing[0] ?? null,
+            bothSidesAccepted: missing.length === 0,
+          },
+        });
+      } catch (error) {
+        stationError(res, error);
+      }
+    }
+  );
+
   r.get(
     "/stations/fix-queue",
     requireSignedStation,
