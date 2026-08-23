@@ -9,19 +9,22 @@ describe("first-shop guided onboarding UI contract", () => {
   it("collects the canonical delivery/contact/Owner fields and labels the current scope", () => {
     const page = read("client/src/pages/admin/partner-first-shop-onboarding.tsx");
     for (const required of [
-      "Legal / shop name",
+      // ONE create form: shop, Owner, delivery address. The operations contact is revealed only
+      // when a different one is wanted, and the Main location name is not asked for at all.
+      "Shop / legal name",
       "Address line 1",
       "Town / city",
       "Postcode",
       "Country",
-      "Primary operations contact",
+      "Use a different operations contact",
       "Operational email",
-      "Partner Owner",
       "Current Partner:",
       "Current location:",
       "Station enrolment must come from the real shop Scanner",
       "Open credits / billing readiness",
     ]) expect(page).toContain(required);
+    // The form must NOT ask for these: the server supplies both.
+    expect(page).not.toContain('label="Main location name"');
     expect(page).toContain("/first-shop/location");
     expect(page).toContain("/first-shop/operations-contact");
     expect(page).toContain("first-shop-create-submit");
@@ -263,5 +266,330 @@ describe("permanent-deletion admin UI", () => {
     const detail = read("client/src/pages/admin/partner-management-detail.tsx");
     expect(detail).toContain('const deleted = modal?.kind === "partner-permanent-delete";');
     expect(detail).toContain("/admin/partners/directory");
+  });
+});
+
+/**
+ * Strip comments before a NEGATIVE assertion. These files explain the defect they fixed, so a naive
+ * `not.toContain("Object.keys(readiness.dimensions)")` fails on the sentence describing why that
+ * call is gone — which would punish documenting the reasoning.
+ */
+const codeOnly = (src: string) =>
+  src.replace(/\/\*[\s\S]*?\*\//g, "").replace(/(^|[^:])\/\/.*$/gm, "$1");
+
+describe("next-action controller UI contract", () => {
+  const page = () => read("client/src/pages/admin/partner-first-shop-onboarding.tsx");
+
+  it("renders ONE dominant next-action card, driven by the server's verdict", () => {
+    const src = page();
+    expect(src).toContain("first-shop-next-action");
+    expect(src).toContain("shop.operational.nextAction");
+    // Title and sentence are the server's own, never re-worded per surface.
+    expect(src).toContain("next.title");
+    expect(src).toContain("{next.message}");
+  });
+
+  it("shows exactly one primary control — the branches are mutually exclusive", () => {
+    const src = page();
+    // run  ?  reveal  :  waiting-text — a single ternary chain, so two gold buttons cannot coexist.
+    expect(src).toContain("first-shop-next-action-run");
+    expect(src).toContain("first-shop-next-action-reveal");
+    expect(src).toContain("first-shop-next-action-waiting");
+    const runIdx = src.indexOf("first-shop-next-action-run");
+    const revealIdx = src.indexOf("first-shop-next-action-reveal");
+    const waitIdx = src.indexOf("first-shop-next-action-waiting");
+    expect(runIdx).toBeLessThan(revealIdx);
+    expect(revealIdx).toBeLessThan(waitIdx);
+  });
+
+  it("has no dead action: every control reports WORKING, and a failure offers RETRY", () => {
+    const src = page();
+    expect(src).toContain("Working");
+    expect(src).toContain("Retry");
+    expect(src).toContain("first-shop-next-action-error");
+  });
+
+  it("keeps the 10 authoritative checks, collapsed by default under one disclosure", () => {
+    const src = page();
+    expect(src).toContain("first-shop-all-checks");
+    expect(src).toContain("Advanced setup diagnostics");
+    // Collapsed by default: `open` is bound to state that starts false.
+    expect(src).toContain("const [checksOpen, setChecksOpen] = useState(false);");
+    expect(src).toContain("open={checksOpen}");
+    // All ten steps survive.
+    for (let n = 1; n <= 10; n += 1) expect(src).toContain(`<Step number={${n}}`);
+  });
+
+  it("reports each check with the four-status glyph vocabulary", () => {
+    const src = page();
+    expect(src).toContain('label: "READY"');
+    expect(src).toContain('label: "IN PROGRESS"');
+    expect(src).toContain('label: "BLOCKED"');
+    expect(src).toContain('label: "NOT STARTED"');
+    expect(src).toContain("data-check-status");
+  });
+
+  it("advances automatically — no manual next-step control anywhere on the page", () => {
+    const src = page();
+    expect(codeOnly(src)).not.toMatch(/Next step/i);
+    // Every mutation refetches readiness, which is what makes the card re-pick by itself.
+    expect(src.match(/onboarding\.refetch\(\)/g)?.length ?? 0).toBeGreaterThanOrEqual(4);
+  });
+
+  it("continues the intended action after Super Admin step-up rather than dropping it", () => {
+    const src = page();
+    expect(src).toContain("runAdminProtected");
+    const stepUp = read("client/src/components/admin/admin-step-up.tsx");
+    // try -> challenge -> RETRY THE SAME ACTION. The continuation is the point.
+    expect(stepUp).toContain("await openChallenge();");
+    expect(stepUp).toContain("return await action();");
+  });
+
+  it("shows the READY state with final facts instead of more setup prompts", () => {
+    const src = page();
+    expect(src).toContain("Shop ready to grade");
+    expect(src).toContain("first-shop-ready-facts");
+    expect(src).toContain("first-shop-open-shop");
+  });
+});
+
+describe("no duplicate client blocker logic", () => {
+  it("the Super Admin lifecycle strip reads nextAction and never ranks dimensions itself", () => {
+    const src = read("client/src/pages/admin/partner-network-lifecycle.ts");
+    expect(src).toContain("readiness.nextAction");
+    // The original defect: choosing a blocker by JavaScript object key order.
+    expect(codeOnly(src)).not.toContain("Object.keys(readiness.dimensions)");
+  });
+
+  it("the canonical order is imported from the shared contract, never re-declared", () => {
+    const shared = read("shared/partner-readiness.ts");
+    expect(shared).toContain("export const PARTNER_READINESS_DIMENSION_ORDER");
+    for (const consumer of [
+      "server/partner/operational-readiness.ts",
+      "client/src/pages/admin/partner-network-lifecycle.ts",
+    ]) {
+      const src = read(consumer);
+      expect(src).toContain("PARTNER_READINESS_DIMENSION_ORDER");
+      // No local copy of the nine keys.
+      expect(codeOnly(src)).not.toMatch(/=\s*\[\s*"organisation",\s*"location",\s*"delivery"/);
+    }
+  });
+});
+
+describe("five-stage setup controller UI contract", () => {
+  const page = () => read("client/src/pages/admin/partner-first-shop-onboarding.tsx");
+
+  it("shows CREATE -> ACTIVATE -> CONNECT -> TEST -> LIVE, from the server's stage", () => {
+    const src = page();
+    expect(src).toContain("first-shop-stage-bar");
+    expect(src).toContain('["CREATE", "ACTIVATE", "CONNECT", "TEST", "LIVE"]');
+    // Rendered from the verdict, never computed here — a client stage would be a second opinion.
+    expect(src).toContain("shop.operational.nextAction.stage");
+    expect(codeOnly(src)).not.toMatch(/function\s+deriveStage|computeStage/);
+  });
+
+  it("does not render ten setup cards by default — diagnostics are collapsed", () => {
+    const src = page();
+    expect(src).toContain("Advanced setup diagnostics");
+    expect(src).toContain("const [checksOpen, setChecksOpen] = useState(false);");
+    expect(src).toContain("open={checksOpen}");
+  });
+
+  it("gives each stage one standing instruction in the operator's words", () => {
+    const src = page();
+    expect(src).toContain("The Owner needs to open the MintVault email");
+    expect(src).toContain("Open MintVault Scanner on this Mac and sign in");
+    expect(src).toContain("Scan one test card");
+  });
+
+  it("resends the invitation from the canonical authority, without a trip into Staff", () => {
+    const src = page();
+    expect(src).toContain("/resend-invitation");
+    expect(src).toContain("Resend invitation");
+    expect(src).toContain('setBanner("Invitation sent.")');
+    // One invitation system: the route is the same one the Staff screen calls.
+    const routes = read("server/partner/partner-management-routes.ts");
+    expect(routes).toContain('r.post("/partners/:partnerId/users/:userId/resend-invitation"');
+  });
+
+  it("approves a single pending Scanner inline, and defers a real choice between Macs", () => {
+    const src = page();
+    expect(src).toContain("pendingStations.length === 1");
+    // Behind the SAME canonical step-up, which retries the same action after the challenge.
+    expect(src).toContain("runAdminProtected");
+  });
+
+  it("never pre-provisions a station identity — enrolment comes from the Mac itself", () => {
+    const src = page();
+    expect(src).toContain("Station enrolment must come from the real shop Scanner");
+    // No client path that creates or copies a station identity.
+    expect(codeOnly(src)).not.toMatch(/createStation|stationPrivateKey|copyStationIdentity/);
+  });
+});
+
+describe("create form asks once", () => {
+  const page = () => read("client/src/pages/admin/partner-first-shop-onboarding.tsx");
+
+  it("does not ask for the Main location name, and does not send one", () => {
+    const src = page();
+    expect(src).not.toContain('label="Main location name"');
+    expect(codeOnly(src)).not.toMatch(/^\s*locationName,\s*$/m);
+  });
+
+  it("only sends an operations contact when a different one was deliberately chosen", () => {
+    const src = page();
+    expect(src).toContain("operationsContact: useDifferentContact ?");
+    expect(src).toContain("const [useDifferentContact, setUseDifferentContact] = useState(false);");
+  });
+
+  it("keeps the single atomic create button", () => {
+    const src = page();
+    expect(src).toContain("first-shop-create-submit");
+    expect(src).toContain("If any part fails, nothing is saved.");
+    // The label now comes from the tested decision module rather than being inlined in JSX.
+    expect(src).toContain("createButtonLabel(");
+    expect(read("client/src/pages/admin/owner-email-eligibility.ts")).toContain("Create shop & send invitation");
+  });
+
+  it("defaults live on the SERVER, so every caller writes the same canonical record", () => {
+    const service = read("server/partner/partner-management-service.ts");
+    expect(service).toContain('export const DEFAULT_MAIN_LOCATION_NAME = "Main location";');
+    expect(service).toContain("input.locationName ?? \"\"");
+    // Owner becomes the operations contact, through the SAME validator as a supplied one.
+    expect(service).toContain("requireOperationalContact(`${ownerFirstName} ${ownerLastName}`, ownerEmail)");
+  });
+});
+
+describe("shop workspace and network surfaces stay on one verdict", () => {
+  it("the Shop workspace leads with SETUP STATUS + NEXT ACTION, diagnostics collapsed", () => {
+    const src = read("client/src/pages/admin/partner-management-detail.tsx");
+    expect(src).toContain("pm-setup-status");
+    expect(src).toContain("pm-setup-stage");
+    expect(src).toContain("pm-setup-next-action");
+    expect(src).toContain("pm-advanced-diagnostics");
+    // Nothing was deleted: the detail moved under the disclosure.
+    expect(src).toContain("pm-setup-checklist");
+    expect(src).toContain("ReadinessPanel");
+    // It renders the verdict rather than deciding one.
+    expect(src).toContain("onboarding.data?.operational?.nextAction");
+  });
+
+  it("the Shops NEXT link opens the simplified setup controller, not a sub-workspace", () => {
+    const src = read("client/src/pages/admin/partner-network-shops.tsx");
+    expect(src).toContain("shop-next-action-");
+    expect(src).toContain("/onboarding`}");
+    expect(src).toContain("NEXT: ");
+    expect(src).toContain('"READY"');
+  });
+
+  it("Overview, Shops and the workspace all read the same nextAction field", () => {
+    for (const surface of [
+      "client/src/pages/admin/partner-network-attention.ts",
+      "client/src/pages/admin/partner-network-shops.tsx",
+      "client/src/pages/admin/partner-management-detail.tsx",
+      "client/src/pages/admin/partner-first-shop-onboarding.tsx",
+    ]) {
+      expect(read(surface)).toMatch(/nextAction/);
+    }
+  });
+});
+
+describe("owner email blocker UX", () => {
+  const page = () => read("client/src/pages/admin/partner-first-shop-onboarding.tsx");
+
+  it("checks the Owner email before create, debounced rather than per keystroke", () => {
+    const src = page();
+    expect(src).toContain("/first-shop/owner-email-eligibility");
+    expect(src).toContain("setDebouncedOwnerEmail");
+  });
+
+  it("renders the duplicate warning AT THE FIELD, between the email input and the next section", () => {
+    const src = page();
+    const emailInput = src.indexOf('label="Email"');
+    const conflict = src.indexOf('data-testid="owner-email-conflict"');
+    const nextSection = src.indexOf("Delivery address</div>");
+    expect(emailInput).toBeGreaterThan(-1);
+    // The whole reported bug was having to scroll UP to find out why Create did nothing.
+    expect(conflict).toBeGreaterThan(emailInput);
+    expect(conflict).toBeLessThan(nextSection);
+  });
+
+  it("shows the required wording: shop, status, and one plain instruction", () => {
+    const src = page();
+    expect(src).toContain("Owner email already in use");
+    expect(src).toContain("Existing shop");
+    expect(src).toContain("User status");
+    expect(src).toContain("Use a different Owner email.");
+    expect(src).toContain("owner-email-conflict-shop");
+    expect(src).toContain("owner-email-conflict-status");
+  });
+
+  it("offers an amendment path ONLY where a canonical authority exists", () => {
+    const src = page();
+    // Gated on the server's own `releasable`, which is true only for INVITED.
+    expect(src).toContain("ownerEmailConflict.releasable &&");
+    expect(src).toContain("owner-email-conflict-amend");
+  });
+
+  it("guards the SUBMIT handler, not just the button's disabled attribute", () => {
+    const src = page();
+    // A disabled button does not stop an Enter keypress inside a text field.
+    expect(src).toContain("if (createBlocked) return;");
+    expect(src).toContain("disabled={create.isPending || createBlocked}");
+  });
+
+  it("covers every eligibility state at the field", () => {
+    const src = page();
+    for (const id of [
+      "owner-email-checking",
+      "owner-email-available",
+      "owner-email-check-failed",
+      "owner-email-conflict",
+    ]) expect(src).toContain(id);
+    // A failed lookup must offer a retry rather than silently reading as available.
+    expect(src).toContain("owner-email-retry");
+  });
+
+  it("clears a stale refusal the moment any field changes", () => {
+    const src = page();
+    expect(src).toContain("if (create.isError) create.reset();");
+    expect(src).toContain("setBanner(null);");
+  });
+
+  it("does NOT put create failures in the page banner any more", () => {
+    const src = page();
+    expect(src).toContain("first-shop-create-error");
+    // The banner is above the fold; the operator is looking at the button.
+    // Scoped to the CREATE mutation: other mutations legitimately use the banner for success notes.
+    const createBlock = src.slice(src.indexOf("const create = useMutation"), src.indexOf("const saveAddress = useMutation"));
+    expect(codeOnly(createBlock)).not.toContain("setBanner(errorMessage");
+  });
+
+  it("success leaves the form for the controller and names who was invited", () => {
+    const src = page();
+    expect(src).toContain("navigate(`/admin/partners/${id}/onboarding`)");
+    expect(src).toContain("first-shop-invited-email");
+    expect(src).toContain("Invitation sent to");
+  });
+
+  it("the pre-check and the create share ONE finder, so they cannot disagree", () => {
+    const service = read("server/partner/partner-management-service.ts");
+    expect(service).toContain("async function findOwnerEmailClash");
+    expect(service.match(/findOwnerEmailClash\(/g)?.length ?? 0).toBeGreaterThanOrEqual(3);
+    expect(service).toContain("export async function checkOwnerEmailEligibility");
+  });
+
+  it("is Super Admin only, and registered before the parameterised sibling", () => {
+    const routes = read("server/partner/partner-management-routes.ts");
+    const eligibility = routes.indexOf('r.get("/first-shop/owner-email-eligibility"');
+    const byId = routes.indexOf('r.get("/partners/:partnerId"');
+    expect(eligibility).toBeGreaterThan(-1);
+    expect(eligibility).toBeLessThan(byId);
+  });
+
+  it("keeps the vague Partner-facing wording off this Super Admin surface", () => {
+    const partnerFacing = read("client/src/pages/partner/login.tsx");
+    expect(partnerFacing).not.toContain("already used by");
+    expect(partnerFacing).not.toContain("owner-email-conflict");
   });
 });

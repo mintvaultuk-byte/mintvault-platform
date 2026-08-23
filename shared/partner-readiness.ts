@@ -170,6 +170,115 @@ export interface PartnerTestCardReadiness {
   } | null;
 }
 
+/**
+ * THE canonical fix-first order — the ONE priority every surface must use.
+ *
+ * It lives in the shared contract rather than on the server because the clients need it too, and
+ * the alternative is what shipped before: the Super Admin lifecycle helper ranked blockers by
+ * `Object.keys(dimensions)` — JavaScript insertion order — which agreed with the authority only by
+ * coincidence and would have diverged the first time a dimension was added anywhere but the end.
+ * Import it; never re-declare it.
+ */
+export const PARTNER_READINESS_DIMENSION_ORDER = [
+  "organisation",
+  "location",
+  "delivery",
+  "operationsContact",
+  "owner",
+  "staff",
+  "station",
+  "scanner",
+  "credits",
+] as const satisfies readonly ReadinessDimensionKey[];
+
+/**
+ * THE ONE NEXT ACTION — what the operator should do about this shop, right now.
+ *
+ * WHY THIS IS ON THE SERVER. The 10 checks below are correct but procedural, and every surface that
+ * showed them invented its own answer to "so what do I do first?": the Super Admin lifecycle helper
+ * walked `Object.keys(dimensions)` (JS insertion order, not the authority's fix-first order), and
+ * Needs Attention re-derived blockers from the DASHBOARD projection instead of from readiness at
+ * all — so the two could, and did, disagree about the same shop. This field is the single answer;
+ * clients render it and never rank blockers themselves.
+ *
+ * IT INTRODUCES NO RULE. It is a pure selection over values `derivePartnerOperationalReadiness`
+ * has already decided: the first non-PASS dimension in the canonical order, then the onboarding
+ * test card, then READY. No new check, no new step, no re-interpretation of a status.
+ *
+ * WHY THE TEST CARD COMES LAST. `overall.ready` deliberately excludes it — a shop that never
+ * scanned a test card can still grade — so the test card can only ever be the next action once
+ * every operational dimension already passes. That is exactly the operator's sequence: get the shop
+ * able to grade, then prove one card end to end.
+ */
+/**
+ * THE FIVE VISIBLE STAGES — what a shop rollout actually looks like to an operator.
+ *
+ * CREATE -> ACTIVATE -> CONNECT -> TEST -> LIVE.
+ *
+ * These are a VIEW over the nine readiness dimensions, not a second model of them. Nothing decides
+ * a stage: it is read off whichever dimension the next action already came from, so the stage and
+ * the action can never disagree. The dimensions stay exactly as they are underneath, and remain the
+ * only authority — this is the label an operator reads, not a state machine anything branches on.
+ *
+ * CREATE is the only stage no readiness payload can produce, because it is the stage BEFORE a shop
+ * exists. The client knows it by having nothing to ask about yet.
+ */
+export type PartnerSetupStage = "CREATE" | "ACTIVATE" | "CONNECT" | "TEST" | "LIVE";
+
+/** The stage each readiness dimension belongs to. Total, so a new dimension must be placed. */
+export const PARTNER_SETUP_STAGE_BY_DIMENSION = {
+  // Becoming a real shop with a real owner: activation, the invitation, the password and MFA.
+  organisation: "ACTIVATE",
+  owner: "ACTIVATE",
+  // The shop's own details. Filled in at CREATE, so reaching one of these means something is
+  // missing from the record itself rather than from the rollout.
+  location: "ACTIVATE",
+  delivery: "ACTIVATE",
+  operationsContact: "ACTIVATE",
+  // Getting the Mac working: who may operate it, whether it is enrolled, approved and calibrated.
+  staff: "CONNECT",
+  station: "CONNECT",
+  scanner: "CONNECT",
+  // Credits matter here and nowhere else: they are what lets the test card actually be scanned.
+  credits: "TEST",
+} as const satisfies Record<ReadinessDimensionKey, PartnerSetupStage>;
+
+export interface PartnerNextAction {
+  /**
+   * What KIND of answer this is.
+   *
+   * BLOCKED   somebody must act, and `action` says who and what.
+   * PENDING   correctly in progress and waiting on someone else (owner setting a password, a
+   *           station awaiting our approval). Still the next thing to watch; not a fault.
+   * UNKNOWN   an authority could not be consulted. Never rendered as progress, never as READY.
+   * READY     nothing left to do. The shop can grade and its test card is finished.
+   */
+  state: "BLOCKED" | "PENDING" | "UNKNOWN" | "READY";
+  /** Stable machine code, reused verbatim from the dimension or test card this came from. */
+  code: PartnerReadinessCode;
+  /** Short operator-facing headline, e.g. "Scanner waiting for approval". */
+  title: string;
+  /** The same sentence the underlying dimension already produced. Never re-worded per surface. */
+  message: string;
+  /**
+   * Where this verdict came from, so a surface can deep-link to the right place and a test can
+   * assert provenance. `"testCard"` when it came from the onboarding test card, null when READY.
+   */
+  source: ReadinessDimensionKey | "testCard" | null;
+  /**
+   * The single control to render. ABSENT when no legitimate in-product action exists — waiting on
+   * the owner to set their own password is not something MintVault can click — in which case the
+   * surface shows `title`/`message` as status text. A button that cannot work is worse than none.
+   */
+  action: ReadinessAction | null;
+  /**
+   * Which of the five visible stages this shop is in. Derived from `source`, so the compact
+   * CREATE/ACTIVATE/CONNECT/TEST/LIVE indicator and the action beneath it are always the same
+   * verdict said twice, never two opinions.
+   */
+  stage: PartnerSetupStage;
+}
+
 export interface PartnerOperationalReadiness {
   overall: {
     /** True ONLY when every load-bearing dimension is PASS. Never true alongside UNKNOWN. */
@@ -180,6 +289,11 @@ export interface PartnerOperationalReadiness {
   dimensions: Record<ReadinessDimensionKey, ReadinessDimension>;
   /** The blocking dimensions in fix-first order, flattened for direct rendering. */
   actions: Array<ReadinessAction & { dimension: ReadinessDimensionKey; code: PartnerReadinessCode }>;
+  /**
+   * The ONE thing to do next. Always present — READY when there is nothing left. Every surface that
+   * shows "what now?" reads this and nothing else; see PartnerNextAction for why.
+   */
+  nextAction: PartnerNextAction;
   /**
    * The onboarding test card, kept OUTSIDE `dimensions` on purpose.
    *

@@ -256,6 +256,26 @@ export function partnerManagementRouter(): Router {
     }
   });
 
+  /**
+   * READ-ONLY Owner-email eligibility for the CREATE SHOP form.
+   *
+   * ROUTE ORDER, same reason as duplicate-check above: a literal path must be registered before any
+   * parameterised sibling that could swallow it.
+   *
+   * Super Admin only, like every route on this router, so it answers plainly — which Partner holds
+   * the address, that user's status, and the one supported resolution. The Partner-facing surfaces
+   * keep their deliberately vague wording; this is the operator entitled to the answer, and telling
+   * them nothing is what made a correct refusal look like a broken button.
+   */
+  r.get("/first-shop/owner-email-eligibility", async (req, res) => {
+    try {
+      const email = typeof req.query.email === "string" ? req.query.email.trim().slice(0, 320) : "";
+      res.json(await svc.checkOwnerEmailEligibility(email));
+    } catch (err) {
+      sendError(res, err);
+    }
+  });
+
   r.get("/partners/:partnerId", async (req, res) => {
     try {
       res.json(await svc.getPartnerDetail(req.params.partnerId));
@@ -393,7 +413,13 @@ export function partnerManagementRouter(): Router {
           actor,
           {
             legalName: requireNonEmpty(req.body?.legalName, "legalName"),
-            locationName: requireNonEmpty(req.body?.locationName, "locationName"),
+            /*
+             * Both optional now. A single-location shop is always "Main location", and its
+             * operations contact is the Owner unless somebody says otherwise, so the guided form
+             * stopped asking for either. The SERVICE applies the defaults, not this route, so the
+             * canonical record is identical whichever caller creates it.
+             */
+            locationName: optionalText(req.body?.locationName, "locationName", 120),
             deliveryAddress: {
               line1: requireNonEmpty(req.body?.deliveryAddress?.line1, "deliveryAddress.line1"),
               line2: optionalText(req.body?.deliveryAddress?.line2, "deliveryAddress.line2", 200),
@@ -401,10 +427,13 @@ export function partnerManagementRouter(): Router {
               postcode: requireNonEmpty(req.body?.deliveryAddress?.postcode, "deliveryAddress.postcode"),
               country: requireNonEmpty(req.body?.deliveryAddress?.country, "deliveryAddress.country"),
             },
-            operationsContact: {
-              fullName: requireNonEmpty(req.body?.operationsContact?.fullName, "operationsContact.fullName"),
-              email: requireNonEmpty(req.body?.operationsContact?.email, "operationsContact.email"),
-            },
+            operationsContact:
+              req.body?.operationsContact == null
+                ? null
+                : {
+                    fullName: optionalText(req.body?.operationsContact?.fullName, "operationsContact.fullName", 200),
+                    email: optionalText(req.body?.operationsContact?.email, "operationsContact.email", 320),
+                  },
             owner: {
               firstName: requireNonEmpty(req.body?.owner?.firstName, "owner.firstName"),
               lastName: requireNonEmpty(req.body?.owner?.lastName, "owner.lastName"),

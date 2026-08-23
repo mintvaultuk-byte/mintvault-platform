@@ -10,7 +10,16 @@ import { AdminButton, AdminShell, Badge, Panel } from "@/components/admin";
 import { ReadinessPanel } from "@/components/partner/readiness-panel";
 import { apiRequest, queryClient } from "@/lib/queryClient";
 import { runAdminProtected } from "@/components/admin/admin-step-up";
-import type { PartnerOperationalReadiness } from "@shared/partner-readiness";
+import { PARTNER_READINESS_DIMENSION_ORDER } from "@shared/partner-readiness";
+import type { OwnerEmailEligibility } from "@shared/partner-owner-email";
+import { createBlockedBy, createButtonLabel, ownerEmailState } from "./owner-email-eligibility";
+import type {
+  PartnerNextAction,
+  PartnerOperationalReadiness,
+  PartnerReadinessCode,
+  PartnerSetupStage,
+  ReadinessStatus,
+} from "@shared/partner-readiness";
 
 const BASE = "/api/super-admin/partner-management";
 const emptyAddress = { line1: "", line2: "", city: "", postcode: "", country: "United Kingdom" };
@@ -70,13 +79,211 @@ function Input({ label, value, onChange, type = "text", required = true }: { lab
   );
 }
 
-function Step({ number, title, complete, children }: { number: number; title: string; complete: boolean; children: React.ReactNode }) {
+function Step({
+  number,
+  title,
+  complete,
+  status,
+  children,
+}: {
+  number: number;
+  title: string;
+  complete: boolean;
+  /** The dimension's own four-state status, when this step maps to one. */
+  status?: ReadinessStatus;
+  children: React.ReactNode;
+}) {
+  const glyph = checkGlyph(status ?? (complete ? "PASS" : "NOT_STARTED"));
   return (
-    <Panel title={`${number}. ${title}`} sub={complete ? "Complete" : "Action required"}>
-      <div data-testid={`first-shop-step-${number}`} data-complete={complete ? "true" : "false"}>
+    <Panel title={`${number}. ${title}`} sub={`${glyph.mark} ${glyph.label}`}>
+      <div
+        data-testid={`first-shop-step-${number}`}
+        data-complete={complete ? "true" : "false"}
+        data-check-status={glyph.label}
+      >
         {children}
       </div>
     </Panel>
+  );
+}
+
+/**
+ * Which numbered step owns each blocker, so "Show me" can open the right one.
+ *
+ * The card deliberately does NOT re-implement the controls those steps already hold. Approving a
+ * Scanner means approving a PARTICULAR Mac, and assigning an operator means choosing a PARTICULAR
+ * person — real decisions the card cannot make on the operator's behalf. For those it reveals the
+ * step that owns the choice. Only argument-free actions run straight from the card.
+ */
+const STEP_FOR_CODE: Partial<Record<PartnerReadinessCode, number>> = {
+  PARTNER_SUSPENDED: 1,
+  DELIVERY_ADDRESS_REQUIRED: 2,
+  OPERATIONS_CONTACT_REQUIRED: 3,
+  OWNER_SETUP_REQUIRED: 4,
+  INVITATION_EXPIRED: 4,
+  AWAITING_PASSWORD_SETUP: 4,
+  AWAITING_MFA_SETUP: 4,
+  USER_SUSPENDED: 4,
+  STAFF_OPERATOR_REQUIRED: 5,
+  STAFF_LOCATION_ASSIGNMENT_REQUIRED: 5,
+  LOCATION_REQUIRED: 5,
+  STATION_SETUP_REQUIRED: 6,
+  STATION_APPROVAL_PENDING: 6,
+  STATION_UNAVAILABLE: 6,
+  SCANNER_OFFLINE: 7,
+  SCANNER_UPDATE_REQUIRED: 7,
+  CALIBRATION_REQUIRED: 7,
+  CREDITS_REQUIRED: 8,
+  TEST_CARD_REQUIRED: 9,
+  TEST_CARD_IN_PROGRESS: 9,
+  TEST_CARD_AWAITING_REVIEW: 9,
+  TEST_CARD_BLOCKED: 9,
+};
+
+/** One glyph vocabulary for the collapsed detail list. */
+function checkGlyph(status: ReadinessStatus | "NOT_STARTED"): { mark: string; label: string } {
+  if (status === "PASS") return { mark: "\u2713", label: "READY" };
+  if (status === "PENDING") return { mark: "\u25cf", label: "IN PROGRESS" };
+  if (status === "BLOCKED") return { mark: "!", label: "BLOCKED" };
+  return { mark: "\u2014", label: "NOT STARTED" };
+}
+
+/**
+ * THE FIVE-STAGE INDICATOR.
+ *
+ * CREATE -> ACTIVATE -> CONNECT -> TEST -> LIVE, with the current stage marked. It renders the
+ * server's `nextAction.stage` and computes nothing: a client that decided its own stage would be a
+ * second readiness opinion, which is the thing this whole package exists to prevent.
+ */
+const SETUP_STAGES: PartnerSetupStage[] = ["CREATE", "ACTIVATE", "CONNECT", "TEST", "LIVE"];
+
+function StageBar({ current }: { current: PartnerSetupStage }) {
+  const currentIndex = SETUP_STAGES.indexOf(current);
+  return (
+    <div
+      data-testid="first-shop-stage-bar"
+      data-stage={current}
+      style={{ display: "flex", gap: 18, flexWrap: "wrap", alignItems: "center", margin: "0 0 16px" }}
+    >
+      {SETUP_STAGES.map((stage, index) => {
+        const done = index < currentIndex;
+        const active = index === currentIndex;
+        return (
+          <span
+            key={stage}
+            data-stage-step={stage}
+            data-stage-state={done ? "done" : active ? "active" : "todo"}
+            style={{
+              fontSize: 11,
+              letterSpacing: 1.4,
+              textTransform: "uppercase",
+              fontWeight: active ? 800 : 600,
+              color: done ? "#7fd6a0" : active ? "#D4AF37" : "var(--admin-ink-faint)",
+              opacity: done || active ? 1 : 0.55,
+            }}
+          >
+            {done ? "\u2713" : active ? "\u25cf" : "\u25cb"} {stage}
+          </span>
+        );
+      })}
+    </div>
+  );
+}
+
+/**
+ * What the operator is told at each stage, in their words rather than the system's.
+ *
+ * The SENTENCE still comes from the server for anything condition-specific; this only supplies the
+ * stage headline and the standing instruction, which are the same whatever the underlying code is.
+ */
+const STAGE_INSTRUCTION: Record<PartnerSetupStage, string> = {
+  CREATE: "Enter the shop's details.",
+  ACTIVATE: "The Owner needs to open the MintVault email, create their password and set up their authenticator.",
+  CONNECT: "Open MintVault Scanner on this Mac and sign in with the Owner account.",
+  TEST: "Scan one test card on the shop's Mac.",
+  LIVE: "This shop can grade cards.",
+};
+
+/**
+ * THE ONE NEXT ACTION.
+ *
+ * The 10 checks below are the authority and stay exactly as they were; this is the operator's
+ * working surface. It renders `readiness.nextAction` verbatim — the server chose which blocker and
+ * wrote the words — and offers at most ONE dominant control, so nothing competes with it.
+ *
+ * There is no manual "next step": every action on this page refetches readiness on success, so the
+ * server re-picks and this card advances by itself.
+ */
+function NextActionCard({
+  next,
+  onRun,
+  runLabel,
+  pending,
+  failed,
+  onReveal,
+}: {
+  next: PartnerNextAction;
+  onRun: (() => void) | null;
+  runLabel: string | null;
+  pending: boolean;
+  failed: boolean;
+  onReveal: (step: number) => void;
+}) {
+  const step = STEP_FOR_CODE[next.code];
+  const ready = next.state === "READY";
+  return (
+    <div
+      data-testid="first-shop-next-action"
+      data-state={next.state}
+      data-code={next.code}
+      data-source={next.source ?? ""}
+      style={{
+        border: `1px solid ${ready ? "#2f7d4f" : "#D4AF37"}`,
+        borderRadius: 10,
+        padding: "18px 20px",
+        marginBottom: 18,
+        background: ready ? "rgba(47,125,79,0.08)" : "rgba(212,175,55,0.08)",
+      }}
+    >
+      <div style={{ fontSize: 11, letterSpacing: 1.5, opacity: 0.75, textTransform: "uppercase" }}>
+        {ready ? "Status" : "Next action"}
+      </div>
+      <h2 data-testid="first-shop-next-action-title" style={{ margin: "6px 0 4px", fontSize: 22 }}>
+        {ready ? "Shop ready to grade" : next.title}
+      </h2>
+      <p data-testid="first-shop-next-action-message" style={{ margin: "0 0 14px", opacity: 0.9 }}>
+        {next.message}
+      </p>
+      {failed && (
+        <p role="alert" data-testid="first-shop-next-action-error" style={{ color: "#ff8a8a", marginTop: 0 }}>
+          That did not go through. Nothing was changed — try again.
+        </p>
+      )}
+      {!ready && (
+        <div style={{ display: "flex", gap: 10, alignItems: "center", flexWrap: "wrap" }}>
+          {onRun && runLabel ? (
+            <AdminButton
+              variant="gold"
+              disabled={pending}
+              onClick={onRun}
+              data-testid="first-shop-next-action-run"
+            >
+              {pending ? "Working\u2026" : failed ? `Retry \u2014 ${runLabel}` : runLabel}
+            </AdminButton>
+          ) : step ? (
+            <AdminButton variant="gold" onClick={() => onReveal(step)} data-testid="first-shop-next-action-reveal">
+              {next.action?.label ?? "Show me"}
+            </AdminButton>
+          ) : (
+            /* Nothing MintVault can click — e.g. the owner has to set their own password. Say so
+               rather than render a button that cannot work. */
+            <span data-testid="first-shop-next-action-waiting" style={{ opacity: 0.85 }}>
+              Waiting — nothing for MintVault to do here yet.
+            </span>
+          )}
+        </div>
+      )}
+    </div>
   );
 }
 
@@ -89,8 +296,15 @@ export default function PartnerFirstShopOnboardingPage() {
   const partnerId = params?.partnerId;
   const [, navigate] = useLocation();
   const [banner, setBanner] = useState<string | null>(null);
+  /*
+   * The 10 checks are collapsed by default: they are the authority and the audit trail, but they
+   * are not the day-to-day workflow. `revealStep` opens them and scrolls to one, which is what the
+   * Next Action card does for any blocker whose fix needs a choice the card cannot make for you.
+   */
+  const [checksOpen, setChecksOpen] = useState(false);
+  /** Off by default: the operations contact is the Owner unless the operator says otherwise. */
+  const [useDifferentContact, setUseDifferentContact] = useState(false);
   const [legalName, setLegalName] = useState("");
-  const [locationName, setLocationName] = useState("Main location");
   const [address, setAddress] = useState(emptyAddress);
   const [contactName, setContactName] = useState("");
   const [contactEmail, setContactEmail] = useState("");
@@ -139,9 +353,11 @@ export default function PartnerFirstShopOnboardingPage() {
     mutationFn: () =>
       apiRequest("POST", `${BASE}/first-shop`, {
         legalName,
-        locationName,
+        // locationName and operationsContact are deliberately omitted: the SERVER defaults the
+        // Main location name and makes the Owner the operations contact, so every caller produces
+        // the same canonical record.
         deliveryAddress: address,
-        operationsContact: { fullName: contactName, email: contactEmail },
+        operationsContact: useDifferentContact ? { fullName: contactName, email: contactEmail } : undefined,
         owner: { firstName: ownerFirstName, lastName: ownerLastName, email: ownerEmail },
         idempotencyKey: createIdempotencyKey.current,
         reason: "first-shop guided onboarding",
@@ -152,12 +368,17 @@ export default function PartnerFirstShopOnboardingPage() {
         setBanner("The onboarding request completed, but its Partner identifier was not returned. Refresh the Partner directory before retrying.");
         return;
       }
-      setBanner(`First shop created. Owner invitation delivery: ${data.result?.invitationDeliveryStatus ?? "recorded"}.`);
+      setBanner("Shop created. Invitation sent to the Owner.");
       createIdempotencyKey.current = requestKey();
       void queryClient.invalidateQueries({ queryKey: [BASE, "partners"] });
       navigate(`/admin/partners/${id}/onboarding`);
     },
-    onError: (error) => setBanner(errorMessage(error, "First-shop onboarding could not be created. Nothing was partially saved.")),
+    /*
+     * Deliberately NOT setBanner. The failure is rendered at the Owner email field and beside the
+     * Create button; putting it at the top of the page as well is what taught the operator to look
+     * in the wrong place.
+     */
+    onError: () => undefined,
   });
   const saveAddress = useMutation({
     mutationFn: () =>
@@ -229,8 +450,54 @@ export default function PartnerFirstShopOnboardingPage() {
     contactIdempotencyKey.current = requestKey();
     setContactEmail(value);
   };
+  /*
+   * OWNER EMAIL ELIGIBILITY, asked while the operator is still filling the form.
+   *
+   * Debounced rather than per-keystroke, and skipped until the address looks like an address, so
+   * typing does not fire a request per character. The SERVER decides; this only asks early. The
+   * create transaction still runs the same check, so a race between typing and submitting cannot
+   * produce a shop the pre-check thought was fine.
+   */
+  const [debouncedOwnerEmail, setDebouncedOwnerEmail] = useState("");
+  useEffect(() => {
+    const value = ownerEmail.trim();
+    const timer = window.setTimeout(() => setDebouncedOwnerEmail(/^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(value) ? value : ""), 400);
+    return () => window.clearTimeout(timer);
+  }, [ownerEmail]);
+
+  const ownerEmailCheck = useQuery<OwnerEmailEligibility>({
+    queryKey: [`${BASE}/first-shop/owner-email-eligibility`, debouncedOwnerEmail],
+    enabled: !shop && debouncedOwnerEmail.length > 0,
+    queryFn: async () =>
+      (await apiRequest(
+        "GET",
+        `${BASE}/first-shop/owner-email-eligibility?email=${encodeURIComponent(debouncedOwnerEmail)}`
+      )).json(),
+    staleTime: 30_000,
+    retry: false,
+  });
+  /*
+   * The lifecycle of that lookup, and the rule the submit handler obeys, live in one pure module so
+   * every combination is pinned by a test rather than read out of JSX. See owner-email-eligibility.
+   */
+  const ownerEmailState_ = ownerEmailState({
+    query: debouncedOwnerEmail,
+    isFetching: ownerEmailCheck.isFetching,
+    isError: ownerEmailCheck.isError,
+    available: ownerEmailCheck.data?.available,
+  });
+  const ownerEmailConflict = ownerEmailCheck.data?.conflict ?? null;
+    const createBlocked = createBlockedBy(ownerEmailState_);
+
   const resetCreateIntent = (setValue: (value: string) => void) => (value: string) => {
     createIdempotencyKey.current = requestKey();
+    /*
+     * A refusal describes the values that were submitted. The moment any of them changes it is
+     * describing something that no longer exists, and leaving it on screen is what made a fixed
+     * form still look broken. Cleared here rather than only on the next submit.
+     */
+    if (create.isError) create.reset();
+    setBanner(null);
     setValue(value);
   };
 
@@ -305,6 +572,23 @@ export default function PartnerFirstShopOnboardingPage() {
    * that declaration inside the NEW transaction and stamps the Card Job, which is why this step can
    * be truthful about a card nobody here has touched.
    */
+  /*
+   * RESEND, from the EXISTING canonical authority. Same route the Staff screen calls; no second
+   * invitation system, and no trip into Staff to reach it during onboarding.
+   */
+  const resendInvitation = useMutation({
+    mutationFn: async (userId: string) =>
+      apiRequest("POST", `${BASE}/partners/${partnerId}/users/${userId}/resend-invitation`, {
+        reason: "First-shop onboarding: resend Owner invitation",
+      }).then((r) => r.json()),
+    onSuccess: () => {
+      setBanner("Invitation sent.");
+      void queryClient.invalidateQueries({ queryKey: [`${BASE}/partners/${partnerId}/users`] });
+      void onboarding.refetch();
+    },
+    onError: (error) => setBanner(errorMessage(error, "The invitation could not be sent.")),
+  });
+
   const armTestCard = useMutation({
     mutationFn: async () =>
       apiRequest("POST", `${BASE}/partners/${partnerId}/first-shop/test-card/arm`, {
@@ -316,6 +600,61 @@ export default function PartnerFirstShopOnboardingPage() {
     },
     onError: (error) => setBanner(errorMessage(error, "The onboarding test card was not armed.")),
   });
+
+  const revealStep = (step: number) => {
+    setChecksOpen(true);
+    // After the <details> has actually opened, bring the owning step into view.
+    window.setTimeout(() => {
+      document.querySelector(`[data-testid="first-shop-step-${step}"]`)?.scrollIntoView({ block: "center" });
+    }, 0);
+  };
+
+  /*
+   * Which blockers the card can clear in ONE click. Only argument-free actions qualify: approving a
+   * Scanner means approving a particular Mac and assigning an operator means choosing a particular
+   * person, so those reveal the step that owns the choice instead of guessing.
+   *
+   * Each of these mutations already refetches readiness on success, which is what makes the card
+   * advance on its own — there is deliberately no "next step" button anywhere on this page.
+   */
+  const nextRun: { run: () => void; label: string; pending: boolean; failed: boolean } | null = (() => {
+    const code = shop?.operational.nextAction.code;
+    if (code === "PARTNER_SUSPENDED" && shop?.organisation.status === "PENDING") {
+      return { run: () => activate.mutate(), label: "Activate Partner", pending: activate.isPending, failed: activate.isError };
+    }
+    if (code === "TEST_CARD_REQUIRED" && shop?.operational.testCard.state === "NOT_STARTED" && shop?.testCardArmingReadable && !shop?.testCardArmedAt) {
+      return { run: () => armTestCard.mutate(), label: "Arm the test card", pending: armTestCard.isPending, failed: armTestCard.isError };
+    }
+    /*
+     * An expired or failed invitation has exactly one remedy and exactly one Owner to apply it to,
+     * so it runs from the card. Super Admin should not have to go into Staff to resend.
+     */
+    if ((code === "INVITATION_EXPIRED" || code === "OWNER_SETUP_REQUIRED") && shop?.owner?.id) {
+      const ownerId = shop.owner.id;
+      return {
+        run: () => resendInvitation.mutate(ownerId),
+        label: "Resend invitation",
+        pending: resendInvitation.isPending,
+        failed: resendInvitation.isError,
+      };
+    }
+    /*
+     * ONE pending Scanner is unambiguous, so approval runs from the card behind the SAME canonical
+     * step-up. More than one is a real choice between Macs, so that reveals the step instead.
+     */
+    if (code === "STATION_APPROVAL_PENDING" && pendingStations.length === 1) {
+      const code0 = stationCodeOf(pendingStations[0]);
+      if (code0) {
+        return {
+          run: () => approveStation.mutate(code0),
+          label: "Approve Scanner",
+          pending: approveStation.isPending,
+          failed: approveStation.isError,
+        };
+      }
+    }
+    return null;
+  })();
 
   return (
     <AdminShell activeTab="dashboard" onTabChange={() => navigate("/admin")} onLogout={() => navigate("/admin")} title="First-shop onboarding" crumb="Partner Network">
@@ -333,37 +672,164 @@ export default function PartnerFirstShopOnboardingPage() {
           <form
             onSubmit={(event) => {
               event.preventDefault();
+              /*
+               * The guard lives HERE, not only on the button's `disabled`. A disabled button does
+               * not stop an Enter keypress inside a text field, and a fast paste-then-click can beat
+               * the debounced lookup. Refusing at the submit boundary is what makes "no POST is
+               * fired when blocked" true rather than merely likely.
+               */
+              if (createBlocked) return;
               create.mutate();
             }}
             data-testid="first-shop-create-form"
           >
-            <Step number={1} title="Shop" complete={false}>
+            {/*
+              * ONE FORM. This used to be four numbered "steps" for shop, address, contact and
+              * Owner, which read like a technical checklist for something that is really one
+              * decision: open this shop. Nothing about the canonical record changed — the server
+              * still writes the same organisation, location, contact, Owner, role, wallet and
+              * invitation in one transaction. The form just stopped asking for what the server
+              * already knows.
+              */}
+            <Panel title="Create shop" sub="One form. MintVault creates the shop, its Main location, the Owner and the invitation together.">
+              <div style={{ fontSize: 11, letterSpacing: 1.4, opacity: 0.7, textTransform: "uppercase", marginBottom: 6 }}>Shop</div>
               <div style={{ display: "flex", gap: 10, flexWrap: "wrap" }}>
-                <Input label="Legal / shop name" value={legalName} onChange={resetCreateIntent(setLegalName)} />
-                <Input label="Main location name" value={locationName} onChange={resetCreateIntent(setLocationName)} />
+                <Input label="Shop / legal name" value={legalName} onChange={resetCreateIntent(setLegalName)} />
               </div>
-            </Step>
-            <Step number={2} title="Main location delivery address" complete={false}>
+
+              <div style={{ fontSize: 11, letterSpacing: 1.4, opacity: 0.7, textTransform: "uppercase", margin: "16px 0 6px" }}>Owner</div>
+              <p style={{ marginTop: 0, fontSize: 12, opacity: 0.85 }}>
+                The Owner receives the invitation and sets their own password and authenticator. Neither secret is ever
+                shown to MintVault staff.
+              </p>
+              <div style={{ display: "flex", gap: 10, flexWrap: "wrap" }}>
+                <Input label="First name" value={ownerFirstName} onChange={resetCreateIntent(setOwnerFirstName)} />
+                <Input label="Last name" value={ownerLastName} onChange={resetCreateIntent(setOwnerLastName)} />
+                <Input label="Email" value={ownerEmail} onChange={resetCreateIntent(setOwnerEmail)} type="email" />
+              </div>
+              {/*
+                * THE ANSWER, AT THE FIELD. This deliberately does not live in the page banner: an
+                * operator who has just pressed Create is looking at the button, and making them
+                * scroll up to find out why nothing happened is the whole reported bug.
+                */}
+              {ownerEmailState_ === "checking" && (
+                <p data-testid="owner-email-checking" style={{ margin: "8px 0 0", fontSize: 12, opacity: 0.75 }}>
+                  Checking Owner email…
+                </p>
+              )}
+              {ownerEmailState_ === "available" && (
+                <p data-testid="owner-email-available" style={{ margin: "8px 0 0", fontSize: 13, color: "#7fd6a0", fontWeight: 600 }}>
+                  ✓ Owner email available
+                </p>
+              )}
+              {ownerEmailState_ === "error" && (
+                <div
+                  role="alert"
+                  data-testid="owner-email-check-failed"
+                  style={{ margin: "8px 0 0", fontSize: 13, color: "#ffcf8a" }}
+                >
+                  Could not check Owner email.{" "}
+                  <button
+                    type="button"
+                    onClick={() => void ownerEmailCheck.refetch()}
+                    data-testid="owner-email-retry"
+                    style={{ background: "none", border: "none", color: "inherit", textDecoration: "underline", cursor: "pointer", padding: 0, font: "inherit" }}
+                  >
+                    Try again
+                  </button>
+                  . If you continue, MintVault will still refuse a duplicate when the shop is created.
+                </div>
+              )}
+              {ownerEmailState_ === "unavailable" && ownerEmailConflict && (
+                <div
+                  role="alert"
+                  data-testid="owner-email-conflict"
+                  data-user-status={ownerEmailConflict.userStatus}
+                  style={{
+                    margin: "10px 0 0",
+                    padding: "12px 14px",
+                    border: "2px solid #d46a6a",
+                    borderRadius: 8,
+                    background: "rgba(212,106,106,0.12)",
+                    fontSize: 13,
+                  }}
+                >
+                  <div style={{ fontWeight: 800, letterSpacing: 0.6, textTransform: "uppercase", marginBottom: 10 }}>
+                    Owner email already in use
+                  </div>
+                  <div style={{ fontSize: 11, letterSpacing: 1.3, opacity: 0.8, textTransform: "uppercase" }}>Existing shop</div>
+                  <div data-testid="owner-email-conflict-shop" style={{ fontWeight: 700, margin: "2px 0 8px" }}>
+                    {ownerEmailConflict.partnerName}
+                  </div>
+                  <div style={{ fontSize: 11, letterSpacing: 1.3, opacity: 0.8, textTransform: "uppercase" }}>User status</div>
+                  <div data-testid="owner-email-conflict-status" style={{ fontWeight: 700, margin: "2px 0 10px" }}>
+                    {ownerEmailConflict.userStatus}
+                  </div>
+                  <p style={{ margin: 0, fontWeight: 700 }}>Use a different Owner email.</p>
+                  {/*
+                    * The amendment path is offered ONLY where a canonical authority exists — an
+                    * INVITED user, whose pending invitation amendPendingInvitation can still move.
+                    * A REVOKED user is terminal and is never offered reuse.
+                    */}
+                  {ownerEmailConflict.releasable && (
+                    <p data-testid="owner-email-conflict-amend" style={{ margin: "8px 0 0" }}>
+                      {ownerEmailConflict.nextAction}
+                    </p>
+                  )}
+                </div>
+              )}
+
+              <div style={{ fontSize: 11, letterSpacing: 1.4, opacity: 0.7, textTransform: "uppercase", margin: "16px 0 6px" }}>Delivery address</div>
               <AddressFields value={addressValue} onChange={setAddressField} />
-            </Step>
-            <Step number={3} title="Primary operations contact" complete={false}>
-              <div style={{ display: "flex", gap: 10, flexWrap: "wrap" }}>
-                <Input label="Contact name" value={contactName} onChange={resetCreateIntent(setContactName)} />
-                <Input label="Operational email" value={contactEmail} onChange={resetCreateIntent(setContactEmail)} type="email" />
+
+              {/*
+                * The operations contact is the Owner unless somebody says otherwise. Revealed only
+                * when asked for, so the normal path never types the same name and email twice —
+                * which is how a shop ended up with two contacts differing by a typo.
+                */}
+              <div style={{ marginTop: 16 }}>
+                <label style={{ display: "flex", gap: 8, alignItems: "center", fontSize: 12, cursor: "pointer" }}>
+                  <input
+                    type="checkbox"
+                    checked={useDifferentContact}
+                    onChange={(event) => {
+                      // Changing WHAT is being created changes the request, so the idempotency key
+                      // must move with it — same rule every other field on this form follows.
+                      createIdempotencyKey.current = requestKey();
+                      setUseDifferentContact(event.target.checked);
+                    }}
+                    data-testid="first-shop-use-different-contact"
+                  />
+                  Use a different operations contact
+                </label>
+                {useDifferentContact && (
+                  <div style={{ display: "flex", gap: 10, flexWrap: "wrap", marginTop: 10 }} data-testid="first-shop-contact-fields">
+                    <Input label="Contact name" value={contactName} onChange={resetCreateIntent(setContactName)} />
+                    <Input label="Operational email" value={contactEmail} onChange={resetCreateIntent(setContactEmail)} type="email" />
+                  </div>
+                )}
               </div>
-            </Step>
-            <Step number={4} title="Partner Owner" complete={false}>
-              <p style={{ marginTop: 0 }}>Submitting sends this Owner the existing invitation flow. They set their own password and MFA; neither secret is shown to MintVault staff.</p>
-              <div style={{ display: "flex", gap: 10, flexWrap: "wrap" }}>
-                <Input label="Owner first name" value={ownerFirstName} onChange={resetCreateIntent(setOwnerFirstName)} />
-                <Input label="Owner last name" value={ownerLastName} onChange={resetCreateIntent(setOwnerLastName)} />
-                <Input label="Owner email" value={ownerEmail} onChange={resetCreateIntent(setOwnerEmail)} type="email" />
-              </div>
-            </Step>
-            <Panel title="Create first shop" sub="Creates canonical records atomically before the Owner invitation is delivered.">
-              <AdminButton type="submit" variant="gold" disabled={create.isPending} data-testid="first-shop-create-submit">
-                {create.isPending ? "Creating…" : "Create shop and send Owner invitation"}
+            </Panel>
+            <Panel title="" sub="Everything is created in one transaction. If any part fails, nothing is saved.">
+              <AdminButton
+                type="submit"
+                variant="gold"
+                disabled={create.isPending || createBlocked}
+                data-testid="first-shop-create-submit"
+                data-eligibility={ownerEmailState_}
+              >
+                {createButtonLabel(ownerEmailState_, { pending: create.isPending, failed: create.isError })}
               </AdminButton>
+              {/*
+                * The refusal, again, next to the control that was pressed. The page banner is no
+                * longer used for create failures at all — it is above the fold and the operator is
+                * looking down here.
+                */}
+              {create.isError && (
+                <p role="alert" data-testid="first-shop-create-error" style={{ margin: "10px 0 0", color: "#ff8a8a", fontWeight: 600 }}>
+                  {errorMessage(create.error, "The shop was not created. Nothing was saved.")}
+                </p>
+              )}
             </Panel>
           </form>
         ) : onboarding.isLoading ? (
@@ -372,21 +838,81 @@ export default function PartnerFirstShopOnboardingPage() {
           <div role="alert">This Partner could not be loaded.</div>
         ) : (
           <>
+            <StageBar current={shop.operational.nextAction.stage} />
+            <p data-testid="first-shop-stage-instruction" style={{ margin: "0 0 14px", opacity: 0.85 }}>
+              {STAGE_INSTRUCTION[shop.operational.nextAction.stage]}
+            </p>
+            {/*
+              * WHO the invitation went to. The only piece of invitation state worth showing an
+              * operator at this stage — tokens, delivery ids, session counts and expiry timestamps
+              * stay in Advanced diagnostics, because none of them change what anybody does next.
+              */}
+            {shop.operational.nextAction.stage === "ACTIVATE" && shop.owner?.email && (
+              <p data-testid="first-shop-invited-email" style={{ margin: "0 0 14px", fontSize: 13 }}>
+                <span style={{ fontSize: 11, letterSpacing: 1.3, opacity: 0.75, textTransform: "uppercase" }}>
+                  Invitation sent to
+                </span>
+                <br />
+                <b>{shop.owner.email}</b>
+              </p>
+            )}
+            <NextActionCard
+              next={shop.operational.nextAction}
+              onRun={nextRun ? nextRun.run : null}
+              runLabel={nextRun ? nextRun.label : null}
+              pending={nextRun?.pending ?? false}
+              failed={nextRun?.failed ?? false}
+              onReveal={revealStep}
+            />
+            {shop.operational.nextAction.state === "READY" && (
+              <Panel title="Shop ready to grade" sub="Setup is finished. Nothing below needs attention.">
+                <ul data-testid="first-shop-ready-facts" style={{ margin: 0, paddingLeft: 18 }}>
+                  <li>Owner ready</li>
+                  <li>Scanner active</li>
+                  <li>Calibration valid</li>
+                  <li>Credits available</li>
+                  <li>Test card complete</li>
+                </ul>
+                <div style={{ marginTop: 12 }}>
+                  <Link href={`/admin/partners/${shop.organisation.id}`} data-testid="first-shop-open-shop">
+                    Open shop
+                  </Link>
+                </div>
+              </Panel>
+            )}
             <Panel title="Current scope" sub="Every action below is scoped to this exact Partner and Main location.">
               <div data-testid="first-shop-current-partner"><b>Current Partner:</b> {shop.organisation.legalName} <Badge variant={shop.organisation.status === "ACTIVE" ? "act" : "wait"}>{shop.organisation.status}</Badge></div>
               <div data-testid="first-shop-current-location" style={{ marginTop: 6 }}><b>Current location:</b> {mainLocation ? `${mainLocation.name} (${mainLocation.status})` : "No active Main location"}</div>
             </Panel>
-            <Step number={1} title="Shop" complete={shop.organisation.status === "ACTIVE"}>
+            {/*
+              * THE 10 AUTHORITATIVE CHECKS. Unchanged, and still the thing the server actually
+              * decides on — but collapsed, because managing a checklist is not the operator's job
+              * any more. This is for troubleshooting and audit.
+              */}
+            <details
+              open={checksOpen}
+              onToggle={(event) => setChecksOpen((event.currentTarget as HTMLDetailsElement).open)}
+              data-testid="first-shop-all-checks"
+            >
+              <summary style={{ cursor: "pointer", padding: "10px 0", fontWeight: 600 }}>
+                Advanced setup diagnostics — view all checks
+                <span style={{ opacity: 0.7, fontWeight: 400 }}>
+                  {" "}
+                  — {PARTNER_READINESS_DIMENSION_ORDER.filter((key) => shop.operational.dimensions[key]?.status === "PASS").length} of{" "}
+                  {PARTNER_READINESS_DIMENSION_ORDER.length} ready
+                </span>
+              </summary>
+            <Step number={1} title="Shop" complete={shop.organisation.status === "ACTIVE"} status={shop.operational.dimensions.organisation.status}>
               <p>Partner status: <b>{shop.organisation.status}</b>. The record remains pending until the operator deliberately activates it.</p>
               {shop.organisation.status === "PENDING" && <AdminButton size="sm" variant="gold" disabled={activate.isPending} onClick={() => activate.mutate()} data-testid="first-shop-activate">Activate Partner</AdminButton>}
             </Step>
-            <Step number={2} title="Main location delivery address" complete={shop.operational.dimensions.delivery.status === "PASS"}>
+            <Step number={2} title="Main location delivery address" complete={shop.operational.dimensions.delivery.status === "PASS"} status={shop.operational.dimensions.delivery.status}>
               <form onSubmit={(event) => { event.preventDefault(); saveAddress.mutate(); }}>
                 <AddressFields value={addressValue} onChange={setAddressField} />
                 <AdminButton type="submit" size="sm" variant="gold" disabled={!mainLocation || saveAddress.isPending} data-testid="first-shop-save-address" style={{ marginTop: 12 }}>Save Main location address</AdminButton>
               </form>
             </Step>
-            <Step number={3} title="Primary operations contact" complete={shop.operational.dimensions.operationsContact.status === "PASS"}>
+            <Step number={3} title="Primary operations contact" complete={shop.operational.dimensions.operationsContact.status === "PASS"} status={shop.operational.dimensions.operationsContact.status}>
               <form onSubmit={(event) => { event.preventDefault(); saveContact.mutate(); }}>
                 <div style={{ display: "flex", gap: 10, flexWrap: "wrap" }}>
                   <Input label="Contact name" value={contactNameValue} onChange={setContactNameForCurrentShop} />
@@ -395,11 +921,11 @@ export default function PartnerFirstShopOnboardingPage() {
                 <AdminButton type="submit" size="sm" variant="gold" disabled={saveContact.isPending} data-testid="first-shop-save-contact" style={{ marginTop: 12 }}>Save primary operations contact</AdminButton>
               </form>
             </Step>
-            <Step number={4} title="Partner Owner" complete={shop.operational.dimensions.owner.status === "PASS"}>
+            <Step number={4} title="Partner Owner" complete={shop.operational.dimensions.owner.status === "PASS"} status={shop.operational.dimensions.owner.status}>
               <p>{shop.owner ? `Owner: ${shop.owner.email} — ${shop.owner.readiness?.onboardingState ?? shop.owner.userStatus}` : "No Partner Owner has been invited."}</p>
               <Link href={`/admin/partners/${shop.organisation.id}/staff`} data-testid="first-shop-owner-action">Open Owner setup</Link>
             </Step>
-            <Step number={5} title="Staff and operator access" complete={shop.operational.dimensions.staff?.status === "PASS"}>
+            <Step number={5} title="Staff and operator access" complete={shop.operational.dimensions.staff?.status === "PASS"} status={shop.operational.dimensions.staff?.status}>
               <p data-testid="first-shop-staff-message">{shop.operational.dimensions.staff?.message ?? "Operator access could not be confirmed."}</p>
               {unassignedOperators.length > 0 && (
                 <div data-testid="first-shop-staff-unassigned" style={{ marginTop: 10 }}>
@@ -448,7 +974,7 @@ export default function PartnerFirstShopOnboardingPage() {
                 <Link href={`/admin/partners/${shop.organisation.id}/staff`} data-testid="first-shop-staff-action">Open Staff</Link>
               </div>
             </Step>
-            <Step number={6} title="Scanner station" complete={shop.operational.dimensions.station.status === "PASS"}>
+            <Step number={6} title="Scanner station" complete={shop.operational.dimensions.station.status === "PASS"} status={shop.operational.dimensions.station.status}>
               <p data-testid="first-shop-station-message">{shop.operational.dimensions.station.message}</p>
               {pendingStations.length > 0 ? (
                 <div data-testid="first-shop-station-pending" style={{ marginTop: 10 }}>
@@ -481,20 +1007,20 @@ export default function PartnerFirstShopOnboardingPage() {
                 <Link href={`/admin/partners/${shop.organisation.id}/stations`} data-testid="first-shop-station-action">Open station setup</Link>
               </div>
             </Step>
-            <Step number={7} title="Calibration and Scanner health" complete={shop.operational.dimensions.scanner.status === "PASS"}>
+            <Step number={7} title="Calibration and Scanner health" complete={shop.operational.dimensions.scanner.status === "PASS"} status={shop.operational.dimensions.scanner.status}>
               <p data-testid="first-shop-scanner-message">{shop.operational.dimensions.scanner.message}</p>
               <p style={{ marginTop: 8, fontSize: 12, opacity: 0.85 }}>
                 Calibration happens physically in the Scanner app on the shop Mac. This step turns green once the
                 station reports a VALID calibration.
               </p>
             </Step>
-            <Step number={8} title="Credits" complete={shop.operational.dimensions.credits.status === "PASS"}>
+            <Step number={8} title="Credits" complete={shop.operational.dimensions.credits.status === "PASS"} status={shop.operational.dimensions.credits.status}>
               <p data-testid="first-shop-credits-message">{shop.operational.dimensions.credits.message}</p>
               <div style={{ marginTop: 10 }}>
                 <Link href={`/admin/partners/${shop.organisation.id}/credits`} data-testid="first-shop-credits-action">Open credits / billing readiness</Link>
               </div>
             </Step>
-            <Step number={9} title="Test card" complete={shop.operational.testCard.state === "COMPLETE"}>
+            <Step number={9} title="Test card" complete={shop.operational.testCard.state === "COMPLETE"} status={shop.operational.testCard.status}>
               {/*
                 * EVERY WORD HERE COMES FROM THE SERVER. The state, the sentence and the actions are
                 * all produced by derivePartnerOperationalReadiness from the explicit
@@ -555,6 +1081,7 @@ export default function PartnerFirstShopOnboardingPage() {
               <p data-testid="first-shop-ready-message">{shop.operational.onboarding.message}</p>
               <ReadinessPanel readiness={shop.operational} audience="SUPER_ADMIN" />
             </Step>
+            </details>
           </>
         )}
       </div>

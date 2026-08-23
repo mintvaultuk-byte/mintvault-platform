@@ -203,8 +203,35 @@ function shop(overrides: Partial<PartnerTableRow> = {}): PartnerTableRow {
     stationsPendingApproval: 0,
     lastActivityAt: null,
     alertCount: 0,
+    nextAction: {
+      state: "READY",
+      code: "READY",
+      title: "Shop ready to grade",
+      message: "This shop can grade a card now and its test card is complete.",
+      source: null,
+      action: null,
+    },
     ...overrides,
   };
+}
+
+/** A shop whose ONE next action is the given blocker, as the server would have decided it. */
+function blockedShop(
+  next: Partial<NonNullable<PartnerTableRow["nextAction"]>>,
+  overrides: Partial<PartnerTableRow> = {}
+): PartnerTableRow {
+  return shop({
+    nextAction: {
+      state: "BLOCKED",
+      code: "CREDITS_REQUIRED",
+      title: "No Grading Credits",
+      message: "No Grading Credits left, so this shop cannot start a card.",
+      source: "credits",
+      action: { audience: "SUPER_ADMIN", label: "Open credits" },
+      ...next,
+    } as NonNullable<PartnerTableRow["nextAction"]>,
+    ...overrides,
+  });
 }
 
 function payload(rows: PartnerTableRow[], alerts: PartnerNetworkOverview["alerts"] = []): PartnerNetworkOverview {
@@ -237,41 +264,81 @@ function payload(rows: PartnerTableRow[], alerts: PartnerNetworkOverview["alerts
 }
 
 describe("needs attention", () => {
+  /*
+   * This list used to re-derive blockers from raw projection counts and rank them with its own
+   * severity rules — a second calculation over the question readiness already answers, which is
+   * how it came to disagree with the onboarding wizard about the same shop. It now renders the
+   * server's single next-action verdict, so these tests assert THAT and nothing about ranking.
+   */
+
   it("is empty when every shop is healthy, so the screen can say so plainly", () => {
     expect(needsAttention(payload([shop()]))).toEqual([]);
     expect(overview).toContain("ALL SHOPS OPERATING NORMALLY");
   });
 
-  it("raises a Scanner waiting for approval, and sends the operator to the inline approval", () => {
-    const [item] = needsAttention(payload([shop({ stationsPendingApproval: 1 })]));
-    expect(item.severity).toBe("critical");
-    expect(item.message).toBe("A Scanner is waiting for approval.");
-    expect(item.actionLabel).toBe("Approve Scanner");
-    // The onboarding wizard is the surface that already owns inline station approval.
-    expect(item.href).toBe("/admin/partners/shop-1/onboarding");
-  });
-
-  it("does not report the same Mac twice as both pending and unhealthy", () => {
-    // stationAttention counts pending stations too; only the surplus is a health problem.
-    const items = needsAttention(payload([shop({ stationsPendingApproval: 1, stationAttention: 1 })]));
-    expect(items.map((i) => i.actionLabel)).toEqual(["Approve Scanner"]);
-  });
-
-  it("separates no credits from low credits, and refuses to guess when the wallet is unreadable", () => {
-    expect(needsAttention(payload([shop({ availableCredits: 0 })]))[0]).toMatchObject({
+  it("renders the server's next action verbatim, and exactly one row per shop", () => {
+    const items = needsAttention(
+      payload([
+        blockedShop({
+          code: "STATION_APPROVAL_PENDING",
+          title: "Scanner waiting for approval",
+          message: "A Scanner is waiting for approval.",
+          source: "station",
+          action: { audience: "SUPER_ADMIN", label: "Approve Scanner" },
+        }),
+      ])
+    );
+    expect(items).toHaveLength(1);
+    expect(items[0]).toMatchObject({
       severity: "critical",
-      actionLabel: "Open credits",
+      message: "A Scanner is waiting for approval.",
+      actionLabel: "Approve Scanner",
+      href: "/admin/partners/shop-1/stations",
     });
-    expect(needsAttention(payload([shop({ availableCredits: LOW_CREDIT_THRESHOLD - 1 })]))[0]).toMatchObject({
+  });
+
+  it("never lists a shop twice, however many raw counts are also wrong", () => {
+    // Pending station AND zero credits AND no location: the server picked one, so one row appears.
+    const items = needsAttention(
+      payload([
+        blockedShop(
+          { code: "STATION_APPROVAL_PENDING", title: "Scanner waiting for approval", source: "station" },
+          { stationsPendingApproval: 1, stationAttention: 1, availableCredits: 0, activeLocations: 0 }
+        ),
+      ])
+    );
+    expect(items).toHaveLength(1);
+  });
+
+  it("maps the verdict's state onto severity: BLOCKED shouts, PENDING and UNKNOWN warn", () => {
+    const of = (state: "BLOCKED" | "PENDING" | "UNKNOWN") =>
+      needsAttention(payload([blockedShop({ state })]))[0]?.severity;
+    expect(of("BLOCKED")).toBe("critical");
+    expect(of("PENDING")).toBe("warning");
+    expect(of("UNKNOWN")).toBe("warning");
+  });
+
+  it("reports unreadable readiness as unreadable, rather than falling back to guessing", () => {
+    const items = needsAttention(payload([shop({ nextAction: null })]));
+    expect(items).toHaveLength(1);
+    expect(items[0]).toMatchObject({
       severity: "warning",
+      message: "Setup status could not be read for this shop.",
     });
+  });
+
+  it("keeps low credits as a warning readiness does not make, without doubling up on zero", () => {
+    // Readiness blocks at zero only; "getting low" is this surface's own, non-competing warning.
+    const low = needsAttention(payload([shop({ availableCredits: LOW_CREDIT_THRESHOLD - 1 })]));
+    expect(low).toHaveLength(1);
+    expect(low[0]).toMatchObject({ severity: "warning", actionLabel: "Open credits" });
+
+    // When zero IS the next action, the shop gets one credits row, not two.
+    const zero = needsAttention(payload([blockedShop({}, { availableCredits: 0 })]));
+    expect(zero.filter((i) => i.href.endsWith("/credits"))).toHaveLength(1);
+
     // null is "we could not read the wallet", which must never render as "no credits".
     expect(needsAttention(payload([shop({ availableCredits: null })]))).toEqual([]);
-  });
-
-  it("flags a shop with no active location, because nothing downstream can be set up", () => {
-    const items = needsAttention(payload([shop({ activeLocations: 0 })]));
-    expect(items[0]).toMatchObject({ severity: "critical", actionLabel: "Fix location" });
   });
 
   it("merges the server's own alerts and never lists one shop's problem twice", () => {
@@ -287,7 +354,6 @@ describe("needs attention", () => {
         detectedAt: null,
       },
     ];
-    // The derived low-credit item targets the SAME shop and destination as the server alert.
     const items = needsAttention(payload([shop({ availableCredits: 1 })], alerts));
     expect(items.filter((i) => i.href === "/admin/partners/shop-1/credits")).toHaveLength(1);
     // First writer wins: the server's own wording is kept.
@@ -296,12 +362,12 @@ describe("needs attention", () => {
 
   it("orders most-blocking first and stays stable between refreshes", () => {
     const rows = [
-      shop({ partnerId: "b", shopName: "Beta", status: "PENDING" }),
-      shop({ partnerId: "a", shopName: "Alpha", availableCredits: 0 }),
-      shop({ partnerId: "c", shopName: "Gamma", stationAttention: 1 }),
+      blockedShop({ state: "PENDING" }, { partnerId: "b", shopName: "Beta" }),
+      blockedShop({}, { partnerId: "a", shopName: "Alpha" }),
+      shop({ partnerId: "c", shopName: "Gamma", availableCredits: LOW_CREDIT_THRESHOLD - 1 }),
     ];
     const items = needsAttention(payload(rows));
-    expect(items.map((i) => i.severity)).toEqual(["critical", "warning", "info"]);
+    expect(items.map((i) => i.severity)).toEqual(["critical", "warning", "warning"]);
     expect(needsAttention(payload(rows))).toEqual(items);
   });
 

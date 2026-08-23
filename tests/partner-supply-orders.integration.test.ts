@@ -109,6 +109,17 @@ describe("Partner supply orders — real PostgreSQL security and payment evidenc
   }, 180_000);
 
   afterAll(async () => {
+    /*
+     * Close the supply-service's own pools BEFORE stopping the cluster. Importing
+     * server/partner/supply-service opens a pooled supply_runtime connection against
+     * PARTNER_DATABASE_URL; stopping the cluster underneath it makes PostgreSQL send
+     * 57P01 (terminating connection due to administrator command) to a live backend,
+     * which pg raises as an UNHANDLED error. Vitest then fails the whole run with
+     * every one of its 428 test files green — which is exactly how it presented.
+     * Every other partner integration suite already tears down this way.
+     */
+    const { closePartnerPools } = await import("../server/partner/db");
+    await closePartnerPools().catch(() => {});
     await admin?.end().catch(() => {});
     await cluster?.stop().catch(() => {});
   });

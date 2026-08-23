@@ -1,9 +1,12 @@
 /** Server-authoritative Partner operational readiness (P5). */
 import { appVersionSatisfies } from "./station-service";
 import { STATION_STALE_MINUTES } from "./dashboard-operations-service";
+import { PARTNER_READINESS_DIMENSION_ORDER, PARTNER_SETUP_STAGE_BY_DIMENSION } from "@shared/partner-readiness";
 import type {
   PartnerOperationalReadiness,
   PartnerReadinessCode,
+  PartnerNextAction,
+  PartnerSetupStage,
   PartnerTestCardReadiness,
   PartnerTestCardState,
   ReadinessAction,
@@ -131,17 +134,100 @@ const dim = (
 ): ReadinessDimension => ({ status, code, message, actions });
 
 /** Order matters: the first non-PASS dimension becomes the overall verdict — the thing to fix first. */
-const DIMENSION_ORDER: ReadinessDimensionKey[] = [
-  "organisation",
-  "location",
-  "delivery",
-  "operationsContact",
-  "owner",
-  "staff",
-  "station",
-  "scanner",
-  "credits",
-];
+/** Internal alias so the derivation body reads unchanged. The order itself is shared. */
+const DIMENSION_ORDER = PARTNER_READINESS_DIMENSION_ORDER;
+
+/**
+ * Short operator-facing headlines, one per reason code.
+ *
+ * A TOTAL Record on purpose: adding a PartnerReadinessCode without deciding how it reads to an
+ * operator is a compile error, not a blank card in production.
+ */
+const NEXT_ACTION_TITLE: Record<PartnerReadinessCode, string> = {
+  READY: "Shop ready to grade",
+  PARTNER_SUSPENDED: "Shop not yet live",
+  PARTNER_REVOKED: "Shop revoked",
+  PORTAL_DISABLED: "Partner portal disabled",
+  LOGIN_DISABLED: "Partner sign-in disabled",
+  EMERGENCY_STOP: "Emergency stop active",
+  OWNER_SETUP_REQUIRED: "Owner invitation required",
+  AWAITING_PASSWORD_SETUP: "Waiting for owner",
+  INVITATION_EXPIRED: "Owner invitation expired",
+  AWAITING_MFA_SETUP: "Owner must complete MFA",
+  USER_SUSPENDED: "Owner account suspended",
+  LOCATION_REQUIRED: "Location required",
+  DELIVERY_ADDRESS_REQUIRED: "Address required",
+  OPERATIONS_CONTACT_REQUIRED: "Operations contact required",
+  STATION_SETUP_REQUIRED: "No Scanner registered",
+  STATION_APPROVAL_PENDING: "Scanner waiting for approval",
+  STATION_UNAVAILABLE: "Scanner status unavailable",
+  SCANNER_OFFLINE: "Scanner offline",
+  SCANNER_UPDATE_REQUIRED: "Scanner update required",
+  CALIBRATION_REQUIRED: "Calibration required",
+  STAFF_OPERATOR_REQUIRED: "Operator required",
+  STAFF_LOCATION_ASSIGNMENT_REQUIRED: "Operator needs location",
+  CREDITS_REQUIRED: "No Grading Credits",
+  TEST_CARD_REQUIRED: "Test card required",
+  TEST_CARD_IN_PROGRESS: "Test card capturing",
+  TEST_CARD_AWAITING_REVIEW: "Test card ready for staff",
+  TEST_CARD_BLOCKED: "Test card blocked",
+  CONFIGURATION_UNAVAILABLE: "Setup status unavailable",
+};
+
+/**
+ * Choose the ONE thing to do next.
+ *
+ * Pure selection over decisions already made above — the first non-PASS dimension in the canonical
+ * order, then the onboarding test card, then READY. It never re-reads a fact, never re-ranks a
+ * status and never invents a step.
+ *
+ * The test card is reached only once every operational dimension passes, which is deliberate:
+ * `overall.ready` excludes the test card because a shop that never scanned one can still grade, so
+ * "prove one card end to end" is genuinely the last thing left rather than a parallel concern.
+ *
+ * A security or authority blocker already wins without a special case, because `organisation` —
+ * which carries revocation, suspension, portal/login disablement and emergency stop — is first in
+ * the canonical order.
+ */
+function deriveNextAction(
+  dimensions: Record<ReadinessDimensionKey, ReadinessDimension>,
+  testCard: PartnerTestCardReadiness,
+  ready: boolean
+): PartnerNextAction {
+  const blocked = DIMENSION_ORDER.map((k) => [k, dimensions[k]] as const).find(([, d]) => d.status !== "PASS");
+  if (blocked) {
+    const [source, dimension] = blocked;
+    return {
+      state: dimension.status === "PASS" ? "READY" : dimension.status,
+      code: dimension.code,
+      title: NEXT_ACTION_TITLE[dimension.code],
+      message: dimension.message,
+      source,
+      action: dimension.actions[0] ?? null,
+      stage: PARTNER_SETUP_STAGE_BY_DIMENSION[source],
+    };
+  }
+  if (ready && testCard.state !== "COMPLETE") {
+    return {
+      state: testCard.status === "PASS" ? "READY" : testCard.status,
+      code: testCard.code,
+      title: NEXT_ACTION_TITLE[testCard.code],
+      message: testCard.message,
+      source: "testCard",
+      action: testCard.actions[0] ?? null,
+      stage: "TEST",
+    };
+  }
+  return {
+    state: "READY",
+    code: "READY",
+    title: NEXT_ACTION_TITLE.READY,
+    message: "This shop can grade a card now and its test card is complete.",
+    source: null,
+    action: null,
+    stage: "LIVE",
+  };
+}
 
 /**
  * Decide whether a Partner can start a NEW grading job right now, and if not, what single condition
@@ -193,7 +279,9 @@ export function derivePartnerOperationalReadiness(facts: PartnerReadinessFacts):
       ? { complete: true, code: "READY" as const, message: "First-shop onboarding is complete." }
       : { complete: false, code: testCard.code, message: testCard.message };
 
-  return { overall, dimensions, actions, testCard, onboarding };
+  const nextAction = deriveNextAction(dimensions, testCard, ready);
+
+  return { overall, dimensions, actions, testCard, onboarding, nextAction };
 }
 
 /**

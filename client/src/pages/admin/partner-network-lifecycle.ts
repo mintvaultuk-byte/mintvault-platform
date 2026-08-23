@@ -1,4 +1,6 @@
+import { PARTNER_READINESS_DIMENSION_ORDER as DIMENSION_ORDER } from "@shared/partner-readiness";
 import type {
+  PartnerNextAction,
   PartnerOperationalReadiness,
   PartnerReadinessCode,
   ReadinessDimensionKey,
@@ -8,6 +10,14 @@ import type {
  * Presentation only: this translates the already-decided readiness payload into the operator's
  * next workspace destination. It deliberately does not decide readiness, calculate a score, or
  * turn an UNKNOWN into a pass.
+ *
+ * IT NO LONGER RANKS BLOCKERS. It used to find the first non-PASS dimension by walking
+ * `Object.keys(readiness.dimensions)` — JavaScript insertion order, which matched the authority's
+ * real fix-first order only by coincidence, and would have diverged silently the first time a
+ * dimension was added anywhere but the end of the object literal. It also could never surface the
+ * onboarding test card, because the test card deliberately lives outside `dimensions`. Both are now
+ * the server's job: `readiness.nextAction` is the single answer and this file only decides where
+ * that answer's link points.
  */
 export interface PartnerLifecycleSummary {
   currentStage: string;
@@ -60,38 +70,47 @@ export function partnerLifecycleSummary(
 ): PartnerLifecycleSummary | null {
   if (!readiness) return null;
 
-  const dimensions = (Object.keys(readiness.dimensions) as ReadinessDimensionKey[]).map(
-    (key) => [key, readiness.dimensions[key]] as const
-  );
-  const current = dimensions.find(([, dimension]) => dimension.status !== "PASS");
+  /*
+   * Ordered by the canonical priority, and defensive about absence: the server always emits all
+   * nine dimensions, but this is presentation code reading a network payload, and a truncated or
+   * older payload should degrade to "not shown" rather than throw inside a render.
+   */
+  const dimensions = DIMENSION_ORDER.flatMap((key) => {
+    const dimension = readiness.dimensions?.[key];
+    return dimension ? [[key, dimension] as const] : [];
+  });
   const completed = dimensions.filter(([, dimension]) => dimension.status === "PASS").map(([key]) => LABEL[key]);
   const blockers = dimensions
     .filter(([, dimension]) => dimension.status !== "PASS")
     .map(([key, dimension]) => `${LABEL[key]} — ${dimension.message}`);
 
-  if (!current) return { currentStage: "Ready to grade", completed, blockers: [], nextAction: null };
+  const next = readiness.nextAction;
+  if (next.state === "READY") return { currentStage: "Ready to grade", completed, blockers: [], nextAction: null };
 
-  const [key, dimension] = current;
-  // Portal, login and emergency-stop are programme controls, not a Partner profile detail.
-  // Keep this routing decision keyed to the server-owned reason code so an organisation that is
-  // merely pending still goes to its overview while a global control goes to canonical Settings.
-  if (PROGRAMME_SETTINGS_CODES.has(dimension.code)) {
-    return {
-      currentStage: STAGE[key],
-      completed,
-      blockers,
-      nextAction: { label: "Open Settings", href: "/admin/partners/settings" },
-    };
-  }
-
-  const destination = DESTINATION[key];
   return {
-    currentStage: STAGE[key],
+    currentStage: next.source === "testCard" ? "Onboarding test card" : next.source ? STAGE[next.source] : next.title,
     completed,
     blockers,
     nextAction: {
-      label: destination.label,
-      href: `/admin/partners/${partnerId}${destination.suffix}`,
+      // The server owns the wording; this file owns only where the link goes.
+      label: next.action?.label ?? next.title,
+      href: nextActionHref(partnerId, next),
     },
   };
+}
+
+/**
+ * Where the server's next action lives in the Super Admin product.
+ *
+ * The server deliberately does not ship Super Admin hrefs — its `ReadinessAction.href` is written
+ * for the Partner Portal, and a link is a property of the surface rendering it, not of the verdict.
+ * So the destination is chosen here, keyed on the server's own `source` and reason code, and
+ * nothing about WHICH blocker was selected is re-decided.
+ */
+export function nextActionHref(partnerId: string, next: PartnerNextAction): string {
+  // Portal, login and emergency-stop are programme controls, not a Partner profile detail.
+  if (PROGRAMME_SETTINGS_CODES.has(next.code)) return "/admin/partners/settings";
+  // The onboarding wizard owns the test card, exactly as it owns inline station approval.
+  if (next.source === "testCard" || next.source === null) return `/admin/partners/${partnerId}/onboarding`;
+  return `/admin/partners/${partnerId}${DESTINATION[next.source].suffix}`;
 }

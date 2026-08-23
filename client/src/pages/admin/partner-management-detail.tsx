@@ -537,6 +537,8 @@ export default function PartnerManagementDetailPage() {
     [org, userRows, statistics.data, branding.data, profile]
   );
   const lifecycle = partnerLifecycleSummary(partnerId, onboarding.data?.operational);
+  /** The ONE verdict. Same field the onboarding controller and the Shops column render. */
+  const nextAction = onboarding.data?.operational?.nextAction ?? null;
 
   const [profileTouched, setProfileTouched] = useState(false);
   const profileErrors: FieldErrors = useMemo(() => validateProfileForm(profileForm), [profileForm]);
@@ -966,13 +968,67 @@ export default function PartnerManagementDetailPage() {
               <div>Accreditation: {org.accreditation_level}</div>
               <div>Health: {org.health}</div>
               <div>Created: {new Date(org.created_at).toLocaleString()}</div>
+              {/*
+                * SETUP STATUS / NEXT ACTION, and nothing else at the top.
+                *
+                * This block used to lead with the completed list, the blocker list, the full
+                * readiness panel, an administrative-setup checklist and the invitation/session
+                * detail — all of it above the fold, all of it for a shop the operator usually just
+                * wants to see the state of. None of that is deleted; it moved below, under a
+                * disclosure. What stays is the two things the operator acts on.
+                */}
               <section
-                aria-label="Partner lifecycle"
-                data-testid="pm-lifecycle-summary"
-                style={{ marginTop: 12, padding: 12, border: "1px solid rgba(255,255,255,.14)", borderRadius: 8 }}
+                aria-label="Setup status"
+                data-testid="pm-setup-status"
+                data-stage={nextAction?.stage ?? "UNAVAILABLE"}
+                style={{
+                  marginTop: 12,
+                  padding: 14,
+                  border: `1px solid ${nextAction?.state === "READY" ? "#2f7d4f" : "rgba(255,255,255,.14)"}`,
+                  borderRadius: 8,
+                  background: nextAction?.state === "READY" ? "rgba(47,125,79,0.08)" : undefined,
+                }}
               >
-                <div style={{ fontWeight: 600 }}>Current stage: {lifecycle?.currentStage ?? "—"}</div>
-                {lifecycle ? (
+                {!nextAction ? (
+                  <div style={{ fontSize: 13 }}>Setup status could not be read right now.</div>
+                ) : nextAction.state === "READY" ? (
+                  <>
+                    <div style={{ fontSize: 11, letterSpacing: 1.4, opacity: 0.75, textTransform: "uppercase" }}>Shop live</div>
+                    <div style={{ fontWeight: 700, fontSize: 18, marginTop: 4 }}>Ready to grade.</div>
+                  </>
+                ) : (
+                  <>
+                    <div style={{ fontSize: 11, letterSpacing: 1.4, opacity: 0.75, textTransform: "uppercase" }}>Setup status</div>
+                    <div data-testid="pm-setup-stage" style={{ fontWeight: 700, fontSize: 18, margin: "4px 0 10px" }}>
+                      {nextAction.stage}
+                    </div>
+                    <div style={{ fontSize: 11, letterSpacing: 1.4, opacity: 0.75, textTransform: "uppercase" }}>Next action</div>
+                    <div data-testid="pm-setup-next-action" style={{ marginTop: 4 }}>{nextAction.message}</div>
+                    <Link
+                      href={`/admin/partners/${partnerId}/onboarding`}
+                      className="underline"
+                      data-testid="pm-lifecycle-next-action"
+                      style={{ display: "inline-block", marginTop: 10, fontSize: 13 }}
+                    >
+                      {nextAction.action?.label ?? "Open setup"}
+                    </Link>
+                  </>
+                )}
+              </section>
+
+              {/*
+                * EVERYTHING TECHNICAL, kept and collapsed. Support and engineering still need the
+                * detailed dimensions, the administrative record-keeping and the per-user invitation
+                * and session state; a normal onboarding never needs to open this.
+                */}
+              <details data-testid="pm-advanced-diagnostics" style={{ marginTop: 12 }}>
+                <summary style={{ cursor: "pointer", padding: "8px 0", fontWeight: 600 }}>
+                  Advanced diagnostics
+                </summary>
+                <div style={{ fontSize: 13, marginTop: 6 }}>
+                  Current stage: {lifecycle?.currentStage ?? "—"}
+                </div>
+                {lifecycle && (
                   <>
                     <div style={{ marginTop: 6, fontSize: 13 }}>
                       Completed: {lifecycle.completed.length ? lifecycle.completed.join(" · ") : "—"}
@@ -980,38 +1036,24 @@ export default function PartnerManagementDetailPage() {
                     <div style={{ marginTop: 6, fontSize: 13 }}>
                       Blockers: {lifecycle.blockers.length ? lifecycle.blockers.join(" · ") : "None"}
                     </div>
-                    {lifecycle.nextAction ? (
-                      <Link
-                        href={lifecycle.nextAction.href}
-                        className="underline"
-                        data-testid="pm-lifecycle-next-action"
-                        style={{ display: "inline-block", marginTop: 8, fontSize: 13 }}
-                      >
-                        Next action: {lifecycle.nextAction.label}
-                      </Link>
-                    ) : (
-                      <div style={{ marginTop: 8, fontSize: 13 }}>Next action: Start grading when work arrives.</div>
-                    )}
                   </>
-                ) : (
-                  <div style={{ marginTop: 6, fontSize: 13 }}>Readiness is unavailable right now.</div>
                 )}
-              </section>
-              <ReadinessPanel readiness={onboarding.data?.operational} audience="SUPER_ADMIN" />
-              <div style={{ marginTop: 12 }} data-testid="pm-setup-checklist">
-                <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 6 }}>
-                  <div style={{ fontWeight: 600 }}>Administrative setup</div>
-                  <span data-testid="pm-checklist-progress" style={{ fontSize: 12, opacity: 0.85 }}>
-                    {checklistProgress(checklist).done} of {checklistProgress(checklist).total} details recorded
-                  </span>
+                <ReadinessPanel readiness={onboarding.data?.operational} audience="SUPER_ADMIN" />
+                <div style={{ marginTop: 12 }} data-testid="pm-setup-checklist">
+                  <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 6 }}>
+                    <div style={{ fontWeight: 600 }}>Administrative setup</div>
+                    <span data-testid="pm-checklist-progress" style={{ fontSize: 12, opacity: 0.85 }}>
+                      {checklistProgress(checklist).done} of {checklistProgress(checklist).total} details recorded
+                    </span>
+                  </div>
+                  <div style={{ fontSize: 12, opacity: 0.7, marginBottom: 8 }}>
+                    Record-keeping only. These do not affect whether the shop can grade.
+                  </div>
+                  {checklist.map((item) => (
+                    <ChecklistItem key={item.key} state={item.state} label={item.label} hint={item.hint} />
+                  ))}
                 </div>
-                <div style={{ fontSize: 12, opacity: 0.7, marginBottom: 8 }}>
-                  Record-keeping only. These do not affect whether the shop can grade.
-                </div>
-                {checklist.map((item) => (
-                  <ChecklistItem key={item.key} state={item.state} label={item.label} hint={item.hint} />
-                ))}
-              </div>
+              </details>
               <OnboardingSection users={(onboarding.data?.users ?? []) as OnboardingUser[]} />
               {!(users.data?.users ?? []).some((u: any) => u.role === "OWNER") && (
                 <div style={{ marginTop: 8 }}>
