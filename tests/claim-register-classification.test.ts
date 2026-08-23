@@ -12,6 +12,7 @@
 import { describe, expect, it } from "vitest";
 import {
   classifyClaimRegister,
+  isSafeToIssue,
   summariseClaimRegister,
   type ClaimRegisterInput,
 } from "../shared/claim-register";
@@ -21,7 +22,7 @@ const LATER = new Date("2026-05-25T10:00:00Z");
 const EARLIER = new Date("2026-03-30T10:00:00Z");
 
 function input(over: Partial<ClaimRegisterInput> = {}): ClaimRegisterInput {
-  return {
+  const built: ClaimRegisterInput = {
     certId: "MV1",
     status: "active",
     ownershipStatus: "unclaimed",
@@ -30,11 +31,18 @@ function input(over: Partial<ClaimRegisterInput> = {}): ClaimRegisterInput {
     hasReadableCode: true,
     credentialIssuedAt: EARLIER,
     lastPrintedAt: null,
+    firstPrintedAt: null,
     printArtefactSurvives: false,
     credentialSelfConsistent: true,
     claimedAt: null,
+    isControlledTestReset: false,
+    hasPriorOwnershipEvent: false,
     ...over,
   };
+  // A card printed once has the same first and last print. Only a test that is
+  // explicitly modelling a REPRINT sets the two ends apart.
+  if (over.firstPrintedAt === undefined) built.firstPrintedAt = built.lastPrintedAt;
+  return built;
 }
 
 describe("claim credential classification", () => {
@@ -47,9 +55,96 @@ describe("claim credential classification", () => {
 
   it("a credential issued AFTER the print means the paper code is dead", () => {
     const v = classifyClaimRegister(input({ lastPrintedAt: PRINTED, credentialIssuedAt: LATER }));
-    expect(v.category).toBe("C_PRINTED_BROKEN");
+    expect(v.category).toBe("S_PRINTED_SUPERSEDED");
     expect(v.action).toBe("MANUAL_RECONCILIATION");
     expect(v.actionRequired).toBe(true);
+    expect(v.supersededPrintedCredential).toBe(true);
+    expect(v.customerRisk).toBe(true);
+  });
+
+  /*
+   * THE PRODUCTION DEFECT, PINNED.
+   *
+   * MV51: insert printed 2026-05-10; a REPRINT on 2026-06-04 silently minted a new
+   * credential; further reprints followed on 06-07, 07-02 and 07-16. Judged against
+   * the LAST print the row looks healthy — the credential predates 07-16 — and the
+   * first shipped rule therefore reported it as "printed, credential valid, do not
+   * touch it". Measured against production, that rule missed 12 of the 13 genuinely
+   * superseded certificates, including all ten customer cards.
+   *
+   * Supersession is a fact about the EARLIEST print: paper from 05-10 is dead no
+   * matter how many times the card was printed afterwards.
+   */
+  it("REGRESSION: a reprint after the mint must not hide a superseded credential", () => {
+    const firstPrint = new Date("2026-05-10T18:40:53Z");
+    const minted = new Date("2026-06-04T18:15:46Z");
+    const reprint = new Date("2026-07-16T12:03:04Z");
+
+    const v = classifyClaimRegister(
+      input({ certId: "MV51", firstPrintedAt: firstPrint, lastPrintedAt: reprint, credentialIssuedAt: minted })
+    );
+    expect(v.category).toBe("S_PRINTED_SUPERSEDED");
+    expect(v.supersededPrintedCredential).toBe(true);
+    expect(v.customerRisk).toBe(true);
+    expect(v.actionRequired).toBe(true);
+    // And it must never be offered for issuance.
+    expect(v.action).not.toBe("MAY_GENERATE");
+    expect(isSafeToIssue(input({ firstPrintedAt: firstPrint, lastPrintedAt: reprint, credentialIssuedAt: minted }), v)).toBe(
+      false
+    );
+  });
+
+  it("MV98: a CLAIMED card with a superseded earlier insert keeps its ownership but is surfaced", () => {
+    const firstPrint = new Date("2026-05-09T06:29:17Z");
+    const minted = new Date("2026-06-09T10:32:04Z");
+    const reprint = new Date("2026-06-09T10:32:14Z");
+    const v = classifyClaimRegister(
+      input({
+        certId: "MV98",
+        ownershipStatus: "claimed",
+        claimedAt: LATER,
+        firstPrintedAt: firstPrint,
+        lastPrintedAt: reprint,
+        credentialIssuedAt: minted,
+        hasPriorOwnershipEvent: true,
+      })
+    );
+    // Ownership is never disturbed …
+    expect(v.category).toBe("E_CLAIMED");
+    expect(v.action).not.toBe("MAY_GENERATE");
+    expect(v.ownershipConflict).toBe(false);
+    // … but the dead paper is not swept under the carpet.
+    expect(v.supersededPrintedCredential).toBe(true);
+    expect(v.customerRisk).toBe(true);
+    expect(v.actionRequired).toBe(true);
+  });
+
+  it("the controlled MV1–MV33 population is classified normally but is never customer risk", () => {
+    const over = { lastPrintedAt: PRINTED, credentialIssuedAt: LATER };
+    const customer = classifyClaimRegister(input({ certId: "MV51", ...over }));
+    const test = classifyClaimRegister(input({ certId: "MV3", ...over, isControlledTestReset: true }));
+
+    // Same defect, same category — the distinction is who is exposed to it.
+    expect(test.category).toBe(customer.category);
+    expect(test.supersededPrintedCredential).toBe(true);
+    expect(test.actionRequired).toBe(true);
+    expect(customer.customerRisk).toBe(true);
+    expect(test.customerRisk).toBe(false);
+    expect(test.controlledTestReset).toBe(true);
+  });
+
+  it("an ownership event with no surviving ownership is a conflict, and is never issued for", () => {
+    const lost = input({ certId: "MV12", hasPriorOwnershipEvent: true, ownershipStatus: "unclaimed",
+      hasCredentialHash: false, hasReadableCode: false, lastPrintedAt: null });
+    const v = classifyClaimRegister(lost);
+    expect(v.ownershipConflict).toBe(true);
+    // It still reads as "never printed, no credential" …
+    expect(v.category).toBe("D_NEVER_PRINTED_NO_CREDENTIAL");
+    // … but the lost ownership event disqualifies it from bulk issuance.
+    expect(isSafeToIssue(lost, v)).toBe(false);
+
+    const owned = classifyClaimRegister(input({ hasPriorOwnershipEvent: true, ownershipStatus: "claimed" }));
+    expect(owned.ownershipConflict).toBe(false);
   });
 
   it("mint-then-print within one operation is not a rotation", () => {
@@ -162,7 +257,7 @@ describe("claim credential classification", () => {
   it("counters agree with the rows behind them", () => {
     const population: ClaimRegisterInput[] = [
       input({ certId: "MV1", lastPrintedAt: PRINTED }), // A
-      input({ certId: "MV3", lastPrintedAt: PRINTED, credentialIssuedAt: LATER }), // C
+      input({ certId: "MV3", lastPrintedAt: PRINTED, credentialIssuedAt: LATER }), // S — superseded
       input({ certId: "MV4", lastPrintedAt: PRINTED, hasCredentialHash: false, hasReadableCode: false }), // C
       input({ certId: "MV6", hasCredentialHash: false, hasReadableCode: false }), // D
       input({ certId: "MV55", ownershipStatus: "claimed" }), // E
@@ -177,10 +272,75 @@ describe("claim credential classification", () => {
     expect(m.validCredential).toBe(6);
     expect(m.claimed).toBe(1);
     expect(m.outstanding).toBe(1);
-    expect(m.brokenPrintedCredential).toBe(2);
+    expect(m.brokenPrintedCredential).toBe(1); // MV4 only — MV3 is now its own superseded category
+    expect(m.printedCredentialSuperseded).toBe(1); // MV3
+    expect(m.printedNoCredential).toBe(1); // MV4
+    expect(m.customerRisk).toBe(2); // MV3 + MV4, neither marked as controlled test
+    expect(m.neverPrinted).toBe(5);
+    expect(m.printed + m.neverPrinted).toBe(m.totalEligible);
+    expect(m.claimVerificationRate).toBeCloseTo(1 / 3);
     expect(m.transferPending).toBe(1);
     expect(m.void).toBe(1);
     expect(m.stolen).toBe(1);
     expect(m.actionRequired).toBe(3); // MV3, MV4, MV90
+  });
+  it("claimVerificationRate is null — not zero — when nothing has been issued", () => {
+    const m = summariseClaimRegister(
+      [input({ hasCredentialHash: false, hasReadableCode: false })].map((i) => ({
+        input: i,
+        verdict: classifyClaimRegister(i),
+      }))
+    );
+    expect(m.printed).toBe(0);
+    // 0/0 is unknown. A dashboard that renders this as "0%" is lying.
+    expect(m.claimVerificationRate).toBeNull();
+  });
+
+  it("SAFETY: isSafeToIssue accepts ONLY never-printed, never-credentialed, unowned cards", () => {
+    let accepted = 0;
+    let considered = 0;
+    for (const status of ["active", "voided"])
+      for (const own of ["unclaimed", "claimed", "transfer_pending"])
+        for (const stolen of [null, "reported_stolen"])
+          for (const hasHash of [true, false])
+            for (const printed of [null, PRINTED])
+              for (const issued of [EARLIER, LATER])
+                for (const priorOwner of [true, false])
+                  for (const testReset of [true, false]) {
+                    const i = input({
+                      status,
+                      ownershipStatus: own,
+                      stolenStatus: stolen,
+                      hasCredentialHash: hasHash,
+                      hasReadableCode: hasHash,
+                      lastPrintedAt: printed,
+                      credentialIssuedAt: issued,
+                      hasPriorOwnershipEvent: priorOwner,
+                      isControlledTestReset: testReset,
+                    });
+                    considered += 1;
+                    if (isSafeToIssue(i, classifyClaimRegister(i))) {
+                      accepted += 1;
+                      // Every property that makes issuance dangerous must be absent.
+                      expect(i.lastPrintedAt).toBeNull();
+                      expect(i.firstPrintedAt).toBeNull();
+                      expect(i.hasCredentialHash).toBe(false);
+                      expect(i.status).toBe("active");
+                      expect(i.ownershipStatus).toBe("unclaimed");
+                      expect(i.stolenStatus).toBeNull();
+                      expect(i.hasPriorOwnershipEvent).toBe(false);
+                      expect(i.isControlledTestReset).toBe(false);
+                    }
+                  }
+    expect(considered).toBeGreaterThan(300); // non-vacuous
+    expect(accepted).toBeGreaterThan(0); // and it does accept something
+  });
+
+  it("the controlled test population is issued for ONLY when explicitly selected", () => {
+    const i = input({ certId: "MV20", hasCredentialHash: false, hasReadableCode: false,
+      lastPrintedAt: null, isControlledTestReset: true });
+    const v = classifyClaimRegister(i);
+    expect(isSafeToIssue(i, v)).toBe(false);
+    expect(isSafeToIssue(i, v, { includeControlledTestReset: true })).toBe(true);
   });
 });

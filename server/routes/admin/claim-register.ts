@@ -30,11 +30,31 @@ import {
 const PRINT_ACTIONS = ["print_batch_generated", "CLAIM_INSERT_SHEET_GENERATED", "CLAIM_INSERT_GENERATED"];
 
 interface PrintFact {
+  firstPrintedAt: Date;
   lastPrintedAt: Date;
   batchIds: string[];
 }
 
-/** Most recent print of a claim credential per certificate, across every historical route. */
+/**
+ * MV1–MV33 — the controlled pre-launch population.
+ *
+ * Established from production audit on 2026-08-23: every ownership event on or
+ * before 2026-05-03 was assigned to a single STAFF account and then deliberately
+ * reset (`hard_delete_reset`, `ownership_reset_pre_v445_retest`,
+ * `bulk_soft_delete_test_data`, all owner-authorised and all recorded as affecting
+ * no paying customer). Every ownership event from 2026-05-05 onward survives. The
+ * founder physically retains these cards, so their broken credentials are
+ * recoverable in a way a customer's never is.
+ */
+const CONTROLLED_TEST_RESET_MAX = 33;
+function isControlledTestReset(certId: string): boolean {
+  const m = /^MV(\d+)$/.exec(certId);
+  if (!m) return false;
+  const n = Number(m[1]);
+  return n >= 1 && n <= CONTROLLED_TEST_RESET_MAX;
+}
+
+/** First AND most recent print of a claim credential per certificate, across every historical route. */
 async function loadPrintHistory(): Promise<Map<string, PrintFact>> {
   const rows = await db.execute(sql`
     SELECT action, entity_id, created_at, details
@@ -46,9 +66,10 @@ async function loadPrintHistory(): Promise<Map<string, PrintFact>> {
   const note = (certId: string, at: Date, batchId?: string | null) => {
     if (!certId) return;
     const prev = out.get(certId);
-    if (!prev) out.set(certId, { lastPrintedAt: at, batchIds: batchId ? [batchId] : [] });
+    if (!prev) out.set(certId, { firstPrintedAt: at, lastPrintedAt: at, batchIds: batchId ? [batchId] : [] });
     else {
       if (at.getTime() > prev.lastPrintedAt.getTime()) prev.lastPrintedAt = at;
+      if (at.getTime() < prev.firstPrintedAt.getTime()) prev.firstPrintedAt = at;
       if (batchId && !prev.batchIds.includes(batchId)) prev.batchIds.push(batchId);
     }
   };
@@ -106,12 +127,20 @@ export interface ClaimRegisterRow {
   reason: string;
   actionRequired: boolean;
   lastClaimEvent: string | null;
+  firstPrintedAt: string | null;
+  credentialIssuedAt: string | null;
+  supersededPrintedCredential: boolean;
+  printedNoCredential: boolean;
+  customerRisk: boolean;
+  controlledTestReset: boolean;
+  ownershipConflict: boolean;
+  printArtefactSurvives: boolean;
 }
 
 export function registerClaimRegisterRoutes(app: Express): void {
   app.get("/api/admin/claim-register", requireAdmin, async (_req: Request, res: Response) => {
     try {
-      const [printHistory, certResult, eventResult] = await Promise.all([
+      const [printHistory, certResult, eventResult, ownershipEventResult] = await Promise.all([
         loadPrintHistory(),
         db.execute(sql`
           SELECT certificate_number, card_name, set_name, grade, grade_type, status,
@@ -126,7 +155,19 @@ export function registerClaimRegisterRoutes(app: Express): void {
           SELECT DISTINCT ON (cert_id) cert_id, event_type, created_at
           FROM ownership_history ORDER BY cert_id, created_at DESC
         `),
+        /*
+         * Real ownership events only. `auto_submission` is intake linkage written for
+         * every submitted card (602 rows on production) and is NOT a Vault Club claim —
+         * counting it would mark almost the whole database as an ownership conflict.
+         */
+        db.execute(sql`
+          SELECT DISTINCT cert_id FROM ownership_history
+          WHERE event_type IN ('initial_claim', 'transfer', 'transfer_completed')
+        `),
       ]);
+      const ownershipEventCerts = new Set(
+        (ownershipEventResult.rows as Array<Record<string, string>>).map((r) => r.cert_id)
+      );
 
       const lastEvent = new Map<string, { event_type: string; created_at: string }>();
       for (const r of eventResult.rows as Array<Record<string, string>>) {
@@ -160,17 +201,28 @@ export function registerClaimRegisterRoutes(app: Express): void {
           hasReadableCode: plain !== null,
           credentialIssuedAt: r.claim_code_created_at ? new Date(r.claim_code_created_at as string) : null,
           lastPrintedAt: print?.lastPrintedAt ?? null,
+          firstPrintedAt: print?.firstPrintedAt ?? null,
           printArtefactSurvives: false,
           credentialSelfConsistent: selfConsistent,
           claimedAt: r.claim_code_used_at ? new Date(r.claim_code_used_at as string) : null,
+          isControlledTestReset: isControlledTestReset(certId),
+          hasPriorOwnershipEvent: ownershipEventCerts.has(certId),
         };
         return { raw: r, input, batchIds: print?.batchIds ?? [] };
       });
 
       // Pass 2 — only the rows that need recovering get an R2 lookup.
-      const needsArtefact = staged.filter(
-        (s) => classifyClaimRegister(s.input).category === "C_PRINTED_BROKEN" && !s.input.hasCredentialHash
-      );
+      /*
+       * Pass 2 — an R2 lookup for every row an artefact could actually rescue: a
+       * printed card with no credential, AND a printed card whose credential was
+       * superseded (the artefact holds the ORIGINAL code, which is the one on the
+       * paper in circulation). The original build looked only at the first case and
+       * so never checked recoverability for the superseded population.
+       */
+      const needsArtefact = staged.filter((s) => {
+        const c = classifyClaimRegister(s.input);
+        return c.printedNoCredential || c.supersededPrintedCredential;
+      });
       const surviving = await artefactsSurviving(needsArtefact.flatMap((s) => s.batchIds));
       for (const s of needsArtefact) {
         if (s.batchIds.some((b) => surviving.has(b))) s.input.printArtefactSurvives = true;
@@ -202,6 +254,14 @@ export function registerClaimRegisterRoutes(app: Express): void {
           reason: verdict.reason,
           actionRequired: verdict.actionRequired,
           lastClaimEvent: ev ? `${ev.event_type} · ${new Date(ev.created_at).toISOString()}` : null,
+          firstPrintedAt: input.firstPrintedAt ? input.firstPrintedAt.toISOString() : null,
+          credentialIssuedAt: input.credentialIssuedAt ? input.credentialIssuedAt.toISOString() : null,
+          supersededPrintedCredential: verdict.supersededPrintedCredential,
+          printedNoCredential: verdict.printedNoCredential,
+          customerRisk: verdict.customerRisk,
+          controlledTestReset: verdict.controlledTestReset,
+          ownershipConflict: verdict.ownershipConflict,
+          printArtefactSurvives: input.printArtefactSurvives,
         };
       });
 

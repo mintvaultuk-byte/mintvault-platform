@@ -36,20 +36,35 @@ interface RegisterRow {
   reason: string;
   actionRequired: boolean;
   lastClaimEvent: string | null;
+  firstPrintedAt: string | null;
+  credentialIssuedAt: string | null;
+  supersededPrintedCredential: boolean;
+  printedNoCredential: boolean;
+  customerRisk: boolean;
+  controlledTestReset: boolean;
+  ownershipConflict: boolean;
+  printArtefactSurvives: boolean;
 }
 
 interface RegisterMetrics {
   totalEligible: number;
   printed: number;
+  neverPrinted: number;
   validCredential: number;
   claimed: number;
   outstanding: number;
   noCredential: number;
   brokenPrintedCredential: number;
+  printedCredentialSuperseded: number;
+  printedNoCredential: number;
+  customerRisk: number;
+  testReset: number;
+  ownershipConflict: number;
   transferPending: number;
   stolen: number;
   void: number;
   actionRequired: number;
+  claimVerificationRate: number | null;
 }
 
 interface RegisterResponse {
@@ -61,11 +76,17 @@ interface RegisterResponse {
 type FilterKey =
   | "all"
   | "printed"
+  | "neverPrinted"
   | "validCredential"
   | "claimed"
   | "outstanding"
   | "noCredential"
   | "brokenPrintedCredential"
+  | "printedCredentialSuperseded"
+  | "printedNoCredential"
+  | "customerRisk"
+  | "testReset"
+  | "ownershipConflict"
   | "transferPending"
   | "stolen"
   | "void"
@@ -74,11 +95,17 @@ type FilterKey =
 const METRICS: Array<{ key: FilterKey; label: string; tone?: "warn" | "bad" }> = [
   { key: "all", label: "Total eligible" },
   { key: "printed", label: "Printed" },
+  { key: "neverPrinted", label: "Never printed" },
   { key: "validCredential", label: "Valid credential" },
   { key: "claimed", label: "Claimed" },
   { key: "outstanding", label: "Outstanding" },
   { key: "noCredential", label: "No credential", tone: "warn" },
   { key: "brokenPrintedCredential", label: "Broken printed", tone: "bad" },
+  { key: "printedCredentialSuperseded", label: "Printed credential superseded", tone: "bad" },
+  { key: "printedNoCredential", label: "Printed / no credential", tone: "bad" },
+  { key: "customerRisk", label: "Customer risk", tone: "bad" },
+  { key: "testReset", label: "Test / reset" },
+  { key: "ownershipConflict", label: "Ownership conflict", tone: "warn" },
   { key: "transferPending", label: "Transfer pending" },
   { key: "stolen", label: "Stolen", tone: "bad" },
   { key: "void", label: "Void" },
@@ -92,6 +119,8 @@ function matchesFilter(row: RegisterRow, key: FilterKey): boolean {
       return true;
     case "printed":
       return row.printedAt !== null;
+    case "neverPrinted":
+      return row.printedAt === null;
     case "validCredential":
       return row.credentialStatus !== "absent";
     case "claimed":
@@ -102,6 +131,16 @@ function matchesFilter(row: RegisterRow, key: FilterKey): boolean {
       return row.credentialStatus === "absent";
     case "brokenPrintedCredential":
       return row.category === "C_PRINTED_BROKEN" || row.category === "B_PRINTED_RECOVERABLE";
+    case "printedCredentialSuperseded":
+      return row.supersededPrintedCredential;
+    case "printedNoCredential":
+      return row.printedNoCredential;
+    case "customerRisk":
+      return row.customerRisk;
+    case "testReset":
+      return row.controlledTestReset;
+    case "ownershipConflict":
+      return row.ownershipConflict;
     case "transferPending":
       return row.transferPending;
     case "stolen":
@@ -122,6 +161,7 @@ const CATEGORY_TONE: Record<string, string> = {
   F_TRANSFER_PENDING: "warn",
   G_VOID: "muted",
   C_PRINTED_BROKEN: "bad",
+  S_PRINTED_SUPERSEDED: "bad",
   H_STOLEN: "bad",
   I_CONFLICT: "bad",
 };
@@ -182,6 +222,21 @@ export default function AdminClaimRegisterPage() {
             <p className="text-xs text-white/50">
               Claim codes are never shown here. {data ? `Read ${new Date(data.generatedAt).toLocaleString("en-GB")}.` : ""}
             </p>
+            {data && (
+              <p className="text-xs text-white/60">
+                Claim verification rate:{" "}
+                <span className="font-bold tabular-nums text-white/80">
+                  {/* Unknown is "—". Nothing issued means the rate does not exist — it is not 0%. */}
+                  {data.metrics.claimVerificationRate === null
+                    ? "—"
+                    : `${(data.metrics.claimVerificationRate * 100).toFixed(1)}%`}
+                </span>
+                <span className="text-white/35">
+                  {" "}
+                  ({data.metrics.claimed} claimed of {data.metrics.printed} issued)
+                </span>
+              </p>
+            )}
           </div>
           <button
             type="button"
@@ -259,7 +314,32 @@ export default function AdminClaimRegisterPage() {
                 <tbody>
                   {rows.map((r) => (
                     <tr key={r.certId} className="border-b border-white/[0.06] last:border-0" data-testid={`row-${r.certId}`}>
-                      <td className="p-2 font-mono text-xs font-bold text-white tabular-nums">{r.certId}</td>
+                      <td className="p-2 font-mono text-xs font-bold text-white tabular-nums">
+                        {r.certId}
+                        <span className="mt-0.5 flex flex-wrap gap-1">
+                          {r.customerRisk && (
+                            <span
+                              className="rounded border border-red-500/40 bg-red-500/10 px-1 py-px text-[9px] font-bold uppercase text-red-300"
+                              data-testid={`badge-customer-risk-${r.certId}`}
+                            >
+                              Customer risk
+                            </span>
+                          )}
+                          {r.controlledTestReset && (
+                            <span
+                              className="rounded border border-white/20 bg-white/5 px-1 py-px text-[9px] font-bold uppercase text-white/50"
+                              data-testid={`badge-test-reset-${r.certId}`}
+                            >
+                              Test / reset
+                            </span>
+                          )}
+                          {r.ownershipConflict && (
+                            <span className="rounded border border-amber-500/40 bg-amber-500/10 px-1 py-px text-[9px] font-bold uppercase text-amber-300">
+                              Ownership conflict
+                            </span>
+                          )}
+                        </span>
+                      </td>
                       <td className="p-2 text-white/80">
                         {r.cardName ?? <span className="text-white/30">—</span>}
                         {r.setName && <span className="block text-[11px] text-white/40">{r.setName}</span>}
@@ -273,9 +353,17 @@ export default function AdminClaimRegisterPage() {
                               ? "hash only"
                               : "none"}
                         </span>
+                        {r.supersededPrintedCredential && (
+                          <span className="block text-[10px] font-bold text-red-300">not the printed code</span>
+                        )}
                       </td>
                       <td className="p-2 text-xs tabular-nums text-white/60">
                         {r.printedAt ? new Date(r.printedAt).toLocaleDateString("en-GB") : <span className="text-white/25">never</span>}
+                        {r.firstPrintedAt && r.firstPrintedAt !== r.printedAt && (
+                          <span className="block text-[10px] text-white/35">
+                            first {new Date(r.firstPrintedAt).toLocaleDateString("en-GB")}
+                          </span>
+                        )}
                       </td>
                       <td className="p-2 text-xs text-white/60">
                         {r.ownerEmailMasked ?? <span className="text-white/25">—</span>}
