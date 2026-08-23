@@ -170,6 +170,55 @@ export interface PartnerTestCardReadiness {
   } | null;
 }
 
+/**
+ * THE ONE NEXT ACTION — what the operator should do about this shop, right now.
+ *
+ * WHY THIS IS ON THE SERVER. The 10 checks below are correct but procedural, and every surface that
+ * showed them invented its own answer to "so what do I do first?": the Super Admin lifecycle helper
+ * walked `Object.keys(dimensions)` (JS insertion order, not the authority's fix-first order), and
+ * Needs Attention re-derived blockers from the DASHBOARD projection instead of from readiness at
+ * all — so the two could, and did, disagree about the same shop. This field is the single answer;
+ * clients render it and never rank blockers themselves.
+ *
+ * IT INTRODUCES NO RULE. It is a pure selection over values `derivePartnerOperationalReadiness`
+ * has already decided: the first non-PASS dimension in the canonical order, then the onboarding
+ * test card, then READY. No new check, no new step, no re-interpretation of a status.
+ *
+ * WHY THE TEST CARD COMES LAST. `overall.ready` deliberately excludes it — a shop that never
+ * scanned a test card can still grade — so the test card can only ever be the next action once
+ * every operational dimension already passes. That is exactly the operator's sequence: get the shop
+ * able to grade, then prove one card end to end.
+ */
+export interface PartnerNextAction {
+  /**
+   * What KIND of answer this is.
+   *
+   * BLOCKED   somebody must act, and `action` says who and what.
+   * PENDING   correctly in progress and waiting on someone else (owner setting a password, a
+   *           station awaiting our approval). Still the next thing to watch; not a fault.
+   * UNKNOWN   an authority could not be consulted. Never rendered as progress, never as READY.
+   * READY     nothing left to do. The shop can grade and its test card is finished.
+   */
+  state: "BLOCKED" | "PENDING" | "UNKNOWN" | "READY";
+  /** Stable machine code, reused verbatim from the dimension or test card this came from. */
+  code: PartnerReadinessCode;
+  /** Short operator-facing headline, e.g. "Scanner waiting for approval". */
+  title: string;
+  /** The same sentence the underlying dimension already produced. Never re-worded per surface. */
+  message: string;
+  /**
+   * Where this verdict came from, so a surface can deep-link to the right place and a test can
+   * assert provenance. `"testCard"` when it came from the onboarding test card, null when READY.
+   */
+  source: ReadinessDimensionKey | "testCard" | null;
+  /**
+   * The single control to render. ABSENT when no legitimate in-product action exists — waiting on
+   * the owner to set their own password is not something MintVault can click — in which case the
+   * surface shows `title`/`message` as status text. A button that cannot work is worse than none.
+   */
+  action: ReadinessAction | null;
+}
+
 export interface PartnerOperationalReadiness {
   overall: {
     /** True ONLY when every load-bearing dimension is PASS. Never true alongside UNKNOWN. */
@@ -180,6 +229,11 @@ export interface PartnerOperationalReadiness {
   dimensions: Record<ReadinessDimensionKey, ReadinessDimension>;
   /** The blocking dimensions in fix-first order, flattened for direct rendering. */
   actions: Array<ReadinessAction & { dimension: ReadinessDimensionKey; code: PartnerReadinessCode }>;
+  /**
+   * The ONE thing to do next. Always present — READY when there is nothing left. Every surface that
+   * shows "what now?" reads this and nothing else; see PartnerNextAction for why.
+   */
+  nextAction: PartnerNextAction;
   /**
    * The onboarding test card, kept OUTSIDE `dimensions` on purpose.
    *
