@@ -1262,6 +1262,9 @@ export function registerAuthRoutes(app: Express): void {
 
       (req.session as any).userId = user.id;
       (req.session as any).userEmail = user.email;
+      // Same reason as the magic-link path: without customerEmail a freshly signed-up
+      // user sees a logged-out dashboard until they log in again by another route.
+      (req.session as any).customerEmail = user.email;
       return res
         .status(201)
         .json({ id: user.id, email: user.email, display_name: user.display_name, email_verified: false });
@@ -1390,6 +1393,11 @@ export function registerAuthRoutes(app: Express): void {
       });
       (req.session as any).userId = user.id;
       (req.session as any).userEmail = user.email;
+      // customerEmail is the key requireCustomer reads, and every customer-facing
+      // read (/api/customer/me, /api/customer/certificates) is gated on it. Without
+      // it this login lands on /dashboard authenticated-but-invisible: /api/auth/me
+      // returns 200 while the collection 401s, so a claimed card never renders.
+      (req.session as any).customerEmail = user.email;
       await db.execute(
         sql`UPDATE users SET last_login_at = NOW(), last_login_ip = ${getClientIpForAuth(req)} WHERE id = ${user.id as string}`
       );
@@ -1609,6 +1617,9 @@ export function registerAuthRoutes(app: Express): void {
         sql`UPDATE users SET email = ${new_email.toLowerCase().trim()}, email_verified = false, email_verified_at = NULL, updated_at = NOW() WHERE id = ${userId}`
       );
       (req.session as any).userEmail = new_email.toLowerCase().trim();
+      // Move customerEmail with it. Leaving it on the OLD address kept the session
+      // reading the previous email's collection — a stale-identity read.
+      (req.session as any).customerEmail = new_email.toLowerCase().trim();
       const token = await createEmailVerificationToken(userId);
       const verifyUrl = `${getAppBaseUrl(req)}/api/auth/verify-email?token=${token}`;
       await sendWelcomeVerificationEmail(new_email, user.display_name as string | null, verifyUrl);

@@ -1449,6 +1449,11 @@ export async function sendCertificatePdf(data: {
     mintvaultuk.com/cert/${data.certId}
   </a>
 </p>
+<p style="margin:0 0 24px 0;">
+  Your card is now in your MintVault collection. Sign in with your email at
+  <a href="${APP_BASE_URL}/customer-login" style="color:#D4AF37;">mintvaultuk.com/customer-login</a>
+  to view it any time — no password needed the first time.
+</p>
 <p style="margin:0;color:#666;font-size:12px;">
   Keep this certificate safe. It serves as your official proof of registered ownership in the MintVault UK registry.
 </p>`;

@@ -1946,6 +1946,17 @@ export class DatabaseStorage implements IStorage {
 
     const cert = await this.getCertificateByCertId(verification.certId);
     if (!cert) return { success: false, error: "Certificate not found." };
+    // The front door (validateClaimCode) already requires status='active'. Re-assert
+    // it HERE too: a verification token minted while the cert was still active stays
+    // valid for 24h, so without this check a certificate voided inside that window
+    // could still be claimed through the stale link — establishing real ownership on
+    // an invalid certificate. Mirrors the front-door predicate exactly (fail closed).
+    if (cert.status !== "active") {
+      return {
+        success: false,
+        error: "This certificate is no longer valid and cannot be claimed. Contact support@mintvaultuk.com.",
+      };
+    }
     if ((cert as any).stolenStatus === "reported_stolen") {
       return {
         success: false,
