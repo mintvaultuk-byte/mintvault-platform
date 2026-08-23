@@ -11,6 +11,7 @@
  */
 import { databaseIdentity, partnerAdminQuery, withPartnerAdminTransaction } from "./db";
 import type { OwnerEmailEligibility, PartnerOwnerEmailClash } from "@shared/partner-owner-email";
+import { partnerDisplayName } from "@shared/partner-person-name";
 import { G5RequestError, canTransitionStatus, isPartnerStatus, type PartnerStatus } from "./partner-management-errors";
 import { hashPassword, isValidPartnerPassword } from "./auth";
 import { deliverInvitationToken, invitationDeliveryConfigured } from "./delivery";
@@ -1472,7 +1473,7 @@ async function createInvitationRecord(
   invitationId: string;
   deliveryStatus: string;
   invitationLink?: string;
-  delivery: { email: string; token: string; partnerName: string; roleCode: string; expiresAt: Date };
+  delivery: { email: string; token: string; partnerName: string; roleCode: string; expiresAt: Date; recipientName: string };
 }> {
   const token = crypto.randomBytes(32).toString("base64url");
   const expiresAt = new Date(Date.now() + INVITE_HOURS * 60 * 60 * 1000);
@@ -1484,14 +1485,25 @@ async function createInvitationRecord(
     [tenantId, userId]
   );
   maybeFailInvitePartnerForTest("before_invitation_insert");
-  const { rows } = await client.query<{ id: string; partner_name: string }>(
+  /*
+   * The recipient's stored name comes back with the insert, so BOTH the initial invitation and every
+   * resend address the person the same way from the same canonical row.
+   */
+  const { rows } = await client.query<{
+    id: string;
+    partner_name: string;
+    first_name: string | null;
+    last_name: string | null;
+  }>(
     `WITH ins AS (
        INSERT INTO partner_invitations
          (tenant_id, user_id, email, role_code, token_hash, invited_by_user_id, invited_by_email, expires_at)
        VALUES ($1,$2,$3,$4,$5,$6,$7,$8)
        RETURNING id
      )
-     SELECT ins.id, o.legal_name AS partner_name FROM ins, partner_organisations o WHERE o.id=$1`,
+     SELECT ins.id, o.legal_name AS partner_name, pu.first_name, pu.last_name
+       FROM ins, partner_organisations o, partner_users pu
+      WHERE o.id=$1 AND pu.id=$2`,
     [tenantId, userId, email, roleCode, sha256(token), actor.actorUserId, actor.actorEmail, expiresAt]
   );
   if (previous.rows.length > 0) {
@@ -1520,7 +1532,14 @@ async function createInvitationRecord(
   return {
     invitationId: rows[0].id,
     deliveryStatus: "DELIVERY_NOT_CONFIGURED",
-    delivery: { email, token, partnerName: rows[0].partner_name, roleCode, expiresAt },
+    delivery: {
+      email,
+      token,
+      partnerName: rows[0].partner_name,
+      roleCode,
+      expiresAt,
+      recipientName: partnerDisplayName({ firstName: rows[0].first_name, lastName: rows[0].last_name, email }),
+    },
     invitationLink: adminInviteLinkCopyAllowed() ? inviteLink(token) : undefined,
   };
 }
@@ -1528,7 +1547,7 @@ async function createInvitationRecord(
 async function recordInvitationDelivery(invite: {
   invitationId: string;
   deliveryStatus: string;
-  delivery: { email: string; token: string; partnerName: string; roleCode: string; expiresAt: Date };
+  delivery: { email: string; token: string; partnerName: string; roleCode: string; expiresAt: Date; recipientName: string };
 }): Promise<string> {
   if (!invitationDeliveryConfigured()) return invite.deliveryStatus;
   try {

@@ -1,4 +1,5 @@
 import crypto from "node:crypto";
+import { partnerDisplayName } from "@shared/partner-person-name";
 import type { PoolClient } from "pg";
 import { writePartnerAudit } from "./audit";
 import { deliverInvitationToken, invitationDeliveryConfigured } from "./delivery";
@@ -172,6 +173,7 @@ interface PendingInvitationDelivery {
   partnerName: string;
   roleCode: string;
   expiresAt: Date;
+  recipientName: string;
 }
 
 async function createInvitationRecord(
@@ -196,16 +198,23 @@ async function createInvitationRecord(
       RETURNING id`,
     [userId, ACTIVE_INVITE_STATUSES]
   );
-  const inserted = await c.query<{ id: string; partner_name: string }>(
+  // The recipient's stored name comes back with the insert, so the Partner-side invite addresses
+  // the person exactly as the Super Admin path does — one rule, one source row.
+  const inserted = await c.query<{
+    id: string;
+    partner_name: string;
+    first_name: string | null;
+    last_name: string | null;
+  }>(
     `WITH ins AS (
        INSERT INTO partner_invitations
          (tenant_id, user_id, email, role_code, token_hash, invited_by_user_id, expires_at)
        VALUES ($1,$2,$3,$4,$5,$6,$7)
        RETURNING id
      )
-     SELECT ins.id, o.legal_name AS partner_name
-       FROM ins, partner_organisations o
-      WHERE o.id=$1`,
+     SELECT ins.id, o.legal_name AS partner_name, pu.first_name, pu.last_name
+       FROM ins, partner_organisations o, partner_users pu
+      WHERE o.id=$1 AND pu.id=$2`,
     [actor.tenantId, userId, email, roleCode, sha256(token), actor.userId, expiresAt]
   );
   if (previous.rows.length > 0) {
@@ -229,7 +238,18 @@ async function createInvitationRecord(
     invitationId: inserted.rows[0].id,
     deliveryStatus,
     delivery: invitationDeliveryConfigured()
-      ? { email, token, partnerName: inserted.rows[0].partner_name, roleCode, expiresAt }
+      ? {
+          email,
+          token,
+          partnerName: inserted.rows[0].partner_name,
+          roleCode,
+          expiresAt,
+          recipientName: partnerDisplayName({
+            firstName: inserted.rows[0].first_name,
+            lastName: inserted.rows[0].last_name,
+            email,
+          }),
+        }
       : null,
   };
 }

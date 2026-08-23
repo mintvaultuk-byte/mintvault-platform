@@ -86,6 +86,8 @@ export async function deliverInvitationToken(data: {
   partnerName: string;
   roleCode: string;
   expiresAt: Date;
+  /** Who to address. Derived once by partnerDisplayName, never assembled at a call site. */
+  recipientName: string;
 }): Promise<void> {
   if (inviteAdapter) {
     await inviteAdapter(data);
@@ -94,11 +96,16 @@ export async function deliverInvitationToken(data: {
   const { sendPartnerInvitationEmail } = await import("../email");
   const sent = await sendPartnerInvitationEmail({
     email: data.email,
+    recipientName: data.recipientName,
     partnerName: data.partnerName,
     roleCode: data.roleCode,
-    invitationUrl: `${process.env.APP_URL || "https://mintvaultuk.com"}/partner/invite?token=${encodeURIComponent(
-      data.token
-    )}`,
+    /*
+     * requireCredentialLinkBaseUrl, NOT `APP_URL || brand domain`. A setup link must point at the
+     * deployment that MINTED the token: a staging-minted token in a production URL is a dead link,
+     * and the silent brand-domain fallback is exactly how that would happen if APP_URL were ever
+     * unset. It throws instead, which surfaces as DELIVERY_FAILED rather than a useless email.
+     */
+    invitationUrl: `${requireCredentialLinkBaseUrl()}/partner/invite?token=${encodeURIComponent(data.token)}`,
     expiresAt: data.expiresAt,
   });
   if (!sent) throw new Error("no invitation delivery provider configured — failing closed");

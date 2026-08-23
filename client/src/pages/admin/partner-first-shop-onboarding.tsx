@@ -40,7 +40,15 @@ type FirstShop = {
   profileVersion: number;
   mainLocation: Location | null;
   primaryContact: Contact | null;
-  owner: { id?: string; email: string; userStatus: string; readiness?: { onboardingState?: string } } | null;
+  owner: {
+    id?: string;
+    email: string;
+    userStatus: string;
+    /** CANONICAL delivery result: PENDING / SENT / DELIVERY_FAILED / REVOKED / CONSUMED. */
+    invitationStatus?: string | null;
+    invitationExpiresAt?: string | null;
+    readiness?: { onboardingState?: string };
+  } | null;
   operational: PartnerOperationalReadiness;
   /** When MintVault declared this shop's next card to be its onboarding test. null = not armed. */
   testCardArmedAt: string | null;
@@ -304,6 +312,13 @@ export default function PartnerFirstShopOnboardingPage() {
   const [checksOpen, setChecksOpen] = useState(false);
   /** Off by default: the operations contact is the Owner unless the operator says otherwise. */
   const [useDifferentContact, setUseDifferentContact] = useState(false);
+  /** Which already-saved sections the operator has deliberately opened for editing. */
+  const [editingContact, setEditingContact] = useState(false);
+  const [editingAddress, setEditingAddress] = useState(false);
+  /** Per-section notices, so one section's outcome is never read as another's. */
+  const [contactNotice, setContactNotice] = useState<string | null>(null);
+  const [resendNotice, setResendNotice] = useState<string | null>(null);
+  const [addressNotice, setAddressNotice] = useState<string | null>(null);
   const [legalName, setLegalName] = useState("");
   const [address, setAddress] = useState(emptyAddress);
   const [contactName, setContactName] = useState("");
@@ -368,31 +383,44 @@ export default function PartnerFirstShopOnboardingPage() {
   const saveAddress = useMutation({
     mutationFn: () =>
       apiRequest("PATCH", `${BASE}/partners/${partnerId}/first-shop/location`, {
-        deliveryAddress: address,
+        // Same defect, same fix: the field shows addressValue, so that is what must be sent.
+        deliveryAddress: addressValue,
         idempotencyKey: addressIdempotencyKey.current,
         reason: "guided Main location delivery address update",
       }),
     onSuccess: () => {
-      setBanner("Main location delivery address saved.");
+      setAddressNotice("✓ Main location address updated");
+      setEditingAddress(false);
       addressIdempotencyKey.current = requestKey();
       void onboarding.refetch();
     },
-    onError: (error) => setBanner(errorMessage(error, "The Main location address was not changed.")),
+    onError: () => setAddressNotice(null),
   });
   const saveContact = useMutation({
     mutationFn: () =>
       apiRequest("PUT", `${BASE}/partners/${partnerId}/first-shop/operations-contact`, {
-        fullName: contactName,
-        email: contactEmail,
+        /*
+         * THE DISPLAYED value, not the raw state.
+         *
+         * `contactName` is "" until the operator types, while the field SHOWS the saved contact via
+         * contactNameValue. Sending the raw state therefore submitted an empty name for a form that
+         * looked filled in, and the server correctly answered "fullName is required" — which landed
+         * in the page banner and was then still on screen when the operator pressed something else.
+         * That is the whole "Save does nothing / Resend says fullName is required" report.
+         */
+        fullName: contactNameValue,
+        email: contactEmailValue,
         idempotencyKey: contactIdempotencyKey.current,
         reason: "guided primary operations contact update",
       }),
     onSuccess: () => {
-      setBanner("Primary operations contact saved.");
+      setContactNotice("✓ Operations contact updated");
+      setEditingContact(false);
       contactIdempotencyKey.current = requestKey();
       void onboarding.refetch();
     },
-    onError: (error) => setBanner(errorMessage(error, "The operations contact was not changed.")),
+    // Beside the section, not in the page banner: an operator who pressed Save is looking here.
+    onError: () => setContactNotice(null),
   });
   const activate = useMutation({
     mutationFn: async () => {
@@ -431,6 +459,50 @@ export default function PartnerFirstShopOnboardingPage() {
     addressIdempotencyKey.current = requestKey();
     setAddress((current) => ({ ...current, ...(partnerId && current.line1 === "" ? existingAddress : {}), [key]: value }));
   };
+  /*
+   * Is the record already saved, and has the operator actually changed anything?
+   *
+   * "Saved" comes from the SERVER's readiness verdict for that dimension, not from whether the form
+   * happens to be populated — the form being populated is exactly what made the old permanent Save
+   * button look meaningful when it would have written an empty value.
+   *
+   * "Unchanged" is compared against the canonical stored record, so pressing Save on an untouched
+   * form performs no write at all.
+   */
+  /*
+   * HONEST DELIVERY STATUS. "Sent" is the CANONICAL invitation row's status, which is only set to
+   * SENT after the provider actually accepted the message; a failure writes DELIVERY_FAILED and the
+   * error. It is deliberately not inferred from "an invitation row exists".
+   */
+  const invitationStatus = shop?.owner?.invitationStatus ?? null;
+  const invitationHeadline =
+    invitationStatus === "SENT"
+      ? "Invitation sent to"
+      : invitationStatus === "DELIVERY_FAILED"
+        ? "Invitation delivery failed for"
+        : invitationStatus === "PENDING"
+          ? "Sending invitation to"
+          : "Invitation for";
+
+  const contactSaved = shop?.operational.dimensions.operationsContact.status === "PASS";
+  const addressSaved = shop?.operational.dimensions.delivery.status === "PASS";
+  const contactUnchanged =
+    contactNameValue.trim() === (contact?.full_name ?? "").trim() &&
+    contactEmailValue.trim().toLowerCase() === (contact?.email ?? "").trim().toLowerCase();
+  const addressUnchanged = (["line1", "line2", "city", "postcode", "country"] as const).every(
+    (key) => (addressValue[key] ?? "").trim() === (existingAddress[key] ?? "").trim()
+  );
+  const addressSummary = [
+    addressValue.line1,
+    addressValue.line2,
+    addressValue.city,
+    addressValue.postcode,
+    addressValue.country,
+  ]
+    .map((part) => (part ?? "").trim())
+    .filter((part) => part.length > 0)
+    .join(", ");
+
   const setContactNameForCurrentShop = (value: string) => {
     contactIdempotencyKey.current = requestKey();
     setContactName(value);
@@ -570,12 +642,17 @@ export default function PartnerFirstShopOnboardingPage() {
       apiRequest("POST", `${BASE}/partners/${partnerId}/users/${userId}/resend-invitation`, {
         reason: "First-shop onboarding: resend Owner invitation",
       }).then((r) => r.json()),
-    onSuccess: () => {
-      setBanner("Invitation sent.");
+    onSuccess: (data: { result?: { deliveryStatus?: string } }) => {
+      /*
+       * The provider's own verdict, not "the request returned 200". recordInvitationDelivery only
+       * reports SENT when the message was accepted, and DELIVERY_FAILED with the reason otherwise.
+       */
+      const status = data?.result?.deliveryStatus;
+      setResendNotice(status === "DELIVERY_FAILED" ? "Resend failed — MintVault could not deliver the email." : "✓ Invitation sent");
       void queryClient.invalidateQueries({ queryKey: [`${BASE}/partners/${partnerId}/users`] });
       void onboarding.refetch();
     },
-    onError: (error) => setBanner(errorMessage(error, "The invitation could not be sent.")),
+    onError: (error) => setResendNotice(`Resend failed — ${errorMessage(error, "the invitation could not be sent.")}`),
   });
 
   const armTestCard = useMutation({
@@ -837,13 +914,34 @@ export default function PartnerFirstShopOnboardingPage() {
               * stay in Advanced diagnostics, because none of them change what anybody does next.
               */}
             {shop.operational.nextAction.stage === "ACTIVATE" && shop.owner?.email && (
-              <p data-testid="first-shop-invited-email" style={{ margin: "0 0 14px", fontSize: 13 }}>
+              <div data-testid="first-shop-invited-email" data-invitation-status={invitationStatus} style={{ margin: "0 0 14px", fontSize: 13 }}>
                 <span style={{ fontSize: 11, letterSpacing: 1.3, opacity: 0.75, textTransform: "uppercase" }}>
-                  Invitation sent to
+                  {invitationHeadline}
                 </span>
                 <br />
                 <b>{shop.owner.email}</b>
-              </p>
+                {invitationStatus === "DELIVERY_FAILED" && (
+                  <p role="alert" data-testid="first-shop-invitation-failed" style={{ margin: "8px 0 0", color: "#ff8a8a", fontWeight: 600 }}>
+                    MintVault could not deliver this invitation. Resend it below.
+                  </p>
+                )}
+                {resendNotice && (
+                  <p data-testid="first-shop-resend-notice" style={{ margin: "8px 0 0", color: resendInvitation.isError || resendNotice.startsWith("Resend failed") ? "#ff8a8a" : "#7fd6a0", fontWeight: 600 }}>
+                    {resendNotice}
+                  </p>
+                )}
+                {shop.owner.id && (
+                  <AdminButton
+                    size="sm"
+                    disabled={resendInvitation.isPending}
+                    onClick={() => shop.owner?.id && resendInvitation.mutate(shop.owner.id)}
+                    data-testid="first-shop-resend-invitation"
+                    style={{ marginTop: 10 }}
+                  >
+                    {resendInvitation.isPending ? "Sending…" : "Resend invitation"}
+                  </AdminButton>
+                )}
+              </div>
             )}
             <NextActionCard
               next={shop.operational.nextAction}
@@ -896,19 +994,79 @@ export default function PartnerFirstShopOnboardingPage() {
               {shop.organisation.status === "PENDING" && <AdminButton size="sm" variant="gold" disabled={activate.isPending} onClick={() => activate.mutate()} data-testid="first-shop-activate">Activate Partner</AdminButton>}
             </Step>
             <Step number={2} title="Main location delivery address" complete={shop.operational.dimensions.delivery.status === "PASS"} status={shop.operational.dimensions.delivery.status}>
-              <form onSubmit={(event) => { event.preventDefault(); saveAddress.mutate(); }}>
-                <AddressFields value={addressValue} onChange={setAddressField} />
-                <AdminButton type="submit" size="sm" variant="gold" disabled={!mainLocation || saveAddress.isPending} data-testid="first-shop-save-address" style={{ marginTop: 12 }}>Save Main location address</AdminButton>
-              </form>
+              {/*
+                * SAVED -> EDIT -> SAVE CHANGES. A record that is already complete should not carry a
+                * permanent gold Save button: it invites a write that changes nothing, and when the
+                * form state was empty that write was actively wrong.
+                */}
+              {addressSaved && !editingAddress ? (
+                <div data-testid="first-shop-address-saved">
+                  <p style={{ margin: "0 0 8px", color: "#7fd6a0", fontWeight: 600 }}>✓ Main location address saved</p>
+                  <p style={{ margin: 0, fontSize: 13 }}>{addressSummary}</p>
+                  {addressNotice && (
+                    <p data-testid="first-shop-address-notice" style={{ margin: "8px 0 0", color: "#7fd6a0", fontSize: 13 }}>{addressNotice}</p>
+                  )}
+                  <AdminButton size="sm" onClick={() => { setAddressNotice(null); setEditingAddress(true); }} data-testid="first-shop-edit-address" style={{ marginTop: 12 }}>Edit</AdminButton>
+                </div>
+              ) : (
+                <form onSubmit={(event) => { event.preventDefault(); if (addressUnchanged) { setAddressNotice("No changes to save"); return; } saveAddress.mutate(); }}>
+                  <AddressFields value={addressValue} onChange={setAddressField} />
+                  {addressNotice && (
+                    <p data-testid="first-shop-address-notice" style={{ margin: "10px 0 0", fontSize: 13, opacity: 0.85 }}>{addressNotice}</p>
+                  )}
+                  {saveAddress.isError && (
+                    <p role="alert" data-testid="first-shop-address-error" style={{ margin: "10px 0 0", color: "#ff8a8a" }}>
+                      {errorMessage(saveAddress.error, "The Main location address was not changed.")}
+                    </p>
+                  )}
+                  <div style={{ display: "flex", gap: 8, marginTop: 12 }}>
+                    <AdminButton type="submit" size="sm" variant="gold" disabled={!mainLocation || saveAddress.isPending} data-testid="first-shop-save-address">
+                      {saveAddress.isPending ? "Saving…" : addressSaved ? "Save changes" : "Save Main location address"}
+                    </AdminButton>
+                    {addressSaved && (
+                      <AdminButton size="sm" onClick={() => { setEditingAddress(false); setAddress(emptyAddress); setAddressNotice(null); saveAddress.reset(); }} data-testid="first-shop-cancel-address">Cancel</AdminButton>
+                    )}
+                  </div>
+                </form>
+              )}
             </Step>
             <Step number={3} title="Primary operations contact" complete={shop.operational.dimensions.operationsContact.status === "PASS"} status={shop.operational.dimensions.operationsContact.status}>
-              <form onSubmit={(event) => { event.preventDefault(); saveContact.mutate(); }}>
-                <div style={{ display: "flex", gap: 10, flexWrap: "wrap" }}>
-                  <Input label="Contact name" value={contactNameValue} onChange={setContactNameForCurrentShop} />
-                  <Input label="Operational email" value={contactEmailValue} onChange={setContactEmailForCurrentShop} type="email" />
+              {contactSaved && !editingContact ? (
+                <div data-testid="first-shop-contact-saved">
+                  <p style={{ margin: "0 0 8px", color: "#7fd6a0", fontWeight: 600 }}>✓ Operations contact saved</p>
+                  <div style={{ fontSize: 11, letterSpacing: 1.3, opacity: 0.75, textTransform: "uppercase" }}>Name</div>
+                  <div style={{ marginBottom: 6 }}>{contactNameValue}</div>
+                  <div style={{ fontSize: 11, letterSpacing: 1.3, opacity: 0.75, textTransform: "uppercase" }}>Email</div>
+                  <div>{contactEmailValue}</div>
+                  {contactNotice && (
+                    <p data-testid="first-shop-contact-notice" style={{ margin: "8px 0 0", color: "#7fd6a0", fontSize: 13 }}>{contactNotice}</p>
+                  )}
+                  <AdminButton size="sm" onClick={() => { setContactNotice(null); setEditingContact(true); }} data-testid="first-shop-edit-contact" style={{ marginTop: 12 }}>Edit</AdminButton>
                 </div>
-                <AdminButton type="submit" size="sm" variant="gold" disabled={saveContact.isPending} data-testid="first-shop-save-contact" style={{ marginTop: 12 }}>Save primary operations contact</AdminButton>
-              </form>
+              ) : (
+                <form onSubmit={(event) => { event.preventDefault(); if (contactUnchanged) { setContactNotice("No changes to save"); return; } saveContact.mutate(); }}>
+                  <div style={{ display: "flex", gap: 10, flexWrap: "wrap" }}>
+                    <Input label="Contact name" value={contactNameValue} onChange={setContactNameForCurrentShop} />
+                    <Input label="Operational email" value={contactEmailValue} onChange={setContactEmailForCurrentShop} type="email" />
+                  </div>
+                  {contactNotice && (
+                    <p data-testid="first-shop-contact-notice" style={{ margin: "10px 0 0", fontSize: 13, opacity: 0.85 }}>{contactNotice}</p>
+                  )}
+                  {saveContact.isError && (
+                    <p role="alert" data-testid="first-shop-contact-error" style={{ margin: "10px 0 0", color: "#ff8a8a" }}>
+                      {errorMessage(saveContact.error, "The operations contact was not changed.")}
+                    </p>
+                  )}
+                  <div style={{ display: "flex", gap: 8, marginTop: 12 }}>
+                    <AdminButton type="submit" size="sm" variant="gold" disabled={saveContact.isPending} data-testid="first-shop-save-contact">
+                      {saveContact.isPending ? "Saving…" : contactSaved ? "Save changes" : "Save primary operations contact"}
+                    </AdminButton>
+                    {contactSaved && (
+                      <AdminButton size="sm" onClick={() => { setEditingContact(false); setContactName(""); setContactEmail(""); setContactNotice(null); saveContact.reset(); }} data-testid="first-shop-cancel-contact">Cancel</AdminButton>
+                    )}
+                  </div>
+                </form>
+              )}
             </Step>
             <Step number={4} title="Partner Owner" complete={shop.operational.dimensions.owner.status === "PASS"} status={shop.operational.dimensions.owner.status}>
               <p>{shop.owner ? `Owner: ${shop.owner.email} — ${shop.owner.readiness?.onboardingState ?? shop.owner.userStatus}` : "No Partner Owner has been invited."}</p>

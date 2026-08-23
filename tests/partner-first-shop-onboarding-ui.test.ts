@@ -406,7 +406,9 @@ describe("five-stage setup controller UI contract", () => {
     const src = page();
     expect(src).toContain("/resend-invitation");
     expect(src).toContain("Resend invitation");
-    expect(src).toContain('setBanner("Invitation sent.")');
+    // Reported beside the invitation, from the provider's own verdict — not a page banner.
+    expect(src).toContain("first-shop-resend-notice");
+    expect(src).toContain("data?.result?.deliveryStatus");
     // One invitation system: the route is the same one the Staff screen calls.
     const routes = read("server/partner/partner-management-routes.ts");
     expect(routes).toContain('r.post("/partners/:partnerId/users/:userId/resend-invitation"');
@@ -591,5 +593,89 @@ describe("owner email blocker UX", () => {
     const partnerFacing = read("client/src/pages/partner/login.tsx");
     expect(partnerFacing).not.toContain("already used by");
     expect(partnerFacing).not.toContain("owner-email-conflict");
+  });
+});
+
+describe("saved / edit pattern on already-complete records", () => {
+  const page = () => read("client/src/pages/admin/partner-first-shop-onboarding.tsx");
+
+  it("sends the DISPLAYED value, never the raw untouched state", () => {
+    const src = page();
+    /*
+     * THE BUG: the field showed contactNameValue (falling back to the saved contact) while the
+     * mutation sent contactName (""), so an untouched Save submitted an empty name and the server
+     * correctly answered "fullName is required".
+     */
+    expect(src).toContain("fullName: contactNameValue");
+    expect(src).toContain("email: contactEmailValue");
+    expect(src).toContain("deliveryAddress: addressValue");
+    /*
+     * Scoped to the SAVE mutations. The CREATE payload legitimately sends the raw typed state —
+     * there is no saved record to fall back to there, and the operator has just typed it.
+     */
+    const saveContactBlock = src.slice(src.indexOf("const saveContact = useMutation"), src.indexOf("const activate = useMutation"));
+    expect(codeOnly(saveContactBlock)).not.toContain("fullName: contactName,");
+    const saveAddressBlock = src.slice(src.indexOf("const saveAddress = useMutation"), src.indexOf("const saveContact = useMutation"));
+    expect(codeOnly(saveAddressBlock)).not.toContain("deliveryAddress: address,");
+  });
+
+  it("renders a saved state with Edit instead of a permanent Save button", () => {
+    const src = page();
+    expect(src).toContain("first-shop-contact-saved");
+    expect(src).toContain("Operations contact saved");
+    expect(src).toContain("first-shop-edit-contact");
+    expect(src).toContain("first-shop-address-saved");
+    expect(src).toContain("first-shop-edit-address");
+  });
+
+  it("performs NO write when nothing changed", () => {
+    const src = page();
+    expect(src).toContain("if (contactUnchanged) { setContactNotice(\"No changes to save\"); return; }");
+    expect(src).toContain("if (addressUnchanged) { setAddressNotice(\"No changes to save\"); return; }");
+    // Compared against the canonical stored record, not against emptiness.
+    expect(src).toContain("(contact?.full_name ?? \"\").trim()");
+  });
+
+  it("saved-ness comes from the SERVER's verdict, not from the form looking populated", () => {
+    const src = page();
+    expect(src).toContain('shop?.operational.dimensions.operationsContact.status === "PASS"');
+    expect(src).toContain('shop?.operational.dimensions.delivery.status === "PASS"');
+  });
+
+  it("confirms success, offers Cancel, and reports failure beside the section", () => {
+    const src = page();
+    expect(src).toContain("✓ Operations contact updated");
+    expect(src).toContain("✓ Main location address updated");
+    expect(src).toContain("first-shop-cancel-contact");
+    expect(src).toContain("first-shop-cancel-address");
+    expect(src).toContain("first-shop-contact-error");
+    expect(src).toContain("first-shop-address-error");
+  });
+
+  it("refetches canonical readiness rather than requiring a page refresh", () => {
+    const src = page();
+    expect((src.match(/onboarding\.refetch\(\)/g) ?? []).length).toBeGreaterThanOrEqual(4);
+  });
+});
+
+describe("honest invitation delivery status", () => {
+  const page = () => read("client/src/pages/admin/partner-first-shop-onboarding.tsx");
+
+  it("reads the canonical invitation status instead of assuming SENT", () => {
+    const src = page();
+    expect(src).toContain("shop?.owner?.invitationStatus");
+    expect(src).toContain('invitationStatus === "SENT"');
+    expect(src).toContain('invitationStatus === "DELIVERY_FAILED"');
+    expect(src).toContain("Invitation delivery failed for");
+  });
+
+  it("offers Resend inside the controller, with sending and outcome states", () => {
+    const src = page();
+    expect(src).toContain("first-shop-resend-invitation");
+    expect(src).toContain("Sending…");
+    expect(src).toContain("✓ Invitation sent");
+    expect(src).toContain("Resend failed");
+    // Disabled while in flight, so a double click cannot mint two invitations.
+    expect(src).toContain("disabled={resendInvitation.isPending}");
   });
 });
