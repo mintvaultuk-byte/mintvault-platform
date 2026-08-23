@@ -311,6 +311,7 @@ export default function PartnerManagementDetailPage() {
   const [inviteReason, setInviteReason] = useState("");
   const [inviteState, setInviteState] = useState<SubmitState>("idle");
   const [inviteError, setInviteError] = useState<string | null>(null);
+  const [resendNotice, setResendNotice] = useState<string | null>(null);
   const [inviteTouched, setInviteTouched] = useState(false);
   const [userState, setUserState] = useState<SubmitState>("idle");
   const [userError, setUserError] = useState<string | null>(null);
@@ -537,8 +538,38 @@ export default function PartnerManagementDetailPage() {
     [org, userRows, statistics.data, branding.data, profile]
   );
   const lifecycle = partnerLifecycleSummary(partnerId, onboarding.data?.operational);
+  /*
+   * RESEND, ON THE SCREEN THE OPERATOR ACTUALLY LANDS ON.
+   *
+   * It already existed inside the onboarding controller and inside Staff. Neither is where an
+   * operator goes when a shop is waiting on its Owner: three separate attempts to resend were made
+   * from Station Fleet, from here, and from Staff, and produced no request at all — not because the
+   * control was broken but because it was never on the screen in front of them. A repair action has
+   * to live where the problem is reported, so this is the same canonical route, called from here.
+   */
+  const resendOwnerInvitation = useMutation({
+    mutationFn: async (userId: string) =>
+      runAdminProtected(() =>
+        apiRequest("POST", `${BASE}/partners/${partnerId}/users/${userId}/resend-invitation`, {
+          reason: "Shop workspace: resend Owner invitation",
+        }).then((r) => r.json())
+      ),
+    onSuccess: (data: { result?: { deliveryStatus?: string } }) => {
+      setResendNotice(
+        data?.result?.deliveryStatus === "DELIVERY_FAILED"
+          ? "Resend failed — the email provider rejected the message."
+          : "✓ Email accepted for delivery"
+      );
+      void onboarding.refetch();
+    },
+    onError: (error) => setResendNotice(`Resend failed — ${serverErrorMessage((error as { body?: unknown })?.body, "the invitation could not be sent.")}`),
+  });
+
   /** The ONE verdict. Same field the onboarding controller and the Shops column render. */
   const nextAction = onboarding.data?.operational?.nextAction ?? null;
+  const ownerUser = onboarding.data?.owner ?? null;
+  /** Waiting on the Owner to finish their own setup — the only case a resend can help. */
+  const ownerAwaitingSetup = (ownerUser as { userStatus?: string } | null)?.userStatus === "INVITED";
 
   const [profileTouched, setProfileTouched] = useState(false);
   const profileErrors: FieldErrors = useMemo(() => validateProfileForm(profileForm), [profileForm]);
@@ -1004,6 +1035,43 @@ export default function PartnerManagementDetailPage() {
                     </div>
                     <div style={{ fontSize: 11, letterSpacing: 1.4, opacity: 0.75, textTransform: "uppercase" }}>Next action</div>
                     <div data-testid="pm-setup-next-action" style={{ marginTop: 4 }}>{nextAction.message}</div>
+                    {/*
+                      * WAITING ON THE OWNER: show who was invited, what the provider actually said,
+                      * and offer the repair right here. "Email accepted for delivery" rather than
+                      * "sent" — MintVault ingests no delivery webhooks, so inbox receipt is not
+                      * something it can honestly claim.
+                      */}
+                    {ownerAwaitingSetup && (ownerUser as { email?: string } | null)?.email && (
+                      <div data-testid="pm-owner-invitation" style={{ marginTop: 12, paddingTop: 12, borderTop: "1px solid rgba(255,255,255,.12)" }}>
+                        <div style={{ fontSize: 11, letterSpacing: 1.3, opacity: 0.75, textTransform: "uppercase" }}>
+                          Owner invitation
+                        </div>
+                        <div style={{ margin: "2px 0 8px" }}>
+                          <b>{(ownerUser as { email?: string }).email}</b>
+                        </div>
+                        {resendNotice && (
+                          <p
+                            data-testid="pm-resend-notice"
+                            style={{ margin: "0 0 8px", fontWeight: 600, color: resendNotice.startsWith("Resend failed") ? "#ff8a8a" : "#7fd6a0" }}
+                          >
+                            {resendNotice}
+                          </p>
+                        )}
+                        {(ownerUser as { id?: string }).id && (
+                          <AdminButton
+                            size="sm"
+                            disabled={resendOwnerInvitation.isPending}
+                            onClick={() => {
+                              const id = (ownerUser as { id?: string }).id;
+                              if (id) resendOwnerInvitation.mutate(id);
+                            }}
+                            data-testid="pm-resend-owner-invitation"
+                          >
+                            {resendOwnerInvitation.isPending ? "Sending…" : "Resend invitation"}
+                          </AdminButton>
+                        )}
+                      </div>
+                    )}
                     <Link
                       href={`/admin/partners/${partnerId}/onboarding`}
                       className="underline"

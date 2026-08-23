@@ -681,3 +681,34 @@ describe("honest invitation delivery status", () => {
     expect(src).toContain("disabled={resendInvitation.isPending}");
   });
 });
+
+describe("the resend control is on the screen the operator actually lands on", () => {
+  it("the Shop workspace offers Resend when the Owner has not finished setup", () => {
+    const src = read("client/src/pages/admin/partner-management-detail.tsx");
+    /*
+     * Three separate resend attempts produced NO server request at all — from Station Fleet, from
+     * the Shop workspace and from Staff — because the control was only ever on the onboarding page.
+     * A repair action has to live where the problem is reported.
+     */
+    expect(src).toContain("pm-resend-owner-invitation");
+    expect(src).toContain("pm-owner-invitation");
+    expect(src).toContain('userStatus === "INVITED"');
+  });
+
+  it("uses the SAME canonical route, behind the same step-up, and never a second flow", () => {
+    const src = read("client/src/pages/admin/partner-management-detail.tsx");
+    expect(src).toContain("/resend-invitation");
+    expect(src).toContain("runAdminProtected");
+    // One invitation system: the identical path the onboarding controller and Staff both call.
+    const onboarding = read("client/src/pages/admin/partner-first-shop-onboarding.tsx");
+    expect(onboarding).toContain("/resend-invitation");
+  });
+
+  it("cannot fire twice from one double-click, and reports the provider's verdict", () => {
+    const src = read("client/src/pages/admin/partner-management-detail.tsx");
+    expect(src).toContain("disabled={resendOwnerInvitation.isPending}");
+    expect(src).toContain("data?.result?.deliveryStatus");
+    expect(src).toContain("Email accepted for delivery");
+    expect(src).toContain("Resend failed");
+  });
+});
