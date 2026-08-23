@@ -234,6 +234,44 @@ describe("claim code → ownership (real storage, real PostgreSQL 17)", () => {
     expect(await storage.validateClaimCode(CERT, "ANYCODEATALL")).toBe(false);
   });
 
+  it("REGRESSION: a reprint returns the SAME code and never rotates a printed credential", async () => {
+    const original = await resetCert(pool!);
+
+    // Reprint while unclaimed — the ordinary case.
+    expect(await storage.getOrGenerateClaimCode(CERT)).toBe(original);
+
+    // Reprint after the card has been claimed. The printed insert is still the
+    // buyer's credential for a transfer, so this must NOT mint a new one.
+    await storage.completeClaimByToken(await storage.createClaimVerification(CERT, OWNER, null, false));
+    expect(await storage.getOrGenerateClaimCode(CERT)).toBe(original);
+
+    // And that same printed code must still authorise a buyer-initiated transfer.
+    const transfer = await storage.validateClaimCodeForTransfer(CERT, original);
+    expect(transfer.valid).toBe(true);
+    expect(transfer.currentOwnerEmail).toBe(OWNER);
+  });
+
+  it("REGRESSION: a code is never issued unless the write is confirmed to have landed", async () => {
+    // No such certificate — the UPDATE matches zero rows. Before the fix this
+    // returned a valid-looking code that a caller would print onto a physical
+    // insert the server had no record of.
+    await expect(storage.generateClaimCode("MV-DOES-NOT-EXIST")).rejects.toThrow(/would not be recoverable/);
+
+    const orphan = await pool!.query(
+      `SELECT COUNT(*)::int n FROM certificates WHERE certificate_number = 'MV-DOES-NOT-EXIST'`
+    );
+    expect(orphan.rows[0].n).toBe(0);
+  });
+
+  it("an explicit rotation still replaces the credential, and the old one stops working", async () => {
+    const original = await resetCert(pool!);
+    const rotated = await storage.generateClaimCode(CERT);
+
+    expect(rotated).not.toBe(original);
+    expect(await storage.validateClaimCode(CERT, original)).toBe(false);
+    expect(await storage.validateClaimCode(CERT, rotated)).toBe(true);
+  });
+
   it("a claim code is accepted case-insensitively and trimmed", async () => {
     const code = await resetCert(pool!);
     expect(await storage.validateClaimCode(CERT, `  ${code.toLowerCase()}  `)).toBe(true);

@@ -1856,10 +1856,26 @@ export class DatabaseStorage implements IStorage {
     return Array.from({ length }, () => chars[crypto.randomInt(chars.length)]).join("");
   }
 
+  /**
+   * MINT a NEW claim credential, replacing any existing one. This is a ROTATION:
+   * it invalidates whatever code is already printed on the physical insert for
+   * this certificate. Only call it from an explicitly authorised rotation path
+   * (the admin regenerate route) or when the certificate genuinely has no code.
+   * Everything on the printing path must go through `getOrGenerateClaimCode`,
+   * which never rotates.
+   *
+   * The credential is returned ONLY after the write is confirmed to have landed
+   * on exactly one row. Previously the UPDATE's row count was ignored, so a
+   * certId that matched nothing still returned a perfectly valid-looking code —
+   * which a caller would then render onto a physical insert that the server had
+   * no record of and could never validate. A printed credential the server
+   * cannot recover is unrecoverable by design: the code is random (12 chars from
+   * a 32-symbol alphabet), stored nowhere else, and derivable from nothing.
+   */
   async generateClaimCode(certId: string): Promise<string> {
     const code = this._generateRandomCode(12);
     const hash = this._hashClaimCode(code);
-    await db.execute(sql`
+    const result = await db.execute(sql`
       UPDATE certificates
       SET claim_code_hash = ${hash},
           claim_code = ${code},
@@ -1869,20 +1885,37 @@ export class DatabaseStorage implements IStorage {
           updated_at = NOW()
       WHERE certificate_number = ${certId}
     `);
+    const persisted = (result as { rowCount?: number | null }).rowCount ?? 0;
+    if (persisted !== 1) {
+      throw new Error(
+        `Refusing to issue a claim code for ${certId}: the write affected ${persisted} rows, ` +
+          `so the credential would not be recoverable by the server. Nothing was printed.`
+      );
+    }
     return code;
   }
 
-  // Returns the existing claim code if the cert is unclaimed, otherwise generates a new one.
-  // Used by claim insert PDF downloads so repeated downloads don't invalidate the code.
+  /**
+   * Return the certificate's EXISTING claim credential, minting one only when it
+   * genuinely has none. This is the only entry point the printing path may use.
+   *
+   * It must never rotate. The printed code stays the customer's credential for
+   * the life of the card: `validateClaimCode` accepts it for the first claim, and
+   * `validateClaimCodeForTransfer` accepts that SAME code on an already-claimed
+   * certificate to authorise a buyer-initiated transfer. The previous predicate
+   * required unclaimed + unused + active, so a reprint of a claimed card fell
+   * through to a fresh mint and silently killed the code on the insert already in
+   * the buyer's hands — the one credential they need to transfer the card.
+   *
+   * We do not know who holds an unclaimed card, so a rotated code cannot be
+   * reissued to anyone. Reuse is the only safe behaviour.
+   */
   async getOrGenerateClaimCode(certId: string): Promise<string> {
     const result = await db.execute(sql`
       SELECT claim_code FROM certificates
       WHERE certificate_number = ${certId}
-        AND ownership_status = 'unclaimed'
         AND claim_code IS NOT NULL
-        AND claim_code_used_at IS NULL
         AND deleted_at IS NULL
-        AND status = 'active'
       LIMIT 1
     `);
     if (result.rows.length > 0) {
