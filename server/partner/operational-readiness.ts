@@ -1,11 +1,12 @@
 /** Server-authoritative Partner operational readiness (P5). */
 import { appVersionSatisfies } from "./station-service";
 import { STATION_STALE_MINUTES } from "./dashboard-operations-service";
-import { PARTNER_READINESS_DIMENSION_ORDER } from "@shared/partner-readiness";
+import { PARTNER_READINESS_DIMENSION_ORDER, PARTNER_SETUP_STAGE_BY_DIMENSION } from "@shared/partner-readiness";
 import type {
   PartnerOperationalReadiness,
   PartnerReadinessCode,
   PartnerNextAction,
+  PartnerSetupStage,
   PartnerTestCardReadiness,
   PartnerTestCardState,
   ReadinessAction,
@@ -203,6 +204,7 @@ function deriveNextAction(
       message: dimension.message,
       source,
       action: dimension.actions[0] ?? null,
+      stage: PARTNER_SETUP_STAGE_BY_DIMENSION[source],
     };
   }
   if (ready && testCard.state !== "COMPLETE") {
@@ -213,6 +215,7 @@ function deriveNextAction(
       message: testCard.message,
       source: "testCard",
       action: testCard.actions[0] ?? null,
+      stage: "TEST",
     };
   }
   return {
@@ -222,6 +225,7 @@ function deriveNextAction(
     message: "This shop can grade a card now and its test card is complete.",
     source: null,
     action: null,
+    stage: "LIVE",
   };
 }
 

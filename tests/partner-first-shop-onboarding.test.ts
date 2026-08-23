@@ -376,4 +376,116 @@ describe("first-shop guided onboarding (real PostgreSQL)", () => {
     } as import("express").Request;
     await expect(partnerRoutes.currentPartnerOwnerActor(managerRequest)).rejects.toMatchObject({ code: "FORBIDDEN" });
   });
+
+  /*
+   * THE SIMPLIFIED CREATE FORM. One form now asks for the shop, the Owner and the delivery address
+   * and nothing else, so these prove the SERVER supplies what the form stopped asking for — and
+   * that it supplies exactly one of each, in the same transaction.
+   */
+  it("names the Main location itself when the form does not ask for one", async () => {
+    const key = "first-shop-default-location-0101";
+    const result = await service.createFirstShopOnboarding(
+      actor(key),
+      {
+        legalName: "Default Location Ltd",
+        deliveryAddress: { line1: "2 Default Way", city: "Leeds", postcode: "LS1 1AA", country: "United Kingdom" },
+        owner: { firstName: "Dee", lastName: "Fault", email: "owner@default-location.test" },
+      } as never,
+      "guided first-shop default location"
+    );
+    const partnerId = (result.result as { partnerId: string }).partnerId;
+    const locations = await admin.query<{ name: string; status: string }>(
+      "SELECT name, status FROM partner_locations WHERE tenant_id=$1",
+      [partnerId]
+    );
+    expect(locations.rows).toHaveLength(1);
+    expect(locations.rows[0]).toMatchObject({ name: "Main location", status: "ACTIVE" });
+  });
+
+  it("makes the Owner the operations contact, once, when no other contact is given", async () => {
+    const key = "first-shop-default-contact-0102";
+    const result = await service.createFirstShopOnboarding(
+      actor(key),
+      {
+        legalName: "Default Contact Ltd",
+        deliveryAddress: { line1: "3 Contact Road", city: "Bristol", postcode: "BS1 1AA", country: "United Kingdom" },
+        owner: { firstName: "Olive", lastName: "Owner", email: "olive@default-contact.test" },
+      } as never,
+      "guided first-shop default contact"
+    );
+    const partnerId = (result.result as { partnerId: string }).partnerId;
+    const contacts = await admin.query<{ full_name: string; email: string; is_primary: boolean }>(
+      "SELECT full_name, email, is_primary FROM partner_contacts WHERE tenant_id=$1 AND contact_type='operations'",
+      [partnerId]
+    );
+    // Exactly ONE. The duplicate-contact failure this default removes was two rows differing by a typo.
+    expect(contacts.rows).toHaveLength(1);
+    expect(contacts.rows[0]).toMatchObject({
+      full_name: "Olive Owner",
+      email: "olive@default-contact.test",
+      is_primary: true,
+    });
+  });
+
+  it("still honours a deliberately different operations contact", async () => {
+    const key = "first-shop-explicit-contact-0103";
+    const result = await service.createFirstShopOnboarding(
+      actor(key),
+      {
+        legalName: "Explicit Contact Ltd",
+        deliveryAddress: { line1: "4 Explicit Lane", city: "Cardiff", postcode: "CF10 1AA", country: "United Kingdom" },
+        operationsContact: { fullName: "Ops Person", email: "ops@explicit-contact.test" },
+        owner: { firstName: "Ollie", lastName: "Owner", email: "owner@explicit-contact.test" },
+      } as never,
+      "guided first-shop explicit contact"
+    );
+    const partnerId = (result.result as { partnerId: string }).partnerId;
+    const contacts = await admin.query<{ full_name: string; email: string }>(
+      "SELECT full_name, email FROM partner_contacts WHERE tenant_id=$1 AND contact_type='operations'",
+      [partnerId]
+    );
+    expect(contacts.rows).toHaveLength(1);
+    expect(contacts.rows[0]).toMatchObject({ full_name: "Ops Person", email: "ops@explicit-contact.test" });
+  });
+
+  it("gives the Owner canonical Main-location access WITHOUT a separate assignment step", async () => {
+    const key = "first-shop-owner-location-0104";
+    const result = await service.createFirstShopOnboarding(
+      actor(key),
+      {
+        legalName: "Owner Location Ltd",
+        deliveryAddress: { line1: "5 Owner Street", city: "Bath", postcode: "BA1 1AA", country: "United Kingdom" },
+        owner: { firstName: "Ola", lastName: "Owner", email: "ola@owner-location.test" },
+      } as never,
+      "guided first-shop owner location"
+    );
+    const partnerId = (result.result as { partnerId: string }).partnerId;
+
+    /*
+     * This is the CANONICAL eligibility rule, not a re-derivation: an org-wide role is eligible at
+     * every ACTIVE location, and everyone else needs an explicit partner_user_locations row. The
+     * Owner holds PARTNER_OWNER from creation, so they can already operate the Scanner at Main
+     * location and there is nothing for Super Admin to click. Asserted here so nobody later "fixes"
+     * it by writing a redundant assignment row — a second assignment path is exactly what the
+     * canonical rule exists to avoid.
+     */
+    const eligible = await admin.query<{ eligible: boolean }>(
+      `SELECT EXISTS (
+         SELECT 1 FROM partner_locations l
+         LEFT JOIN partner_user_locations ul
+           ON ul.tenant_id=l.tenant_id AND ul.location_id=l.id AND ul.user_id=u.id
+         WHERE l.tenant_id=u.tenant_id AND l.status='ACTIVE'
+           AND (ul.user_id IS NOT NULL OR EXISTS (
+             SELECT 1 FROM partner_user_roles ur
+             JOIN partner_roles r ON r.id=ur.role_id
+             WHERE ur.tenant_id=u.tenant_id AND ur.user_id=u.id
+               AND r.code IN ('PARTNER_OWNER','PARTNER_MANAGER','PARTNER_FINANCE_VIEWER')
+           ))
+       ) AS eligible
+       FROM partner_users u WHERE u.tenant_id=$1`,
+      [partnerId]
+    );
+    expect(eligible.rows[0]?.eligible).toBe(true);
+  });
+
 });

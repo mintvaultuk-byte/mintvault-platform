@@ -10,7 +10,7 @@
  * single answer, so a future surface has nothing left to guess.
  */
 import { describe, expect, it } from "vitest";
-import { PARTNER_READINESS_DIMENSION_ORDER } from "@shared/partner-readiness";
+import { PARTNER_READINESS_DIMENSION_ORDER, PARTNER_SETUP_STAGE_BY_DIMENSION } from "@shared/partner-readiness";
 import {
   derivePartnerOperationalReadiness,
   type PartnerReadinessFacts,
@@ -238,5 +238,65 @@ describe("READY", () => {
   it("is withheld whenever any authority is UNKNOWN", () => {
     expect(next({ credits: null }).state).not.toBe("READY");
     expect(next({ portalEnabled: null }).state).not.toBe("READY");
+  });
+});
+
+describe("the five visible stages", () => {
+  it("places every readiness dimension in exactly one stage", () => {
+    // Total by construction, so a new dimension cannot ship without being placed.
+    const stages = new Set(Object.values(PARTNER_SETUP_STAGE_BY_DIMENSION));
+    expect([...stages].sort()).toEqual(["ACTIVATE", "CONNECT", "TEST"]);
+    expect(Object.keys(PARTNER_SETUP_STAGE_BY_DIMENSION).sort()).toEqual([...PARTNER_READINESS_DIMENSION_ORDER].sort());
+  });
+
+  it("ACTIVATE covers becoming a real shop with a real owner", () => {
+    expect(next({ orgStatus: "PENDING" }).stage).toBe("ACTIVATE");
+    expect(next({ owner: null }).stage).toBe("ACTIVATE");
+    expect(next({ deliveryAddressReady: false }).stage).toBe("ACTIVATE");
+    expect(
+      next({
+        owner: { userStatus: "ACTIVE", passwordConfigured: true, invitationValid: false, mfaRequired: true, mfaConfigured: false },
+      }).stage
+    ).toBe("ACTIVATE");
+  });
+
+  it("CONNECT covers getting the Mac working", () => {
+    expect(next({ station: { enrolledCount: 0, approvedActiveCount: 0, pendingApprovalCount: 0, active: null } }).stage).toBe("CONNECT");
+    expect(next({ station: { enrolledCount: 1, approvedActiveCount: 0, pendingApprovalCount: 1, active: null } }).stage).toBe("CONNECT");
+    expect(next({ staff: { scanCapableCount: 1, locationScopedWithoutLocation: 1 } }).stage).toBe("CONNECT");
+    const h = healthy();
+    expect(
+      next({ station: { ...h.station, active: { ...h.station.active!, calibrationStatus: "REQUIRED", currentCalibrationId: null } } }).stage
+    ).toBe("CONNECT");
+  });
+
+  it("TEST covers credits and the test card, because credits are what let the card be scanned", () => {
+    expect(next({ credits: 0 }).stage).toBe("TEST");
+    expect(next({ testCard: { completedCount: 0, latest: null } }).stage).toBe("TEST");
+  });
+
+  it("LIVE only when the canonical authority says so", () => {
+    expect(next().stage).toBe("LIVE");
+    // Not live while anything is unresolved, including an unreadable authority.
+    expect(next({ credits: null }).stage).not.toBe("LIVE");
+    expect(next({ testCard: { completedCount: 0, latest: null } }).stage).not.toBe("LIVE");
+  });
+
+  it("the stage always agrees with the action it is shown beside", () => {
+    // Same verdict said twice, never two opinions.
+    const action = next({ station: { enrolledCount: 1, approvedActiveCount: 0, pendingApprovalCount: 1, active: null } });
+    expect(action.source).toBe("station");
+    expect(action.stage).toBe(PARTNER_SETUP_STAGE_BY_DIMENSION.station);
+  });
+
+  it("low credits above zero is NOT an onboarding blocker", () => {
+    // 4 credits still grades. Only zero stops a card, so only zero can be the next action.
+    expect(next({ credits: 4 }).state).toBe("READY");
+    expect(next({ credits: 4 }).stage).toBe("LIVE");
+  });
+
+  it("branding can never influence the verdict — it is not a dimension at all", () => {
+    expect(Object.keys(PARTNER_SETUP_STAGE_BY_DIMENSION)).not.toContain("branding");
+    expect([...PARTNER_READINESS_DIMENSION_ORDER]).not.toContain("branding" as never);
   });
 });

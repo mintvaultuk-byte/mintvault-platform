@@ -393,7 +393,13 @@ export function partnerManagementRouter(): Router {
           actor,
           {
             legalName: requireNonEmpty(req.body?.legalName, "legalName"),
-            locationName: requireNonEmpty(req.body?.locationName, "locationName"),
+            /*
+             * Both optional now. A single-location shop is always "Main location", and its
+             * operations contact is the Owner unless somebody says otherwise, so the guided form
+             * stopped asking for either. The SERVICE applies the defaults, not this route, so the
+             * canonical record is identical whichever caller creates it.
+             */
+            locationName: optionalText(req.body?.locationName, "locationName", 120),
             deliveryAddress: {
               line1: requireNonEmpty(req.body?.deliveryAddress?.line1, "deliveryAddress.line1"),
               line2: optionalText(req.body?.deliveryAddress?.line2, "deliveryAddress.line2", 200),
@@ -401,10 +407,13 @@ export function partnerManagementRouter(): Router {
               postcode: requireNonEmpty(req.body?.deliveryAddress?.postcode, "deliveryAddress.postcode"),
               country: requireNonEmpty(req.body?.deliveryAddress?.country, "deliveryAddress.country"),
             },
-            operationsContact: {
-              fullName: requireNonEmpty(req.body?.operationsContact?.fullName, "operationsContact.fullName"),
-              email: requireNonEmpty(req.body?.operationsContact?.email, "operationsContact.email"),
-            },
+            operationsContact:
+              req.body?.operationsContact == null
+                ? null
+                : {
+                    fullName: optionalText(req.body?.operationsContact?.fullName, "operationsContact.fullName", 200),
+                    email: optionalText(req.body?.operationsContact?.email, "operationsContact.email", 320),
+                  },
             owner: {
               firstName: requireNonEmpty(req.body?.owner?.firstName, "owner.firstName"),
               lastName: requireNonEmpty(req.body?.owner?.lastName, "owner.lastName"),

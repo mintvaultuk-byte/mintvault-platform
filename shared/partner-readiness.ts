@@ -210,6 +210,39 @@ export const PARTNER_READINESS_DIMENSION_ORDER = [
  * every operational dimension already passes. That is exactly the operator's sequence: get the shop
  * able to grade, then prove one card end to end.
  */
+/**
+ * THE FIVE VISIBLE STAGES — what a shop rollout actually looks like to an operator.
+ *
+ * CREATE -> ACTIVATE -> CONNECT -> TEST -> LIVE.
+ *
+ * These are a VIEW over the nine readiness dimensions, not a second model of them. Nothing decides
+ * a stage: it is read off whichever dimension the next action already came from, so the stage and
+ * the action can never disagree. The dimensions stay exactly as they are underneath, and remain the
+ * only authority — this is the label an operator reads, not a state machine anything branches on.
+ *
+ * CREATE is the only stage no readiness payload can produce, because it is the stage BEFORE a shop
+ * exists. The client knows it by having nothing to ask about yet.
+ */
+export type PartnerSetupStage = "CREATE" | "ACTIVATE" | "CONNECT" | "TEST" | "LIVE";
+
+/** The stage each readiness dimension belongs to. Total, so a new dimension must be placed. */
+export const PARTNER_SETUP_STAGE_BY_DIMENSION = {
+  // Becoming a real shop with a real owner: activation, the invitation, the password and MFA.
+  organisation: "ACTIVATE",
+  owner: "ACTIVATE",
+  // The shop's own details. Filled in at CREATE, so reaching one of these means something is
+  // missing from the record itself rather than from the rollout.
+  location: "ACTIVATE",
+  delivery: "ACTIVATE",
+  operationsContact: "ACTIVATE",
+  // Getting the Mac working: who may operate it, whether it is enrolled, approved and calibrated.
+  staff: "CONNECT",
+  station: "CONNECT",
+  scanner: "CONNECT",
+  // Credits matter here and nowhere else: they are what lets the test card actually be scanned.
+  credits: "TEST",
+} as const satisfies Record<ReadinessDimensionKey, PartnerSetupStage>;
+
 export interface PartnerNextAction {
   /**
    * What KIND of answer this is.
@@ -238,6 +271,12 @@ export interface PartnerNextAction {
    * surface shows `title`/`message` as status text. A button that cannot work is worse than none.
    */
   action: ReadinessAction | null;
+  /**
+   * Which of the five visible stages this shop is in. Derived from `source`, so the compact
+   * CREATE/ACTIVATE/CONNECT/TEST/LIVE indicator and the action beneath it are always the same
+   * verdict said twice, never two opinions.
+   */
+  stage: PartnerSetupStage;
 }
 
 export interface PartnerOperationalReadiness {

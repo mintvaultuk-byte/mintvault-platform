@@ -554,11 +554,25 @@ export async function createPartner(
 
 export interface FirstShopOnboardingInput {
   legalName: string;
-  locationName: string;
+  /** Optional. A single-location shop is always the Main location; see DEFAULT_MAIN_LOCATION_NAME. */
+  locationName?: string | null;
   deliveryAddress: PartnerDeliveryAddressInput;
-  operationsContact: { fullName: string; email: string };
+  /**
+   * Optional. Defaults to the Owner, who is the operations contact for a normal new shop — asking
+   * an operator to type the same name and email twice is how duplicate contacts get created.
+   */
+  operationsContact?: { fullName?: string | null; email?: string | null } | null;
   owner: { firstName: string; lastName: string; email: string };
 }
+
+/**
+ * The one name a single-location shop's location ever has.
+ *
+ * Defaulted on the SERVER so every caller produces the same canonical record, and so the readiness
+ * query's "main location" lookup — which prefers `lower(btrim(name)) = 'main location'` — keeps
+ * finding it. A form field that can be typed differently is a field that will be.
+ */
+export const DEFAULT_MAIN_LOCATION_NAME = "Main location";
 
 function requireFirstShopAddress(raw: PartnerDeliveryAddressInput): PartnerDeliveryAddress {
   const address = normalisePartnerDeliveryAddress(raw);
@@ -594,7 +608,7 @@ export async function createFirstShopOnboarding(actor: ActorContext, input: Firs
   if (legalName.length < 2 || legalName.length > 500) {
     throw new G5RequestError("VALIDATION_ERROR", "A legal or shop name of 2–500 characters is required.");
   }
-  const locationName = input.locationName.trim();
+  const locationName = (input.locationName ?? "").trim() || DEFAULT_MAIN_LOCATION_NAME;
   if (locationName.length < 2 || locationName.length > 120) {
     throw new G5RequestError("VALIDATION_ERROR", "A Main location name of 2–120 characters is required.");
   }
@@ -602,13 +616,26 @@ export async function createFirstShopOnboarding(actor: ActorContext, input: Firs
     throw new G5RequestError("VALIDATION_ERROR", "A stable onboarding request key is required.");
   }
   const deliveryAddress = requireFirstShopAddress(input.deliveryAddress);
-  const operationsContact = requireOperationalContact(input.operationsContact.fullName, input.operationsContact.email);
   const ownerFirstName = input.owner.firstName.trim();
   const ownerLastName = input.owner.lastName.trim();
   const ownerEmail = normalisePartnerOperationalEmail(input.owner.email);
   if (!ownerFirstName || !ownerLastName || !PARTNER_OPERATIONAL_EMAIL_RE.test(ownerEmail)) {
     throw new G5RequestError("VALIDATION_ERROR", "A Partner Owner name and valid email are required.");
   }
+  /*
+   * THE OPERATIONS CONTACT IS THE OWNER unless the caller deliberately supplies a different one.
+   *
+   * Validation is unchanged — requireOperationalContact still runs, so a supplied contact must be
+   * as valid as it ever was, and the Owner's own name and email have already been validated above.
+   * This only removes the retyping, and with it the commonest way a shop ended up with two contacts
+   * that differ by a typo.
+   */
+  const suppliedContactName = input.operationsContact?.fullName?.trim() ?? "";
+  const suppliedContactEmail = input.operationsContact?.email?.trim() ?? "";
+  const operationsContact =
+    suppliedContactName || suppliedContactEmail
+      ? requireOperationalContact(suppliedContactName, suppliedContactEmail)
+      : requireOperationalContact(`${ownerFirstName} ${ownerLastName}`, ownerEmail);
 
   const committed = await withPartnerAdminTransaction(async (client) => {
     // The audit table's success uniqueness protects the terminal write, but it
