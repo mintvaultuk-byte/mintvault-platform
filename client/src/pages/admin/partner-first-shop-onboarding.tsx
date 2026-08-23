@@ -10,7 +10,13 @@ import { AdminButton, AdminShell, Badge, Panel } from "@/components/admin";
 import { ReadinessPanel } from "@/components/partner/readiness-panel";
 import { apiRequest, queryClient } from "@/lib/queryClient";
 import { runAdminProtected } from "@/components/admin/admin-step-up";
-import type { PartnerOperationalReadiness } from "@shared/partner-readiness";
+import { PARTNER_READINESS_DIMENSION_ORDER } from "@shared/partner-readiness";
+import type {
+  PartnerNextAction,
+  PartnerOperationalReadiness,
+  PartnerReadinessCode,
+  ReadinessStatus,
+} from "@shared/partner-readiness";
 
 const BASE = "/api/super-admin/partner-management";
 const emptyAddress = { line1: "", line2: "", city: "", postcode: "", country: "United Kingdom" };
@@ -70,13 +76,155 @@ function Input({ label, value, onChange, type = "text", required = true }: { lab
   );
 }
 
-function Step({ number, title, complete, children }: { number: number; title: string; complete: boolean; children: React.ReactNode }) {
+function Step({
+  number,
+  title,
+  complete,
+  status,
+  children,
+}: {
+  number: number;
+  title: string;
+  complete: boolean;
+  /** The dimension's own four-state status, when this step maps to one. */
+  status?: ReadinessStatus;
+  children: React.ReactNode;
+}) {
+  const glyph = checkGlyph(status ?? (complete ? "PASS" : "NOT_STARTED"));
   return (
-    <Panel title={`${number}. ${title}`} sub={complete ? "Complete" : "Action required"}>
-      <div data-testid={`first-shop-step-${number}`} data-complete={complete ? "true" : "false"}>
+    <Panel title={`${number}. ${title}`} sub={`${glyph.mark} ${glyph.label}`}>
+      <div
+        data-testid={`first-shop-step-${number}`}
+        data-complete={complete ? "true" : "false"}
+        data-check-status={glyph.label}
+      >
         {children}
       </div>
     </Panel>
+  );
+}
+
+/**
+ * Which numbered step owns each blocker, so "Show me" can open the right one.
+ *
+ * The card deliberately does NOT re-implement the controls those steps already hold. Approving a
+ * Scanner means approving a PARTICULAR Mac, and assigning an operator means choosing a PARTICULAR
+ * person — real decisions the card cannot make on the operator's behalf. For those it reveals the
+ * step that owns the choice. Only argument-free actions run straight from the card.
+ */
+const STEP_FOR_CODE: Partial<Record<PartnerReadinessCode, number>> = {
+  PARTNER_SUSPENDED: 1,
+  DELIVERY_ADDRESS_REQUIRED: 2,
+  OPERATIONS_CONTACT_REQUIRED: 3,
+  OWNER_SETUP_REQUIRED: 4,
+  INVITATION_EXPIRED: 4,
+  AWAITING_PASSWORD_SETUP: 4,
+  AWAITING_MFA_SETUP: 4,
+  USER_SUSPENDED: 4,
+  STAFF_OPERATOR_REQUIRED: 5,
+  STAFF_LOCATION_ASSIGNMENT_REQUIRED: 5,
+  LOCATION_REQUIRED: 5,
+  STATION_SETUP_REQUIRED: 6,
+  STATION_APPROVAL_PENDING: 6,
+  STATION_UNAVAILABLE: 6,
+  SCANNER_OFFLINE: 7,
+  SCANNER_UPDATE_REQUIRED: 7,
+  CALIBRATION_REQUIRED: 7,
+  CREDITS_REQUIRED: 8,
+  TEST_CARD_REQUIRED: 9,
+  TEST_CARD_IN_PROGRESS: 9,
+  TEST_CARD_AWAITING_REVIEW: 9,
+  TEST_CARD_BLOCKED: 9,
+};
+
+/** One glyph vocabulary for the collapsed detail list. */
+function checkGlyph(status: ReadinessStatus | "NOT_STARTED"): { mark: string; label: string } {
+  if (status === "PASS") return { mark: "\u2713", label: "READY" };
+  if (status === "PENDING") return { mark: "\u25cf", label: "IN PROGRESS" };
+  if (status === "BLOCKED") return { mark: "!", label: "BLOCKED" };
+  return { mark: "\u2014", label: "NOT STARTED" };
+}
+
+/**
+ * THE ONE NEXT ACTION.
+ *
+ * The 10 checks below are the authority and stay exactly as they were; this is the operator's
+ * working surface. It renders `readiness.nextAction` verbatim — the server chose which blocker and
+ * wrote the words — and offers at most ONE dominant control, so nothing competes with it.
+ *
+ * There is no manual "next step": every action on this page refetches readiness on success, so the
+ * server re-picks and this card advances by itself.
+ */
+function NextActionCard({
+  next,
+  onRun,
+  runLabel,
+  pending,
+  failed,
+  onReveal,
+}: {
+  next: PartnerNextAction;
+  onRun: (() => void) | null;
+  runLabel: string | null;
+  pending: boolean;
+  failed: boolean;
+  onReveal: (step: number) => void;
+}) {
+  const step = STEP_FOR_CODE[next.code];
+  const ready = next.state === "READY";
+  return (
+    <div
+      data-testid="first-shop-next-action"
+      data-state={next.state}
+      data-code={next.code}
+      data-source={next.source ?? ""}
+      style={{
+        border: `1px solid ${ready ? "#2f7d4f" : "#D4AF37"}`,
+        borderRadius: 10,
+        padding: "18px 20px",
+        marginBottom: 18,
+        background: ready ? "rgba(47,125,79,0.08)" : "rgba(212,175,55,0.08)",
+      }}
+    >
+      <div style={{ fontSize: 11, letterSpacing: 1.5, opacity: 0.75, textTransform: "uppercase" }}>
+        {ready ? "Status" : "Next action"}
+      </div>
+      <h2 data-testid="first-shop-next-action-title" style={{ margin: "6px 0 4px", fontSize: 22 }}>
+        {ready ? "Shop ready to grade" : next.title}
+      </h2>
+      <p data-testid="first-shop-next-action-message" style={{ margin: "0 0 14px", opacity: 0.9 }}>
+        {next.message}
+      </p>
+      {failed && (
+        <p role="alert" data-testid="first-shop-next-action-error" style={{ color: "#ff8a8a", marginTop: 0 }}>
+          That did not go through. Nothing was changed — try again.
+        </p>
+      )}
+      {!ready && (
+        <div style={{ display: "flex", gap: 10, alignItems: "center", flexWrap: "wrap" }}>
+          {onRun && runLabel ? (
+            <AdminButton
+              variant="gold"
+              disabled={pending}
+              onClick={onRun}
+              data-testid="first-shop-next-action-run"
+            >
+              {pending ? "Working\u2026" : failed ? `Retry \u2014 ${runLabel}` : runLabel}
+            </AdminButton>
+          ) : step ? (
+            <AdminButton variant="gold" onClick={() => onReveal(step)} data-testid="first-shop-next-action-reveal">
+              {next.action?.label ?? "Show me"}
+            </AdminButton>
+          ) : (
+            /* Nothing MintVault can click — e.g. the owner has to set their own password. Say so
+               rather than render a button that cannot work. */
+            <span data-testid="first-shop-next-action-waiting" style={{ opacity: 0.85 }}>
+              Waiting — nothing for MintVault to do here yet.
+            </span>
+          )}
+        </div>
+      )}
+    </div>
   );
 }
 
@@ -89,6 +237,12 @@ export default function PartnerFirstShopOnboardingPage() {
   const partnerId = params?.partnerId;
   const [, navigate] = useLocation();
   const [banner, setBanner] = useState<string | null>(null);
+  /*
+   * The 10 checks are collapsed by default: they are the authority and the audit trail, but they
+   * are not the day-to-day workflow. `revealStep` opens them and scrolls to one, which is what the
+   * Next Action card does for any blocker whose fix needs a choice the card cannot make for you.
+   */
+  const [checksOpen, setChecksOpen] = useState(false);
   const [legalName, setLegalName] = useState("");
   const [locationName, setLocationName] = useState("Main location");
   const [address, setAddress] = useState(emptyAddress);
@@ -306,6 +460,33 @@ export default function PartnerFirstShopOnboardingPage() {
     onError: (error) => setBanner(errorMessage(error, "The onboarding test card was not armed.")),
   });
 
+  const revealStep = (step: number) => {
+    setChecksOpen(true);
+    // After the <details> has actually opened, bring the owning step into view.
+    window.setTimeout(() => {
+      document.querySelector(`[data-testid="first-shop-step-${step}"]`)?.scrollIntoView({ block: "center" });
+    }, 0);
+  };
+
+  /*
+   * Which blockers the card can clear in ONE click. Only argument-free actions qualify: approving a
+   * Scanner means approving a particular Mac and assigning an operator means choosing a particular
+   * person, so those reveal the step that owns the choice instead of guessing.
+   *
+   * Each of these mutations already refetches readiness on success, which is what makes the card
+   * advance on its own — there is deliberately no "next step" button anywhere on this page.
+   */
+  const nextRun: { run: () => void; label: string; pending: boolean; failed: boolean } | null = (() => {
+    const code = shop?.operational.nextAction.code;
+    if (code === "PARTNER_SUSPENDED" && shop?.organisation.status === "PENDING") {
+      return { run: () => activate.mutate(), label: "Activate Partner", pending: activate.isPending, failed: activate.isError };
+    }
+    if (code === "TEST_CARD_REQUIRED" && shop?.operational.testCard.state === "NOT_STARTED" && shop?.testCardArmingReadable && !shop?.testCardArmedAt) {
+      return { run: () => armTestCard.mutate(), label: "Arm the test card", pending: armTestCard.isPending, failed: armTestCard.isError };
+    }
+    return null;
+  })();
+
   return (
     <AdminShell activeTab="dashboard" onTabChange={() => navigate("/admin")} onLogout={() => navigate("/admin")} title="First-shop onboarding" crumb="Partner Network">
       <div data-testid="first-shop-onboarding-root" style={{ maxWidth: 980 }}>
@@ -361,21 +542,63 @@ export default function PartnerFirstShopOnboardingPage() {
           <div role="alert">This Partner could not be loaded.</div>
         ) : (
           <>
+            <NextActionCard
+              next={shop.operational.nextAction}
+              onRun={nextRun ? nextRun.run : null}
+              runLabel={nextRun ? nextRun.label : null}
+              pending={nextRun?.pending ?? false}
+              failed={nextRun?.failed ?? false}
+              onReveal={revealStep}
+            />
+            {shop.operational.nextAction.state === "READY" && (
+              <Panel title="Shop ready to grade" sub="Setup is finished. Nothing below needs attention.">
+                <ul data-testid="first-shop-ready-facts" style={{ margin: 0, paddingLeft: 18 }}>
+                  <li>Owner ready</li>
+                  <li>Scanner active</li>
+                  <li>Calibration valid</li>
+                  <li>Credits available</li>
+                  <li>Test card complete</li>
+                </ul>
+                <div style={{ marginTop: 12 }}>
+                  <Link href={`/admin/partners/${shop.organisation.id}`} data-testid="first-shop-open-shop">
+                    Open shop
+                  </Link>
+                </div>
+              </Panel>
+            )}
             <Panel title="Current scope" sub="Every action below is scoped to this exact Partner and Main location.">
               <div data-testid="first-shop-current-partner"><b>Current Partner:</b> {shop.organisation.legalName} <Badge variant={shop.organisation.status === "ACTIVE" ? "act" : "wait"}>{shop.organisation.status}</Badge></div>
               <div data-testid="first-shop-current-location" style={{ marginTop: 6 }}><b>Current location:</b> {mainLocation ? `${mainLocation.name} (${mainLocation.status})` : "No active Main location"}</div>
             </Panel>
-            <Step number={1} title="Shop" complete={shop.organisation.status === "ACTIVE"}>
+            {/*
+              * THE 10 AUTHORITATIVE CHECKS. Unchanged, and still the thing the server actually
+              * decides on — but collapsed, because managing a checklist is not the operator's job
+              * any more. This is for troubleshooting and audit.
+              */}
+            <details
+              open={checksOpen}
+              onToggle={(event) => setChecksOpen((event.currentTarget as HTMLDetailsElement).open)}
+              data-testid="first-shop-all-checks"
+            >
+              <summary style={{ cursor: "pointer", padding: "10px 0", fontWeight: 600 }}>
+                View all setup checks
+                <span style={{ opacity: 0.7, fontWeight: 400 }}>
+                  {" "}
+                  — {PARTNER_READINESS_DIMENSION_ORDER.filter((key) => shop.operational.dimensions[key]?.status === "PASS").length} of{" "}
+                  {PARTNER_READINESS_DIMENSION_ORDER.length} ready
+                </span>
+              </summary>
+            <Step number={1} title="Shop" complete={shop.organisation.status === "ACTIVE"} status={shop.operational.dimensions.organisation.status}>
               <p>Partner status: <b>{shop.organisation.status}</b>. The record remains pending until the operator deliberately activates it.</p>
               {shop.organisation.status === "PENDING" && <AdminButton size="sm" variant="gold" disabled={activate.isPending} onClick={() => activate.mutate()} data-testid="first-shop-activate">Activate Partner</AdminButton>}
             </Step>
-            <Step number={2} title="Main location delivery address" complete={shop.operational.dimensions.delivery.status === "PASS"}>
+            <Step number={2} title="Main location delivery address" complete={shop.operational.dimensions.delivery.status === "PASS"} status={shop.operational.dimensions.delivery.status}>
               <form onSubmit={(event) => { event.preventDefault(); saveAddress.mutate(); }}>
                 <AddressFields value={addressValue} onChange={setAddressField} />
                 <AdminButton type="submit" size="sm" variant="gold" disabled={!mainLocation || saveAddress.isPending} data-testid="first-shop-save-address" style={{ marginTop: 12 }}>Save Main location address</AdminButton>
               </form>
             </Step>
-            <Step number={3} title="Primary operations contact" complete={shop.operational.dimensions.operationsContact.status === "PASS"}>
+            <Step number={3} title="Primary operations contact" complete={shop.operational.dimensions.operationsContact.status === "PASS"} status={shop.operational.dimensions.operationsContact.status}>
               <form onSubmit={(event) => { event.preventDefault(); saveContact.mutate(); }}>
                 <div style={{ display: "flex", gap: 10, flexWrap: "wrap" }}>
                   <Input label="Contact name" value={contactNameValue} onChange={setContactNameForCurrentShop} />
@@ -384,11 +607,11 @@ export default function PartnerFirstShopOnboardingPage() {
                 <AdminButton type="submit" size="sm" variant="gold" disabled={saveContact.isPending} data-testid="first-shop-save-contact" style={{ marginTop: 12 }}>Save primary operations contact</AdminButton>
               </form>
             </Step>
-            <Step number={4} title="Partner Owner" complete={shop.operational.dimensions.owner.status === "PASS"}>
+            <Step number={4} title="Partner Owner" complete={shop.operational.dimensions.owner.status === "PASS"} status={shop.operational.dimensions.owner.status}>
               <p>{shop.owner ? `Owner: ${shop.owner.email} — ${shop.owner.readiness?.onboardingState ?? shop.owner.userStatus}` : "No Partner Owner has been invited."}</p>
               <Link href={`/admin/partners/${shop.organisation.id}/staff`} data-testid="first-shop-owner-action">Open Owner setup</Link>
             </Step>
-            <Step number={5} title="Staff and operator access" complete={shop.operational.dimensions.staff?.status === "PASS"}>
+            <Step number={5} title="Staff and operator access" complete={shop.operational.dimensions.staff?.status === "PASS"} status={shop.operational.dimensions.staff?.status}>
               <p data-testid="first-shop-staff-message">{shop.operational.dimensions.staff?.message ?? "Operator access could not be confirmed."}</p>
               {unassignedOperators.length > 0 && (
                 <div data-testid="first-shop-staff-unassigned" style={{ marginTop: 10 }}>
@@ -437,7 +660,7 @@ export default function PartnerFirstShopOnboardingPage() {
                 <Link href={`/admin/partners/${shop.organisation.id}/staff`} data-testid="first-shop-staff-action">Open Staff</Link>
               </div>
             </Step>
-            <Step number={6} title="Scanner station" complete={shop.operational.dimensions.station.status === "PASS"}>
+            <Step number={6} title="Scanner station" complete={shop.operational.dimensions.station.status === "PASS"} status={shop.operational.dimensions.station.status}>
               <p data-testid="first-shop-station-message">{shop.operational.dimensions.station.message}</p>
               {pendingStations.length > 0 ? (
                 <div data-testid="first-shop-station-pending" style={{ marginTop: 10 }}>
@@ -470,20 +693,20 @@ export default function PartnerFirstShopOnboardingPage() {
                 <Link href={`/admin/partners/${shop.organisation.id}/stations`} data-testid="first-shop-station-action">Open station setup</Link>
               </div>
             </Step>
-            <Step number={7} title="Calibration and Scanner health" complete={shop.operational.dimensions.scanner.status === "PASS"}>
+            <Step number={7} title="Calibration and Scanner health" complete={shop.operational.dimensions.scanner.status === "PASS"} status={shop.operational.dimensions.scanner.status}>
               <p data-testid="first-shop-scanner-message">{shop.operational.dimensions.scanner.message}</p>
               <p style={{ marginTop: 8, fontSize: 12, opacity: 0.85 }}>
                 Calibration happens physically in the Scanner app on the shop Mac. This step turns green once the
                 station reports a VALID calibration.
               </p>
             </Step>
-            <Step number={8} title="Credits" complete={shop.operational.dimensions.credits.status === "PASS"}>
+            <Step number={8} title="Credits" complete={shop.operational.dimensions.credits.status === "PASS"} status={shop.operational.dimensions.credits.status}>
               <p data-testid="first-shop-credits-message">{shop.operational.dimensions.credits.message}</p>
               <div style={{ marginTop: 10 }}>
                 <Link href={`/admin/partners/${shop.organisation.id}/credits`} data-testid="first-shop-credits-action">Open credits / billing readiness</Link>
               </div>
             </Step>
-            <Step number={9} title="Test card" complete={shop.operational.testCard.state === "COMPLETE"}>
+            <Step number={9} title="Test card" complete={shop.operational.testCard.state === "COMPLETE"} status={shop.operational.testCard.status}>
               {/*
                 * EVERY WORD HERE COMES FROM THE SERVER. The state, the sentence and the actions are
                 * all produced by derivePartnerOperationalReadiness from the explicit
@@ -544,6 +767,7 @@ export default function PartnerFirstShopOnboardingPage() {
               <p data-testid="first-shop-ready-message">{shop.operational.onboarding.message}</p>
               <ReadinessPanel readiness={shop.operational} audience="SUPER_ADMIN" />
             </Step>
+            </details>
           </>
         )}
       </div>

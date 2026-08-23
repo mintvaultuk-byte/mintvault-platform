@@ -265,3 +265,110 @@ describe("permanent-deletion admin UI", () => {
     expect(detail).toContain("/admin/partners/directory");
   });
 });
+
+/**
+ * Strip comments before a NEGATIVE assertion. These files explain the defect they fixed, so a naive
+ * `not.toContain("Object.keys(readiness.dimensions)")` fails on the sentence describing why that
+ * call is gone — which would punish documenting the reasoning.
+ */
+const codeOnly = (src: string) =>
+  src.replace(/\/\*[\s\S]*?\*\//g, "").replace(/(^|[^:])\/\/.*$/gm, "$1");
+
+describe("next-action controller UI contract", () => {
+  const page = () => read("client/src/pages/admin/partner-first-shop-onboarding.tsx");
+
+  it("renders ONE dominant next-action card, driven by the server's verdict", () => {
+    const src = page();
+    expect(src).toContain("first-shop-next-action");
+    expect(src).toContain("shop.operational.nextAction");
+    // Title and sentence are the server's own, never re-worded per surface.
+    expect(src).toContain("next.title");
+    expect(src).toContain("{next.message}");
+  });
+
+  it("shows exactly one primary control — the branches are mutually exclusive", () => {
+    const src = page();
+    // run  ?  reveal  :  waiting-text — a single ternary chain, so two gold buttons cannot coexist.
+    expect(src).toContain("first-shop-next-action-run");
+    expect(src).toContain("first-shop-next-action-reveal");
+    expect(src).toContain("first-shop-next-action-waiting");
+    const runIdx = src.indexOf("first-shop-next-action-run");
+    const revealIdx = src.indexOf("first-shop-next-action-reveal");
+    const waitIdx = src.indexOf("first-shop-next-action-waiting");
+    expect(runIdx).toBeLessThan(revealIdx);
+    expect(revealIdx).toBeLessThan(waitIdx);
+  });
+
+  it("has no dead action: every control reports WORKING, and a failure offers RETRY", () => {
+    const src = page();
+    expect(src).toContain("Working");
+    expect(src).toContain("Retry");
+    expect(src).toContain("first-shop-next-action-error");
+  });
+
+  it("keeps the 10 authoritative checks, collapsed by default under one disclosure", () => {
+    const src = page();
+    expect(src).toContain("first-shop-all-checks");
+    expect(src).toContain("View all setup checks");
+    // Collapsed by default: `open` is bound to state that starts false.
+    expect(src).toContain("const [checksOpen, setChecksOpen] = useState(false);");
+    expect(src).toContain("open={checksOpen}");
+    // All ten steps survive.
+    for (let n = 1; n <= 10; n += 1) expect(src).toContain(`<Step number={${n}}`);
+  });
+
+  it("reports each check with the four-status glyph vocabulary", () => {
+    const src = page();
+    expect(src).toContain('label: "READY"');
+    expect(src).toContain('label: "IN PROGRESS"');
+    expect(src).toContain('label: "BLOCKED"');
+    expect(src).toContain('label: "NOT STARTED"');
+    expect(src).toContain("data-check-status");
+  });
+
+  it("advances automatically — no manual next-step control anywhere on the page", () => {
+    const src = page();
+    expect(codeOnly(src)).not.toMatch(/Next step/i);
+    // Every mutation refetches readiness, which is what makes the card re-pick by itself.
+    expect(src.match(/onboarding\.refetch\(\)/g)?.length ?? 0).toBeGreaterThanOrEqual(4);
+  });
+
+  it("continues the intended action after Super Admin step-up rather than dropping it", () => {
+    const src = page();
+    expect(src).toContain("runAdminProtected");
+    const stepUp = read("client/src/components/admin/admin-step-up.tsx");
+    // try -> challenge -> RETRY THE SAME ACTION. The continuation is the point.
+    expect(stepUp).toContain("await openChallenge();");
+    expect(stepUp).toContain("return await action();");
+  });
+
+  it("shows the READY state with final facts instead of more setup prompts", () => {
+    const src = page();
+    expect(src).toContain("Shop ready to grade");
+    expect(src).toContain("first-shop-ready-facts");
+    expect(src).toContain("first-shop-open-shop");
+  });
+});
+
+describe("no duplicate client blocker logic", () => {
+  it("the Super Admin lifecycle strip reads nextAction and never ranks dimensions itself", () => {
+    const src = read("client/src/pages/admin/partner-network-lifecycle.ts");
+    expect(src).toContain("readiness.nextAction");
+    // The original defect: choosing a blocker by JavaScript object key order.
+    expect(codeOnly(src)).not.toContain("Object.keys(readiness.dimensions)");
+  });
+
+  it("the canonical order is imported from the shared contract, never re-declared", () => {
+    const shared = read("shared/partner-readiness.ts");
+    expect(shared).toContain("export const PARTNER_READINESS_DIMENSION_ORDER");
+    for (const consumer of [
+      "server/partner/operational-readiness.ts",
+      "client/src/pages/admin/partner-network-lifecycle.ts",
+    ]) {
+      const src = read(consumer);
+      expect(src).toContain("PARTNER_READINESS_DIMENSION_ORDER");
+      // No local copy of the nine keys.
+      expect(codeOnly(src)).not.toMatch(/=\s*\[\s*"organisation",\s*"location",\s*"delivery"/);
+    }
+  });
+});
