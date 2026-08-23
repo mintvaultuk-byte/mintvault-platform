@@ -6,17 +6,25 @@
  * the network is genuinely fine, and if it is not empty every row is something a human can act on
  * right now. A rule buried in JSX gets verified by looking at it, once.
  *
- * IT DECIDES NOTHING NEW. Every input is already an authoritative value on the server projection —
- * `stationsPendingApproval`, `availableCredits`, `activeLocations`, `status`, `riskStatus`, and the
- * server's own `alerts[]`. Nothing here recomputes readiness, invents a threshold the server
- * disagrees with, or turns an unavailable metric into a number. `availableCredits === null` means
- * the wallet authority could not be read, and it is deliberately NOT reported as "no credits":
- * "we cannot tell" and "zero" are different facts, exactly as the dashboard contract requires.
+ * IT NO LONGER DECIDES WHAT IS WRONG. It used to read raw projection counts —
+ * `stationsPendingApproval`, `activeLocations`, `availableCredits`, `stationAttention`, `status` —
+ * and rank them with its own severity rules. That was a SECOND blocker calculation over the same
+ * question `derivePartnerOperationalReadiness` was already answering for the onboarding wizard, and
+ * the two could disagree about the same shop: the wizard would say "address required" while this
+ * list said "approve Scanner". Each row is now the server's single `nextAction` verdict for that
+ * shop, rendered verbatim, with its destination resolved by the one shared helper.
+ *
+ * TWO JUDGEMENTS REMAIN, deliberately. Severity — how loudly to say it — is mapped from the
+ * verdict's own state. And low credits stays as a WARNING, because readiness blocks at zero and
+ * says nothing about "getting low"; that is a gap this surface fills rather than a rule it
+ * duplicates. `availableCredits === null` means the wallet authority could not be read and is still
+ * withheld: "we cannot tell" and "zero" are different facts.
  *
  * ORDERING IS THE PRODUCT. The operator reads top-down and stops when they run out of time, so the
  * order is "what blocks a shop from working", not "what is most numerous".
  */
 import type { DashboardAlert, PartnerNetworkOverview, PartnerTableRow } from "@shared/partner-dashboard";
+import { nextActionHref } from "./partner-network-lifecycle";
 
 export type AttentionSeverity = "critical" | "warning" | "info";
 
@@ -66,53 +74,64 @@ function alertAction(alert: Pick<DashboardAlert, "id">): string {
   return "Open shop";
 }
 
-/** Per-shop conditions the projection can prove. Ordered by how hard they block real work. */
+/**
+ * ONE row per shop, from the ONE next-action authority.
+ *
+ * This used to re-derive blockers from raw projection counts — stationsPendingApproval,
+ * activeLocations, availableCredits, stationAttention, status — and rank them with its own
+ * severity list. That was a second calculation over the same question the onboarding wizard was
+ * already answering from readiness, and the two could disagree about the same shop: the wizard
+ * would say "address required" while this list said "approve Scanner", because they were reading
+ * different things and ordering them differently.
+ *
+ * Now the server decides, once, and this file renders. The only judgement left here is severity —
+ * how loudly to say it — and the low-credit WARNING below, which readiness deliberately does not
+ * answer because it is not a blocker.
+ */
 function shopItems(shop: PartnerTableRow): AttentionItem[] {
   const items: AttentionItem[] = [];
+  const next = shop.nextAction;
 
-  // 1. A Mac is enrolled and waiting on US. Nothing the shop does clears this.
-  if (shop.stationsPendingApproval > 0) {
+  if (next === null) {
+    /*
+     * Readiness could not be established. Say so rather than falling back to the old count-ranking
+     * rules: a quiet second calculation is precisely what this consolidation removed, and "we
+     * cannot tell" is a different fact from "nothing is wrong".
+     */
     items.push({
-      id: `station-approval-${shop.partnerId}`,
+      id: `readiness-unavailable-${shop.partnerId}`,
       shopId: shop.partnerId,
       shopName: shop.shopName,
-      severity: "critical",
-      message:
-        shop.stationsPendingApproval === 1
-          ? "A Scanner is waiting for approval."
-          : `${shop.stationsPendingApproval} Scanners are waiting for approval.`,
-      actionLabel: "Approve Scanner",
-      // The onboarding wizard approves inline; it is the surface that already owns this decision.
-      href: `/admin/partners/${shop.partnerId}/onboarding`,
+      severity: "warning",
+      message: "Setup status could not be read for this shop.",
+      actionLabel: "Open shop",
+      href: `/admin/partners/${shop.partnerId}`,
+    });
+  } else if (next.state !== "READY") {
+    items.push({
+      id: `next-${shop.partnerId}`,
+      shopId: shop.partnerId,
+      shopName: shop.shopName,
+      // BLOCKED stops work outright; PENDING is correctly in progress; UNKNOWN is unproven.
+      severity: next.state === "BLOCKED" ? "critical" : "warning",
+      message: next.message,
+      actionLabel: next.action?.label ?? next.title,
+      href: nextActionHref(shop.partnerId, next),
     });
   }
 
-  // 2. No active location means no operator can be assigned and no station can enrol against it.
-  if (shop.activeLocations === 0) {
-    items.push({
-      id: `location-${shop.partnerId}`,
-      shopId: shop.partnerId,
-      shopName: shop.shopName,
-      severity: "critical",
-      message: "No active location, so no Scanner can be set up.",
-      actionLabel: "Fix location",
-      href: `/admin/partners/${shop.partnerId}/locations`,
-    });
-  }
-
-  // 3. Zero credits stops NEW cards outright; low credits is a warning, not a stoppage.
-  //    `null` is withheld deliberately — see the note at the top of this file.
-  if (shop.availableCredits !== null && shop.availableCredits <= 0) {
-    items.push({
-      id: `credits-zero-${shop.partnerId}`,
-      shopId: shop.partnerId,
-      shopName: shop.shopName,
-      severity: "critical",
-      message: "No Grading Credits left, so this shop cannot start a card.",
-      actionLabel: "Open credits",
-      href: `/admin/partners/${shop.partnerId}/credits`,
-    });
-  } else if (shop.availableCredits !== null && shop.availableCredits < LOW_CREDIT_THRESHOLD) {
+  /*
+   * Low credits is a WARNING the readiness contract deliberately does not make: it blocks at zero
+   * and says nothing about "getting low". It is not a competing blocker calculation, so it stays —
+   * but only when zero is not already the next action, so one shop never gets two credit rows.
+   * `null` is withheld deliberately: "we cannot tell" is not "no credits".
+   */
+  if (
+    next?.code !== "CREDITS_REQUIRED" &&
+    shop.availableCredits !== null &&
+    shop.availableCredits > 0 &&
+    shop.availableCredits < LOW_CREDIT_THRESHOLD
+  ) {
     items.push({
       id: `credits-low-${shop.partnerId}`,
       shopId: shop.partnerId,
@@ -121,40 +140,6 @@ function shopItems(shop: PartnerTableRow): AttentionItem[] {
       message: `Only ${shop.availableCredits} Grading Credit${shop.availableCredits === 1 ? "" : "s"} left.`,
       actionLabel: "Open credits",
       href: `/admin/partners/${shop.partnerId}/credits`,
-    });
-  }
-
-  /*
-   * 4. Scanner health. Reported only for stations that are NOT merely pending approval, so a shop
-   *    whose only station is awaiting our approval gets one clear instruction rather than two rows
-   *    describing the same Mac.
-   */
-  const unhealthy = shop.stationAttention - shop.stationsPendingApproval;
-  if (unhealthy > 0) {
-    items.push({
-      id: `scanner-${shop.partnerId}`,
-      shopId: shop.partnerId,
-      shopName: shop.shopName,
-      severity: "warning",
-      message:
-        unhealthy === 1
-          ? "A Scanner is offline or needs calibration."
-          : `${unhealthy} Scanners are offline or need calibration.`,
-      actionLabel: "Open Scanner",
-      href: `/admin/partners/${shop.partnerId}/stations`,
-    });
-  }
-
-  // 5. Still in onboarding. Last, because it is a state to finish rather than a fault to repair.
-  if (shop.status === "PENDING") {
-    items.push({
-      id: `onboarding-${shop.partnerId}`,
-      shopId: shop.partnerId,
-      shopName: shop.shopName,
-      severity: "info",
-      message: "Onboarding is not finished.",
-      actionLabel: "Continue onboarding",
-      href: `/admin/partners/${shop.partnerId}/onboarding`,
     });
   }
 

@@ -14,6 +14,8 @@
  */
 
 /** Why a metric cannot be shown. Rendered to the operator as a tooltip. */
+import type { PartnerNextAction } from "./partner-readiness";
+
 export type UnavailableReason =
   | "NO_DATA_SOURCE" // the schema has no table/column for this at all
   | "NOT_LINKED" // data exists but has no partner/tenant linkage
@@ -241,6 +243,18 @@ export interface PartnerTableRow {
   stationsPendingApproval: number;
   lastActivityAt: string | null;
   alertCount: number;
+  /**
+   * The ONE next thing to do for this shop, from the same authority the onboarding page uses.
+   *
+   * `null` when readiness could not be established for this row — never a cheerful default. The
+   * Shops column and Needs Attention both read this instead of ranking raw counts themselves,
+   * which is what let them disagree with the onboarding wizard about the same shop.
+   *
+   * Answered at DIMENSION level only: the onboarding test card needs a per-shop Card Job read and
+   * is not worth an N+1 across a page, so a shop whose nine dimensions pass reads READY here. That
+   * is the right answer for this column, which asks whether the shop can grade.
+   */
+  nextAction: PartnerNextAction | null;
 }
 
 /** Risk is DERIVED from real signals only (suspension, lockouts, escalations, security events). */

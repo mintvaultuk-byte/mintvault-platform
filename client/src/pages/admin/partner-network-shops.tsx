@@ -30,6 +30,7 @@ import {
   statusBadgeVariant,
 } from "./partner-dashboard-helpers";
 import { LOW_CREDIT_THRESHOLD } from "./partner-network-attention";
+import { nextActionHref } from "./partner-network-lifecycle";
 
 const BASE = "/api/super-admin/partner-dashboard";
 
@@ -98,8 +99,25 @@ function ShopRow({ shop }: { shop: PartnerTableRow }) {
         <Badge variant={statusBadgeVariant(shop.status)}>{shop.status}</Badge>
       </td>
       <td>
-        <Link href={`/admin/partners/${shop.partnerId}/onboarding`} className="underline">
-          {shop.onboardingStage}
+        {/*
+          * CONCISE, and from the SAME next-action authority the onboarding wizard uses — so an
+          * operator scanning many shops reads the same verdict here that they will see when they
+          * open one. "Onboarding" / "Onboarded" said nothing actionable; "NEXT: Approve Scanner"
+          * says what to do. `null` means readiness could not be read, which is reported as such
+          * rather than dressed up as a stage.
+          */}
+        <Link
+          href={shop.nextAction ? nextActionHref(shop.partnerId, shop.nextAction) : `/admin/partners/${shop.partnerId}/onboarding`}
+          className="underline"
+          data-testid={`shop-next-action-${shop.partnerId}`}
+          data-state={shop.nextAction?.state ?? "UNAVAILABLE"}
+          title={shop.nextAction?.message ?? undefined}
+        >
+          {!shop.nextAction
+            ? "Status unavailable"
+            : shop.nextAction.state === "READY"
+              ? "READY"
+              : `NEXT: ${shop.nextAction.title}`}
         </Link>
       </td>
       <td>

@@ -107,7 +107,7 @@ export function partnerLifecycleSummary(
  * So the destination is chosen here, keyed on the server's own `source` and reason code, and
  * nothing about WHICH blocker was selected is re-decided.
  */
-function nextActionHref(partnerId: string, next: PartnerNextAction): string {
+export function nextActionHref(partnerId: string, next: PartnerNextAction): string {
   // Portal, login and emergency-stop are programme controls, not a Partner profile detail.
   if (PROGRAMME_SETTINGS_CODES.has(next.code)) return "/admin/partners/settings";
   // The onboarding wizard owns the test card, exactly as it owns inline station approval.

@@ -21,6 +21,9 @@
  *   partner_password_reset_tokens.token_hash.
  */
 import { partnerAdminQuery } from "./db";
+import { derivePartnerOperationalReadiness } from "./operational-readiness";
+import { listReadinessFacts, readGlobalReadinessFlags, toReadinessFacts } from "./readiness-facts";
+import { getPartnerStationReadVisibility } from "./dashboard-visibility";
 import {
   BOTTLENECK_STATES,
   clampDashboardPagination,
@@ -576,8 +579,12 @@ export async function listPartnersForDashboard(
       stationsPendingApproval: num(r.stations_pending_approval),
       lastActivityAt: iso(r.last_activity),
       alertCount: num(r.security_alerts) + num(r.open_corrections) + (String(r.status) === "SUSPENDED" ? 1 : 0),
+      // Filled in below from the same authority the onboarding wizard uses.
+      nextAction: null,
     };
   });
+
+  await attachNextActions(mapped, walletSchema);
 
   return {
     rows: mapped,
@@ -1295,4 +1302,50 @@ export async function getAlerts(limitRaw: unknown, walletSchema = true): Promise
   }
 
   return sortAlerts(alerts).slice(0, limit);
+}
+
+
+/**
+ * Give every row on this page its ONE next action, from the SAME authority the onboarding wizard
+ * uses — `derivePartnerOperationalReadiness` — rather than from raw counts ranked here.
+ *
+ * ONE extra batched query for the whole page, not one per shop. If anything about it fails the rows
+ * keep `nextAction: null` and the surfaces fall back to what they showed before: this column is
+ * useful, but it is not worth failing the Shops table over.
+ */
+async function attachNextActions(rows: PartnerTableRow[], walletSchema: boolean): Promise<void> {
+  if (rows.length === 0) return;
+  try {
+    /*
+     * The profile-revision column is an OPTIONAL schema capability and must be PROVEN, not assumed
+     * either way. Guessing false is not the safe option here: the scanner dimension treats an
+     * absent revision as UNKNOWN, so every shop with a working station would read "status
+     * unavailable". Guessing true would read a column that may not exist. So it is probed, exactly
+     * as the Command Centre adapter probes it.
+     */
+    const [flags, stationVisibility] = await Promise.all([
+      readGlobalReadinessFlags(),
+      getPartnerStationReadVisibility(),
+    ]);
+    const profileRevisionSchema = stationVisibility.ok && stationVisibility.profileRevisionSchema;
+    const facts = await listReadinessFacts(
+      rows.map((row) => row.partnerId),
+      walletSchema,
+      profileRevisionSchema,
+      // Staff IS asked for here, so the Shops column can distinguish "operator needs a location"
+      // from a generic unknown. The Command Centre snapshot still deliberately does not ask.
+      true
+    );
+    const nowMs = Date.now();
+    const byPartner = new Map(facts.map((row) => [row.partner_id, row]));
+    for (const row of rows) {
+      const fact = byPartner.get(row.partnerId);
+      if (!fact) continue;
+      row.nextAction = derivePartnerOperationalReadiness(
+        toReadinessFacts(fact, flags, { walletSchema, profileRevisionSchema, nowMs, withStaff: true })
+      ).nextAction;
+    }
+  } catch {
+    // Left as null on every row. Never a cheerful default.
+  }
 }

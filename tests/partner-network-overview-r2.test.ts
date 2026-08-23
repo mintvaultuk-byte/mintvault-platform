@@ -13,6 +13,7 @@ const overview = read("client/src/pages/admin/partner-network-overview.tsx");
  */
 const shops = read("client/src/pages/admin/partner-network-shops.tsx");
 const attention = read("client/src/pages/admin/partner-network-attention.ts");
+const lifecycle = read("client/src/pages/admin/partner-network-lifecycle.ts");
 const app = read("client/src/App.tsx");
 const workspace = read("client/src/pages/admin/partner-management-detail.tsx");
 
@@ -58,12 +59,14 @@ describe("Partner Network R2 consolidated overview", () => {
     expect(attention).toContain('alert.id.startsWith("lock-")');
     expect(attention).toContain('alert.id.startsWith("esc-")');
     /*
-     * The Shops table carries the founder's agreed columns and no longer has a Locations column, so
-     * the authoritative "no active location" signal surfaces where it can be ACTED on: as a critical
-     * Needs Attention row linking straight to that shop's Locations. The Scanner column still links
-     * to the station workspace directly.
+     * Needs Attention no longer hard-codes a destination per condition. It renders the server's
+     * single next-action verdict and resolves WHERE that points through the one shared helper, so
+     * the authoritative "no active location" signal still lands on that shop's Locations — it is
+     * just no longer a literal in this file. Asserting the literal would now be asserting the
+     * duplication that was removed.
      */
-    expect(attention).toContain("/locations");
+    expect(attention).toContain("nextActionHref");
+    expect(lifecycle).toContain('suffix: "/locations"');
     expect(shops).toContain("/stations");
     expect(service).toContain("active_locations");
     expect(service).toContain("station_attention");
