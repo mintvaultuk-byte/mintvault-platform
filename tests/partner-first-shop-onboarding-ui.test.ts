@@ -178,7 +178,7 @@ describe("first-shop wizard — the onboarding test card", () => {
       [7, "Scanner connection and automatic profile"],
       [8, "Credits"],
     ] as Array<[number, string]>) {
-      expect(source).toContain(`<Step number={${number}} title="${title}"`);
+      expect(source).toMatch(new RegExp(`<Step\\s+number=\\{${number}\\}\\s+title="${title}"`));
     }
     expect(source).not.toContain("<Step number={11}");
   });
