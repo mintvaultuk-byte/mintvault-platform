@@ -203,6 +203,26 @@ describe("claim code → ownership (real storage, real PostgreSQL 17)", () => {
     expect((await certRow(pool!)).owner_email).toBe(OWNER);
   });
 
+  it("allows exactly one owner when two verified claim tokens race", async () => {
+    await resetCert(pool!);
+    const [firstToken, secondToken] = await Promise.all([
+      storage.createClaimVerification(CERT, OWNER, "First claimant", false),
+      storage.createClaimVerification(CERT, OTHER, "Second claimant", false),
+    ]);
+
+    const results = await Promise.all([storage.completeClaimByToken(firstToken), storage.completeClaimByToken(secondToken)]);
+    const successes = results.filter((result) => result.success);
+
+    expect(successes).toHaveLength(1);
+    const cert = await certRow(pool!);
+    expect(cert.ownership_status).toBe("claimed");
+    expect([OWNER, OTHER]).toContain(cert.owner_email);
+    expect(cert.owner_email).toBe(successes[0].email);
+    expect(await historyCount(pool!)).toBe(1);
+    const usedTokens = await pool!.query<{ n: string }>(`SELECT COUNT(*) n FROM claim_verifications WHERE used_at IS NOT NULL`);
+    expect(Number(usedTokens.rows[0].n)).toBe(1);
+  });
+
   it("a second person cannot claim an already-claimed certificate", async () => {
     await resetCert(pool!);
     await storage.completeClaimByToken(await storage.createClaimVerification(CERT, OWNER, null, false));

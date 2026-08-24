@@ -2047,15 +2047,13 @@ export class DatabaseStorage implements IStorage {
 
     const ownershipToken = await this._generateOwnershipToken();
 
-    // Atomic claim — cert UPDATE, ownership_history INSERT, claim_verifications
-    // UPDATE, and the new users.email_verified flip all succeed together or
-    // none. Without the wrapping transaction a partial failure could leave
-    // the user table un-flipped while the cert is already claimed (or vice
-    // versa). The email_verified flip is conditional on email_verified=false
-    // so repeated claims by the same user don't churn the timestamp.
+    // Atomic claim — the certificate UPDATE is a compare-and-set, so the first
+    // claimant wins and every concurrent claimant observes zero affected rows.
+    // The history, verification-token, and email-verified writes occur only
+    // after that authoritative ownership transition succeeds.
     const userId = user.id;
-    await db.transaction(async (tx) => {
-      await tx.execute(sql`
+    const applied = await db.transaction(async (tx) => {
+      const claimed = await tx.execute(sql`
         UPDATE certificates
         SET current_owner_user_id = ${userId},
             ownership_status = 'claimed',
@@ -2067,7 +2065,15 @@ export class DatabaseStorage implements IStorage {
             declared_new = ${verification.declaredNew === true},
             updated_at = NOW()
         WHERE certificate_number = ${verification.certId}
+          AND ownership_status = 'unclaimed'
+          AND claim_code_used_at IS NULL
+          AND deleted_at IS NULL
+          AND status = 'active'
+          AND stolen_status IS DISTINCT FROM 'reported_stolen'
+          AND (claim_code_created_at IS NULL OR claim_code_created_at <= ${verification.createdAt})
+        RETURNING certificate_number
       `);
+      if (claimed.rows.length !== 1) return false;
 
       await tx.insert(ownershipHistory).values({
         certId: verification.certId,
@@ -2089,7 +2095,13 @@ export class DatabaseStorage implements IStorage {
         WHERE id = ${userId}
           AND email_verified = false
       `);
+
+      return true;
     });
+
+    if (!applied) {
+      return { success: false, error: "This certificate is no longer available to claim." };
+    }
 
     return {
       success: true,
