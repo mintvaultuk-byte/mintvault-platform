@@ -44,10 +44,7 @@ export interface ActorContext {
 
 type CreatePartnerFailurePoint = "after_org_insert" | "after_default_location_insert";
 type InvitePartnerFailurePoint =
-  | "after_user_insert"
-  | "after_role_assignment"
-  | "before_invitation_insert"
-  | "before_invitation_audit";
+  "after_user_insert" | "after_role_assignment" | "before_invitation_insert" | "before_invitation_audit";
 
 interface InviteBarrier {
   point: "after_duplicate_check";
@@ -628,7 +625,8 @@ export async function createFirstShopOnboarding(actor: ActorContext, input: Firs
         ORDER BY created_at DESC LIMIT 1`,
       [actor.idempotencyKey]
     );
-    if (replay.rows[0]?.entity_id) return { replayed: true as const, partnerId: replay.rows[0].entity_id, invite: null };
+    if (replay.rows[0]?.entity_id)
+      return { replayed: true as const, partnerId: replay.rows[0].entity_id, invite: null };
 
     // A guided first-shop submit has no "override duplicate" affordance. Requiring the operator
     // to resolve a matching canonical Partner first is safer than quietly creating Shop 1 twice.
@@ -687,7 +685,9 @@ export async function createFirstShopOnboarding(actor: ActorContext, input: Firs
        VALUES ($1::uuid,'partner_first_shop_onboarded',$2,$3,$4,$5,'partner',$1::uuid::text,$6,'__attempt__','attempted')`,
       [partnerId, actor.actorUserId, actor.actorEmail, actor.requestId, actor.idempotencyKey, null]
     );
-    await client.query("INSERT INTO partner_profiles (tenant_id) VALUES ($1) ON CONFLICT (tenant_id) DO NOTHING", [partnerId]);
+    await client.query("INSERT INTO partner_profiles (tenant_id) VALUES ($1) ON CONFLICT (tenant_id) DO NOTHING", [
+      partnerId,
+    ]);
     const location = await client.query<{ id: string }>(
       `INSERT INTO partner_locations
          (tenant_id, partner_id, name, address, address_line1, address_line2, address_city, address_postcode, address_country, status, created_by)
@@ -733,7 +733,11 @@ export async function createFirstShopOnboarding(actor: ActorContext, input: Firs
       "partner_user_invited",
       "First-shop Owner invitation"
     );
-    const wallet = await ensureWalletWithClient(client, { actorUserId: actor.actorUserId, actorEmail: actor.actorEmail }, partnerId);
+    const wallet = await ensureWalletWithClient(
+      client,
+      { actorUserId: actor.actorUserId, actorEmail: actor.actorEmail },
+      partnerId
+    );
     await client.query(
       `INSERT INTO partner_management_audit
          (tenant_id, action_type, actor_user_id, actor_email, request_id, idempotency_key, entity_type, entity_id, after_state, reason, result)
@@ -758,7 +762,10 @@ export async function createFirstShopOnboarding(actor: ActorContext, input: Firs
   });
 
   if (committed.replayed || !committed.invite) {
-    return { result: { partnerId: committed.partnerId, invitationDeliveryStatus: "NOT_RETRIED" }, alreadyCompleted: true };
+    return {
+      result: { partnerId: committed.partnerId, invitationDeliveryStatus: "NOT_RETRIED" },
+      alreadyCompleted: true,
+    };
   }
   const { delivery, ...invite } = committed.invite;
   let invitationDeliveryStatus: string;
@@ -1845,7 +1852,8 @@ function guidedReadinessHref(partnerId: string, dimension: ReadinessDimensionKey
   if (dimension === "location" || dimension === "delivery") return `${guide}?step=location`;
   if (dimension === "operationsContact") return `${guide}?step=contact`;
   if (dimension === "owner") return `${guide}?step=owner`;
-  if (dimension === "station" || dimension === "scanner") return `/admin/partners/${encodeURIComponent(partnerId)}/stations`;
+  if (dimension === "station" || dimension === "scanner")
+    return `/admin/partners/${encodeURIComponent(partnerId)}/stations`;
   if (dimension === "credits") return `/admin/partners/${encodeURIComponent(partnerId)}/credits`;
   return undefined;
 }
@@ -1992,13 +2000,15 @@ export async function getPartnerOnboardingReadiness(partnerId: string) {
     [org.id]
   );
   const foundation = foundationRows[0];
-  const hasStructuredAddress = !!foundation && [
-    foundation.address_line1,
-    foundation.address_line2,
-    foundation.address_city,
-    foundation.address_postcode,
-    foundation.address_country,
-  ].some((value) => value != null);
+  const hasStructuredAddress =
+    !!foundation &&
+    [
+      foundation.address_line1,
+      foundation.address_line2,
+      foundation.address_city,
+      foundation.address_postcode,
+      foundation.address_country,
+    ].some((value) => value != null);
   const structuredDeliveryAddressReady =
     !!foundation &&
     isCompletePartnerDeliveryAddress({
@@ -2052,11 +2062,11 @@ export async function getPartnerOnboardingReadiness(partnerId: string) {
      * only thing standing between this and another shop's fleet.
      */
     /*
-     * Built in two tiers because `current_profile_revision_id` may be absent on an older database.
-     * The reduced probe marks that fact as `undefined`; the decision contract treats it as UNKNOWN,
-     * never as a pass, because capture readiness cannot be established without the revision.
+     * `current_profile_revision_id` arrived after the first station schema. Reading it through the
+     * row JSON avoids a deliberately failing first query on a mixed-version staging database while
+     * preserving the distinction between an absent column (UNKNOWN) and a present NULL value.
      */
-    const stationSql = (withProfileRevision: boolean) => `
+    const stationSql = `
       SELECT
         (SELECT count(*)::int FROM partner_stations WHERE tenant_id = $1 AND status <> 'REVOKED') AS enrolled,
         (SELECT count(*)::int FROM partner_stations s2
@@ -2066,12 +2076,13 @@ export async function getPartnerOnboardingReadiness(partnerId: string) {
         (SELECT count(*)::int FROM partner_stations
            WHERE tenant_id = $1 AND status = 'PENDING' AND approved_at IS NULL) AS pending_approval,
         a.scanner_connected, a.last_seen_at, a.calibration_status, a.current_calibration_id,
-        ${withProfileRevision ? "a.current_profile_revision_id" : "NULL::uuid AS current_profile_revision_id"},
+        a.current_profile_revision_id, a.has_profile_revision,
         a.app_version, a.minimum_supported_version
       FROM (SELECT 1) _
       LEFT JOIN LATERAL (
         SELECT s.scanner_connected, s.last_seen_at, s.calibration_status, s.current_calibration_id,
-               ${withProfileRevision ? "s.current_profile_revision_id," : ""}
+               to_jsonb(s) ->> 'current_profile_revision_id' AS current_profile_revision_id,
+               to_jsonb(s) ? 'current_profile_revision_id' AS has_profile_revision,
                s.app_version, s.minimum_supported_version
           FROM partner_stations s
           JOIN partner_locations l ON l.id = s.location_id AND l.tenant_id = s.tenant_id AND l.status = 'ACTIVE'
@@ -2088,17 +2099,11 @@ export async function getPartnerOnboardingReadiness(partnerId: string) {
       calibration_status: string | null;
       current_calibration_id: string | null;
       current_profile_revision_id: string | null;
+      has_profile_revision: boolean | null;
       app_version: string | null;
       minimum_supported_version: string | null;
     };
-    let hasProfileRevision = true;
-    let stationRows;
-    try {
-      stationRows = await partnerAdminQuery<StationProbeRow>(stationSql(true), [org.id]);
-    } catch {
-      stationRows = await partnerAdminQuery<StationProbeRow>(stationSql(false), [org.id]);
-      hasProfileRevision = false;
-    }
+    const stationRows = await partnerAdminQuery<StationProbeRow>(stationSql, [org.id]);
     const s = stationRows.rows[0];
     stationReady = (s?.approved_active ?? 0) > 0;
     stationFacts = {
@@ -2112,7 +2117,7 @@ export async function getPartnerOnboardingReadiness(partnerId: string) {
               lastSeenAt: s.last_seen_at,
               calibrationStatus: s.calibration_status,
               currentCalibrationId: s.current_calibration_id,
-              currentProfileRevisionId: hasProfileRevision ? s.current_profile_revision_id : undefined,
+              currentProfileRevisionId: s.has_profile_revision === true ? s.current_profile_revision_id : undefined,
               appVersion: s.app_version,
               minimumSupportedVersion: s.minimum_supported_version,
             }
@@ -2146,7 +2151,8 @@ export async function getPartnerOnboardingReadiness(partnerId: string) {
       // Could this person actually be offered a location to enrol a station at?
       scanCapableCount: activeUsers.filter((u: any) => u.location_eligible === true).length,
       // Location-scoped, ACTIVE, and pinned to nothing — capabilities but nowhere to use them.
-      locationScopedWithoutLocation: activeUsers.filter((u: any) => !isOrgWide(u) && u.location_eligible !== true).length,
+      locationScopedWithoutLocation: activeUsers.filter((u: any) => !isOrgWide(u) && u.location_eligible !== true)
+        .length,
     };
   } catch {
     staff = null;
@@ -2177,33 +2183,36 @@ export async function getPartnerOnboardingReadiness(partnerId: string) {
     rows.find((u: any) => u.user_status !== "REVOKED") ??
     rows[0];
 
-  const operational = attachGuidedReadinessActions(derivePartnerOperationalReadiness({
-    orgStatus: org.status,
-    staff,
-    portalEnabled: flagsReadable ? portalEnabled : null,
-    loginFlagEnabled: flagsReadable ? loginFlagEnabled : null,
-    emergencyStop: flagsReadable ? emergencyStop : null,
-    owner: ownerRow
-      ? {
-          userStatus: ownerRow.user_status,
-          passwordConfigured: ownerRow.password_configured === true,
-          invitationValid:
-            !!ownerRow.invitation_status &&
-            ["PENDING", "SENT", "DELIVERY_FAILED"].includes(ownerRow.invitation_status) &&
-            !!ownerRow.invitation_expires_at &&
-            new Date(ownerRow.invitation_expires_at).getTime() > Date.now(),
-          mfaRequired: ownerRow.mfa_required === true,
-          mfaConfigured: ownerRow.mfa_configured === true,
-        }
-      : null,
-    locationEligible: ownerRow?.location_eligible === true,
-    deliveryAddressReady,
-    operationsContactReady,
-    station: stationFacts,
-    credits,
-    testCard,
-    nowMs: Date.now(),
-  }), org.id);
+  const operational = attachGuidedReadinessActions(
+    derivePartnerOperationalReadiness({
+      orgStatus: org.status,
+      staff,
+      portalEnabled: flagsReadable ? portalEnabled : null,
+      loginFlagEnabled: flagsReadable ? loginFlagEnabled : null,
+      emergencyStop: flagsReadable ? emergencyStop : null,
+      owner: ownerRow
+        ? {
+            userStatus: ownerRow.user_status,
+            passwordConfigured: ownerRow.password_configured === true,
+            invitationValid:
+              !!ownerRow.invitation_status &&
+              ["PENDING", "SENT", "DELIVERY_FAILED"].includes(ownerRow.invitation_status) &&
+              !!ownerRow.invitation_expires_at &&
+              new Date(ownerRow.invitation_expires_at).getTime() > Date.now(),
+            mfaRequired: ownerRow.mfa_required === true,
+            mfaConfigured: ownerRow.mfa_configured === true,
+          }
+        : null,
+      locationEligible: ownerRow?.location_eligible === true,
+      deliveryAddressReady,
+      operationsContactReady,
+      station: stationFacts,
+      credits,
+      testCard,
+      nowMs: Date.now(),
+    }),
+    org.id
+  );
 
   return {
     organisation: { id: org.id, legalName: org.legal_name, status: org.status },
@@ -3211,10 +3220,20 @@ export async function upsertFirstShopOperationsContact(
   const created = await addContact(
     actor,
     org.id,
-    { fullName: contact.fullName, email: contact.email, contactType: "operations", phone: null, title: null, isPrimary: true },
+    {
+      fullName: contact.fullName,
+      email: contact.email,
+      contactType: "operations",
+      phone: null,
+      title: null,
+      isPrimary: true,
+    },
     reason
   );
-  return { ...created, result: { contactId: (created.result as { contactId: string } | null)?.contactId ?? null, reused: false } };
+  return {
+    ...created,
+    result: { contactId: (created.result as { contactId: string } | null)?.contactId ?? null, reused: false },
+  };
 }
 
 async function loadOnboardingMainLocation(partnerId: string): Promise<{
@@ -3529,12 +3548,7 @@ export async function setPartnerUserLocations(
  * from, so the two refusal sets can be read against each other in one file. This adds the
  * super-admin wrapper: partner resolution, a mandatory reason, and the audit envelope.
  */
-export async function voidPartnerCardJob(
-  actor: ActorContext,
-  partnerId: string,
-  cardJobId: string,
-  reason: string
-) {
+export async function voidPartnerCardJob(actor: ActorContext, partnerId: string, cardJobId: string, reason: string) {
   const org = await loadPartner(partnerId);
   return withAudit(actor, org.id, "partner_card_job_voided", reason, { cardJobId }, async () => {
     const { voidCardJobUnrecoverableGeometry } = await import("./card-job-cancellation");

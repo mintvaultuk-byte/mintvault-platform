@@ -6,6 +6,16 @@ const root = resolve(import.meta.dirname, "..");
 const read = (path: string) => readFileSync(resolve(root, path), "utf8");
 
 describe("first-shop guided onboarding UI contract", () => {
+  it("renders actionable API load failures instead of treating an auth or projection failure as missing Partner data", () => {
+    const page = read("client/src/pages/admin/partner-first-shop-onboarding.tsx");
+    expect(page).toContain("function onboardingLoadFailure");
+    expect(page).toContain("failure.status === 401");
+    expect(page).toContain("failure.status === 403");
+    expect(page).toContain("failure.status === 404");
+    expect(page).toContain("first-shop-load-failure");
+    expect(page).not.toContain("This Partner could not be loaded.");
+  });
+
   it("collects the canonical delivery/contact/Owner fields and labels the current scope", () => {
     const page = read("client/src/pages/admin/partner-first-shop-onboarding.tsx");
     for (const required of [
@@ -21,7 +31,8 @@ describe("first-shop guided onboarding UI contract", () => {
       "Current location:",
       "Station enrolment must come from the real shop Scanner",
       "Open credits / billing readiness",
-    ]) expect(page).toContain(required);
+    ])
+      expect(page).toContain(required);
     expect(page).toContain("/first-shop/location");
     expect(page).toContain("/first-shop/operations-contact");
     expect(page).toContain("first-shop-create-submit");
@@ -60,7 +71,8 @@ describe("first-shop guided onboarding UI contract", () => {
       "Security &amp; Account",
       "Open Credits &amp; Billing",
       "ReadinessPanel",
-    ]) expect(ownerPage).toContain(required);
+    ])
+      expect(ownerPage).toContain(required);
     expect(app).toContain('path="/partner/onboarding"');
     expect(routes).toContain('r.get("/onboarding"');
     expect(routes).toContain('roles.includes("PARTNER_OWNER")');
@@ -174,7 +186,7 @@ describe("first-shop wizard — the onboarding test card", () => {
   it("renders the test-card sentence from the server verdict rather than deriving one", () => {
     const source = page();
     expect(source).toContain("{shop.operational.testCard.message}");
-    expect(source).toContain('data-state={shop.operational.testCard.state}');
+    expect(source).toContain("data-state={shop.operational.testCard.state}");
     // No client-side status interpretation: the six states are the server's to decide.
     expect(source).not.toMatch(/testCard\.cardJob\?\.status\s*===/);
     expect(source).not.toContain('cardJob.status === "READY_TO_GRADE"');
@@ -243,7 +255,10 @@ describe("permanent-deletion admin UI", () => {
     const detail = read("client/src/pages/admin/partner-management-detail.tsx");
 
     // 1. The panel must go through the seeding opener, not setModal.
-    const mount = detail.slice(detail.indexOf("<PermanentDeletionPanel"), detail.indexOf("<PermanentDeletionPanel") + 1500);
+    const mount = detail.slice(
+      detail.indexOf("<PermanentDeletionPanel"),
+      detail.indexOf("<PermanentDeletionPanel") + 1500
+    );
     expect(mount).toContain("openModal={openModalSeeded}");
     expect(mount).not.toContain("openModal={setModal}");
 

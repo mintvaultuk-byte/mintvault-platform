@@ -1769,4 +1769,58 @@ describe("Card Job → canonical grading bridge (real PostgreSQL)", () => {
     expect(String(direct)).toContain("illegal transition");
     expect(await jobStatus(card.cardJobId)).toBe("READY_TO_GRADE");
   });
+
+  it("AT-B24: a retried canonical calibration keeps one row, one immutable event and one current VALID calibration", async () => {
+    const { saveStationCalibration } = await import("../server/partner/station-service");
+    const station = await admin.query<{ id: string; tenant_id: string; location_id: string; station_code: string }>(
+      `SELECT id, tenant_id, location_id, station_code FROM partner_stations WHERE id=$1`,
+      [shopA.stationA]
+    );
+    const row = station.rows[0];
+    const principal = {
+      id: row.id,
+      code: row.station_code,
+      tenantId: row.tenant_id,
+      locationId: row.location_id,
+      appVersion: "1.5.5",
+      scannerProfileVersion: "mintvault-canon-lide-400-v3",
+      calibrationStatus: "UNPROVISIONED",
+    } as never;
+    const input = {
+      scannerHardware: {
+        manufacturer: "Canon",
+        model: "Canon LiDE 400",
+        serial: "idempotency-proof",
+        deviceId: "idempotency-proof",
+      },
+      scannerProfileVersion: "mintvault-canon-lide-400-v3",
+      acquisitionRegion: { x: 20, y: 20, width: 100, height: 130 },
+      workingRegion: { x: 24.6, y: 24.6, width: 90.8, height: 120.8 },
+      placementToleranceMm: { left: 4.6, top: 4.6, right: 4.6, bottom: 4.6 },
+      calibrationVersion: "capture-geometry-v1",
+    };
+    const first = await saveStationCalibration(principal, shopA.owner, input);
+    const retry = await saveStationCalibration(principal, shopA.owner, input);
+    expect(retry).toEqual(first);
+
+    const [calibrations, events, current] = await Promise.all([
+      admin.query<{ n: string }>(
+        `SELECT count(*)::text AS n FROM partner_station_calibrations
+          WHERE station_id=$1 AND scanner_hardware->>'deviceId'='idempotency-proof'`,
+        [row.id]
+      ),
+      admin.query<{ n: string }>(
+        `SELECT count(*)::text AS n FROM partner_station_events
+          WHERE station_id=$1 AND event_type='station_calibration_saved' AND detail->>'calibrationId'=$2`,
+        [row.id, first.id]
+      ),
+      admin.query<{ current_calibration_id: string; calibration_status: string }>(
+        `SELECT current_calibration_id, calibration_status FROM partner_stations WHERE id=$1`,
+        [row.id]
+      ),
+    ]);
+    expect(Number(calibrations.rows[0].n)).toBe(1);
+    expect(Number(events.rows[0].n)).toBe(1);
+    expect(current.rows[0]).toEqual({ current_calibration_id: first.id, calibration_status: "VALID" });
+  });
 });

@@ -706,9 +706,7 @@ export async function saveStationCalibration(
    * Checking here makes the failure land on the SAVE, where the operator is standing at the scanner
    * with the window under their cursor.
    */
-  const acquisitionRegion = assertLegalCalibrationRegion(
-    finiteRegion(input.acquisitionRegion, "acquisitionRegion")
-  );
+  const acquisitionRegion = assertLegalCalibrationRegion(finiteRegion(input.acquisitionRegion, "acquisitionRegion"));
   const workingRegion = input.workingRegion == null ? {} : finiteRegion(input.workingRegion, "workingRegion");
   const placementToleranceMm =
     input.placementToleranceMm == null ? {} : finiteMargins(input.placementToleranceMm, "placementToleranceMm");
@@ -799,7 +797,7 @@ export async function saveStationCalibration(
          (tenant_id,location_id,station_id,calibration_fingerprint,scanner_hardware_fingerprint,scanner_hardware,
           scanner_profile_version,acquisition_region,working_region,placement_tolerance_mm,calibration_version,health_status,created_by_user_id)
        VALUES ($1,$2,$3,$4,$5,$6::jsonb,$7,$8::jsonb,$9::jsonb,$10::jsonb,$11,'VALID',$12)
-       ON CONFLICT (station_id,calibration_fingerprint) DO UPDATE SET calibration_fingerprint=EXCLUDED.calibration_fingerprint
+       ON CONFLICT (station_id,calibration_fingerprint) DO NOTHING
        RETURNING id`,
       [
         station.tenantId,
@@ -816,7 +814,17 @@ export async function saveStationCalibration(
         actorUserId,
       ]
     );
-    const id = inserted.rows[0].id;
+    const created = inserted.rows.length === 1;
+    const id =
+      inserted.rows[0]?.id ||
+      (
+        await client.query<{ id: string }>(
+          `SELECT id FROM partner_station_calibrations
+            WHERE station_id=$1 AND calibration_fingerprint=$2`,
+          [station.id, calibrationFingerprint]
+        )
+      ).rows[0]?.id;
+    if (!id) throw new StationServiceError("validation", "Calibration could not be resolved after its idempotent save");
     await client.query(
       `UPDATE partner_stations
           SET current_calibration_id=$2, calibration_status='VALID', scanner_hardware=$3::jsonb,
@@ -824,17 +832,19 @@ export async function saveStationCalibration(
         WHERE id=$1 AND status='ACTIVE'`,
       [station.id, id, JSON.stringify(scannerHardware), scannerHardwareFingerprint, scannerProfileVersion]
     );
-    await client.query(
-      `INSERT INTO partner_station_events (tenant_id,location_id,station_id,actor_user_id,event_type,detail)
-       VALUES ($1,$2,$3,$4,'station_calibration_saved',$5::jsonb)`,
-      [
-        station.tenantId,
-        station.locationId,
-        station.id,
-        actorUserId,
-        JSON.stringify({ calibrationId: id, scannerHardwareFingerprint, scannerProfileVersion, calibrationVersion }),
-      ]
-    );
+    if (created) {
+      await client.query(
+        `INSERT INTO partner_station_events (tenant_id,location_id,station_id,actor_user_id,event_type,detail)
+         VALUES ($1,$2,$3,$4,'station_calibration_saved',$5::jsonb)`,
+        [
+          station.tenantId,
+          station.locationId,
+          station.id,
+          actorUserId,
+          JSON.stringify({ calibrationId: id, scannerHardwareFingerprint, scannerProfileVersion, calibrationVersion }),
+        ]
+      );
+    }
     return { id, calibrationStatus: "VALID" };
   });
 }
@@ -993,11 +1003,9 @@ export async function listFleetStations(input: {
  * using it; a missing partner_stations relation throws so it cannot become a false
  * zero.
  */
-export async function getFleetStationLifecycleSummary(): Promise<
-  Record<StationStatus, number>
-> {
+export async function getFleetStationLifecycleSummary(): Promise<Record<StationStatus, number>> {
   const result = await partnerAdminQuery<{ status: StationStatus; n: string }>(
-    "SELECT status, count(*)::bigint AS n FROM partner_stations GROUP BY status",
+    "SELECT status, count(*)::bigint AS n FROM partner_stations GROUP BY status"
   );
   const summary: Record<StationStatus, number> = {
     PENDING: 0,
