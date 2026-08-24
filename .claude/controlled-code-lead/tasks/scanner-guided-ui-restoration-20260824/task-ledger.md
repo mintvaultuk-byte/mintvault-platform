@@ -23,7 +23,7 @@
 | 4 — Implementation authorisation | done   | 2026-08-24 | Local Scanner UI/package repair only; no protected action required.                                                                                                             |
 | 5 — Implementation               | done   | 2026-08-24 | Operational markup is hidden by default; card work/billing requires authoritative `ACTIVE` setup plus `VALID` calibration; stale billing closes on non-operational transitions. |
 | 6 — Regression                   | done   | 2026-08-24 | Scanner 165/165; compiled proof 41/41; fresh 1.5.4 arm64 package/verifier; root typecheck, lint and build all passed.                                                           |
-| 7 — Final report                 | done   | 2026-08-24 | Read-only packaged STAGING runtime inspection found no active work and was cleanly stopped. This task does not deploy Fly or mutate staging.                                    |
+| 7 — Final report                 | done   | 2026-08-24 | Exact 1.5.4 package foreground-observed the guided calibration state, then the package and all helpers exited cleanly. This task does not deploy Fly or mutate staging.         |
 
 ## Reviewer assignments (Stage 1)
 

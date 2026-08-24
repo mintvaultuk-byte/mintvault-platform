@@ -18,7 +18,7 @@
 
 ### If the local packaged app is launched
 
-- Quit only the corrected foreground Scanner via its own app control, preserve its runtime manifest/logs, and relaunch the previous verified 1.5.1 package from its recorded isolated path if an owner chooses to roll back.
+- Quit only the corrected foreground Scanner via its own app control, preserve its runtime manifest/logs, and relaunch the prior verified 1.5.1 package from its recorded isolated path if an owner chooses to roll back.
 
 ## What rollback does NOT undo
 

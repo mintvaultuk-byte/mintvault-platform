@@ -15,9 +15,9 @@
 
 - Branch: `codex/partner-scanner-onboarding-20260824`
 - Baseline: `8b117946c411a544f38cf551a091bfb949cb8f43`
-- Pushed: yes — source release commit published to `origin/codex/partner-scanner-onboarding-20260824`
+- Pushed: `f7d281b73084b21e641b22d76dc4b209b9f20cc1` is published to `origin/codex/partner-scanner-onboarding-20260824`; this evidence follow-up is pending publication.
 - Deployed to Fly: no
-- Local packaged Scanner: 1.5.4 arm64 package built, verified, read-only runtime-inspected against STAGING, then cleanly stopped.
+- Local packaged Scanner: 1.5.4 arm64 package built, verified and foreground-observed; its isolated runtime manifest declared the exact executable, profile/scans dir and STAGING API, then the package and helpers exited cleanly.
 
 ## Known divergence between environments
 

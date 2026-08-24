@@ -22,12 +22,12 @@ If actuals exceed any estimate by more than ~25%, stop editing, re-check the dia
 
 ## Actuals (fill at Stage 6/7)
 
-| Metric                            | Actual                                                                             | Within 25%?                           |
-| --------------------------------- | ---------------------------------------------------------------------------------- | ------------------------------------- |
-| Files changed                     | 9 implementation files + 9 task records                                            | yes                                   |
-| Lines changed (`git diff --stat`) | 206 additions / 21 deletions in implementation before governance records           | no — rechecked                        |
-| Commits                           | 1 Scanner UI release commit planned                                                | yes                                   |
-| Tests                             | Scanner 165/165; compiled proof 41/41; package verifier; root typecheck/lint/build | exceeds estimate with useful coverage |
-| Duration                          | one session                                                                        | yes                                   |
+| Metric                            | Actual                                                                                                                                                           | Within 25%?                           |
+| --------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------- | ------------------------------------- |
+| Files changed                     | 9 implementation files + 9 task records                                                                                                                          | yes                                   |
+| Lines changed (`git diff --stat`) | 206 additions / 21 deletions in implementation before final governance updates                                                                                   | no — rechecked                        |
+| Commits                           | 1 Scanner UI release commit planned                                                                                                                              | yes                                   |
+| Tests                             | Scanner 165/165; compiled proof 41/41; package verifier; root typecheck/lint/build; full Vitest 6,088 pass/1,015 skip with five known database-env-only failures | exceeds estimate with useful coverage |
+| Duration                          | one session                                                                                                                                                      | yes                                   |
 
 **Overrun explanation (if any):** The implementation-only line count exceeded the early ±145 estimate because the DOM-level renderer harness needed 88 deterministic workflow assertions to prove the hiding and stale-overlay transitions. The diagnosis was rechecked: the extra proof remains inside the original renderer/package-test scope; no server, schema, payment, credit or station action was added.

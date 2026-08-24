@@ -7,8 +7,8 @@
 - [x] Scanner and project gates pass.
 - [x] Fresh macOS arm64 package is built and verified.
 - [x] The source version and package version match: 1.5.4.
-- [x] One isolated Shop Games Scanner process was verified; it and all helpers exited cleanly.
-- [x] State was read-only checked: no active capture, card job, pending start or upload; no station/approval/card/credit action was taken.
+- [x] One isolated Shop Games Scanner process was verified: v1.5.4, exact packaged executable/profile/scans directory and STAGING endpoint; it and all helpers then exited cleanly.
+- [x] Foreground physical screen is calibration-only: no card action, top-up affordance, preview/capture surface or stale banner. No station/approval/card/credit action was taken.
 
 ## Steps
 
@@ -19,7 +19,7 @@
 
 ## Staging verification evidence (class C+ only)
 
-- The exact 1.5.4 arm64 package declared STAGING in its own runtime manifest and was then cleanly quit. This package uses the existing staging API but performs no staging write in this rollout; staging remains `8b117946` / v589.
+- The exact 1.5.4 arm64 package declared STAGING in its own runtime manifest and was foreground-observed in its calibration-only screen. This package uses the existing staging API but performs no staging write in this rollout; staging remains `8b117946` / v589.
 
 ## Who/what is affected
 
