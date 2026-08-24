@@ -7,25 +7,32 @@
 const els = {
   hideBtn: document.getElementById("hideBtn"),
   appVersion: document.getElementById("appVersion"),
+  operationalWorkflow: document.getElementById("operationalWorkflow"),
   updateBtn: document.getElementById("updateBtn"),
   scannerHealth: document.getElementById("scannerHealth"),
   stationIdentityRow: document.getElementById("stationIdentityRow"),
   stationOrganisation: document.getElementById("stationOrganisation"),
   stationIdentity: document.getElementById("stationIdentity"),
   stationUser: document.getElementById("stationUser"),
+  stationCreditsCell: document.getElementById("stationCreditsCell"),
   lowCreditsWarning: document.getElementById("lowCreditsWarning"),
   buyMoreCreditsBtn: document.getElementById("buyMoreCreditsBtn"),
   targetCert: document.getElementById("targetCert"),
   targetSide: document.getElementById("targetSide"),
   targetHint: document.getElementById("targetHint"),
+  captureTargetRow: document.getElementById("captureTargetRow"),
   workflowGuide: document.getElementById("workflowGuide"),
   placementVisual: document.getElementById("placementVisual"),
   workflowGuideStep: document.getElementById("workflowGuideStep"),
   workflowGuideTitle: document.getElementById("workflowGuideTitle"),
   workflowGuideHint: document.getElementById("workflowGuideHint"),
+  calibrationPreviewBtn: document.getElementById("calibrationPreviewBtn"),
   dot: document.getElementById("dot"),
   statusText: document.getElementById("statusText"),
   statusSub: document.getElementById("statusSub"),
+  statusRow: document.getElementById("statusRow"),
+  captureActionsRow: document.getElementById("captureActionsRow"),
+  recentRow: document.getElementById("recentRow"),
   recentList: document.getElementById("recentList"),
   orphansBtn: document.getElementById("fixMissingImagesBtn"),
   orphanModal: document.getElementById("orphanModal"),
@@ -173,7 +180,11 @@ let newCardInFlight = false;
  * the button must not imply otherwise.
  */
 let openCardActionInFlight = false;
-let stationSetup = null;
+/*
+ * Fail closed before the first IPC answer. A static capture screen is never a safe loading state:
+ * the only truthful first view is that the Scanner is checking this Mac's station authority.
+ */
+let stationSetup = { stage: "checking" };
 let stationSetupBusy = false;
 let stationSetupPoll = null;
 const REQUIRED_BILLING_PACK_CREDITS = [5, 10, 25, 50, 100];
@@ -210,6 +221,17 @@ function billingLocked(state) {
 
 function shouldShowBillingLock(state) {
   return billingLocked(state) && !billingModalDismissedAtZero;
+}
+
+/* Credits buy card work, not setup. Calibration stays available at a zero balance. */
+function stationCanStartCardWork() {
+  return (
+    stationSetup?.stage === "active" && String(stationSetup?.calibrationStatus || "").toUpperCase() === "VALID"
+  );
+}
+
+function stationRequiresCalibration() {
+  return stationSetup?.stage === "active" && !stationCanStartCardWork();
 }
 
 function canPurchaseCredits() {
@@ -325,6 +347,20 @@ function startBillingPoll() {
 }
 
 function renderBillingLock(state) {
+  /*
+   * CREDIT IS NOT A SETUP GATE.
+   *
+   * If an active operator signs out or their session expires while a zero-credit billing modal is
+   * visible, `renderStationSetup()` changes the station state before any later state push arrives.
+   * Close the old modal immediately: it belongs only to an ACTIVE station and otherwise sits above
+   * the guided setup modal (its z-index is intentionally higher while operating).
+   */
+  if (!stationCanStartCardWork()) {
+    stopBillingPoll();
+    billingModalDismissedAtZero = false;
+    closeBillingModal();
+    return;
+  }
   const walletRefreshGeneration = Number.isFinite(state?.walletRefreshGeneration)
     ? state.walletRefreshGeneration
     : null;
@@ -345,8 +381,7 @@ function renderBillingLock(state) {
   renderedWalletRefreshGeneration = walletRefreshGeneration;
   // Reconcile every active signed-in Scanner. This survives a restart while Stripe is delivering a
   // webhook: no renderer memory is needed to refresh the authoritative visible wallet.
-  if (stationSetup?.stage === "active") startBillingPoll();
-  else stopBillingPoll();
+  startBillingPoll();
   const locked = billingLocked(state);
   if (!locked) {
     billingModalDismissedAtZero = false;
@@ -379,8 +414,7 @@ function renderBillingLock(state) {
    * Scoped to an operational station, which is the only state in which starting a card is even
    * possible. NEW CARD remains hard-disabled at zero by its own control — that gate is untouched.
    */
-  const stationOperational = stationSetup?.stage === "active";
-  if (stationOperational && shouldShowBillingLock(state)) {
+  if (shouldShowBillingLock(state)) {
     // A reservation already paid for this Card Job can finish safely. Keep the canonical zero panel
     // visible, but make it non-blocking so SCAN/FIX remains usable while NEW stays hard-disabled.
     openBillingModal("zero", { nonBlocking: stationHasReservedCardInProgress(state) });
@@ -538,6 +572,24 @@ function availableCreditsFromState(state) {
 }
 
 function renderWorkflowGuide(state) {
+  if (!stationCanStartCardWork()) {
+    els.workflowGuideStep.textContent = "SETUP — CALIBRATE SCANNER";
+    els.workflowGuideTitle.textContent = "Calibrate this Scanner";
+    els.workflowGuideHint.textContent =
+      "Run Preview to check scanner health and complete calibration before MintVault enables card work.";
+    els.placementVisual.classList.remove("flip-required");
+    els.workflowGuide.dataset.guideState = "setup";
+    const canCheckHealth = ["ready", "profile_unprovisioned"].includes(String(state?.scannerHealth?.status || ""));
+    els.calibrationPreviewBtn.hidden = !stationRequiresCalibration();
+    setActionButton(
+      els.calibrationPreviewBtn,
+      actionInFlight ? "CHECKING SCANNER…" : "CHECK SCANNER HEALTH",
+      true,
+      actionInFlight || !canCheckHealth
+    );
+    return;
+  }
+  els.calibrationPreviewBtn.hidden = true;
   const active = state.activeCapture;
   const stage = String(active?.stage || "");
   const awaitingScan = stage === "awaiting_scan";
@@ -609,7 +661,21 @@ function renderStationSetup(next) {
   stationSetup = next || { stage: "sign_in" };
   const stage = String(stationSetup.stage || "sign_in");
   const active = stage === "active";
+  const calibrating = stationRequiresCalibration();
+  els.operationalWorkflow.hidden = !active;
+  // An approved station that is not yet calibrated has one job: scanner health. Its old card
+  // workflow, remembered thumbnails, credit affordances and movable service surface must not leak
+  // through beneath that guided screen.
+  els.stationCreditsCell.hidden = calibrating;
+  els.captureTargetRow.hidden = calibrating;
+  els.statusRow.hidden = calibrating;
+  els.captureActionsRow.hidden = calibrating;
+  els.recentRow.hidden = calibrating;
+  els.diagnosticsRow.hidden = calibrating;
+  // Close any previously-open zero-credit overlay before the new guided state is made visible.
+  renderBillingLock(lastState || {});
   renderStationIdentity(stationSetup);
+  renderCaptureActions(lastState || {});
   renderStationEnvironment(stationSetup);
   els.stationSetupModal.classList.toggle("visible", !active);
   // `session_expired` is a sign-in screen with different words — the form must be on it, or the
@@ -622,7 +688,10 @@ function renderStationSetup(next) {
   els.stationMfaBtn.disabled = stationSetupBusy;
   els.stationRegisterBtn.disabled = stationSetupBusy;
 
-  if (stage === "mfa") {
+  if (stage === "checking") {
+    els.stationSetupTitle.textContent = "Checking this Mac";
+    els.stationSetupText.textContent = "MintVault is confirming this Scanner's station status.";
+  } else if (stage === "mfa") {
     els.stationSetupTitle.textContent = "Verify your MintVault sign-in";
     els.stationSetupText.textContent =
       "Enter your authenticator or recovery code. This Mac cannot scan until both you and the station are authorised.";
@@ -1237,6 +1306,7 @@ function renderBackgroundUploads(state) {
 }
 
 function renderCaptureActions(state) {
+  const stationCanStartCards = stationCanStartCardWork();
   const active = state.activeCapture;
   const stage = String(active?.stage || "");
   const side = toTitle(active?.side || "card");
@@ -1265,7 +1335,8 @@ function renderCaptureActions(state) {
     approval.side === active.side &&
     approval.certId === active.certId
   );
-  const scanEnabled = awaitingScan && placementGreen && state.scannerHealth?.status === "ready" && !actionInFlight;
+  const scanEnabled =
+    stationCanStartCards && awaitingScan && placementGreen && state.scannerHealth?.status === "ready" && !actionInFlight;
   const cardRegistered = state.lastAcceptedCapture?.cardRegistered === true && !active;
 
   /*
@@ -1305,8 +1376,9 @@ function renderCaptureActions(state) {
   const openCard = state.openCardJob;
   const noAvailableCredits = billingLocked(state);
   els.newCardBtn.disabled =
-    Boolean(active) || Boolean(openCard) || noAvailableCredits || actionInFlight || newCardInFlight;
-  els.creditEmptyPanel.hidden = !noAvailableCredits;
+    !stationCanStartCards || Boolean(active) || Boolean(openCard) || noAvailableCredits || actionInFlight || newCardInFlight;
+  els.orphansBtn.disabled = !stationCanStartCards || actionInFlight;
+  els.creditEmptyPanel.hidden = !stationCanStartCards || !noAvailableCredits;
 
   /*
    * The blocking recovery panel. Shown ONLY when the card genuinely cannot proceed on its own — an
@@ -1371,8 +1443,10 @@ function renderCaptureActions(state) {
     els.capturePreview.removeAttribute("src");
   }
 
-  els.captureActionHint.textContent = !hasTarget
-    ? "Open or arm a card in MintVault to enable final scanning."
+  els.captureActionHint.textContent = !stationCanStartCards
+    ? "Complete this station’s calibration before MintVault enables card work."
+    : !hasTarget
+      ? "Open or arm a card in MintVault to enable final scanning."
     : awaitingScan && state.scannerHealth?.status !== "ready"
       ? "Finish this station’s placement setup before final scanning is enabled."
       : awaitingScan && !placementGreen
@@ -1939,6 +2013,10 @@ els.positioningPreviewBtn.addEventListener("click", () => {
   }
   void runCaptureAction(() => window.scanner.runPositioningPreview());
 });
+els.calibrationPreviewBtn.addEventListener("click", () => {
+  if (!stationRequiresCalibration()) return;
+  void runCaptureAction(() => window.scanner.runPositioningPreview());
+});
 els.rescanErrorBtn.addEventListener(
   "click",
   () => void runCaptureAction((previewId) => window.scanner.rescanCapturePreview(previewId))
@@ -2189,6 +2267,7 @@ setInterval(() => {
   }
 }, 1_000);
 wireStationRecoveryControls();
+renderStationSetup({ stage: "checking" });
 void refreshStationSetup();
 window.addEventListener("resize", () => {
   if (!lastState?.positioningPreview) return;

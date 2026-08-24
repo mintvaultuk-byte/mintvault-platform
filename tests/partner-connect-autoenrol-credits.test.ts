@@ -962,9 +962,13 @@ describe("Scanner — trapped-state recovery, isolation and launcher proof (comp
 
   it("M10/M11/M12 — zero credits blocks only a new card, never sign-in, enrolment or calibration", () => {
     const renderer = read("renderer/app.js");
-    // The blocking top-up modal is scoped to an operational station.
-    expect(renderer).toContain('const stationOperational = stationSetup?.stage === "active"');
-    expect(renderer).toContain("if (stationOperational && shouldShowBillingLock(state))");
+    // The billing/capture gate is now stronger: a station must be ACTIVE and have a VALID
+    // calibration before either card work or a zero-credit top-up overlay can appear.
+    expect(renderer).toContain("function stationCanStartCardWork()");
+    expect(renderer).toContain('stationSetup?.stage === "active"');
+    expect(renderer).toContain('calibrationStatus || "").toUpperCase() === "VALID"');
+    expect(renderer).toContain("if (!stationCanStartCardWork())");
+    expect(renderer).toContain("if (shouldShowBillingLock(state))");
     // NEW CARD's own zero-credit gate is untouched.
     expect(renderer).toContain("billingLocked(");
   });
@@ -1025,9 +1029,9 @@ describe("Scanner — trapped-state recovery, isolation and launcher proof (comp
     expect(main).toContain("raw.pid === process.pid");
   });
 
-  it("M-version — the compiled build is 1.5.1, distinguishable from the enrolled Shop 0 Mac", () => {
+  it("M-version — the compiled build is 1.5.4, distinguishable from the enrolled Shop 0 Mac", () => {
     const pkg = JSON.parse(read("package.json")) as { version: string };
-    expect(pkg.version).toBe("1.5.1");
+    expect(pkg.version).toBe("1.5.4");
     expect(pkg.version).not.toBe("1.2.1");
     expect(pkg.version).not.toBe("1.4.1");
   });

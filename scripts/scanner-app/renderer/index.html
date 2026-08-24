@@ -14,6 +14,15 @@
       <button class="hdr-btn hdr-btn--icon" id="hideBtn" data-tip="Hide this window">×</button>
     </header>
 
+    <!--
+      THE OPERATIONAL WORKFLOW IS ABSENT UNTIL THIS MAC IS AUTHORITATIVELY ACTIVE.
+
+      Static HTML used to paint NEW CARD / PREVIEW / SCAN CARD / FIX MISSING IMAGES while the
+      asynchronous station-state read was still deciding whether this Mac was signed in, pending,
+      or active. That made an expired or pending first-shop Scanner look like the old capture app.
+      The renderer opens this only after the canonical station response says ACTIVE.
+    -->
+    <main id="operationalWorkflow" hidden>
     <section class="row device" id="deviceRow">
       <span class="row-label">Canon LiDE 400</span>
       <span class="row-value" id="scannerHealth">Checking device…</span>
@@ -37,7 +46,7 @@
       actually answered: "0 Grading Credits" and "we have not asked yet" are different facts, and a
       shop that reads the second as the first stops working for no reason.
     -->
-      <div class="station-identity-cell">
+      <div class="station-identity-cell" id="stationCreditsCell">
         <span class="identity-key">GRADING CREDITS</span>
         <span class="identity-value" id="stationCredits">—</span>
         <span class="credit-low-warning" id="lowCreditsWarning" hidden>LOW CREDITS — TOP UP</span>
@@ -71,6 +80,7 @@
         <span class="row-header" id="workflowGuideStep">SETUP — CHECK PLACEMENT</span>
         <strong id="workflowGuideTitle">Place a card, then Preview</strong>
         <p class="hint" id="workflowGuideHint">Preview checks that the complete card is visible before a final scan.</p>
+        <button class="btn primary" id="calibrationPreviewBtn" hidden>CHECK SCANNER HEALTH</button>
       </div>
     </section>
 
@@ -310,6 +320,7 @@
         </div>
       </div>
     </details>
+    </main>
 
     <!-- Exceptional recovery. The app never attaches an arbitrary TIFF: it
        opens the selected certificate in MintVault, where an authenticated

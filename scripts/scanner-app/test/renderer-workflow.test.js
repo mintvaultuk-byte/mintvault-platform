@@ -2,12 +2,35 @@ const assert = require("node:assert/strict");
 const fs = require("node:fs");
 const path = require("node:path");
 const test = require("node:test");
+const { Window } = require("happy-dom");
 
 const APP = path.resolve(__dirname, "..");
 const html = fs.readFileSync(path.join(APP, "renderer", "index.html"), "utf8");
 const renderer = fs.readFileSync(path.join(APP, "renderer", "app.js"), "utf8");
 const css = fs.readFileSync(path.join(APP, "renderer", "styles.css"), "utf8");
 const main = fs.readFileSync(path.join(APP, "main.js"), "utf8");
+
+async function renderSetup(setup, state = {}) {
+  const window = new Window({ url: "http://mintvault-scanner.test" });
+  window.document.write(html);
+  window.document.close();
+  window.alert = () => {};
+  window.confirm = () => false;
+  window.setInterval = () => 0;
+  window.clearInterval = () => {};
+  window.setTimeout = () => 0;
+  window.clearTimeout = () => {};
+  window.scanner = {
+    onStateUpdate: () => () => {},
+    getState: () => Promise.resolve({ state: "idle", availableCredits: 0, ...state }),
+    getStationSetup: () => Promise.resolve(setup),
+    getVersion: () => Promise.resolve({ ok: true, version: "1.5.2" }),
+  };
+  window.eval(renderer);
+  await new Promise((resolve) => setImmediate(resolve));
+  await new Promise((resolve) => setImmediate(resolve));
+  return window.document;
+}
 
 test("station UI keeps final Scan visible but target-gated", () => {
   assert.match(html, /id="scanCardBtn" disabled>SCAN CARD/);
@@ -19,6 +42,71 @@ test("station UI keeps final Scan visible but target-gated", () => {
   assert.match(html, /id="workflowGuide"/);
   assert.match(renderer, /STEP 1 — PLACE CARD/);
   assert.match(renderer, /STEP 2 — FLIP THE CARD/);
+});
+
+test("non-ACTIVE setup hides every operational capture and top-up control before the first station answer", () => {
+  assert.match(html, /<main id="operationalWorkflow" hidden>/);
+  assert.match(renderer, /let stationSetup = \{ stage: "checking" \};/);
+  assert.match(renderer, /els\.operationalWorkflow\.hidden = !active;/);
+  assert.match(renderer, /renderStationSetup\(\{ stage: "checking" \}\);/);
+  assert.match(renderer, /els\.stationSetupTitle\.textContent = "Checking this Mac";/);
+  assert.match(renderer, /if \(!stationCanStartCardWork\(\)\)/);
+  assert.match(renderer, /closeBillingModal\(\);/);
+  assert.match(renderer, /function stationCanStartCardWork\(\)/);
+  assert.match(renderer, /!stationCanStartCards \|\| !noAvailableCredits/);
+});
+
+test("pending and session-expired stations render only guided setup, never the legacy capture workflow", async () => {
+  for (const setup of [
+    {
+      stage: "pending",
+      stationCode: "MV-STN-N5YE3IBUGVMMQDIV",
+      summary: { organisationName: "shop games", locationName: "Main location", availableCredits: 0 },
+    },
+    { stage: "session_expired", stationCode: "MV-STN-N5YE3IBUGVMMQDIV", summary: { availableCredits: 0 } },
+  ]) {
+    const document = await renderSetup(setup);
+    assert.equal(document.getElementById("operationalWorkflow").hidden, true);
+    assert.equal(document.getElementById("creditEmptyPanel").hidden, true);
+    assert.equal(document.getElementById("billingLockModal").classList.contains("visible"), false);
+    assert.equal(document.getElementById("stationSetupModal").classList.contains("visible"), true);
+  }
+});
+
+test("a calibrated ACTIVE zero-credit station preserves the guarded operational workflow", async () => {
+  const document = await renderSetup({ stage: "active", calibrationStatus: "VALID", summary: { availableCredits: 0 } });
+  assert.equal(document.getElementById("operationalWorkflow").hidden, false);
+  assert.equal(document.getElementById("stationSetupModal").classList.contains("visible"), false);
+  assert.equal(document.getElementById("newCardBtn").disabled, true);
+  assert.equal(document.getElementById("creditEmptyPanel").hidden, false);
+  assert.equal(document.getElementById("billingLockModal").classList.contains("visible"), true);
+});
+
+test("an approved but uncalibrated zero-credit station presents calibration instead of top-up", async () => {
+  const document = await renderSetup(
+    { stage: "active", calibrationStatus: "UNPROVISIONED", summary: { availableCredits: 0 } },
+    { scannerHealth: { status: "profile_unprovisioned" } }
+  );
+  assert.equal(document.getElementById("operationalWorkflow").hidden, false);
+  for (const id of ["stationCreditsCell", "captureTargetRow", "statusRow", "captureActionsRow", "recentRow", "diagnosticsRow"]) {
+    assert.equal(document.getElementById(id).hidden, true, `${id} must not leak the legacy workflow`);
+  }
+  assert.equal(document.getElementById("billingLockModal").classList.contains("visible"), false);
+  assert.match(document.getElementById("workflowGuideTitle").textContent, /Calibrate this Scanner/);
+  assert.equal(document.getElementById("calibrationPreviewBtn").hidden, false);
+  assert.match(document.getElementById("calibrationPreviewBtn").textContent, /CHECK SCANNER HEALTH/);
+});
+
+test("guided pending state keeps recovery controls and defers calibration/capture until approval", () => {
+  for (const id of ["stationRefreshBtn", "stationSignOutBtn", "stationDiagnosticsBtn"]) {
+    assert.match(html, new RegExp(`id="${id}"`));
+  }
+  assert.match(renderer, /if \(stage === "pending"\)/);
+  assert.match(renderer, /Waiting for MintVault approval/);
+  assert.match(renderer, /This Mac is connected\. Approve it in MintVault Super Admin\. This screen updates automatically\./);
+  assert.match(renderer, /setTimeout\(\(\) => void refreshStationSetup\(\), 6_000\)/);
+  assert.match(renderer, /after === "active"\) els\.stationRefreshStatus\.textContent = "APPROVED — CONTINUING"/);
+  assert.match(renderer, /Complete placement setup before its first evidence scan\./);
 });
 
 test("post-scan Accept/Reject is removed — Scan approval immediately becomes upload", () => {

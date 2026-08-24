@@ -670,7 +670,8 @@ test("FIX 4: NEW CARD is gated on the server-confirmed open card, not on activeC
     /Boolean\(active\) \|\| Boolean\(openCard\) \|\| noAvailableCredits \|\| actionInFlight \|\| newCardInFlight/
   );
   assert.match(renderer, /const noAvailableCredits = billingLocked\(state\);/);
-  assert.match(renderer, /els\.creditEmptyPanel\.hidden = !noAvailableCredits;/);
+  assert.match(renderer, /function stationCanStartCardWork\(\)/);
+  assert.match(renderer, /els\.creditEmptyPanel\.hidden = !stationCanStartCards \|\| !noAvailableCredits;/);
   assert.match(html, /NO GRADING CREDITS AVAILABLE/);
   assert.match(html, /TOP UP NOW/);
   assert.match(html, /id="billingLockModal"/);
