@@ -677,13 +677,13 @@ export default function PartnerFirstShopOnboardingPage() {
             </Step>
             <Step
               number={7}
-              title="Calibration and Scanner health"
+              title="Scanner connection and automatic profile"
               complete={shop.operational.dimensions.scanner.status === "PASS"}
             >
               <p data-testid="first-shop-scanner-message">{shop.operational.dimensions.scanner.message}</p>
               <p style={{ marginTop: 8, fontSize: 12, opacity: 0.85 }}>
-                Calibration happens physically in the Scanner app on the shop Mac. This step turns green once the
-                station reports a VALID calibration.
+                MintVault Scanner applies the fixed Canon profile automatically. This diagnostic turns green once the
+                enrolled station reports a healthy current profile.
               </p>
             </Step>
             <Step number={8} title="Credits" complete={shop.operational.dimensions.credits.status === "PASS"}>

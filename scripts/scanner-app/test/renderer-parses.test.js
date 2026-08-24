@@ -124,13 +124,11 @@ test("FIX MISSING IMAGES is a fourth PRIMARY action, not a diagnostics link", ()
   assert.ok(!/id="fixMissingImagesBtn"[^>]*danger/.test(grid), "recovery is not a destructive action");
 });
 
-test("a refused capture-window save is visually distinct from a successful one", () => {
+test("capture-window saving is absent from the operator renderer", () => {
   const app = fs.readFileSync(path.join(APP_ROOT, "renderer", "app.js"), "utf8");
   const css = fs.readFileSync(path.join(APP_ROOT, "renderer", "styles.css"), "utf8");
-  // The success path sets the attribute via a ternary, so match the states rather than a literal call.
-  assert.match(app, /setAttribute\("data-state", "refused"\)/, "a refusal must mark itself");
-  assert.match(app, /"saved" : "refused"/, "a success must mark itself distinctly from a refusal");
-  assert.match(css, /\[data-state="refused"\][\s\S]{0,80}color:\s*#b3261e/, "refusal must not render as ordinary grey text");
+  assert.doesNotMatch(app, /captureWindowSaveInFlight|saveCaptureWindow|SAVE CALIBRATION/);
+  assert.doesNotMatch(css, /capture-window-save|capture-window-reset|capture-window-setup/);
 });
 
 test("the renderer never shadows a browser global it also uses", () => {

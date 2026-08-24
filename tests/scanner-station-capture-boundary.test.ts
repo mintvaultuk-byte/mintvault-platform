@@ -95,7 +95,9 @@ describe("signed-station capture boundary", () => {
       /const profileChanged\s*=\s*previous\.scanner_profile_version != null && previous\.scanner_profile_version !== scannerProfileVersion/
     );
     expect(stations).toContain("const calibrationInvalidated = hardwareChanged || profileChanged");
-    expect(stations).toContain("current_calibration_id=CASE WHEN $11 THEN NULL ELSE current_calibration_id END");
+    expect(stations).toContain(
+      "current_calibration_id=CASE WHEN $11 THEN NULL WHEN $12::uuid IS NOT NULL THEN $12::uuid ELSE current_calibration_id END"
+    );
     expect(stations).toContain('"scanner_profile_changed"');
   });
 

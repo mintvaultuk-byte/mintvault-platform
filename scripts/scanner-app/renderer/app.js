@@ -7,17 +7,20 @@
 const els = {
   hideBtn: document.getElementById("hideBtn"),
   appVersion: document.getElementById("appVersion"),
+  operationalWorkflow: document.getElementById("operationalWorkflow"),
   updateBtn: document.getElementById("updateBtn"),
   scannerHealth: document.getElementById("scannerHealth"),
   stationIdentityRow: document.getElementById("stationIdentityRow"),
   stationOrganisation: document.getElementById("stationOrganisation"),
   stationIdentity: document.getElementById("stationIdentity"),
   stationUser: document.getElementById("stationUser"),
+  stationCreditsCell: document.getElementById("stationCreditsCell"),
   lowCreditsWarning: document.getElementById("lowCreditsWarning"),
   buyMoreCreditsBtn: document.getElementById("buyMoreCreditsBtn"),
   targetCert: document.getElementById("targetCert"),
   targetSide: document.getElementById("targetSide"),
   targetHint: document.getElementById("targetHint"),
+  captureTargetRow: document.getElementById("captureTargetRow"),
   workflowGuide: document.getElementById("workflowGuide"),
   placementVisual: document.getElementById("placementVisual"),
   workflowGuideStep: document.getElementById("workflowGuideStep"),
@@ -26,6 +29,9 @@ const els = {
   dot: document.getElementById("dot"),
   statusText: document.getElementById("statusText"),
   statusSub: document.getElementById("statusSub"),
+  statusRow: document.getElementById("statusRow"),
+  captureActionsRow: document.getElementById("captureActionsRow"),
+  recentRow: document.getElementById("recentRow"),
   recentList: document.getElementById("recentList"),
   orphansBtn: document.getElementById("fixMissingImagesBtn"),
   orphanModal: document.getElementById("orphanModal"),
@@ -38,6 +44,12 @@ const els = {
   billingLockError: document.getElementById("billingLockError"),
   billingLockStatus: document.getElementById("billingLockStatus"),
   billingLockClose: document.getElementById("billingLockClose"),
+  stationSetupRecovery: document.getElementById("stationSetupRecovery"),
+  stationSetupEnvironment: document.getElementById("stationSetupEnvironment"),
+  stationRefreshBtn: document.getElementById("stationRefreshBtn"),
+  stationSignOutBtn: document.getElementById("stationSignOutBtn"),
+  stationDiagnosticsBtn: document.getElementById("stationDiagnosticsBtn"),
+  stationRefreshStatus: document.getElementById("stationRefreshStatus"),
   billingOpenBrowser: document.getElementById("billingOpenBrowser"),
   lastCertBtn: document.getElementById("lastCertBtn"),
   logsBtn: document.getElementById("logsBtn"),
@@ -73,15 +85,6 @@ const els = {
   positioningPreviewBtn: document.getElementById("positioningPreviewBtn"),
   positioningHint: document.getElementById("positioningHint"),
   positioningPanel: document.getElementById("positioningPanel"),
-  captureWindowSetup: document.getElementById("captureWindowSetup"),
-  platenViewport: document.getElementById("platenViewport"),
-  platenWindow: document.getElementById("platenWindow"),
-  captureWindowReadout: document.getElementById("captureWindowReadout"),
-  captureWindowMaintenance: document.getElementById("captureWindowMaintenance"),
-  captureWindowFixedNote: document.getElementById("captureWindowFixedNote"),
-  captureWindowStatus: document.getElementById("captureWindowStatus"),
-  captureWindowSaveBtn: document.getElementById("captureWindowSaveBtn"),
-  captureWindowResetBtn: document.getElementById("captureWindowResetBtn"),
   placementPanel: document.getElementById("placementPanel"),
   placementViewport: document.getElementById("placementViewport"),
   placementPreview: document.getElementById("placementPreview"),
@@ -167,7 +170,11 @@ let newCardInFlight = false;
  * the button must not imply otherwise.
  */
 let openCardActionInFlight = false;
-let stationSetup = null;
+/*
+ * Fail closed before the first IPC answer. A static capture screen is never a safe loading state:
+ * the only truthful first view is that the Scanner is checking this Mac's station authority.
+ */
+let stationSetup = { stage: "checking" };
 let stationSetupBusy = false;
 let stationSetupPoll = null;
 const REQUIRED_BILLING_PACK_CREDITS = [5, 10, 25, 50, 100];
@@ -204,6 +211,13 @@ function billingLocked(state) {
 
 function shouldShowBillingLock(state) {
   return billingLocked(state) && !billingModalDismissedAtZero;
+}
+
+/* Credits buy server-owned card work; automatic profile verification is not a paid action. */
+function stationCanStartCardWork() {
+  return (
+    stationSetup?.stage === "active" && String(stationSetup?.calibrationStatus || "").toUpperCase() === "VALID"
+  );
 }
 
 function canPurchaseCredits() {
@@ -319,6 +333,20 @@ function startBillingPoll() {
 }
 
 function renderBillingLock(state) {
+  /*
+   * CREDIT IS NOT A SETUP GATE.
+   *
+   * If an active operator signs out or their session expires while a zero-credit billing modal is
+   * visible, `renderStationSetup()` changes the station state before any later state push arrives.
+   * Close the old modal immediately: it belongs only to an ACTIVE station and otherwise sits above
+   * the guided setup modal (its z-index is intentionally higher while operating).
+   */
+  if (!stationCanStartCardWork()) {
+    stopBillingPoll();
+    billingModalDismissedAtZero = false;
+    closeBillingModal();
+    return;
+  }
   const walletRefreshGeneration = Number.isFinite(state?.walletRefreshGeneration)
     ? state.walletRefreshGeneration
     : null;
@@ -339,8 +367,7 @@ function renderBillingLock(state) {
   renderedWalletRefreshGeneration = walletRefreshGeneration;
   // Reconcile every active signed-in Scanner. This survives a restart while Stripe is delivering a
   // webhook: no renderer memory is needed to refresh the authoritative visible wallet.
-  if (stationSetup?.stage === "active") startBillingPoll();
-  else stopBillingPoll();
+  startBillingPoll();
   const locked = billingLocked(state);
   if (!locked) {
     billingModalDismissedAtZero = false;
@@ -361,6 +388,18 @@ function renderBillingLock(state) {
     setBillingModalCopy("manual");
     return;
   }
+  /*
+   * AN EMPTY WALLET IS A REASON NOT TO START A CARD. It is not a reason to be unable to sign in.
+   *
+   * This ran on every state push regardless of what the station was doing, so a shop with a zero
+   * balance — which is every shop before its first top-up — got "NO GRADING CREDITS AVAILABLE / TOP
+   * UP TO CONTINUE" over the sign-in and awaiting-approval screens. Nothing on that path spends a
+   * credit: signing in, enrolling a Mac, waiting for approval and calibrating are all free. The
+   * modal was blocking the very steps that lead to being able to buy credits at all.
+   *
+   * Scoped to an operational station, which is the only state in which starting a card is even
+   * possible. NEW CARD remains hard-disabled at zero by its own control — that gate is untouched.
+   */
   if (shouldShowBillingLock(state)) {
     // A reservation already paid for this Card Job can finish safely. Keep the canonical zero panel
     // visible, but make it non-blocking so SCAN/FIX remains usable while NEW stays hard-disabled.
@@ -485,9 +524,6 @@ function renderStationIdentity(setup) {
   els.stationUser.textContent = setup.summary?.displayName || "Authorised user";
   renderAvailableCredits();
   renderBillingLock(lastState || {});
-  // Whether this operator may move the capture area travels with their identity, not with scanner
-  // state — it is a property of who signed in.
-  syncCaptureWindowAuthority();
 }
 
 /**
@@ -519,6 +555,15 @@ function availableCreditsFromState(state) {
 }
 
 function renderWorkflowGuide(state) {
+  if (!stationCanStartCardWork()) {
+    els.workflowGuideStep.textContent = "CONNECTING SCANNER";
+    els.workflowGuideTitle.textContent = "Preparing the fixed Scanner profile";
+    els.workflowGuideHint.textContent =
+      "MintVault is automatically verifying this station's Canon profile and health. No operator setup is required.";
+    els.placementVisual.classList.remove("flip-required");
+    els.workflowGuide.dataset.guideState = "setup";
+    return;
+  }
   const active = state.activeCapture;
   const stage = String(active?.stage || "");
   const awaitingScan = stage === "awaiting_scan";
@@ -590,9 +635,26 @@ function renderStationSetup(next) {
   stationSetup = next || { stage: "sign_in" };
   const stage = String(stationSetup.stage || "sign_in");
   const active = stage === "active";
+  const profilePreparing = active && !stationCanStartCardWork();
+  els.operationalWorkflow.hidden = !active || profilePreparing;
+  // An ACTIVE station without a ready fixed profile remains a simple automatic-status screen. Its
+  // previous card state and every shop-floor control stay hidden until the server confirms readiness.
+  els.stationCreditsCell.hidden = profilePreparing;
+  els.captureTargetRow.hidden = profilePreparing;
+  els.statusRow.hidden = profilePreparing;
+  els.captureActionsRow.hidden = profilePreparing;
+  els.recentRow.hidden = profilePreparing;
+  els.diagnosticsRow.hidden = false;
+  // Close any previously-open zero-credit overlay before the new guided state is made visible.
+  renderBillingLock(lastState || {});
   renderStationIdentity(stationSetup);
-  els.stationSetupModal.classList.toggle("visible", !active);
-  els.stationSignInForm.hidden = stage !== "sign_in";
+  renderWorkflowGuide(lastState || {});
+  renderCaptureActions(lastState || {});
+  renderStationEnvironment(stationSetup);
+  els.stationSetupModal.classList.toggle("visible", !active || profilePreparing);
+  // `session_expired` is a sign-in screen with different words — the form must be on it, or the
+  // one thing it tells you to do would be impossible.
+  els.stationSignInForm.hidden = stage !== "sign_in" && stage !== "session_expired";
   els.stationMfaForm.hidden = stage !== "mfa";
   els.stationRegisterPanel.hidden = stage !== "register";
   els.stationSetupError.textContent = stationSetup.error || "";
@@ -600,13 +662,23 @@ function renderStationSetup(next) {
   els.stationMfaBtn.disabled = stationSetupBusy;
   els.stationRegisterBtn.disabled = stationSetupBusy;
 
-  if (stage === "mfa") {
+  if (stage === "checking") {
+    els.stationSetupTitle.textContent = "Checking this Mac";
+    els.stationSetupText.textContent = "MintVault is confirming this Scanner's station status.";
+  } else if (stage === "mfa") {
     els.stationSetupTitle.textContent = "Verify your MintVault sign-in";
     els.stationSetupText.textContent =
       "Enter your authenticator or recovery code. This Mac cannot scan until both you and the station are authorised.";
   } else if (stage === "register") {
     const locations = Array.isArray(stationSetup.locations) ? stationSetup.locations : [];
-    els.stationSetupTitle.textContent = "Connect this station";
+    /*
+     * The single-location case normally never renders: main.js enrols automatically and this screen
+     * is replaced by "Waiting for MintVault approval" before anyone reads it. It survives as the
+     * fail-closed fallback for when that automatic attempt was refused, which is exactly when a
+     * manual control and the server's own reason need to be visible.
+     */
+    els.stationSetupTitle.textContent =
+      locations.length === 1 && !stationSetup.error ? "Connecting this Mac" : "Connect this station";
     els.stationSetupText.textContent = stationSetup.summary?.organisationName
       ? `${stationSetup.summary.organisationName}${stationSetup.summary.locationName ? ` — ${stationSetup.summary.locationName}` : ""}. Register this Mac for its authorised location.`
       : "Register this Mac for an authorised MintVault location.";
@@ -623,30 +695,153 @@ function renderStationSetup(next) {
       els.stationRegisterBtn.disabled = true;
     }
   } else if (stage === "pending") {
+    /*
+     * A NORMAL, EXPECTED WAIT — written like one.
+     *
+     * This is where a brand-new shop spends its first few minutes, so it names the three things the
+     * person standing at the Mac wants confirmed (the right shop, the right location, this actual
+     * Mac) and says plainly that MintVault is doing the next bit. It asks for nothing, mentions no
+     * support queue, and offers no Quit: the screen refreshes itself the moment approval lands.
+     *
+     * There is deliberately no balance and no top-up here. Nothing on this path costs a credit, and
+     * a shop with an empty wallet — every shop, before its first top-up — must be able to finish
+     * connecting a Mac without being sold anything.
+     */
     els.stationSetupTitle.textContent = "Waiting for MintVault approval";
-    els.stationSetupText.textContent = `${stationSetup.stationCode || "This Mac"} is registered and awaiting Super Admin approval. Keep the app open; no card can be scanned yet.`;
+    const shop = stationSetup.summary?.organisationName || "this shop";
+    const where = stationSetup.summary?.locationName || "Main location";
+    els.stationSetupText.textContent =
+      `Shop: ${shop}\nLocation: ${where}\nMac: ${stationSetup.stationCode || "registered"}\n\n` +
+      "This Mac is connected. Approve it in MintVault Super Admin. This screen updates automatically.";
+  } else if (stage === "session_expired") {
+    /*
+     * The station, its approval and its calibration are all intact on the server; only the person's
+     * session lapsed. Say that, so nobody goes looking for a Mac to re-register.
+     */
+    els.stationSetupTitle.textContent = "Session expired";
+    els.stationSetupText.textContent =
+      "You have been signed out after a period of inactivity. Sign in again to continue — this Mac stays registered.";
+  } else if (stage === "identity_mismatch") {
+    /*
+     * REGISTERED TO A DIFFERENT SHOP. Not an outage, and not this operator's mistake.
+     *
+     * The old copy for this case was "Station unavailable / contact a MintVault Super Admin", which
+     * is what a Mac carrying a previous shop's station identity showed a brand-new Owner signing in
+     * for the first time. It reads as a fault in MintVault; it is actually a Mac that has been used
+     * before. Naming that is the difference between a support call and a thirty-second fix.
+     */
+    els.stationSetupTitle.textContent = "This Mac belongs to another shop";
+    els.stationSetupText.textContent =
+      `This Mac is already registered to a different MintVault shop as ${stationSetup.stationCode || "another station"}, ` +
+      `so it cannot scan for ${stationSetup.summary?.organisationName || "this shop"}. ` +
+      "MintVault must release the old registration, or this shop needs its own Mac. Nothing has been changed.";
   } else if (stage === "update_required") {
     els.stationSetupTitle.textContent = "UPDATE REQUIRED";
     els.stationSetupText.textContent = stationSetup.minimumSupportedVersion
       ? `This Mac must run MintVault Scanner ${stationSetup.minimumSupportedVersion} or later. Install the current signed MintVault Scanner release, then reopen the app.`
       : "Install the current signed MintVault Scanner release, then reopen the app.";
-  } else if (stage === "suspended" || stage === "revoked" || stage === "station_unavailable") {
-    els.stationSetupTitle.textContent = "Station unavailable";
+  } else if (stage === "revoked") {
+    /*
+     * REVOKED covers both a withdrawn station and a REJECTED enrolment: rejectPendingStation sets
+     * REVOKED with action `rejected`, so there is no separate status to read. Either way this Mac
+     * will not scan again under this identity, and the honest next step is to sign out — not to
+     * stare at a generic failure.
+     */
+    els.stationSetupTitle.textContent = "This Mac's registration was withdrawn";
     els.stationSetupText.textContent =
-      "This station is not currently authorised for scanning. Contact a MintVault Super Admin.";
+      `${stationSetup.stationCode || "This Mac"} is no longer authorised to scan for ` +
+      `${stationSetup.summary?.organisationName || "this shop"}. It was either rejected during approval or ` +
+      "withdrawn afterwards. Sign out below; MintVault must register this Mac again before it can scan.";
+  } else if (stage === "suspended") {
+    els.stationSetupTitle.textContent = "This Mac is suspended";
+    els.stationSetupText.textContent =
+      `${stationSetup.stationCode || "This Mac"} is registered to ` +
+      `${stationSetup.summary?.organisationName || "this shop"} but is currently suspended, so it cannot scan. ` +
+      "MintVault can lift a suspension without re-registering the Mac — nothing here needs undoing.";
+  } else if (stage === "station_unavailable") {
+    /*
+     * The genuinely unknown case, and the only one that still says so: MintVault answered something
+     * this app cannot interpret, or could not be reached at all. Every state that HAS a name — a
+     * pending approval, another shop's Mac, a withdrawal, a suspension — is now named above, so
+     * this no longer absorbs four different situations under one unhelpful sentence.
+     */
+    els.stationSetupTitle.textContent = "Station status unavailable";
+    els.stationSetupText.textContent =
+      (stationSetup.error || "MintVault could not confirm this Mac's status right now.") +
+      " Press Refresh status below. If it persists, contact MintVault.";
+  } else if (profilePreparing) {
+    els.stationSetupTitle.textContent = "Preparing Scanner";
+    els.stationSetupText.textContent =
+      "MintVault is automatically applying this station's fixed Canon profile and checking health. No operator setup is required.";
   } else if (active) {
     els.stationSetupTitle.textContent = "Station ready";
-    els.stationSetupText.textContent =
-      "This station is authorised. Complete placement setup before its first evidence scan.";
+    els.stationSetupText.textContent = "This station is authorised and ready for server-owned card captures.";
   } else {
     els.stationSetupTitle.textContent = "Sign in to MintVault";
     els.stationSetupText.textContent = "Use your authorised MintVault account to set up this Mac.";
   }
 
   if (stationSetupPoll) clearTimeout(stationSetupPoll);
-  if (stage === "pending") {
-    stationSetupPoll = setTimeout(() => void refreshStationSetup(), 15_000);
+  if (stage === "pending" || profilePreparing) {
+    /*
+     * Six seconds, not fifteen. This poll is the ONLY thing standing between a Super Admin pressing
+     * Approve and the shop being able to work, and it runs on one modal on one Mac — the cost is a
+     * tenth of the old traffic's worth of attention and the difference between "it just went green"
+     * and hunting for a refresh that does not exist.
+     */
+    stationSetupPoll = setTimeout(() => void refreshStationSetup(), 6_000);
   }
+}
+
+/*
+ * The four controls that are always available, wired once and never disabled by station state.
+ * Sign out routes through the SAME canonical handler as the in-app control, so its mid-card refusal
+ * still applies — an always-reachable control is not an unconditional one.
+ */
+function wireStationRecoveryControls() {
+  els.stationRefreshBtn?.addEventListener("click", () => void manualRefreshStationSetup());
+  els.stationSignOutBtn?.addEventListener("click", () =>
+    runStationSetupAction(() => window.scanner.stationSignOut())
+  );
+  els.stationDiagnosticsBtn?.addEventListener("click", () => void window.scanner.openLogs());
+  /*
+   * NO QUIT HERE, deliberately.
+   *
+   * A Quit button sat on this modal and was pressed — twice — during onboarding, which is exactly
+   * what it invited: it is the most final-looking control on a screen whose real job is to wait.
+   * Quitting then left the Mac with no Scanner, and re-opening "MintVault Scanner" the ordinary way
+   * resolved to a different bundle on a different profile, putting the previous shop's station and
+   * its historical failures on screen.
+   *
+   * Quit still exists where quitting an app belongs: the macOS menu-bar item. It is not offered as
+   * a step in setting a shop up.
+   */
+}
+
+/**
+ * REFRESH STATUS, with something to see.
+ *
+ * The automatic poll is silent by design. A control a person presses is not: pressing it and
+ * watching nothing change is indistinguishable from a dead button, which is what sends someone
+ * looking for a Scanner to restart. This says what it did and what it found.
+ */
+async function manualRefreshStationSetup() {
+  const before = stationSetup?.stage;
+  if (els.stationRefreshStatus) els.stationRefreshStatus.textContent = "CHECKING…";
+  await refreshStationSetup();
+  if (!els.stationRefreshStatus) return;
+  const after = stationSetup?.stage;
+  if (after === "active") els.stationRefreshStatus.textContent = "APPROVED — CONTINUING";
+  else if (after === "pending") els.stationRefreshStatus.textContent = "STILL WAITING";
+  else if (after !== before) els.stationRefreshStatus.textContent = "";
+  else els.stationRefreshStatus.textContent = "STILL WAITING";
+}
+
+/** Name the environment on the setup screen too — a STAGING Mac must never look like a live one. */
+function renderStationEnvironment(setup) {
+  if (!els.stationSetupEnvironment) return;
+  const label = setup?.summary?.environmentLabel || setup?.environmentLabel || "";
+  els.stationSetupEnvironment.textContent = label ? `${label}` : "";
 }
 
 async function refreshStationSetup() {
@@ -820,17 +1015,14 @@ function renderPlacementPreview(entry, state) {
   const status = String(entry?.status || "");
   const showing = ["ready", "reposition"].includes(status);
 
-  /*
-   * While a side is awaiting Scan the PREVIEW button belongs to this gate, so it is relabelled here,
-   * AFTER renderPositioningPreview has had its say. The setup preview owns the button at every other
-   * moment, and it is disabled during a scan for the same reason every other action is.
-   */
+  /* The Preview button exists only for the armed server-owned side. */
   const awaitingScan = String(state?.activeCapture?.stage || "") === "awaiting_scan";
   if (awaitingScan) {
     const scanning = status === "scanning";
+    const side = toTitle(state?.activeCapture?.side || "card");
     setActionButton(
       els.positioningPreviewBtn,
-      scanning ? "PREVIEWING…" : "PREVIEW",
+      scanning ? `PREVIEWING ${side.toUpperCase()}…` : `PREVIEW ${side.toUpperCase()}`,
       true,
       actionInFlight || scanning || state?.scannerHealth?.status !== "ready"
     );
@@ -906,101 +1098,10 @@ function renderPlacementPreview(entry, state) {
   }
 }
 
-function renderPositioningPreview(entry, scannerHealth, activeCapture) {
-  const evidenceReviewActive = [
-    "scanning",
-    "retrying_scan",
-    "processing_preview",
-    "preview_error",
-    "uploading",
-  ].includes(String(activeCapture?.stage || ""));
-  const status = String(entry?.status || "");
-  const canStart = ["ready", "profile_unprovisioned"].includes(String(scannerHealth?.status || ""));
-  const scanning = status === "scanning";
-  setActionButton(
-    els.positioningPreviewBtn,
-    scanning ? "PREVIEWING…" : "PREVIEW",
-    true,
-    actionInFlight || scanning || !canStart
-  );
-
-  if (!entry || evidenceReviewActive) {
-    els.positioningPanel.hidden = true;
-    els.fullPlatenDiagnostics.hidden = true;
-    els.positioningHint.textContent = "Preview checks card placement only. It never becomes card evidence.";
-    return;
-  }
-  if (scanning) {
-    els.positioningPanel.hidden = true;
-    els.fullPlatenDiagnostics.hidden = true;
-    els.positioningHint.textContent =
-      "Scanning a local placement Preview. No certificate, TIFF, or upload is involved.";
-    return;
-  }
-
-  const showImage = ["detected", "reposition", "not_detected", "saved"].includes(status);
-  els.positioningPanel.hidden = !showImage && status !== "error";
-  els.fullPlatenDiagnostics.hidden = !showImage;
-  if (showImage && entry.id !== renderedPositioningPreviewId) {
-    renderedPositioningPreviewId = entry.id;
-    els.positioningCardPreview.removeAttribute("src");
-    els.positioningFullPreview.removeAttribute("src");
-    window.scanner
-      .getPositioningPreview(entry.id)
-      .then((result) => {
-        if (lastState?.positioningPreview?.id !== entry.id || !result?.ok) return;
-        els.positioningFullPreview.onload = () => {
-          if (lastState?.positioningPreview?.id === entry.id) renderPositioningOverlays(lastState.positioningPreview);
-        };
-        els.positioningCardPreview.onload = () => {
-          if (lastState?.positioningPreview?.id === entry.id) renderPositioningCardCrop(lastState.positioningPreview);
-        };
-        els.positioningCardPreview.src = result.dataUrl;
-        els.positioningFullPreview.src = result.dataUrl;
-      })
-      .catch(() => {});
-  }
-
-  const candidate = entry.cardCandidate?.cardBoundsMm;
-  const area = entry.capture?.areaMm;
-  if (showImage && els.positioningFullPreview.complete) renderPositioningOverlays(entry);
-  if (showImage && els.positioningCardPreview.complete) renderPositioningCardCrop(entry);
-
-  /*
-   * A DIAGNOSTIC, NOT A DECISION. This panel reports what the scanner saw on the whole platen and
-   * where the fixed capture area sits. It no longer has a SAVE button, because a card no longer
-   * calibrates anything — the capture window is moved deliberately in "Capture window position"
-   * below, and the RED/GREEN that governs a scan is the per-side placement gate.
-   */
-  /*
-   * NOT `window`. Naming a `const` after the global shadows it for the WHOLE function under
-   * temporal-dead-zone rules, so the `window.scanner.getPositioningPreview(...)` call earlier in this
-   * same function threw "Cannot access 'window' before initialization" and killed the render.
-   */
-  const captureAreaMm = entry.captureWindowMm;
-  const windowText = captureAreaMm
-    ? `Capture area ${formatMm(captureAreaMm.width)} × ${formatMm(captureAreaMm.height)} at ` +
-      `${formatMm(captureAreaMm.x)}, ${formatMm(captureAreaMm.y)}.`
-    : "This station has no saved capture area yet — it is set during station maintenance.";
-
-  if (status === "detected") {
-    els.positioningResult.textContent = "CARD DETECTED";
-    els.positioningGeometry.textContent = `Card ${formatMm(candidate.x)}, ${formatMm(candidate.y)} · ${formatMm(candidate.width)} × ${formatMm(candidate.height)}. ${windowText}`;
-    els.positioningHint.textContent =
-      "Full-platen diagnostic only. Whether a card may be scanned is decided by the per-side placement gate against the fixed capture area.";
-  } else if (status === "not_detected") {
-    els.positioningResult.textContent = "CARD NOT DETECTED";
-    els.positioningGeometry.textContent = area
-      ? `Full platen preview ${formatMm(area.width)} × ${formatMm(area.height)} at ${formatMm(area.x)}, ${formatMm(area.y)}. ${windowText}`
-      : "The scanner did not return usable positioning geometry.";
-    els.positioningHint.textContent =
-      "No placement was saved and no evidence was created. This diagnostic never changes a card.";
-  } else {
-    els.positioningResult.textContent = "POSITIONING PREVIEW FAILED";
-    els.positioningGeometry.textContent = entry.error || "No card position was saved.";
-    els.positioningHint.textContent =
-      "No certificate or evidence was changed. Check scanner readiness and Preview again.";
-  }
+function renderPositioningPreview() {
+  /* The retired full-platen setup Preview has no normal operator action. */
+  els.positioningPreviewBtn.hidden = true;
+  els.fullPlatenDiagnostics.hidden = true;
 }
 
 function visibleCapturePreviewId(state) {
@@ -1088,9 +1189,10 @@ function renderBackgroundUploads(state) {
 }
 
 function renderCaptureActions(state) {
+  const stationCanStartCards = stationCanStartCardWork();
   const active = state.activeCapture;
   const stage = String(active?.stage || "");
-  const side = toTitle(active?.side || "card");
+  const side = String(active?.side || "card").toUpperCase();
   const scanning = ["scanning", "retrying_scan", "processing_preview"].includes(stage);
   const uploading = stage === "uploading" && Boolean(active?.previewId);
   const previewError = stage === "preview_error" && Boolean(active?.previewId);
@@ -1116,7 +1218,8 @@ function renderCaptureActions(state) {
     approval.side === active.side &&
     approval.certId === active.certId
   );
-  const scanEnabled = awaitingScan && placementGreen && state.scannerHealth?.status === "ready" && !actionInFlight;
+  const scanEnabled =
+    stationCanStartCards && awaitingScan && placementGreen && state.scannerHealth?.status === "ready" && !actionInFlight;
   const cardRegistered = state.lastAcceptedCapture?.cardRegistered === true && !active;
 
   /*
@@ -1156,8 +1259,9 @@ function renderCaptureActions(state) {
   const openCard = state.openCardJob;
   const noAvailableCredits = billingLocked(state);
   els.newCardBtn.disabled =
-    Boolean(active) || Boolean(openCard) || noAvailableCredits || actionInFlight || newCardInFlight;
-  els.creditEmptyPanel.hidden = !noAvailableCredits;
+    !stationCanStartCards || Boolean(active) || Boolean(openCard) || noAvailableCredits || actionInFlight || newCardInFlight;
+  els.orphansBtn.disabled = !stationCanStartCards || actionInFlight;
+  els.creditEmptyPanel.hidden = !stationCanStartCards || !noAvailableCredits;
 
   /*
    * The blocking recovery panel. Shown ONLY when the card genuinely cannot proceed on its own — an
@@ -1222,10 +1326,12 @@ function renderCaptureActions(state) {
     els.capturePreview.removeAttribute("src");
   }
 
-  els.captureActionHint.textContent = !hasTarget
-    ? "Open or arm a card in MintVault to enable final scanning."
+  els.captureActionHint.textContent = !stationCanStartCards
+    ? "MintVault is automatically verifying this station's fixed Scanner profile."
+    : !hasTarget
+      ? "Open or arm a card in MintVault to enable final scanning."
     : awaitingScan && state.scannerHealth?.status !== "ready"
-      ? "Finish this station’s placement setup before final scanning is enabled."
+      ? "Scanner profile health must be ready before final scanning is enabled."
       : awaitingScan && !placementGreen
         ? `Place the ${side.toLowerCase()} inside the box, then press Preview. Scan unlocks when the box turns green.`
         : awaitingScan
@@ -1292,9 +1398,8 @@ function renderState(state) {
   renderAvailableCredits();
   renderTarget(lastState);
   renderWorkflowGuide(lastState);
-  renderPositioningPreview(lastState.positioningPreview, lastState.scannerHealth, lastState.activeCapture);
+  renderPositioningPreview();
   renderPlacementPreview(lastState.placementPreview, lastState);
-  syncCaptureWindowFromState(lastState);
 
   if (els.autoOpenOnError) els.autoOpenOnError.checked = lastState.autoOpenOnError !== false;
   if (els.soundEnabled) els.soundEnabled.checked = lastState.soundEnabled !== false;
@@ -1605,190 +1710,10 @@ els.autoOpenOnError.addEventListener("change", () =>
 );
 els.soundEnabled.addEventListener("change", () => window.scanner.setSetting("soundEnabled", els.soundEnabled.checked));
 els.scanCardBtn.addEventListener("click", () => void runCaptureAction(() => window.scanner.scanTarget()));
-/*
- * ONE PREVIEW BUTTON, TWO JOBS, CHOSEN BY WHAT THE STATION IS DOING.
- *
- * With a side awaiting Scan it runs the PER-SIDE PLACEMENT GATE — the 300-DPI check of the calibrated
- * capture window that must go green before SCAN unlocks. With no card in hand it runs the original
- * full-platen SETUP preview. Staff therefore learn one button: place the card, press PREVIEW, wait
- * for green.
- */
-/*
- * ── PHASE C: dragging the capture window ─────────────────────────────────────────────────────
- *
- * The geometry is duplicated here as plain numbers ON PURPOSE: the renderer is a sandboxed page and
- * cannot require the shared profile module. It is a DRAWING only — every value it produces is
- * re-validated in the main process against the real profile, and an origin outside the platen is
- * refused there rather than corrected here. If these ever drift, the save fails loudly instead of
- * persisting a window the station cannot scan.
- */
-const PLATEN = { width: 215.9, height: 297.0107 };
-const WINDOW_MM = { width: 100, height: 130 };
-/*
- * ZERO, matching `MIN_PLATEN_INSET_MM` in the shared profile. It was 5 here and there, and that pair
- * of fives was the fleet-wide lockout: every station calibrated at the platen origin was read as
- * UNPROVISIONED by the Scanner and refused by the server, so no station could arm any capture.
- */
-const MIN_INSET_MM = 0;
-const DEFAULT_ORIGIN_MM = { x: 20, y: 20 };
-const originBounds = {
-  minX: MIN_INSET_MM,
-  maxX: PLATEN.width - WINDOW_MM.width - MIN_INSET_MM,
-  minY: MIN_INSET_MM,
-  maxY: PLATEN.height - WINDOW_MM.height - MIN_INSET_MM,
-};
-let captureWindowOriginMm = { ...DEFAULT_ORIGIN_MM };
-/** Set from the operator's own permissions. FALSE until proven otherwise — see `stationSummary`. */
-let captureWindowMovable = false;
-
-function clampOriginMm(origin) {
-  return {
-    x: Math.min(originBounds.maxX, Math.max(originBounds.minX, origin.x)),
-    y: Math.min(originBounds.maxY, Math.max(originBounds.minY, origin.y)),
-  };
-}
-
-function drawCaptureWindow() {
-  const pct = (value, total) => `${(100 * value) / total}%`;
-  els.platenWindow.style.left = pct(captureWindowOriginMm.x, PLATEN.width);
-  els.platenWindow.style.top = pct(captureWindowOriginMm.y, PLATEN.height);
-  els.platenWindow.style.width = pct(WINDOW_MM.width, PLATEN.width);
-  els.platenWindow.style.height = pct(WINDOW_MM.height, PLATEN.height);
-  /*
-   * ONE rectangle. The inner 80 x 110 "safe placement box" was drawn here too and is gone with the
-   * 10 mm gate — it was a second target that refused cards which produced valid evidence.
-   */
-  els.captureWindowReadout.textContent =
-    `${WINDOW_MM.width} × ${WINDOW_MM.height} mm at ${captureWindowOriginMm.x.toFixed(1)}, ` +
-    `${captureWindowOriginMm.y.toFixed(1)} mm on the scanner bed.`;
-}
-
-/**
- * Dragging exists only for maintenance, and only for an operator who may actually save the result.
- *
- * Gating the POINTER as well as the buttons is deliberate: a Scanner Operator who can shove the box
- * around but cannot save it has been shown a lie about where their station scans, and the readout
- * beneath it would follow the cursor rather than the hardware. The server is still the real gate —
- * this only keeps the picture honest.
- */
-(function enableCaptureWindowDrag() {
-  let dragging = null;
-  const originFromPointer = (event) => {
-    const rect = els.platenViewport.getBoundingClientRect();
-    if (!rect.width || !rect.height) return null;
-    const mmPerPxX = PLATEN.width / rect.width;
-    const mmPerPxY = PLATEN.height / rect.height;
-    return clampOriginMm({
-      x: (event.clientX - rect.left) * mmPerPxX - dragging.offsetMmX,
-      y: (event.clientY - rect.top) * mmPerPxY - dragging.offsetMmY,
-    });
-  };
-  els.platenWindow.addEventListener("pointerdown", (event) => {
-    if (!captureWindowMovable) return;
-    const rect = els.platenViewport.getBoundingClientRect();
-    if (!rect.width || !rect.height) return;
-    // Grab the window where it was actually clicked, so it does not jump under the cursor.
-    dragging = {
-      offsetMmX: (event.clientX - rect.left) * (PLATEN.width / rect.width) - captureWindowOriginMm.x,
-      offsetMmY: (event.clientY - rect.top) * (PLATEN.height / rect.height) - captureWindowOriginMm.y,
-    };
-    els.platenWindow.setPointerCapture(event.pointerId);
-    event.preventDefault();
-  });
-  els.platenWindow.addEventListener("pointermove", (event) => {
-    if (!dragging || !captureWindowMovable) return;
-    const next = originFromPointer(event);
-    if (!next) return;
-    captureWindowOriginMm = next;
-    drawCaptureWindow();
-  });
-  const end = (event) => {
-    if (!dragging) return;
-    dragging = null;
-    try {
-      els.platenWindow.releasePointerCapture(event.pointerId);
-    } catch {
-      /* pointer already gone */
-    }
-  };
-  els.platenWindow.addEventListener("pointerup", end);
-  els.platenWindow.addEventListener("pointercancel", end);
-})();
-
-/**
- * Show the maintenance controls only to an operator who holds `partner.stations.calibrate`.
- *
- * PRESENTATION, NOT AUTHORISATION. The server refuses `POST /stations/calibrations` without that
- * capability whatever this does; hiding the controls only avoids offering a Scanner Operator a
- * button that would refuse them.
- */
-function syncCaptureWindowAuthority() {
-  captureWindowMovable = stationSetup?.summary?.canCalibrate === true;
-  els.captureWindowMaintenance.hidden = !captureWindowMovable;
-  els.captureWindowFixedNote.hidden = captureWindowMovable;
-  els.platenViewport.title = captureWindowMovable
-    ? "Maintenance only — drag to reposition the capture area"
-    : "The capture area for this station";
-  els.platenWindow.classList.toggle("platen-window--movable", captureWindowMovable);
-}
-
-/*
- * Seed the drag from the station's SAVED window, once, and never again while the operator is
- * dragging — re-seeding on every state push would drag the box back out from under them.
- */
-let captureWindowSeeded = false;
-function syncCaptureWindowFromState(state) {
-  if (captureWindowSeeded) return;
-  const saved = state?.scannerHealth?.captureWindow?.originMm;
-  if (!saved || !Number.isFinite(Number(saved.x)) || !Number.isFinite(Number(saved.y))) return;
-  captureWindowSeeded = true;
-  captureWindowOriginMm = clampOriginMm({ x: Number(saved.x), y: Number(saved.y) });
-  drawCaptureWindow();
-}
-
-els.captureWindowResetBtn.addEventListener("click", () => {
-  captureWindowOriginMm = { ...DEFAULT_ORIGIN_MM };
-  els.captureWindowStatus.textContent = "";
-  drawCaptureWindow();
-});
-
-els.captureWindowSaveBtn.addEventListener("click", async () => {
-  /*
-   * A REFUSAL MUST LOOK LIKE A REFUSAL.
-   *
-   * The reason was already written here, but as the same undifferentiated grey text used for
-   * "Saving…" and for success — so an operator who pressed SAVE while a card was open reasonably
-   * believed it had worked, and only found out later that the station calibration had never moved.
-   * The refusal itself is correct and stays: a capture window cannot move mid-card, or a card's
-   * FRONT and BACK would come from two different physical rectangles.
-   *
-   * `data-state` drives the styling, so the three outcomes are visually distinct.
-   */
-  els.captureWindowStatus.setAttribute("data-state", "pending");
-  els.captureWindowStatus.textContent = "Saving…";
-  const result = await window.scanner.saveCaptureWindow({ ...captureWindowOriginMm });
-  if (!result?.ok) {
-    els.captureWindowStatus.setAttribute("data-state", "refused");
-    els.captureWindowStatus.textContent = result?.error || "The capture window could not be saved.";
-    return;
-  }
-  // The local save and the station calibration record are reported separately: a station whose
-  // window moved but whose calibration authority did not is exactly the divergence to surface.
-  els.captureWindowStatus.setAttribute("data-state", result.calibration?.saved ? "saved" : "refused");
-  els.captureWindowStatus.textContent = result.calibration?.saved
-    ? "Capture window saved and recorded against this station's calibration."
-    : `Saved on this Mac, but the station calibration was NOT recorded: ${result.calibration?.error || "unknown reason"}`;
-});
-
-drawCaptureWindow();
-
 els.positioningPreviewBtn.addEventListener("click", () => {
   const stage = String(lastState?.activeCapture?.stage || "");
-  if (stage === "awaiting_scan") {
-    void runCaptureAction(() => window.scanner.runPlacementPreview());
-    return;
-  }
-  void runCaptureAction(() => window.scanner.runPositioningPreview());
+  if (stage !== "awaiting_scan") return;
+  void runCaptureAction(() => window.scanner.runPlacementPreview());
 });
 els.rescanErrorBtn.addEventListener(
   "click",
@@ -2039,6 +1964,8 @@ setInterval(() => {
     renderState(lastState);
   }
 }, 1_000);
+wireStationRecoveryControls();
+renderStationSetup({ stage: "checking" });
 void refreshStationSetup();
 window.addEventListener("resize", () => {
   if (!lastState?.positioningPreview) return;

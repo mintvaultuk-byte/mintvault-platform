@@ -706,15 +706,15 @@ describe("P6 integration surfaces", () => {
   const scannerApp = readFileSync("scripts/scanner-app/renderer/app.js", "utf8");
 
   it("the NEW route demands BOTH an approved station and an authorised operator", () => {
-    const route = stationRoutes.slice(stationRoutes.indexOf('r.post("/card-jobs"'));
-    const body = route.slice(0, route.indexOf('r.post("/stations/calibrations"'));
+    const routeStart = stationRoutes.indexOf('r.post("/card-jobs"');
+    const body = stationRoutes.slice(routeStart, stationRoutes.indexOf("r.get(", routeStart));
     expect(body).toContain("requireSignedStation");
     expect(body).toContain("requireSignedStationOperator");
   });
 
   it("the NEW route takes tenant, location and station from the authenticated principals only", () => {
-    const route = stationRoutes.slice(stationRoutes.indexOf('r.post("/card-jobs"'));
-    const body = route.slice(0, route.indexOf('r.post("/stations/calibrations"'));
+    const routeStart = stationRoutes.indexOf('r.post("/card-jobs"');
+    const body = stationRoutes.slice(routeStart, stationRoutes.indexOf("r.get(", routeStart));
     expect(body).toContain("tenantId: station.tenantId");
     expect(body).toContain("locationId: station.locationId");
     expect(body).toContain("stationId: station.id");
@@ -725,8 +725,8 @@ describe("P6 integration surfaces", () => {
   });
 
   it("insufficient credits is answered as 402, not a generic failure", () => {
-    const route = stationRoutes.slice(stationRoutes.indexOf('r.post("/card-jobs"'));
-    const body = route.slice(0, route.indexOf('r.post("/stations/calibrations"'));
+    const routeStart = stationRoutes.indexOf('r.post("/card-jobs"');
+    const body = stationRoutes.slice(routeStart, stationRoutes.indexOf("r.get(", routeStart));
     expect(body).toMatch(/INSUFFICIENT_CREDITS"?\s*\?\s*402/);
     /*
      * 409 is the "conflicts with state that already exists" group. It now covers a second condition

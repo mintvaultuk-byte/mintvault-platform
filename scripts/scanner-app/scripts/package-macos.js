@@ -72,6 +72,8 @@ function shouldExclude(relativePath) {
   if (parts[0] === "node_modules" && parts[1] === ".bin" && basename === "electron") return true;
   if (basename === ".DS_Store") return true;
   if (basename && basename.endsWith(".log")) return true;
+  // Historical engineering-only capture tooling must never ship in the shop-floor Scanner bundle.
+  if (basename === "calibrate-lide.js") return true;
   if (basename === "experiment-lide400-quality.js") return true;
   return false;
 }
@@ -95,7 +97,13 @@ function copyRecursive(source, destination, root = source) {
   if (stat.isFile()) {
     fs.mkdirSync(path.dirname(destination), { recursive: true });
     fs.copyFileSync(source, destination);
-    fs.chmodSync(destination, stat.mode & 0o777);
+    /*
+     * `copyFileSync` preserves ordinary file modes on macOS. Avoid a redundant chmod when it has
+     * already done so: Finder/provenance-marked files can reject that no-op metadata write with
+     * EPERM even though the copied package file has the exact required mode.
+     */
+    const intendedMode = stat.mode & 0o777;
+    if ((fs.statSync(destination).mode & 0o777) !== intendedMode) fs.chmodSync(destination, intendedMode);
   }
 }
 

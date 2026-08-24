@@ -136,10 +136,6 @@ async function heartbeat(payload) {
   return signedJson("POST", "/api/partner/stations/heartbeat", payload);
 }
 
-async function saveCalibration(payload) {
-  return signedJson("POST", "/api/partner/stations/calibrations", payload);
-}
-
 module.exports = {
   creditSummary,
   creditPacks,
@@ -152,6 +148,5 @@ module.exports = {
   selectLocation,
   registerThisMac,
   heartbeat,
-  saveCalibration,
   _private: { cookieTokenFrom, baseUrl },
 };

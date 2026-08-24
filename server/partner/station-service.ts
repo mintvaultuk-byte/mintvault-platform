@@ -12,6 +12,12 @@ import {
   verifyStationSignature,
 } from "./station-identity";
 import { CaptureGeometryError, assertLegalCaptureWindow } from "../lib/lide400-capture-authority";
+import {
+  STANDARD_TCG,
+  captureWindowRectMm,
+  placementBoundaryRectMm,
+  previewGreenMinMarginMm,
+} from "@shared/lide400-capture-profile.cjs";
 
 export type StationStatus = "PENDING" | "ACTIVE" | "SUSPENDED" | "REVOKED";
 export type CalibrationStatus = "UNPROVISIONED" | "VALID" | "INVALID" | "EXPIRED";
@@ -548,8 +554,14 @@ export async function recordStationHeartbeat(
     pendingUploadCount?: unknown;
     captureState?: unknown;
     lastFailureCode?: unknown;
-  }
-): Promise<{ calibrationStatus: CalibrationStatus; hardwareChanged: boolean; profileChanged: boolean }> {
+  },
+  actorUserId: string | null = null
+): Promise<{
+  calibrationStatus: CalibrationStatus;
+  hardwareChanged: boolean;
+  profileChanged: boolean;
+  fixedProfileProvisioned: boolean;
+}> {
   const appVersion = input.appVersion == null ? station.appVersion : boundedText(input.appVersion, "appVersion", 64);
   if (typeof input.scannerConnected !== "boolean")
     throw new StationServiceError("validation", "scannerConnected is invalid");
@@ -575,10 +587,13 @@ export async function recordStationHeartbeat(
       scanner_connected: boolean;
       scanner_hardware_fingerprint: string | null;
       scanner_profile_version: string | null;
+      calibration_status: CalibrationStatus;
+      current_calibration_id: string | null;
       capture_state: string;
       last_failure_code: string | null;
     }>(
-      `SELECT scanner_connected, scanner_hardware_fingerprint, scanner_profile_version, capture_state, last_failure_code
+      `SELECT scanner_connected, scanner_hardware_fingerprint, scanner_profile_version,
+              calibration_status, current_calibration_id, capture_state, last_failure_code
          FROM partner_stations WHERE id=$1 AND tenant_id=$2 FOR UPDATE`,
       [station.id, station.tenantId]
     );
@@ -594,14 +609,128 @@ export async function recordStationHeartbeat(
     const profileChanged =
       previous.scanner_profile_version != null && previous.scanner_profile_version !== scannerProfileVersion;
     const calibrationInvalidated = hardwareChanged || profileChanged;
-    const calibrationStatus: CalibrationStatus = calibrationInvalidated ? "INVALID" : station.calibrationStatus;
+    /*
+     * FIRST-RUN FIXED PROFILE PROVISIONING.
+     *
+     * A Canon LiDE 400 station that MintVault has just approved has no historical capture rectangle
+     * to preserve. Requiring a shop-floor operator to create one introduced a second geometry
+     * authority and stranded a physically healthy station at `profile_unprovisioned`. The Canon
+     * profile already owns the only approved default; provision that exact profile once, inside the
+     * heartbeat transaction, and then retain the ordinary server-side readiness checks for every
+     * card-side session.
+     *
+     * This is deliberately narrow. It never changes a VALID, INVALID or EXPIRED station, never
+     * replaces a current calibration, and never treats a changed scanner/profile as a fresh station.
+     * Those cases remain INVALID until an authorised maintenance process resolves them.
+     */
+    const model = String(scannerHardware.model || "")
+      .trim()
+      .replace(/\s+/g, " ")
+      .toLowerCase();
+    const isCanonLide400 =
+      String(scannerHardware.manufacturer || "")
+        .trim()
+        .toLowerCase() === "canon" &&
+      (model === "canon lide 400" || model === "canoscan lide 400");
+    const shouldProvisionFixedProfile =
+      !calibrationInvalidated &&
+      previous.calibration_status === "UNPROVISIONED" &&
+      previous.current_calibration_id == null &&
+      input.scannerConnected === true &&
+      isCanonLide400 &&
+      scannerProfileVersion === STANDARD_TCG.scannerProfileVersion;
+
+    let fixedProfileCalibrationId: string | null = null;
+    if (shouldProvisionFixedProfile) {
+      const acquisitionRegion = captureWindowRectMm(STANDARD_TCG.defaultOriginMm, STANDARD_TCG);
+      const placementBoundary = placementBoundaryRectMm(STANDARD_TCG);
+      const previewMarginMm = previewGreenMinMarginMm(STANDARD_TCG);
+      const workingRegion = {
+        x: acquisitionRegion.x + placementBoundary.x,
+        y: acquisitionRegion.y + placementBoundary.y,
+        width: placementBoundary.width,
+        height: placementBoundary.height,
+      };
+      const placementToleranceMm = {
+        left: previewMarginMm,
+        right: previewMarginMm,
+        top: previewMarginMm,
+        bottom: previewMarginMm,
+      };
+      const calibrationFingerprint = fingerprint({
+        scannerHardwareFingerprint: hardwareFingerprint,
+        scannerProfileVersion,
+        acquisitionRegion,
+        workingRegion,
+        placementToleranceMm,
+        calibrationVersion: STANDARD_TCG.version,
+      });
+      const inserted = await client.query<{ id: string }>(
+        `INSERT INTO partner_station_calibrations
+           (tenant_id,location_id,station_id,calibration_fingerprint,scanner_hardware_fingerprint,scanner_hardware,
+            scanner_profile_version,acquisition_region,working_region,placement_tolerance_mm,calibration_version,health_status,created_by_user_id)
+         VALUES ($1,$2,$3,$4,$5,$6::jsonb,$7,$8::jsonb,$9::jsonb,$10::jsonb,$11,'VALID',$12)
+         ON CONFLICT (station_id,calibration_fingerprint) DO NOTHING
+         RETURNING id`,
+        [
+          station.tenantId,
+          station.locationId,
+          station.id,
+          calibrationFingerprint,
+          hardwareFingerprint,
+          JSON.stringify(scannerHardware),
+          scannerProfileVersion,
+          JSON.stringify(acquisitionRegion),
+          JSON.stringify(workingRegion),
+          JSON.stringify(placementToleranceMm),
+          STANDARD_TCG.version,
+          actorUserId,
+        ]
+      );
+      fixedProfileCalibrationId =
+        inserted.rows[0]?.id ||
+        (
+          await client.query<{ id: string }>(
+            `SELECT id FROM partner_station_calibrations WHERE station_id=$1 AND calibration_fingerprint=$2`,
+            [station.id, calibrationFingerprint]
+          )
+        ).rows[0]?.id ||
+        null;
+      if (!fixedProfileCalibrationId) {
+        throw new StationServiceError("validation", "Fixed Scanner profile could not be resolved after provisioning");
+      }
+      if (inserted.rows.length === 1) {
+        await client.query(
+          `INSERT INTO partner_station_events (tenant_id,location_id,station_id,actor_user_id,event_type,detail)
+           VALUES ($1,$2,$3,$4,'station_fixed_profile_provisioned',$5::jsonb)`,
+          [
+            station.tenantId,
+            station.locationId,
+            station.id,
+            actorUserId,
+            JSON.stringify({
+              calibrationId: fixedProfileCalibrationId,
+              profileId: STANDARD_TCG.id,
+              scannerProfileVersion,
+              calibrationVersion: STANDARD_TCG.version,
+              acquisitionRegion,
+            }),
+          ]
+        );
+      }
+    }
+    const calibrationStatus: CalibrationStatus = calibrationInvalidated
+      ? "INVALID"
+      : fixedProfileCalibrationId
+        ? "VALID"
+        : previous.calibration_status;
     const updated = await client.query<{ id: string }>(
       `UPDATE partner_stations
           SET app_version=$2, scanner_connected=$3, scanner_hardware=$4::jsonb,
               scanner_hardware_fingerprint=$5, scanner_profile_version=$6,
               pending_upload_count=$7, capture_state=$8, last_failure_code=$9,
               calibration_status=$10,
-              current_calibration_id=CASE WHEN $11 THEN NULL ELSE current_calibration_id END,
+              current_calibration_id=CASE WHEN $11 THEN NULL WHEN $12::uuid IS NOT NULL THEN $12::uuid ELSE current_calibration_id END,
               last_seen_at=now(), updated_at=now()
         WHERE id=$1 AND status='ACTIVE'
         RETURNING id`,
@@ -617,6 +746,7 @@ export async function recordStationHeartbeat(
         lastFailureCode,
         calibrationStatus,
         calibrationInvalidated,
+        fixedProfileCalibrationId,
       ]
     );
     if (updated.rows.length !== 1) throw new StationServiceError("station_not_active", "Station is no longer active");
@@ -652,7 +782,12 @@ export async function recordStationHeartbeat(
         ]
       );
     }
-    return { calibrationStatus, hardwareChanged, profileChanged };
+    return {
+      calibrationStatus,
+      hardwareChanged,
+      profileChanged,
+      fixedProfileProvisioned: fixedProfileCalibrationId != null,
+    };
   });
 }
 

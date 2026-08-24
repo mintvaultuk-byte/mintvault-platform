@@ -5,9 +5,9 @@
  * This command has no server client and no evidence-upload capability. It asks
  * the ImageCaptureCore bridge for one bounded 1200-DPI hardware acquisition,
  * produces a review-only JPEG from that TIFF, and reports a conservative card
- * edge candidate in platen millimetres. A person must visually confirm all
- * edges before any placement zone is persisted. The Scanner's Preview flow is
- * the operator-facing calibration path; this CLI remains a diagnostic tool.
+ * edge candidate in platen millimetres. It cannot persist a placement zone or
+ * alter server state. It is an engineering-only diagnostic and is excluded
+ * from every packaged Scanner artifact.
  */
 const fs = require("node:fs");
 const path = require("node:path");

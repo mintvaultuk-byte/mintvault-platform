@@ -175,7 +175,7 @@ describe("first-shop wizard — the onboarding test card", () => {
       [4, "Partner Owner"],
       [5, "Staff and operator access"],
       [6, "Scanner station"],
-      [7, "Calibration and Scanner health"],
+      [7, "Scanner connection and automatic profile"],
       [8, "Credits"],
     ] as Array<[number, string]>) {
       expect(source).toContain(`<Step number={${number}} title="${title}"`);

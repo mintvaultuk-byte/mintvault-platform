@@ -43,15 +43,12 @@ done
 mkdir -p "$HOME/Library/Application Support/MintVaultScanner"
 echo "[setup] ✓ Ensured $BASE/{inbox,processed,failed,rejected,discarded,capture-staging} + App Support dir"
 
-# 2) Non-secret local calibration path. Credentials and station identity are
-# created after sign-in and protected by the app's Keychain storage.
+# 2) Non-secret environment file. Credentials and station identity are created
+# after sign-in and protected by the app's Keychain storage. Capture geometry is
+# never configured here: MintVault supplies the automatic fixed Canon profile.
 if [ ! -f "$ENV_FILE" ]; then
   umask 077
   printf '# MintVault Scanner non-secret local configuration\n' > "$ENV_FILE"
-  chmod 600 "$ENV_FILE"
-fi
-if ! grep -qE '^MINTVAULT_STATION_CONFIG_PATH=.+' "$ENV_FILE"; then
-  printf 'MINTVAULT_STATION_CONFIG_PATH=%s\n' "$ENV_FILE" >> "$ENV_FILE"
   chmod 600 "$ENV_FILE"
 fi
 
@@ -102,5 +99,5 @@ echo "  launchctl print $TARGET | grep -E 'state|program ='"
 echo "  tail -n 30 $BASE/scanner-app.log | grep -Ei 'watching|electron|FATAL'"
 echo ""
 echo "Expect 'state = running' and a LiDE device/profile health line."
-echo "Tray icon appears in the menu bar. Sign in with your MintVault account, register this Mac and wait for approval. Then use PREVIEW with a disposable card; it visibly detects and saves the jig origin. Do not configure a hot-folder export."
+echo "Tray icon appears in the menu bar. Sign in with your MintVault account, register this Mac and wait for approval. MintVault then applies the fixed Canon profile automatically; start the target-bound PREVIEW FRONT flow when the Scanner is ready. Do not configure a hot-folder export."
 echo "──────────────────────────────────────────────────────────────"
