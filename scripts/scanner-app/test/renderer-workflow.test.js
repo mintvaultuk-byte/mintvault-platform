@@ -10,6 +10,7 @@ const renderer = fs.readFileSync(path.join(APP, "renderer", "app.js"), "utf8");
 const main = fs.readFileSync(path.join(APP, "main.js"), "utf8");
 const preload = fs.readFileSync(path.join(APP, "preload.js"), "utf8");
 const packager = fs.readFileSync(path.join(APP, "scripts", "package-macos.js"), "utf8");
+const SCANNER_VERSION = require("../package.json").version;
 
 async function renderSetup(setup, state = {}, scannerOverrides = {}) {
   const window = new Window({ url: "http://mintvault-scanner.test" });
@@ -25,7 +26,7 @@ async function renderSetup(setup, state = {}, scannerOverrides = {}) {
     onStateUpdate: () => () => {},
     getState: () => Promise.resolve({ state: "idle", availableCredits: 5, ...state }),
     getStationSetup: () => Promise.resolve(setup),
-    getVersion: () => Promise.resolve({ ok: true, version: "1.5.6" }),
+    getVersion: () => Promise.resolve({ ok: true, version: SCANNER_VERSION }),
     getPlacementPreview: () => Promise.resolve({ ok: false }),
     runPlacementPreview: () => Promise.resolve({ ok: true }),
     ...scannerOverrides,
@@ -55,6 +56,12 @@ test("normal Scanner workflow has no movable area, reset, save, or operator cali
   assert.match(packager, /basename === "calibrate-lide\.js"/);
   assert.match(html, /id="positioningPreviewBtn" hidden>PREVIEW FRONT/);
   assert.match(renderer, /`PREVIEW \$\{side\.toUpperCase\(\)\}`/);
+});
+
+test("About UI displays the Scanner package version", async () => {
+  assert.equal(SCANNER_VERSION, "1.6.0");
+  const document = await renderSetup({ stage: "active", calibrationStatus: "VALID", summary: { availableCredits: 5 } });
+  assert.equal(document.getElementById("appVersion").textContent, `v${SCANNER_VERSION}`);
 });
 
 test("a non-ACTIVE station exposes no card or billing workflow before authority is known", async () => {

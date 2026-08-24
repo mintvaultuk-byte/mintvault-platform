@@ -10,7 +10,7 @@ function assertLocalTestDb(url: string): void {
   const parsed = new URL(url);
   const ok =
     (parsed.hostname === "127.0.0.1" || parsed.hostname === "localhost") &&
-    parsed.port === "55432" &&
+    parsed.port === (process.env.MINTVAULT_TEST_PG16_PORT || "55432") &&
     parsed.pathname.includes("mintvault_vq_phase10_local");
   if (!ok) {
     throw new Error(

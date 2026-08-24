@@ -15,6 +15,7 @@ const PACKAGED_SHARED = path.join(CONTENTS, "shared");
 const EXECUTABLE = path.join(CONTENTS, "MacOS", "MintVault Scanner");
 const BRIDGE = path.join(PACKAGED_APP, "native", "mintvault-lide-bridge");
 const MANIFEST = path.join(path.dirname(APP_BUNDLE), "mintvault-scanner-package-manifest.json");
+const SOURCE_PACKAGE = JSON.parse(fs.readFileSync(path.join(APP_ROOT, "package.json"), "utf8"));
 
 function fail(message) {
   throw new Error(message);
@@ -41,6 +42,10 @@ function plistValue(key) {
 
 function assertNoPath(file, description) {
   if (fs.existsSync(file)) fail(`${description} must not be present: ${file}`);
+}
+
+function mustMatch(actual, expected, description) {
+  if (actual !== expected) fail(`${description} mismatch: expected ${expected}, got ${actual || "missing"}`);
 }
 
 function requirePackagedController() {
@@ -85,6 +90,24 @@ function main() {
 
   mustExist(MANIFEST, "package manifest");
   const manifest = JSON.parse(fs.readFileSync(MANIFEST, "utf8"));
+  const expectedVersion = SOURCE_PACKAGE.version;
+  const packagedPackage = JSON.parse(fs.readFileSync(path.join(PACKAGED_APP, "package.json"), "utf8"));
+  const packagedMain = fs.readFileSync(path.join(PACKAGED_APP, "main.js"), "utf8");
+  const packagedRenderer = fs.readFileSync(path.join(PACKAGED_APP, "renderer", "app.js"), "utf8");
+  const packagedPreload = fs.readFileSync(path.join(PACKAGED_APP, "preload.js"), "utf8");
+  mustMatch(plistValue("CFBundleShortVersionString"), expectedVersion, "CFBundleShortVersionString");
+  mustMatch(plistValue("CFBundleVersion"), expectedVersion, "CFBundleVersion");
+  mustMatch(packagedPackage.version, expectedVersion, "packaged runtime package version");
+  mustMatch(manifest.packageVersion, expectedVersion, "package manifest version");
+  if (!packagedMain.includes('require("./package.json").version')) {
+    fail("packaged runtime does not source its version from package.json");
+  }
+  if (!packagedPreload.includes('getVersion: () => ipcRenderer.invoke("get-version")')) {
+    fail("packaged preload does not expose the runtime version IPC");
+  }
+  if (!packagedRenderer.includes('els.appVersion.textContent = `v${result.version}`')) {
+    fail("packaged About UI does not render the runtime version");
+  }
   if (manifest.nativeBridge?.runtimeCompilationRequired !== false) {
     fail("manifest must state that runtime bridge compilation is not required");
   }

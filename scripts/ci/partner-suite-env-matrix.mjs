@@ -28,12 +28,24 @@
  * CONSUMED BY: scripts/ci/run-partner-suite.mjs
  */
 
-/** Disposable loopback clusters. Ports are fixed by the CI container provisioning step. */
+/**
+ * Disposable loopback clusters. CI keeps the conventional ports; local release
+ * verification may opt into distinct loopback ports so concurrent candidates
+ * never share or interrupt a disposable database.
+ */
+function localTestPort(variable, fallback) {
+  const value = String(process.env[variable] || fallback);
+  if (!/^\d{2,5}$/.test(value) || Number(value) < 1024 || Number(value) > 65535) {
+    throw new Error(`${variable} must be an unprivileged local TCP port, got '${value}'.`);
+  }
+  return Number(value);
+}
+
 export const CLUSTERS = {
   /** PostgreSQL 16 + pgvector — the MintVault-compatible shared cluster. */
-  pg16: { host: "127.0.0.1", port: 55432, user: "postgres", password: "postgres" },
+  pg16: { host: "127.0.0.1", port: localTestPort("MINTVAULT_TEST_PG16_PORT", "55432"), user: "postgres", password: "postgres" },
   /** PostgreSQL 17.10 — Partner accounting, RBAC, connector and migration suites. */
-  pg17: { host: "127.0.0.1", port: 55433, user: "postgres", password: "postgres" },
+  pg17: { host: "127.0.0.1", port: localTestPort("MINTVAULT_TEST_PG17_PORT", "55433"), user: "postgres", password: "postgres" },
 };
 
 /** Build a connection URL for a database on a named cluster. */

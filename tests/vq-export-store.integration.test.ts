@@ -25,7 +25,7 @@ vi.mock("../server/db", () => {
   if (!url) return { db: {}, pool: { end: () => Promise.resolve(), query: () => Promise.resolve() } };
   // Pin to the throwaway local DB — refuse anything else BEFORE opening a pool.
   const u = new URL(url);
-  const ok = (u.hostname === "127.0.0.1" || u.hostname === "localhost") && u.port === "55432" && u.pathname === "/mintvault_vq_phase10_local";
+  const ok = (u.hostname === "127.0.0.1" || u.hostname === "localhost") && u.port === (process.env.MINTVAULT_TEST_PG16_PORT || "55432") && u.pathname === "/mintvault_vq_phase10_local";
   if (!ok) throw new Error(`REFUSED: TEST_DATABASE_URL must be the local throwaway DB (127.0.0.1:55432/mintvault_vq_phase10_local), got ${u.hostname}:${u.port}${u.pathname}`);
   // eslint-disable-next-line @typescript-eslint/no-require-imports
   const pg = require("pg");

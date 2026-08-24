@@ -17,7 +17,11 @@ const TEST_URL = process.env.SCANNER_MIGRATION_TEST_DATABASE_URL || "";
  * named `mintvault_dgn_release_*`, so even on loopback it cannot be aimed at a real local database.
  * Only the set of accepted disposable ports is widened to the ones this repository provisions.
  */
-const DISPOSABLE_PORTS = ["5432", "55432", "55433"];
+const DISPOSABLE_PORTS = [
+  "5432",
+  process.env.MINTVAULT_TEST_PG16_PORT || "55432",
+  process.env.MINTVAULT_TEST_PG17_PORT || "55433",
+];
 
 function assertDisposableUrl(url: string): void {
   const parsed = new URL(url);

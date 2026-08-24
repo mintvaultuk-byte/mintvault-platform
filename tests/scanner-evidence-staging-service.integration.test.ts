@@ -7,7 +7,7 @@ function assertDisposableUrl(url: string): void {
   const parsed = new URL(url);
   if (
     !["127.0.0.1", "localhost"].includes(parsed.hostname) ||
-    !["5432", "55432"].includes(parsed.port) ||
+    !["5432", process.env.MINTVAULT_TEST_PG16_PORT || "55432"].includes(parsed.port) ||
     !/^\/mintvault_dgn_[a-z0-9_]+$/i.test(parsed.pathname)
   ) {
     throw new Error(
