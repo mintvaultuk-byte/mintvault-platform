@@ -1086,6 +1086,51 @@ function heartbeatPayload() {
   };
 }
 
+// Lightweight current-state heartbeat. It is intentionally independent of
+// target polling and carries no TIFF/certificate payload. Server-side it
+// appends events only for meaningful connection/hardware transitions.
+//
+// This is module-scoped because startup, successful sign-in/MFA, and setup
+// recovery are all legitimate callers of the same heartbeat authority.
+let heartbeatInFlight = false;
+async function sendHeartbeat() {
+  if (heartbeatInFlight || !stationIdentity.hasActiveStationSession()) return;
+  heartbeatInFlight = true;
+  try {
+    /*
+     * Adopt the server's capture rectangle on the heartbeat, not only when the operator opens the
+     * window. `stationSetupState()` runs on demand from the renderer, so a tray-only Scanner that
+     * nobody has clicked sits at `profile_unprovisioned` — unable to Preview or scan — while the
+     * server has held a VALID calibration for it the whole time. The station should be ready
+     * because it is enrolled, not because somebody looked at it.
+     *
+     * Cheap and idempotent: it returns immediately once the local origin already agrees.
+     */
+    const originMissingBeforeHeartbeat = !lide400._private.jigOrigin();
+    if (originMissingBeforeHeartbeat) await stationSetupState();
+    const result = await stationClient.heartbeat(heartbeatPayload());
+    if (result.ok && (originMissingBeforeHeartbeat || result.body?.fixedProfileProvisioned === true)) {
+      /*
+       * A first connected heartbeat may have just created the server-owned fixed profile. Fetch it
+       * immediately and adopt its rectangle before the next operator action; no user-visible
+       * geometry action or restart is required.
+       */
+      await stationSetupState();
+      pushStateToRenderer();
+    } else if (!result.ok) {
+      console.warn(
+        `[station-heartbeat] rejected: ${result.body?.error?.code || result.body?.error || `HTTP ${result.status}`}`
+      );
+      if ([401, 403, 404, 426].includes(result.status) || result.body?.error?.code === "version_blocked")
+        await stationSetupState();
+    }
+  } catch (error) {
+    console.warn(`[station-heartbeat] failed: ${error?.message || error}`);
+  } finally {
+    heartbeatInFlight = false;
+  }
+}
+
 function setupIpc() {
   ipcMain.handle("get-state", () => stateMod.get());
 
@@ -1838,47 +1883,6 @@ app.whenReady().then(async () => {
   void pollTargetedCapture();
   scheduleTargetPoll();
 
-  // Lightweight current-state heartbeat. It is intentionally independent of
-  // target polling and carries no TIFF/certificate payload. Server-side it
-  // appends events only for meaningful connection/hardware transitions.
-  let heartbeatInFlight = false;
-  const sendHeartbeat = async () => {
-    if (heartbeatInFlight || !stationIdentity.hasActiveStationSession()) return;
-    heartbeatInFlight = true;
-    try {
-      /*
-       * Adopt the server's capture rectangle on the heartbeat, not only when the operator opens the
-       * window. `stationSetupState()` runs on demand from the renderer, so a tray-only Scanner that
-       * nobody has clicked sits at `profile_unprovisioned` — unable to Preview or scan — while the
-       * server has held a VALID calibration for it the whole time. The station should be ready
-       * because it is enrolled, not because somebody looked at it.
-       *
-       * Cheap and idempotent: it returns immediately once the local origin already agrees.
-       */
-      const originMissingBeforeHeartbeat = !lide400._private.jigOrigin();
-      if (originMissingBeforeHeartbeat) await stationSetupState();
-      const result = await stationClient.heartbeat(heartbeatPayload());
-      if (result.ok && (originMissingBeforeHeartbeat || result.body?.fixedProfileProvisioned === true)) {
-        /*
-         * A first connected heartbeat may have just created the server-owned fixed profile. Fetch it
-         * immediately and adopt its rectangle before the next operator action; no user-visible
-         * geometry action or restart is required.
-         */
-        await stationSetupState();
-        pushStateToRenderer();
-      } else if (!result.ok) {
-        console.warn(
-          `[station-heartbeat] rejected: ${result.body?.error?.code || result.body?.error || `HTTP ${result.status}`}`
-        );
-        if ([401, 403, 404, 426].includes(result.status) || result.body?.error?.code === "version_blocked")
-          await stationSetupState();
-      }
-    } catch (error) {
-      console.warn(`[station-heartbeat] failed: ${error?.message || error}`);
-    } finally {
-      heartbeatInFlight = false;
-    }
-  };
   const scheduleHeartbeat = () => {
     const delay = 75_000 + Math.floor(Math.random() * 30_000); // 75–105 seconds, per-Mac jitter
     setTimeout(async () => {

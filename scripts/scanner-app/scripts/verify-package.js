@@ -16,6 +16,7 @@ const EXECUTABLE = path.join(CONTENTS, "MacOS", "MintVault Scanner");
 const BRIDGE = path.join(PACKAGED_APP, "native", "mintvault-lide-bridge");
 const MANIFEST = path.join(path.dirname(APP_BUNDLE), "mintvault-scanner-package-manifest.json");
 const SOURCE_PACKAGE = JSON.parse(fs.readFileSync(path.join(APP_ROOT, "package.json"), "utf8"));
+const SOURCE_PACKAGE_LOCK = JSON.parse(fs.readFileSync(path.join(APP_ROOT, "package-lock.json"), "utf8"));
 
 function fail(message) {
   throw new Error(message);
@@ -92,18 +93,45 @@ function main() {
   const manifest = JSON.parse(fs.readFileSync(MANIFEST, "utf8"));
   const expectedVersion = SOURCE_PACKAGE.version;
   const packagedPackage = JSON.parse(fs.readFileSync(path.join(PACKAGED_APP, "package.json"), "utf8"));
+  const packagedPackageLock = JSON.parse(fs.readFileSync(path.join(PACKAGED_APP, "package-lock.json"), "utf8"));
   const packagedMain = fs.readFileSync(path.join(PACKAGED_APP, "main.js"), "utf8");
+  const packagedHtml = fs.readFileSync(path.join(PACKAGED_APP, "renderer", "index.html"), "utf8");
   const packagedRenderer = fs.readFileSync(path.join(PACKAGED_APP, "renderer", "app.js"), "utf8");
   const packagedPreload = fs.readFileSync(path.join(PACKAGED_APP, "preload.js"), "utf8");
   mustMatch(plistValue("CFBundleShortVersionString"), expectedVersion, "CFBundleShortVersionString");
   mustMatch(plistValue("CFBundleVersion"), expectedVersion, "CFBundleVersion");
+  mustMatch(SOURCE_PACKAGE_LOCK.version, expectedVersion, "source package-lock version");
+  mustMatch(SOURCE_PACKAGE_LOCK.packages?.[""]?.version, expectedVersion, "source package-lock root version");
   mustMatch(packagedPackage.version, expectedVersion, "packaged runtime package version");
+  mustMatch(packagedPackageLock.version, expectedVersion, "packaged runtime package-lock version");
+  mustMatch(
+    packagedPackageLock.packages?.[""]?.version,
+    expectedVersion,
+    "packaged runtime package-lock root version"
+  );
   mustMatch(manifest.packageVersion, expectedVersion, "package manifest version");
-  if (!packagedMain.includes('require("./package.json").version')) {
+  if (!packagedMain.includes('return require("./package.json").version;')) {
     fail("packaged runtime does not source its version from package.json");
+  }
+  const runtimeManifestWriter = packagedMain.slice(
+    packagedMain.indexOf("function writeRuntimeManifest() {"),
+    packagedMain.indexOf("\nfunction readActiveInstanceClaim()")
+  );
+  if (
+    !/const manifest = \{\s*pid: process\.pid,\s*executable: process\.execPath,\s*version: APP_VERSION,/.test(
+      runtimeManifestWriter
+    )
+  ) {
+    fail("packaged runtime manifest does not use the package version authority");
+  }
+  if (!packagedMain.includes('ipcMain.handle("get-version", () => ({ ok: true, version: APP_VERSION }));')) {
+    fail("packaged runtime version IPC does not use the package version authority");
   }
   if (!packagedPreload.includes('getVersion: () => ipcRenderer.invoke("get-version")')) {
     fail("packaged preload does not expose the runtime version IPC");
+  }
+  if (!packagedHtml.includes('id="appVersion"')) {
+    fail("packaged About UI does not contain the app version element");
   }
   if (!packagedRenderer.includes('els.appVersion.textContent = `v${result.version}`')) {
     fail("packaged About UI does not render the runtime version");

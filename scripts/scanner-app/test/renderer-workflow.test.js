@@ -59,7 +59,7 @@ test("normal Scanner workflow has no movable area, reset, save, or operator cali
 });
 
 test("About UI displays the Scanner package version", async () => {
-  assert.equal(SCANNER_VERSION, "1.6.0");
+  assert.equal(SCANNER_VERSION, "1.6.1");
   const document = await renderSetup({ stage: "active", calibrationStatus: "VALID", summary: { availableCredits: 5 } });
   assert.equal(document.getElementById("appVersion").textContent, `v${SCANNER_VERSION}`);
 });
