@@ -20,6 +20,7 @@
     "command-centre:runtime": "node --import tsx scripts/command-centre-runtime-harness.ts",
     "test:command-centre-mobile-layout": "node scripts/command-centre-mobile-layout-check.mjs",
     "test": "vitest run",
+    "test:engineering": "vitest run --pool=forks --maxWorkers=1 --no-file-parallelism",
     "test:watch": "vitest",
     "graph:build": "PYTHONHASHSEED=0 GRAPHIFY_QUERY_LOG_DISABLE=1 graphify extract . --code-only",
     "graph:check": "PYTHONHASHSEED=0 GRAPHIFY_QUERY_LOG_DISABLE=1 graphify check-update .",

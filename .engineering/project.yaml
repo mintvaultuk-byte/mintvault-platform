@@ -40,7 +40,7 @@ risk:
 commands:
   typecheck: npm run check
   lint: npm run lint
-  unit_test: npm run test
+  unit_test: npm run test:engineering
   integration_test:
   build: npm run build
 gates:
