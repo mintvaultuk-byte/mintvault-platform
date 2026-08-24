@@ -22,9 +22,14 @@ COPY . .
 # GIT_SHA passed by the deploy (fly deploy --build-arg GIT_SHA=$(git rev-parse
 # --short HEAD)). .git is dockerignored, so the build can't read it directly —
 # this hands the committed SHA to script/build.ts, which embeds it so
-# /api/version can prove which commit is live. Defaults to "unknown".
-ARG GIT_SHA=unknown
+# /api/version can prove which commit is live. Production builds must receive
+# this explicitly: script/build.ts refuses to create an artifact with unknown
+# provenance when the checkout is absent from the Docker context.
+ARG GIT_SHA
 ENV GIT_SHA=$GIT_SHA
+# The builder intentionally has access to dev dependencies. This marker keeps
+# provenance fail-closed without changing npm's install mode.
+ENV BUILD_PROVENANCE_REQUIRED=1
 # This is a Vite compile-time flag, not a runtime secret.  Keep the default
 # fail-closed so an ordinary deploy preserves the legacy Partner admin surface.
 ARG VITE_PARTNER_NETWORK_CONSOLIDATION=false

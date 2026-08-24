@@ -2,18 +2,25 @@ import { build as esbuild } from "esbuild";
 import { build as viteBuild } from "vite";
 import { rm, readFile } from "fs/promises";
 import { execSync } from "child_process";
+import { resolveBuildGitSha } from "./build-provenance";
 
 // The exact commit this artifact was built from — embedded so /api/version can
 // PROVE which code is actually running. A stale-checkout deploy silently wiped
-// newer prod code twice this cycle; this is the machine-checkable guard against
-// it. Falls back to a Fly/env value or "unknown" when git isn't in the context.
-const GIT_SHA = (() => {
+// newer prod code twice this cycle; production Docker builds fail closed when
+// Git is absent and no valid build argument was injected.
+const checkoutGitSha = (() => {
   try {
     return execSync("git rev-parse --short HEAD", { encoding: "utf-8" }).trim();
   } catch {
-    return (process.env.GIT_SHA || process.env.FLY_IMAGE_REF || "unknown").slice(0, 40);
+    return null;
   }
 })();
+
+const GIT_SHA = resolveBuildGitSha({
+  checkoutSha: checkoutGitSha,
+  environmentSha: process.env.GIT_SHA,
+  production: process.env.NODE_ENV === "production" || process.env.BUILD_PROVENANCE_REQUIRED === "1",
+});
 
 // server deps to bundle to reduce openat(2) syscalls
 // which helps cold start times
