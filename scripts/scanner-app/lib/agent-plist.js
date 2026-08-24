@@ -23,10 +23,20 @@ const LABEL = "com.mintvault.scanner";
 function paths() {
   const appDir = path.resolve(__dirname, ".."); // …/scripts/scanner-app
   const home = os.homedir();
+  const packagedContents = path.resolve(appDir, "..", "..");
+  const packagedExecutable = path.join(packagedContents, "MacOS", "MintVault Scanner");
+  const isPackaged =
+    fs.existsSync(path.join(packagedContents, "Info.plist")) && fs.existsSync(packagedExecutable);
+  const wrapper = path.join(appDir, "launchd-wrapper.sh");
   return {
     label: LABEL,
     appDir,
-    wrapper: path.join(appDir, "launchd-wrapper.sh"),
+    wrapper,
+    packagedExecutable,
+    // A shipped bundle deliberately excludes the development Electron package. Its LaunchAgent
+    // must therefore start the bundle executable, not the development wrapper that expects
+    // node_modules/.bin/electron. Source-checkout development retains the wrapper unchanged.
+    launcher: isPackaged ? packagedExecutable : wrapper,
     home,
     uid: typeof process.getuid === "function" ? process.getuid() : null,
     plistPath: path.join(home, "Library", "LaunchAgents", `${LABEL}.plist`),
@@ -49,7 +59,7 @@ function renderPlist() {
 
     <key>ProgramArguments</key>
     <array>
-        <string>${p.wrapper}</string>
+        <string>${p.launcher}</string>
     </array>
 
     <key>WorkingDirectory</key>

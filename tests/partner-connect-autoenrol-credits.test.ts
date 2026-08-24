@@ -815,19 +815,22 @@ describe("Scanner — trapped-state recovery, isolation and launcher proof (comp
    * which is precisely the "it works on the machine that built it" failure they exist to catch.
    */
   const launcher = () =>
-    fs.readFileSync(path.join(process.cwd(), "scripts/scanner-app/acceptance/launch-isolated-instance.command"), "utf8");
+    fs.readFileSync(
+      path.join(process.cwd(), "scripts/scanner-app/acceptance/launch-isolated-instance.command"),
+      "utf8"
+    );
 
   it("M1–M5 — the launcher identifies, terminates and then VERIFIES, never assumes", () => {
     const s = launcher();
-    expect(s).toContain("pgrep -f");                       // enumerate every running Scanner
-    expect(s).toContain("runtime.json");                   // identify by the app's own claim
-    expect(s).toContain("kill -TERM");                     // terminate a genuine conflict
-    expect(s).toContain("would not exit");                 // and prove it exited, or stop
+    expect(s).toContain("pgrep -f"); // enumerate every running Scanner
+    expect(s).toContain("runtime.json"); // identify by the app's own claim
+    expect(s).toContain("kill -TERM"); // terminate a genuine conflict
+    expect(s).toContain("would not exit"); // and prove it exited, or stop
     // Verifies each field of the process that actually came up.
     for (const field of ["version", "scansDir", "userDataPath", "apiBase", "environment"]) {
       expect(s).toContain(`manifest_field "$OUR_MANIFEST" ${field}`);
     }
-    expect(s).toContain("never declared itself");          // fails loudly rather than assuming
+    expect(s).toContain("never declared itself"); // fails loudly rather than assuming
     // A window appearing is never treated as success.
     expect(s).not.toMatch(/open -a .*MintVault Scanner/);
   });
@@ -875,7 +878,10 @@ describe("Scanner — trapped-state recovery, isolation and launcher proof (comp
     expect(main).toContain('app.on("window-all-closed"');
     expect(main).toContain("e.preventDefault()");
     // Quit must not destroy identity, calibration or the server-side station.
-    const quit = main.slice(main.indexOf("async function quitScanner()"), main.indexOf("async function refreshStationSetupFromTray"));
+    const quit = main.slice(
+      main.indexOf("async function quitScanner()"),
+      main.indexOf("async function refreshStationSetupFromTray")
+    );
     expect(quit).not.toContain("clearEnrollment");
     expect(quit).not.toContain("unlinkSync");
     expect(quit).not.toContain("stations/");
@@ -906,7 +912,10 @@ describe("Scanner — trapped-state recovery, isolation and launcher proof (comp
 
   it("M-wait — the waiting screen states shop, location and Mac, and sells nothing", () => {
     const renderer = read("renderer/app.js");
-    const pending = renderer.slice(renderer.indexOf('stage === "pending"'), renderer.indexOf('stage === "session_expired"'));
+    const pending = renderer.slice(
+      renderer.indexOf('stage === "pending"'),
+      renderer.indexOf('stage === "session_expired"')
+    );
     expect(pending).toContain("Waiting for MintVault approval");
     expect(pending).toContain("Shop: ");
     expect(pending).toContain("Location: ");
@@ -922,7 +931,7 @@ describe("Scanner — trapped-state recovery, isolation and launcher proof (comp
     const main = read("main.js");
     expect(main).toContain('stage: hadSession ? "session_expired" : "sign_in"');
     // Reads the station identity to decide; never clears it.
-    const block = main.slice(main.indexOf("AN EXPIRED SESSION IS NOT"), main.indexOf('stage: hadSession'));
+    const block = main.slice(main.indexOf("AN EXPIRED SESSION IS NOT"), main.indexOf("stage: hadSession"));
     expect(block).not.toContain("clearEnrollment");
     const renderer = read("renderer/app.js");
     expect(renderer).toContain("Session expired");
@@ -962,13 +971,19 @@ describe("Scanner — trapped-state recovery, isolation and launcher proof (comp
 
   it("M13/M14 — pending is a wait, a foreign Mac is named, and only the unknown is 'unavailable'", () => {
     const renderer = read("renderer/app.js");
-    const pending = renderer.slice(renderer.indexOf('stage === "pending"'), renderer.indexOf('stage === "session_expired"'));
+    const pending = renderer.slice(
+      renderer.indexOf('stage === "pending"'),
+      renderer.indexOf('stage === "session_expired"')
+    );
     expect(pending).toContain("Waiting for MintVault approval");
     expect(pending).not.toContain("Station unavailable");
 
-    const mismatch = renderer.slice(renderer.indexOf('stage === "identity_mismatch"'), renderer.indexOf('stage === "update_required"'));
+    const mismatch = renderer.slice(
+      renderer.indexOf('stage === "identity_mismatch"'),
+      renderer.indexOf('stage === "update_required"')
+    );
     expect(mismatch).toContain("This Mac belongs to another shop");
-    expect(mismatch).not.toContain("registerThisMac");   // never silently re-homes the station
+    expect(mismatch).not.toContain("registerThisMac"); // never silently re-homes the station
 
     // Rejected/withdrawn and suspended are their own states, each with a way out.
     expect(renderer).toContain("This Mac's registration was withdrawn");
@@ -980,7 +995,10 @@ describe("Scanner — trapped-state recovery, isolation and launcher proof (comp
   it("M15 — one shop's cards cannot appear under another shop", () => {
     const main = read("main.js");
     expect(main).toContain("reconcileTenantScopedState(session.body?.tenantId)");
-    const fn = main.slice(main.indexOf("function reconcileTenantScopedState"), main.indexOf("/** Sanitised first-run state only"));
+    const fn = main.slice(
+      main.indexOf("function reconcileTenantScopedState"),
+      main.indexOf("/** Sanitised first-run state only")
+    );
     for (const cleared of ["lastUploadedCert: null", "recent: []", "openCardJob: null", "calibrationRecovery: null"]) {
       expect(fn).toContain(cleared);
     }
@@ -1007,9 +1025,9 @@ describe("Scanner — trapped-state recovery, isolation and launcher proof (comp
     expect(main).toContain("raw.pid === process.pid");
   });
 
-  it("M-version — the compiled build is 1.5.0, distinguishable from the enrolled Shop 0 Mac", () => {
+  it("M-version — the compiled build is 1.5.1, distinguishable from the enrolled Shop 0 Mac", () => {
     const pkg = JSON.parse(read("package.json")) as { version: string };
-    expect(pkg.version).toBe("1.5.0");
+    expect(pkg.version).toBe("1.5.1");
     expect(pkg.version).not.toBe("1.2.1");
     expect(pkg.version).not.toBe("1.4.1");
   });

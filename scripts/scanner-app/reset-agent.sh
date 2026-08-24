@@ -28,6 +28,9 @@ PLIST="$HOME/Library/LaunchAgents/$LABEL.plist"
 LOG="$HOME/mintvault-scans/scanner-app.log"
 STATUS="$HOME/mintvault-scans/last-reset.json"
 ELECTRON_BIN="$APP_DIR/node_modules/.bin/electron"
+# A packaged Scanner has no development Electron dependency. The renamed bundle executable is
+# still Electron and can run the plist renderer with ELECTRON_RUN_AS_NODE=1.
+PACKAGED_ELECTRON="$APP_DIR/../../MacOS/MintVault Scanner"
 REASON="${1:-manual reset}"
 
 mkdir -p "$HOME/mintvault-scans"
@@ -56,6 +59,8 @@ regen_plist() {
   # Electron as node (always present; no system-node dependency).
   if [ -x "$ELECTRON_BIN" ]; then
     ELECTRON_RUN_AS_NODE=1 "$ELECTRON_BIN" "$APP_DIR/lib/agent-plist.js" --write >/dev/null 2>>"$LOG"
+  elif [ -x "$PACKAGED_ELECTRON" ]; then
+    ELECTRON_RUN_AS_NODE=1 "$PACKAGED_ELECTRON" "$APP_DIR/lib/agent-plist.js" --write >/dev/null 2>>"$LOG"
   elif command -v node >/dev/null 2>&1; then
     node "$APP_DIR/lib/agent-plist.js" --write >/dev/null 2>>"$LOG"
   else

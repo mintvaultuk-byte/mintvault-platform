@@ -50,6 +50,35 @@ function requirePackagedController() {
   return require(controllerPath);
 }
 
+function verifyPackagedLaunchAgent() {
+  // The production Scanner deliberately omits the development Electron package. Exercise its
+  // embedded runtime as Node and make the generated plist name the bundle executable directly.
+  // This is the regression that prevents a healthy current package from leaving an older
+  // development checkout as the only restartable Scanner on the Mac.
+  const result = spawnSync(
+    EXECUTABLE,
+    [
+      "-e",
+      `const agent = require(process.argv[1]); process.stdout.write(agent.renderPlist());`,
+      path.join(PACKAGED_APP, "lib", "agent-plist.js"),
+    ],
+    {
+      encoding: "utf8",
+      env: { ...process.env, ELECTRON_RUN_AS_NODE: "1" },
+    }
+  );
+  if (result.status !== 0) {
+    fail(`packaged Scanner could not render its LaunchAgent plist: ${result.stderr.trim()}`);
+  }
+  const plist = result.stdout;
+  if (!plist.includes(`<string>${EXECUTABLE}</string>`)) {
+    fail("packaged LaunchAgent does not start the bundle executable");
+  }
+  if (plist.includes("launchd-wrapper.sh")) {
+    fail("packaged LaunchAgent must not depend on the development launchd wrapper");
+  }
+}
+
 function main() {
   mustExist(APP_BUNDLE, "MintVault Scanner app bundle");
   mustExecutable(EXECUTABLE, "app executable");
@@ -82,6 +111,7 @@ function main() {
   if (controller._private.validatePackagedBridge(BRIDGE) !== BRIDGE) {
     fail("controller does not accept the nested packaged bridge");
   }
+  verifyPackagedLaunchAgent();
 
   mustExist(MANIFEST, "package manifest");
   const manifest = JSON.parse(fs.readFileSync(MANIFEST, "utf8"));

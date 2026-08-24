@@ -87,4 +87,11 @@ describe("macOS scanner packaging contract", () => {
     assert.match(script, /copyRecursive\(SHARED_SOURCE, OUT_SHARED\)/);
     assert.match(script, /partnerMacRequiresXcodeOrClang: false/);
   });
+
+  test("the source LaunchAgent uses the development wrapper only outside a packaged bundle", () => {
+    const agent = require("../lib/agent-plist");
+    const rendered = agent.renderPlist();
+    assert.ok(rendered.includes(agent.paths().wrapper));
+    assert.ok(!rendered.includes(agent.paths().packagedExecutable));
+  });
 });
