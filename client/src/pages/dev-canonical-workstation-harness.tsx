@@ -335,12 +335,30 @@ export function createCanonicalHarnessFetchFixture(originalFetch: typeof fetch):
       finish("fixture", role);
       return json({
         urls: {
+          front_working: SAMPLE_CARD_IMAGE,
           front_display: SAMPLE_CARD_IMAGE,
           front_original: SAMPLE_CARD_IMAGE,
           front_cropped: SAMPLE_CARD_IMAGE,
+          back_working: SAMPLE_CARD_IMAGE,
           back_display: SAMPLE_CARD_IMAGE,
           back_original: SAMPLE_CARD_IMAGE,
           back_cropped: SAMPLE_CARD_IMAGE,
+        },
+        workingEvidence: {
+          front: {
+            available: true,
+            reason: null,
+            recovery: null,
+            master: { dpi: 1200, width: 4724, height: 6136 },
+            working: { width: 734, height: 1024, format: "svg" },
+          },
+          back: {
+            available: true,
+            reason: null,
+            recovery: null,
+            master: { dpi: 1200, width: 4724, height: 6136 },
+            working: { width: 734, height: 1024, format: "svg" },
+          },
         },
         quality: {},
       });

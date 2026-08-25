@@ -14,10 +14,9 @@ export interface CardInspectionState {
   views: Record<CardInspectionSide, CardInspectionView>;
 }
 
-export const CARD_INSPECTION_MIN_ZOOM = 1;
-/** Matches the existing Grade ImageViewer ceiling; stage sharing must not
- * reduce an operator's established inspection capability. */
-export const CARD_INSPECTION_MAX_ZOOM = 6;
+/** FIT-relative presentation range. 100% is FIT, not native source pixels. */
+export const CARD_INSPECTION_MIN_ZOOM = 0.5;
+export const CARD_INSPECTION_MAX_ZOOM = 5;
 
 export function defaultCardInspectionView(): CardInspectionView {
   return { zoom: 1, focusX: 0.5, focusY: 0.5 };
@@ -41,8 +40,8 @@ export function normaliseCardInspectionState(value: CardInspectionState): CardIn
     const zoom = clamp(finiteOr(view?.zoom, fallback.zoom), CARD_INSPECTION_MIN_ZOOM, CARD_INSPECTION_MAX_ZOOM);
     return {
       zoom,
-      focusX: zoom === 1 ? 0.5 : clamp(finiteOr(view?.focusX, fallback.focusX), 0, 1),
-      focusY: zoom === 1 ? 0.5 : clamp(finiteOr(view?.focusY, fallback.focusY), 0, 1),
+      focusX: zoom <= 1 ? 0.5 : clamp(finiteOr(view?.focusX, fallback.focusX), 0, 1),
+      focusY: zoom <= 1 ? 0.5 : clamp(finiteOr(view?.focusY, fallback.focusY), 0, 1),
     };
   };
   return {

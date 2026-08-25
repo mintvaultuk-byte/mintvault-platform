@@ -1,9 +1,9 @@
 /**
  * Regression coverage for the two production grading-workstation layout defects:
  *
- *   1. Card Details read-only preview zoom must step by 75 percentage points —
- *      100 → 175 → … → 550 → 600 (max 600%, min 100%), button-only, wheel never
- *      zooms, reset returns to 100%.
+ *   1. Card Details read-only preview shares the 50–500% inspection-state
+ *      range, uses button zoom, leaves ordinary wheel input to page scroll,
+ *      and FIT returns to 100%.
  *   2. The desktop workstation must be a real two-column shell with correct scroll
  *      ownership: the right controls column scrolls internally where needed, the
  *      browser page always remains scrollable (no overflow-hidden trap), and the
@@ -18,6 +18,10 @@ import { describe, it, expect } from "vitest";
 import { readFileSync } from "fs";
 import { join } from "path";
 import { unifiedAdminShellChangedFiles } from "./helpers/grading-release-scope";
+import {
+  CARD_INSPECTION_MAX_ZOOM,
+  CARD_INSPECTION_MIN_ZOOM,
+} from "../client/src/components/grading-workflow/card-inspection-state";
 
 const read = (p: string) => readFileSync(join(process.cwd(), p), "utf8");
 const PREVIEW = read("client/src/components/grading-workflow/CardPreviewPanel.tsx");
@@ -39,18 +43,11 @@ function slice(src: string, start: string, end: string): string {
   return src.slice(i, j);
 }
 
-/** Pull a numeric `const NAME = <number>;` out of the preview source. */
-function num(name: string): number {
-  const m = PREVIEW.match(new RegExp(`const ${name}\\s*=\\s*([0-9.]+)`));
-  expect(m, `constant ${name}`).toBeTruthy();
-  return Number(m![1]);
-}
-
 // The component clamps every step: nextZoom = clamp(zoom ± STEP). Rebuild the
 // ascending ladder from the real constants so the test tracks the source.
-const MIN = num("MIN_ZOOM");
-const MAX = num("MAX_ZOOM");
-const STEP = num("ZOOM_STEP");
+const MIN = CARD_INSPECTION_MIN_ZOOM;
+const MAX = CARD_INSPECTION_MAX_ZOOM;
+const STEP = 0.75;
 const clamp = (z: number) => Math.min(MAX, Math.max(MIN, z));
 function ladder(): number[] {
   const levels: number[] = [MIN];
@@ -65,22 +62,21 @@ function ladder(): number[] {
 }
 const pct = (z: number) => Math.round(z * 100);
 
-describe("1-4. button-only zoom steps preserve the Grade viewer's 600% ceiling", () => {
-  it("steps by 75 percentage points and clamps the final step at 600 percent", () => {
-    expect(ladder().map(pct)).toEqual([100, 175, 250, 325, 400, 475, 550, 600]);
-    // 75 percentage points per click.
-    expect(pct(MIN + STEP)).toBe(175);
+describe("1-4. button zoom shares the 50–500% inspection range", () => {
+  it("steps by 75 percentage points and clamps the final step at 500 percent", () => {
+    expect(ladder().map(pct)).toEqual([50, 125, 200, 275, 350, 425, 500]);
+    expect(pct(1 + STEP)).toBe(175);
   });
-  it("zoom never exceeds 600%", () => {
-    expect(pct(MAX)).toBe(600);
+  it("zoom never exceeds 500%", () => {
+    expect(pct(MAX)).toBe(500);
     // stepping up from the top clamps, never overshoots.
-    expect(pct(clamp(MAX + STEP))).toBe(600);
+    expect(pct(clamp(MAX + STEP))).toBe(500);
     // the Zoom-In control is disabled at the ceiling.
     expect(PREVIEW).toContain("zoom >= MAX_ZOOM");
   });
-  it("zoom never goes below 100%", () => {
-    expect(pct(MIN)).toBe(100);
-    expect(pct(clamp(MIN - STEP))).toBe(100);
+  it("zoom never goes below 50%", () => {
+    expect(pct(MIN)).toBe(50);
+    expect(pct(clamp(MIN - STEP))).toBe(50);
     expect(PREVIEW).toContain("zoom <= MIN_ZOOM");
   });
   it("Reset returns to 100% (and re-centres)", () => {
@@ -107,14 +103,14 @@ describe("5. the read-only preview has NO wheel-zoom handler", () => {
   });
 });
 
-describe("6. desktop shell is a real two-column layout at desktop breakpoints", () => {
-  it("the panels row becomes a two-column flex-row at md+ (engages on real laptops)", () => {
+describe("6. desktop shell is a real two-column layout at its usability floor", () => {
+  it("the panels row becomes a two-column flex-row at 540px+", () => {
     // GradingWorkstation is the sole shell owner; CertificateForm is an editor slot.
     expect(WORKSTATION).toContain("<CanonicalGradingWorkstationShell");
     expect(FORM).not.toContain("<CanonicalGradingWorkstationShell");
-    expect(CANON_SHELL).toContain("flex min-h-0 flex-1 flex-col gap-2 md:flex-row");
+    expect(CANON_SHELL).toContain('WORKSTATION_TWO_PANE_CLASS = "min-[540px]:flex-row"');
     const asideSrc = read("client/src/components/grading-workflow/WorkstationPreviewAside.tsx");
-    expect(asideSrc).toContain("md:w-[45%] md:shrink-0");
+    expect(asideSrc).toContain("min-[540px]:w-[45%] min-[540px]:shrink-0");
     // the old lg-only breakpoint (which collapsed below 1024px) is gone.
     expect(CANON_SHELL).not.toContain("gap-3 lg:flex-row");
   });
@@ -143,9 +139,7 @@ describe("6. desktop shell is a real two-column layout at desktop breakpoints", 
     expect(FOCUS_SURFACE).toContain(
       'ADMIN_FOCUS_SURFACE_CLASS = "flex min-h-[100dvh] flex-col p-2.5 md:h-[100dvh] md:min-h-0"'
     );
-    expect(FOCUS_SURFACE).toContain(
-      'ADMIN_FOCUS_WORKSTATION_CLASS = "flex min-h-0 flex-col md:min-h-0 md:flex-1"'
-    );
+    expect(FOCUS_SURFACE).toContain('ADMIN_FOCUS_WORKSTATION_CLASS = "flex min-h-0 flex-col md:min-h-0 md:flex-1"');
     expect(CANON_SHELL).toContain("flex min-h-0 flex-col h-full");
   });
 });

@@ -132,9 +132,9 @@ export default function DevAdminShellGeometryHarness() {
                  viewport tall while its child actively tries to push it open,
                  which is the condition that inflated the page to 2568px before. */
               <div className="flex min-h-0 h-full flex-col" data-testid="grading-workspace">
-                <div className="flex min-h-0 flex-1 flex-col gap-2 md:flex-row">
+                <div className="flex min-h-0 flex-1 flex-col gap-2 min-[540px]:flex-row">
                   <aside
-                    className="min-h-0 max-md:max-h-[55vh] md:w-[45%] md:shrink-0 rounded border border-[var(--admin-line)] bg-[var(--admin-panel)]"
+                    className="min-h-0 max-[539px]:basis-1/2 max-[539px]:flex-1 min-[540px]:w-[45%] min-[540px]:shrink-0 rounded border border-[var(--admin-line)] bg-[var(--admin-panel)]"
                     data-testid="grading-preview-panel"
                   >
                     <div className="p-2 text-xs text-[var(--admin-ink-dim)]">card rail (stub)</div>

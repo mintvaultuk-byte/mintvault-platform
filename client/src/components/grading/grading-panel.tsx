@@ -3127,7 +3127,7 @@ export default function GradingPanel({
             {/* FRONT/BACK chip row — kept as the compact inspection switcher.
               ImageViewer omits its duplicate chip row and follows `viewerSide`;
               there is deliberately no filter-row spacer below this control. */}
-            <div className="px-3 mb-1">
+            {previewHost == null && <div className="px-3 mb-1">
               <div className="flex gap-2 overflow-x-auto pb-1">
                 {(["front", "back"] as const).map((s) => {
                   const count = defects.filter((d) => d.image_side === s).length;
@@ -3183,7 +3183,7 @@ export default function GradingPanel({
                   );
                 })}
               </div>
-            </div>
+            </div>}
 
             <div style={{ margin: "8px 12px 0" }}>
               <div className="relative" style={{ overflow: "visible" }}>
@@ -3203,7 +3203,7 @@ export default function GradingPanel({
                   highlightId={highlightDefect}
                   referenceImageUrl={aiIdentification?.referenceImageUrl}
                   side={viewerSide as "front" | "back"}
-                  omitSideTabs
+                  omitSideTabs={previewHost == null}
                   fillHost={previewHost != null}
                   topRowSlot={previewHost != null ? previewTopSlot : null}
                   onOpenCardTool={active ? setManualCardToolSide : undefined}

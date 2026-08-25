@@ -139,20 +139,20 @@ describe("4. Review restores the two-column workstation (card left, details righ
     expect(SUMMARY).toContain('className="grid gap-2 lg:grid-cols-2"');
     expect(SUMMARY).not.toMatch(/grid-cols-\[minmax\(150px/);
   });
-  it("Review reuses the SAME responsive breakpoint as the approved Card Details workstation (md, not an excessively wide 2xl)", () => {
-    // The aside/control-panel row is `md:flex-row` — Review renders inside that
+  it("Review reuses the SAME 540px responsive breakpoint as Card Details", () => {
+    // Review renders inside the canonical aside/control-panel row
     // exact same row (same aside gate, same flex row), so it inherits the
-    // identical md breakpoint rather than requiring a new one. The column
+    // identical breakpoint rather than requiring a new one. The column
     // ratio itself now lives in ONE shared constant (WorkstationPreviewAside).
-    expect(CANON_SHELL).toContain("flex min-h-0 flex-1 flex-col gap-2 md:flex-row");
-    expect(ASIDE_SRC).toContain("md:w-[45%] md:shrink-0");
+    expect(CANON_SHELL).toContain('WORKSTATION_TWO_PANE_CLASS = "min-[540px]:flex-row"');
+    expect(ASIDE_SRC).toContain("min-[540px]:w-[45%] min-[540px]:shrink-0");
     expect(ASIDE_SRC).toContain("WORKSTATION_PREVIEW_WIDTH_CLASS");
   });
-  it("mobile stacking remains supported (no md:/lg:-only mandatory two-column)", () => {
-    // Base (mobile-first) classes are flex-col; md:flex-row only applies at
-    // the md breakpoint and above, so below it the aside and control panel
+  it("mobile stacking remains supported below the 540px usability floor", () => {
+    // Base (mobile-first) classes are flex-col; the two-pane class only applies
+    // at 540px and above, so below it the aside and control panel
     // stack vertically like Card Details already does.
-    expect(CANON_SHELL).toMatch(/flex min-h-0 flex-1 flex-col gap-2 md:flex-row/);
+    expect(CANON_SHELL).toContain('WORKSTATION_TWO_PANE_CLASS = "min-[540px]:flex-row"');
   });
 });
 

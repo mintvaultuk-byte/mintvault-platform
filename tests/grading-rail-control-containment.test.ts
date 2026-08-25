@@ -52,17 +52,16 @@ describe("rail containment — ImageViewer reserves space for its controls", () 
     // utility row. The containment contract this test exists to protect — `min-h-0
     // flex-1`, so the card area takes the leftover and never pushes the controls out —
     // is identical.
-    expect(VIEWER).toMatch(/<div className="flex min-h-0 flex-1 flex-col">\{renderImageArea\("100%"\)\}/);
+    expect(VIEWER).toContain('<div className="flex min-h-0 flex-1 flex-col">{renderImageArea("100%")}</div>');
     // Centring belongs to the measured inspection viewport inside that region, whose
     // overflow containment also stops the card re-inflating the rail.
-    expect(VIEWER).toMatch(/relative flex min-h-0 min-w-0 flex-1 items-center justify-center overflow-hidden/);
+    expect(VIEWER).toContain("relative h-full w-full min-h-0 min-w-0 flex-1 overflow-hidden overscroll-contain");
   });
 
   it("the controls row never shrinks and is a real in-flow sibling", () => {
-    // The row now also carries a ref: the fit has to reserve room for it, because the
-    // card's ceiling is the visible screen minus everything rendered beneath the card.
-    expect(VIEWER).toMatch(/ref=\{railControlsRef\}/);
-    expect(VIEWER).toMatch(/className="flex shrink-0 flex-wrap items-center gap-2"/);
+    // The row stays outside the measured card viewport. Horizontal overflow is
+    // scrollable instead of wrapping and consuming unpredictable card height.
+    expect(VIEWER).toContain('className="flex shrink-0 flex-nowrap items-center gap-2 overflow-x-auto pb-1"');
     expect(VIEWER).toMatch(/data-testid="grading-card-controls"/);
   });
 
@@ -72,7 +71,9 @@ describe("rail containment — ImageViewer reserves space for its controls", () 
     // them costs the card vertical space beyond the row that already exists. The
     // certificate is the flexible member: controls keep their intrinsic size and it
     // absorbs the squeeze, because compressing a control makes it overlap its neighbour.
-    expect(VIEWER).toMatch(/topRowSlot \? <div className="flex min-w-0 flex-1 justify-end">\{topRowSlot\}<\/div> : null/);
+    expect(VIEWER).toMatch(
+      /topRowSlot \? <div className="flex min-w-0 flex-1 justify-end">\{topRowSlot\}<\/div> : null/
+    );
   });
 
   it("the controls row is NOT absolutely or fixed positioned — it cannot float over anything", () => {

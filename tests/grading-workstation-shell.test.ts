@@ -84,9 +84,7 @@ describe("1-4. two-panel workspace: preview aside + control panel are grid sibli
     // two tokens are a PAIR — md:flex-1 without md:h-[100dvh] restores exactly
     // that PR #234 regression, which is why both are asserted together.
     expect(DASH).toContain("ADMIN_FOCUS_WORKSTATION_CLASS");
-    expect(FOCUS_SURFACE).toContain(
-      'ADMIN_FOCUS_WORKSTATION_CLASS = "flex min-h-0 flex-col md:min-h-0 md:flex-1"'
-    );
+    expect(FOCUS_SURFACE).toContain('ADMIN_FOCUS_WORKSTATION_CLASS = "flex min-h-0 flex-col md:min-h-0 md:flex-1"');
     expect(FOCUS_SURFACE).toContain(
       'ADMIN_FOCUS_SURFACE_CLASS = "flex min-h-[100dvh] flex-col p-2.5 md:h-[100dvh] md:min-h-0"'
     );
@@ -101,10 +99,10 @@ describe("1-4. two-panel workspace: preview aside + control panel are grid sibli
       expect(cls).not.toMatch(/rem\)/);
     }
     expect(DASH).not.toMatch(/className="flex min-h-0 flex-col md:h-\[calc\(100dvh-4\.5rem\)\]"/);
-    // The panels container is a flex row at md+ (column-stack below): 40% preview
+    // The panels container is a flex row at 540px+ (column-stack below): 45% preview
     // aside on the left, flex-1 control panel on the right.
-    expect(SHELL_SRC).toContain("flex min-h-0 flex-1 flex-col gap-2 md:flex-row");
-    expect(ASIDE_SRC).toContain("md:w-[45%] md:shrink-0");
+    expect(SHELL_SRC).toContain('WORKSTATION_TWO_PANE_CLASS = "min-[540px]:flex-row"');
+    expect(ASIDE_SRC).toContain("min-[540px]:w-[45%] min-[540px]:shrink-0");
   });
   it("CardPreviewPanel lives in the preview aside; controls in the control panel — siblings in one flex row", () => {
     // GradingWorkstation passes the preview aside to the canonical shell.

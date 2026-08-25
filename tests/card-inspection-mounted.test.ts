@@ -5,7 +5,7 @@ import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { CardPreviewPanel } from "../client/src/components/grading-workflow/CardPreviewPanel";
 import { createCardInspectionState } from "../client/src/components/grading-workflow/card-inspection-state";
-import ImageViewer from "../client/src/components/grading/image-viewer";
+import ImageViewer, { isInspectionShortcutTarget } from "../client/src/components/grading/image-viewer";
 import ManualCardTool from "../client/src/components/grading/manual-card-tool";
 const IMAGE = "data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' width='500' height='700'/>";
 const ADMITTED_WORKING_EVIDENCE = {
@@ -45,6 +45,87 @@ async function flushQuery(): Promise<void> {
 }
 
 describe("mounted controlled card inspection", () => {
+  it("excludes form and editable targets from inspection keyboard shortcuts", () => {
+    for (const element of [
+      document.createElement("input"),
+      document.createElement("textarea"),
+      document.createElement("select"),
+      Object.assign(document.createElement("div"), { contentEditable: "true" }),
+    ]) {
+      document.body.appendChild(element);
+      expect(isInspectionShortcutTarget(element)).toBe(true);
+      element.remove();
+    }
+    const combobox = document.createElement("div");
+    combobox.setAttribute("role", "combobox");
+    const child = document.createElement("span");
+    combobox.appendChild(child);
+    document.body.appendChild(combobox);
+    expect(isInspectionShortcutTarget(child)).toBe(true);
+    expect(isInspectionShortcutTarget(document.createElement("button"))).toBe(false);
+    combobox.remove();
+  });
+
+  it("leaves browser zoom keyboard chords untouched while plain inspection shortcuts still work", async () => {
+    await act(async () =>
+      root.render(
+        /* @__PURE__ */ React.createElement(ImageViewer, {
+          urls: { front_working: IMAGE, back_working: IMAGE },
+          workingEvidence: ADMITTED_WORKING_EVIDENCE,
+          defects: [],
+          onDefectAdded: () => {},
+          highlightId: null,
+          fillHost: true,
+        })
+      )
+    );
+    const viewport = host.querySelector<HTMLElement>('[data-testid="grading-image-viewport"]')!;
+    const browserZoom = new KeyboardEvent("keydown", {
+      bubbles: true,
+      cancelable: true,
+      ctrlKey: true,
+      key: "=",
+    });
+    await act(async () => document.dispatchEvent(browserZoom));
+    expect(browserZoom.defaultPrevented).toBe(false);
+    expect(viewport.dataset.inspectionZoom).toBe("1");
+
+    const inspectionZoom = new KeyboardEvent("keydown", { bubbles: true, cancelable: true, key: "+" });
+    await act(async () => document.dispatchEvent(inspectionZoom));
+    expect(inspectionZoom.defaultPrevented).toBe(true);
+    expect(viewport.dataset.inspectionZoom).toBe("1.25");
+  });
+
+  it("does not turn the release of a pan drag into an extra click-to-zoom step", async () => {
+    await act(async () =>
+      root.render(
+        /* @__PURE__ */ React.createElement(ImageViewer, {
+          urls: { front_working: IMAGE, back_working: IMAGE },
+          workingEvidence: ADMITTED_WORKING_EVIDENCE,
+          defects: [],
+          onDefectAdded: () => {},
+          highlightId: null,
+        })
+      )
+    );
+    const viewport = host.querySelector<HTMLElement>('[data-testid="grading-image-viewport"]')!;
+    await act(async () => host.querySelector<HTMLButtonElement>('[aria-label="Zoom in"]')!.click());
+    expect(viewport.dataset.inspectionZoom).toBe("1.25");
+    await act(async () =>
+      viewport.dispatchEvent(new MouseEvent("mousedown", { bubbles: true, clientX: 100, clientY: 100 }))
+    );
+    await act(async () =>
+      viewport.dispatchEvent(new MouseEvent("mousemove", { bubbles: true, clientX: 140, clientY: 100 }))
+    );
+    await act(async () =>
+      viewport.dispatchEvent(new MouseEvent("mouseup", { bubbles: true, clientX: 140, clientY: 100 }))
+    );
+    await act(async () =>
+      viewport.dispatchEvent(new MouseEvent("click", { bubbles: true, clientX: 140, clientY: 100 }))
+    );
+    expect(viewport.dataset.inspectionZoom).toBe("1.25");
+  });
+
   it("keeps real drag pan, zoom and side state while the workstation stage changes", async () => {
     function Host() {
       const [inspection, setInspection] = useState(createCardInspectionState);
@@ -127,7 +208,7 @@ describe("mounted controlled card inspection", () => {
     await act(async () =>
       viewport.dispatchEvent(new MouseEvent("click", { bubbles: true, clientX: 100, clientY: 420 }))
     );
-    expect(observed.views.front).toEqual({ zoom: 1.5, focusX: 0.25, focusY: 0.75 });
+    expect(observed.views.front).toEqual({ zoom: 1.25, focusX: 0.25, focusY: 0.75 });
     const mark = [...host.querySelectorAll("button")].find((button) => button.textContent?.includes("Mark Defects"));
     expect(mark).toBeDefined();
     await act(async () => mark.click());
@@ -179,8 +260,112 @@ describe("mounted controlled card inspection", () => {
     await act(async () => done.click());
     const front = [...host.querySelectorAll("button")].find((button) => button.textContent?.trim() === "front");
     await act(async () => front.click());
-    expect(observed.views.front).toEqual({ zoom: 1.5, focusX: 0.25, focusY: 0.75 });
+    expect(observed.views.front).toEqual({ zoom: 1.25, focusX: 0.25, focusY: 0.75 });
     expect(added.map((defect) => defect.image_side)).toEqual(["front", "back"]);
+  });
+
+  it("keeps the image, defect pins, line measurements and centering on one transform plane", async () => {
+    await act(async () =>
+      root.render(
+        /* @__PURE__ */ React.createElement(ImageViewer, {
+          urls: { front_working: IMAGE, back_working: IMAGE },
+          workingEvidence: ADMITTED_WORKING_EVIDENCE,
+          defects: [
+            {
+              id: 7,
+              image_side: "front",
+              x_percent: 22.5,
+              y_percent: 73.25,
+              type: "Scratch",
+              severity: "minor",
+              description: "coordinate proof",
+              location: "front",
+            },
+          ],
+          whiteningLines: [
+            {
+              id: "wl-proof",
+              side: "front",
+              edge: "left",
+              coveragePct: 10,
+              start: { x: 10, y: 20 },
+              end: { x: 10, y: 40 },
+            },
+          ],
+          centeringFront: {
+            ratioLR: "50/50",
+            ratioTB: "50/50",
+            outerFrame: { left_pct: 2, right_pct: 98, top_pct: 2, bottom_pct: 98 },
+            innerFrame: { left_pct: 10, right_pct: 90, top_pct: 12, bottom_pct: 88 },
+          },
+          onDefectAdded: () => {},
+          onDefectsChange: () => {},
+          highlightId: null,
+        })
+      )
+    );
+
+    const plane = host.querySelector<HTMLElement>('[data-testid="grading-coordinate-plane"]')!;
+    const image = host.querySelector('[data-testid="grading-card-image"]')!;
+    const pin = host.querySelector('[aria-label^="Defect 1:"]')!;
+    expect(plane.contains(image)).toBe(true);
+    expect(plane.contains(pin)).toBe(true);
+    expect(plane.querySelector('line[x1="10"][y1="20"]')).toBeTruthy();
+    expect(pin.parentElement?.style.left).toBe("22.5%");
+    expect(pin.parentElement?.style.top).toBe("73.25%");
+
+    const centering = [...host.querySelectorAll("button")].find((button) => button.textContent === "Show Centering")!;
+    await act(async () => centering.click());
+    expect(plane.querySelector('rect[x="2"][y="2"]')).toBeTruthy();
+
+    const mark = [...host.querySelectorAll("button")].find((button) => button.textContent?.includes("Mark Defects"))!;
+    await act(async () => mark.click());
+    const markPlane = host.querySelector<HTMLElement>('[data-testid="grading-coordinate-plane"]')!;
+    expect(markPlane.contains(host.querySelector('[data-testid="grading-card-image"]')!)).toBe(true);
+    expect(markPlane.contains(host.querySelector('[aria-label^="Defect 1:"]')!)).toBe(true);
+    expect(host.querySelector('[data-testid="grading-image-viewport"]')?.getAttribute("data-coordinate-mode")).toBe(
+      "measurement"
+    );
+  });
+
+  it("leaves ordinary page wheel input alone and reserves Ctrl/Cmd+wheel for image zoom", async () => {
+    let observed = createCardInspectionState();
+    function Host() {
+      const [inspection, setInspection] = useState(observed);
+      return /* @__PURE__ */ React.createElement(ImageViewer, {
+        urls: { front_working: IMAGE, back_working: IMAGE },
+        workingEvidence: ADMITTED_WORKING_EVIDENCE,
+        defects: [],
+        onDefectAdded: () => {},
+        highlightId: null,
+        inspectionState: inspection,
+        onInspectionStateChange: (next) => {
+          observed = next;
+          setInspection(next);
+        },
+      });
+    }
+    await act(async () => root.render(/* @__PURE__ */ React.createElement(Host, null)));
+    const viewport = host.querySelector<HTMLElement>('[data-testid="grading-card-viewport"]')!;
+    const ordinary = new WheelEvent("wheel", { bubbles: true, cancelable: true, deltaY: -100 });
+    await act(async () => viewport.dispatchEvent(ordinary));
+    expect(ordinary.defaultPrevented).toBe(false);
+    expect(observed.views.front.zoom).toBe(1);
+
+    const inspectionWheel = new WheelEvent("wheel", {
+      bubbles: true,
+      cancelable: true,
+      ctrlKey: true,
+      deltaY: -100,
+      clientX: 100,
+      clientY: 100,
+    });
+    // happy-dom does not currently retain WheelEvent modifier flags from the
+    // constructor; define the browser-provided read-only value for this test.
+    Object.defineProperty(inspectionWheel, "ctrlKey", { value: true });
+    await act(async () => viewport.dispatchEvent(inspectionWheel));
+    expect(observed.views.front.zoom).toBeCloseTo(Math.exp(0.2), 8);
+    expect(inspectionWheel.defaultPrevented).toBe(true);
   });
 
   it("automatically shows FRONT/BACK working evidence and has no full-resolution toggle", async () => {
