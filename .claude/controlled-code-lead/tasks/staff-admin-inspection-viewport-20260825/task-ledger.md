@@ -47,7 +47,12 @@
   image URL (SIV-007).
 - Both HIGHs were reproduced with RED regressions and repaired without changing
   stored coordinates, evidence authority, grading semantics or role capability.
-- Current exact focused/protected matrix: 30 files / 778 assertions passed.
+- Independent Claude Opus review of replacement `b1952f1f…` returned PASS at
+  BLOCKER/HIGH but found actionable MEDIUM SIV-008: the new rail-owned side tabs
+  had lost the former panel delete-image lifecycle gate. Lead source verification
+  confirmed it, rejected that candidate, and added a delete-specific capability
+  plus mounted/wiring regressions.
+- Current exact focused/protected matrix: 30 files / 780 assertions passed.
 - Current `npm run check`, lint and production build pass; lint remains at the
   repository baseline of 0 errors / 2,749 warnings.
 - Near-final broad disposable-DB run: 429 files / 6,860 tests passed / 6 skipped.
@@ -68,7 +73,7 @@
 
 ## Next authorised action
 
-Freeze a replacement candidate, run the independent Claude Opus hostile review
+Freeze the next replacement candidate, rerun the independent Claude Opus hostile review
 against that exact SHA, complete every supported in-app acceptance proof, and
 retry the Chrome connection. Push, staging mutation, migration and deployment
 remain unauthorised.

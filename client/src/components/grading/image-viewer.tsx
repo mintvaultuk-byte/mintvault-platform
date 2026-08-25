@@ -161,6 +161,10 @@ interface Props {
    * callers so this is an explicit capability split, not a second workflow.
    */
   sourceImageMutationsEnabled?: boolean;
+  /** Delete-image is gated separately because the canonical rail owns its side
+   * tabs inside this viewer. Preserve the panel's active/non-review lifecycle
+   * boundary rather than treating general source-tool access as delete access. */
+  sourceImageDeletionEnabled?: boolean;
   /** When true, defect markers render but clicks are inert (tooltip explains
    *  why). Used by the post-approval read-only state in the parent's edit-mode
    *  gate so admins can still SEE the defects but can't edit until they click
@@ -378,6 +382,7 @@ export default function ImageViewer({
   onInspectionStateChange,
   mutationsEnabled = true,
   sourceImageMutationsEnabled,
+  sourceImageDeletionEnabled,
   readOnly,
   side: controlledSide,
   omitSideTabs,
@@ -391,6 +396,7 @@ export default function ImageViewer({
   apiBase = "/api/admin",
 }: Props) {
   const mayMutateSourceImage = sourceImageMutationsEnabled ?? mutationsEnabled;
+  const mayDeleteSourceImage = sourceImageDeletionEnabled ?? mayMutateSourceImage;
   // Inline defect-edit popover anchored to a clicked marker. Null = closed.
   // Stores the defect id rather than the whole defect so we always read fresh
   // values from the live `defects` array (avoids stale closures during edit).
@@ -1115,7 +1121,7 @@ export default function ImageViewer({
                     {s}
                     {count > 0 ? ` (${count})` : ""}
                   </button>
-                  {hasImage && certId && !fullscreen && mayMutateSourceImage && (
+                  {hasImage && certId && !fullscreen && mayDeleteSourceImage && (
                     <button
                       type="button"
                       title={`Delete ${s} image`}

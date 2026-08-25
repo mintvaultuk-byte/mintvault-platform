@@ -3206,6 +3206,9 @@ export default function GradingPanel({
                   onInspectionStateChange={onInspectionStateChange}
                   mutationsEnabled={active && !approvalInteractionLocked}
                   sourceImageMutationsEnabled={workstationCapabilities.imageMutations}
+                  sourceImageDeletionEnabled={
+                    active && !adminReview && !approvalInteractionLocked && workstationCapabilities.imageMutations
+                  }
                   readOnly={approvalInteractionLocked}
                   highlightId={highlightDefect}
                   referenceImageUrl={aiIdentification?.referenceImageUrl}

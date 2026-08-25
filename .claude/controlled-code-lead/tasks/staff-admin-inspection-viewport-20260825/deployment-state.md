@@ -13,6 +13,7 @@
 - Worktree: `/private/tmp/mintvault-staff-admin-inspection-viewport-20260825`
 - Baseline: exact production SHA above.
 - Rejected candidate: `82cbf17d4d6e7a4ed35a2170cae0ba24054b925d` (SIV-006/SIV-007).
+- Rejected candidate: `b1952f1f77a507a5e8efecec3ba1718f9230f874` (SIV-008).
 - Replacement candidate: one new local commit will freeze the repaired working tree; the final owner report records its exact SHA.
 - Pushed: no.
 - Deployed to staging: no.

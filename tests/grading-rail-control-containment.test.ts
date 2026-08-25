@@ -57,6 +57,13 @@ describe("rail containment — ImageViewer reserves space for its controls", () 
     expect(PANEL).toContain('className={previewHost ? "relative h-full min-h-0" : "relative"}');
   });
 
+  it("preserves the panel lifecycle gate when image-delete moves into the rail viewer", () => {
+    expect(PANEL).toMatch(
+      /sourceImageDeletionEnabled=\{\s*active && !adminReview && !approvalInteractionLocked && workstationCapabilities\.imageMutations\s*\}/
+    );
+    expect(VIEWER).toContain("hasImage && certId && !fullscreen && mayDeleteSourceImage");
+  });
+
   it("the card frame absorbs ONLY the leftover height (flex-1 min-h-0)", () => {
     // Without min-h-0 a flex item refuses to shrink below its content, which is exactly how the
     // controls got pushed out of the clipped host. Unchanged requirement.

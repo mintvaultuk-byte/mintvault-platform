@@ -160,6 +160,38 @@ describe("mounted controlled card inspection", () => {
     expect(switched.dataset.cardNaturalH).toBe("700");
   });
 
+  it("keeps image deletion behind its explicit lifecycle capability", async () => {
+    const props = {
+      urls: { front_working: IMAGE, back_working: IMAGE },
+      workingEvidence: ADMITTED_WORKING_EVIDENCE,
+      defects: [],
+      onDefectAdded: () => {},
+      highlightId: null,
+      certId: 42,
+      mutationsEnabled: true,
+      sourceImageMutationsEnabled: true,
+    };
+    await act(async () =>
+      root.render(
+        /* @__PURE__ */ React.createElement(ImageViewer, {
+          ...props,
+          sourceImageDeletionEnabled: false,
+        })
+      )
+    );
+    expect(host.querySelector('button[title="Delete front image"]')).toBeNull();
+
+    await act(async () =>
+      root.render(
+        /* @__PURE__ */ React.createElement(ImageViewer, {
+          ...props,
+          sourceImageDeletionEnabled: true,
+        })
+      )
+    );
+    expect(host.querySelector('button[title="Delete front image"]')).not.toBeNull();
+  });
+
   it("keeps real drag pan, zoom and side state while the workstation stage changes", async () => {
     function Host() {
       const [inspection, setInspection] = useState(createCardInspectionState);

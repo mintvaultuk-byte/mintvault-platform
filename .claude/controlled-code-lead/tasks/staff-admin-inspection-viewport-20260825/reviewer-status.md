@@ -3,9 +3,10 @@
 - Independent Fable review: owner-routed; its reconciled requirements are locked in the attached authorization.
 - Lead code verification: complete against exact production SHA.
 - Codex subagents: none (not authorised by current orchestration rules).
-- Final Claude Opus hostile diff review: authenticated client verified; required
-  after the replacement candidate freeze because the first candidate was
-  rejected during runtime acceptance; pending exact replacement SHA.
+- Claude Opus review of `b1952f1f77a507a5e8efecec3ba1718f9230f874`:
+  PASS at BLOCKER/HIGH; one actionable MEDIUM delete-gate regression (SIV-008)
+  independently found and Lead-confirmed. That SHA is rejected.
+- Final Claude Opus hostile re-review: required against the next frozen candidate; pending.
 
 The Fable review was pre-implementation requirements reconciliation, not
 post-change release acceptance. Current orchestration rules prohibit spawning

@@ -10,6 +10,7 @@
 - SIV-003 — inadequate independent MARK DEFECTS inspection viewport — Class C.
 - SIV-006 — canonical preview portal did not propagate definite height into the fill-host viewer — Class C.
 - SIV-007 — same-URL FRONT/BACK switches could clear decoded natural dimensions without a replacement load event — Class C.
+- SIV-008 — moving side tabs into the rail viewer dropped the panel's delete-image lifecycle gate — Class C.
 
 ## Explicitly deferred
 
@@ -25,8 +26,8 @@
 | `client/src/components/grading-workflow/card-inspection-state.ts` | Clamp presentation zoom to 50–500% while retaining per-side normalized focus | SIV-003 | C |
 | `client/src/components/grading-workflow/CardPreviewPanel.tsx` | Keep the secondary shared-state consumer inside the same 50–500% bounds | SIV-003 | C |
 | `client/src/components/grading/inspection-viewport-geometry.ts` | Add pure FIT, placement, pan and cursor-zoom geometry over normalized focus | SIV-001..003 | C |
-| `client/src/components/grading/image-viewer.tsx` | Replace rail ratchet + separate MARK path with one explicit image/overlay plane; add FIT, 50–500%, anchored zoom, pan, non-hijacking wheel and safe shortcuts; synchronously retain decoded natural dimensions across a same-URL side switch | SIV-001..003, SIV-007 | C |
-| `client/src/components/grading/grading-panel.tsx` | Remove the portaled duplicate side row; let the viewer own the single side/zoom utility row; propagate definite remaining height through the canonical portal wrappers | SIV-002, SIV-006 | C |
+| `client/src/components/grading/image-viewer.tsx` | Replace rail ratchet + separate MARK path with one explicit image/overlay plane; add FIT, 50–500%, anchored zoom, pan, non-hijacking wheel and safe shortcuts; synchronously retain decoded natural dimensions across a same-URL side switch; expose a delete-specific capability input | SIV-001..003, SIV-007, SIV-008 | C |
+| `client/src/components/grading/grading-panel.tsx` | Remove the portaled duplicate side row; let the viewer own the single side/zoom utility row; propagate definite remaining height through the canonical portal wrappers; preserve the existing active/non-review delete lifecycle | SIV-002, SIV-006, SIV-008 | C |
 | `client/src/pages/dev-admin-shell-geometry-harness.tsx` | Keep the shell stub aligned and expose runtime geometry needed for browser acceptance | SIV-001 | C |
 | `client/src/pages/dev-canonical-workstation-harness.tsx` | Supply admitted test evidence so the canonical five-role harness can render the authoritative viewer | SIV-001..003 | C |
 
@@ -75,6 +76,11 @@
   the fill-host viewer to zero height, and a same-URL FRONT/BACK switch could
   leave the viewer without natural dimensions. Both defects now have red/green
   regressions and the narrow presentation repairs described above.
+- The replacement `b1952f1f77a507a5e8efecec3ba1718f9230f874` was
+  rejected after independent Claude Opus review found that the moved side tabs
+  exposed image deletion without the panel's former `active && !adminReview`
+  lifecycle gate. A delete-specific capability now restores that exact boundary
+  without changing Card Tool or Manual Crop capability.
 - Local automated verification is green. Real Chrome acceptance and the final
   independent hostile diff review remain release gates, so staging is not yet safe.
 
