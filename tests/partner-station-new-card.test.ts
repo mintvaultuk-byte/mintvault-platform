@@ -783,8 +783,15 @@ describe("P6 integration surfaces", () => {
     expect(stationClient).toContain('operatorJson("GET", "/api/partner/credits")');
     expect(scannerMain).toContain("availableCreditsOrNull");
     expect(scannerMain).toContain("availableCredits:");
-    // The summary the renderer reads is built WITH the credits value.
-    expect(scannerMain).toContain("stationSummary(session.body, await refreshAvailableCredits())");
+    /*
+     * The summary the renderer reads is built WITH the operator-scoped credits value, but only
+     * after the existing station has passed its tenant/status check. Fetching credits inline while
+     * building the summary would let a wrong-shop login read and commit its wallet before the
+     * persisted station identity had been proved to belong to that session.
+     */
+    expect(scannerMain).toMatch(
+      /const status = await operatorScope\.enrolmentStatus\(code\);[\s\S]*?const availableCredits = await availableCreditsOrNull\(operatorScope\);[\s\S]*?operatorScope\.assertCurrent\(\);[\s\S]*?operatorScope\.validateStationScope\(code, station\.status\);[\s\S]*?const summary = stationSummary\(session\.body, commitAvailableCredits\(availableCredits\)\);/
+    );
     // A failed read degrades to null, never to 0, and never blocks setup.
     expect(scannerMain).toMatch(/catch \{\s*return null;/);
     /*

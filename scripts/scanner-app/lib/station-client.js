@@ -38,17 +38,26 @@ async function readJson(response) {
   }
 }
 
-async function operatorJson(method, apiPath, payload) {
+async function operatorJsonForSession(operatorSession, method, apiPath, payload) {
   const fetch = await getFetch();
-  const operatorSession = stationIdentity._private.readOperatorSession();
   if (!operatorSession) throw new Error("Sign in to MintVault before using this station");
+  stationIdentity._private.assertOperatorSession(operatorSession);
   const init = {
     method,
     headers: { "content-type": "application/json", cookie: `mv.partner.sid=${encodeURIComponent(operatorSession)}` },
   };
   if (method !== "GET" && method !== "HEAD") init.body = JSON.stringify(payload || {});
   const response = await fetch(`${baseUrl()}${apiPath}`, init);
-  return { ok: response.ok, status: response.status, body: await readJson(response) };
+  const body = await readJson(response);
+  // A response authorises only the exact session that sent it. A concurrent sign-in, sign-out or
+  // second process replacing the encrypted token makes this response stale, even when HTTP was 200.
+  stationIdentity._private.assertOperatorSession(operatorSession);
+  return { ok: response.ok, status: response.status, body };
+}
+
+async function operatorJson(method, apiPath, payload) {
+  const operatorSession = stationIdentity._private.readOperatorSession();
+  return operatorJsonForSession(operatorSession, method, apiPath, payload);
 }
 
 /**
@@ -119,17 +128,49 @@ async function selectLocation(locationId) {
   return operatorJson("POST", "/api/partner/session/location", { locationId });
 }
 
-async function registerThisMac({ locationId, appVersion }) {
+async function registerThisMacWith(operatorSession, operatorRequest, { locationId, appVersion }) {
   const payload = { ...stationIdentity.enrolmentPublicPayload(appVersion), ...(locationId ? { locationId } : {}) };
-  const result = await operatorJson("POST", "/api/partner/stations/enrol", payload);
+  const result = await operatorRequest("POST", "/api/partner/stations/enrol", payload);
   if (result.ok && result.body?.station?.stationCode) {
+    stationIdentity._private.assertOperatorSession(operatorSession);
     stationIdentity.saveEnrollment({
       stationCode: result.body.station.stationCode,
       publicKeyFingerprint: payload.publicKeyFingerprint,
       status: result.body.station.status || "PENDING",
+      expectedOperatorSession: operatorSession,
     });
   }
   return result;
+}
+
+async function registerThisMac(options) {
+  return operatorSessionScope().registerThisMac(options);
+}
+
+/**
+ * One immutable operator-session generation for the complete setup transaction.
+ *
+ * The token stays inside this closure. Every request verifies it both before dispatch and after the
+ * response, and station validation compares against the same token. A concurrent sign-in/sign-out
+ * therefore invalidates the whole transaction instead of letting an old response bless a new token.
+ */
+function operatorSessionScope() {
+  const operatorSession = stationIdentity._private.readOperatorSession();
+  stationIdentity._private.assertOperatorSession(operatorSession);
+  const request = (method, apiPath, payload) => operatorJsonForSession(operatorSession, method, apiPath, payload);
+  return Object.freeze({
+    assertCurrent: () => stationIdentity._private.assertOperatorSession(operatorSession),
+    validateStationScope: (stationCode, stationStatus) =>
+      stationIdentity.validateOperatorScope(stationCode, stationStatus, operatorSession),
+    creditSummary: () => request("GET", "/api/partner/credits"),
+    stationSession: () => request("GET", "/api/partner/session"),
+    enrolmentLocations: () => request("GET", "/api/partner/stations/enrolment-locations"),
+    enrolmentStatus: (stationCode) => {
+      if (typeof stationCode !== "string" || !stationCode) throw new Error("Station code is required");
+      return request("GET", `/api/partner/stations/${encodeURIComponent(stationCode)}/enrolment-status`);
+    },
+    registerThisMac: (options) => registerThisMacWith(operatorSession, request, options),
+  });
 }
 
 async function heartbeat(payload) {
@@ -147,6 +188,7 @@ module.exports = {
   enrolmentStatus,
   selectLocation,
   registerThisMac,
+  operatorSessionScope,
   heartbeat,
   _private: { cookieTokenFrom, baseUrl },
 };

@@ -681,9 +681,9 @@ function stationSummary(sessionBody, availableCredits) {
  * balance on every NEW press and refuses independently, so a station that cannot read it must still
  * be able to work. Blocking setup on a credits fetch would turn a reporting hiccup into a dead shop.
  */
-async function availableCreditsOrNull() {
+async function availableCreditsOrNull(operatorScope = null) {
   try {
-    const result = await stationClient.creditSummary();
+    const result = operatorScope ? await operatorScope.creditSummary() : await stationClient.creditSummary();
     const value = result?.ok ? result.body?.summary?.availableCredits : null;
     return typeof value === "number" ? value : null;
   } catch {
@@ -710,8 +710,7 @@ async function availableCreditsOrNull() {
  * asks the server and shows the answer, so a failed fetch degrades to "not answered" rather than to
  * a plausible wrong number.
  */
-async function refreshAvailableCredits() {
-  const available = await availableCreditsOrNull();
+function commitAvailableCredits(available) {
   const prior = stateMod.get().availableCredits;
   /*
    * A failed read is not evidence that capacity changed. Do not replace a confirmed zero with
@@ -725,6 +724,11 @@ async function refreshAvailableCredits() {
   });
   pushStateToRenderer();
   return available;
+}
+
+async function refreshAvailableCredits() {
+  const available = await availableCreditsOrNull();
+  return commitAvailableCredits(available);
 }
 
 /**
@@ -847,7 +851,20 @@ function reconcileTenantScopedState(tenantId) {
  * is the question — and one of a dozen returns forgetting it is how that guarantee rots.
  */
 async function stationSetupState() {
-  const setup = await stationSetupStateInner();
+  let setup;
+  try {
+    setup = await stationSetupStateInner();
+  } catch (error) {
+    if (error?.code !== "OPERATOR_SESSION_CHANGED") throw error;
+    /*
+     * The token setter already invalidated the old pairing. Do not clear the latch here: a newer
+     * setup may already have validated the replacement token while this stale request was in flight.
+     */
+    setup = {
+      ok: true,
+      stage: stationIdentity.currentStationCode() ? "session_expired" : "sign_in",
+    };
+  }
   let environmentLabel = "UNCONFIGURED";
   try {
     const resolved = environment.resolveEnvironment();
@@ -861,9 +878,13 @@ async function stationSetupState() {
 /** Sanitised first-run state only — no cookie, private key, UUID or fingerprint crosses IPC. */
 async function stationSetupStateInner() {
   let session;
+  let operatorScope;
   try {
-    session = await stationClient.stationSession();
+    operatorScope = stationClient.operatorSessionScope();
+    session = await operatorScope.stationSession();
   } catch (error) {
+    if (error?.code === "OPERATOR_SESSION_CHANGED") throw error;
+    stationIdentity.invalidateOperatorScope();
     /*
      * No usable session at all — the stored one is gone, not merely stale. From the operator's side
      * that is the same situation as an idle timeout and deserves the same reassurance: a Mac that
@@ -883,6 +904,7 @@ async function stationSetupStateInner() {
     };
   }
   if (!session.ok || !session.body?.mfaPassed) {
+    stationIdentity.invalidateOperatorScope();
     if (session.status === 503) {
       return {
         ok: true,
@@ -911,26 +933,25 @@ async function stationSetupStateInner() {
     }
     return { ok: true, stage: hadSession ? "session_expired" : "sign_in" };
   }
-  /*
-   * ONE SHOP'S WORK MUST NOT SHOW UP ON ANOTHER SHOP'S SCREEN.
-   *
-   * A Mac that has been used before still holds the previous shop's operational state — the last
-   * cert it uploaded, its recent captures, its open card, its calibration recovery note. Signing in
-   * as a DIFFERENT shop used to inherit all of it, so a brand-new shop's first screen could show a
-   * historical failure banner for a card it has never seen and cannot act on. That is a cross-tenant
-   * display leak as well as a bad first impression.
-   *
-   * SCOPED, NOT PURGED. This clears the operational fields that describe cards, and nothing else:
-   * the scans on disk, the app's logs and the previous station's own identity are untouched, so the
-   * forensic trail survives. Reconciliation, not deletion.
-   */
-  reconcileTenantScopedState(session.body?.tenantId);
-  // Committed to shared state as well as returned, so the identity row and the capture panel are
-  // reading ONE number rather than two that drift apart the moment a card is started.
-  const summary = stationSummary(session.body, await refreshAvailableCredits());
   const code = stationIdentity.currentStationCode();
   if (!code) {
-    const locations = await stationClient.enrolmentLocations();
+    /*
+     * ONE SHOP'S WORK MUST NOT SHOW UP ON ANOTHER SHOP'S SCREEN.
+     *
+     * With no station identity there is no second authority to compare. The authenticated Partner
+     * session may therefore establish the tenant for this fresh profile before enrolment. This is
+     * deliberately below the no-code branch: an existing station must pass enrolment-status first,
+     * or a wrong-shop login could rebind the previous shop's local card state before being refused.
+     *
+     * SCOPED, NOT PURGED. This clears operational card fields only; scans and forensic logs survive.
+     */
+    const availableCredits = await availableCreditsOrNull(operatorScope);
+    operatorScope.assertCurrent();
+    reconcileTenantScopedState(session.body?.tenantId);
+    // Committed to shared state as well as returned, so the identity row and capture panel read one
+    // server-reported number. It is display-only and cannot authorise a card.
+    const summary = stationSummary(session.body, commitAvailableCredits(availableCredits));
+    const locations = await operatorScope.enrolmentLocations();
     if (!locations.ok) {
       return {
         ok: true,
@@ -967,7 +988,7 @@ async function stationSetupStateInner() {
     if (eligible.length === 1 && !autoEnrolInFlight) {
       autoEnrolInFlight = true;
       try {
-        const enrolled = await stationClient.registerThisMac({ locationId: eligible[0].id, appVersion: APP_VERSION });
+        const enrolled = await operatorScope.registerThisMac({ locationId: eligible[0].id, appVersion: APP_VERSION });
         if (enrolled.ok && enrolled.body?.station?.stationCode) {
           console.log(`[station] auto-enrolled this Mac as ${enrolled.body.station.stationCode} (awaiting approval)`);
           return await stationSetupStateInner();
@@ -996,8 +1017,19 @@ async function stationSetupStateInner() {
     }
     return { ok: true, stage: "register", summary, locations: eligible };
   }
-  const status = await stationClient.enrolmentStatus(code);
+
+  /*
+   * PROVE THE OPERATOR/STATION PAIR BEFORE USING EITHER AS RUNTIME AUTHORITY.
+   *
+   * The Partner cookie proves who signed in; the encrypted identity proves which station this
+   * profile holds. Neither proves they belong together. This tenant-scoped read is deliberately the
+   * first operation after session validation. Until it succeeds, do not reconcile local card state,
+   * fetch the new tenant's credits, adopt geometry or permit a signed station request.
+   */
+  const status = await operatorScope.enrolmentStatus(code);
   if (!status.ok || !status.body?.station) {
+    stationIdentity.invalidateOperatorScope();
+    const summary = stationSummary(session.body, null);
     /*
      * THIS MAC IS ENROLLED — TO SOMEBODY ELSE.
      *
@@ -1025,6 +1057,60 @@ async function stationSetupStateInner() {
     return { ok: true, stage: "station_unavailable", summary, stationCode: code };
   }
   const station = status.body.station;
+  if (String(station.stationCode || "") !== code) {
+    stationIdentity.invalidateOperatorScope();
+    return {
+      ok: true,
+      stage: "identity_mismatch",
+      summary: stationSummary(session.body, null),
+      stationCode: code,
+    };
+  }
+  try {
+    stationIdentity.setStationStatus(station.status);
+  } catch {
+    stationIdentity.invalidateOperatorScope();
+    return {
+      ok: true,
+      stage: "station_unavailable",
+      summary: stationSummary(session.body, null),
+      stationCode: code,
+      error: "This Scanner could not validate its local station identity.",
+    };
+  }
+
+  if (!versionSatisfies(APP_VERSION, station.minimumSupportedVersion)) {
+    stationIdentity.invalidateOperatorScope();
+    return {
+      ok: true,
+      stage: "update_required",
+      summary: stationSummary(session.body, null),
+      stationCode: code,
+      minimumSupportedVersion: station.minimumSupportedVersion,
+      error: "This Scanner version is no longer supported. Install the current signed MintVault Scanner release.",
+    };
+  }
+  try {
+    operatorScope.validateStationScope(code, station.status);
+  } catch {
+    stationIdentity.invalidateOperatorScope();
+    return {
+      ok: true,
+      stage: "station_unavailable",
+      summary: stationSummary(session.body, null),
+      stationCode: code,
+      error: "This Scanner could not validate its authenticated station scope.",
+    };
+  }
+
+  // Credits are read through the same immutable operator-session generation. Revalidate after that
+  // await and only then permit any tenant-scoped local state or geometry to move.
+  const availableCredits = await availableCreditsOrNull(operatorScope);
+  operatorScope.assertCurrent();
+  operatorScope.validateStationScope(code, station.status);
+  reconcileTenantScopedState(session.body?.tenantId);
+  const summary = stationSummary(session.body, commitAvailableCredits(availableCredits));
+
   /*
    * ADOPT THE SERVER'S CAPTURE RECTANGLE. A synchronisation, not a move.
    *
@@ -1044,19 +1130,6 @@ async function stationSetupStateInner() {
   } catch (error) {
     console.warn(`[station] could not adopt the server capture window: ${error?.message || error}`);
   }
-  if (!versionSatisfies(APP_VERSION, station.minimumSupportedVersion)) {
-    return {
-      ok: true,
-      stage: "update_required",
-      summary,
-      stationCode: code,
-      minimumSupportedVersion: station.minimumSupportedVersion,
-      error: "This Scanner version is no longer supported. Install the current signed MintVault Scanner release.",
-    };
-  }
-  try {
-    stationIdentity.setStationStatus(station.status);
-  } catch {}
   return {
     ok: true,
     stage: String(station.status || "PENDING").toLowerCase(),
@@ -1129,6 +1202,26 @@ async function sendHeartbeat() {
   } finally {
     heartbeatInFlight = false;
   }
+}
+
+/**
+ * Complete the authenticated setup read before sending a signed heartbeat.
+ *
+ * A Partner session and a station identity are separate authorities.  The
+ * tenant-scoped enrolment-status read inside stationSetupState() is the first
+ * point at which the app proves they belong together.  Heartbeating first
+ * allowed a correctly rejected wrong-shop login to consume this station's
+ * signed nonce and attest its app version before the operator-scope refusal.
+ *
+ * Only an ACTIVE, same-tenant station reaches the heartbeat.  Every other
+ * stage (MFA, expired session, pending approval, identity mismatch, suspended
+ * station) returns the authoritative setup result without a signed mutation.
+ */
+async function refreshStationAfterAuthentication() {
+  const setup = await stationSetupState();
+  if (setup?.stage !== "active") return setup;
+  await sendHeartbeat();
+  return stationSetupState();
 }
 
 function setupIpc() {
@@ -1612,8 +1705,7 @@ function setupIpc() {
     if (!email || !password) return { ok: false, error: "Email and password are required" };
     const result = await stationClient.signIn(email, password);
     if (!result.ok) return { ok: false, error: result.body?.error || "MintVault sign-in failed" };
-    await sendHeartbeat();
-    return stationSetupState();
+    return refreshStationAfterAuthentication();
   });
   ipcMain.handle("station-complete-mfa", async (_event, payload) => {
     const code = typeof payload?.code === "string" ? payload.code.trim() : "";
@@ -1621,8 +1713,7 @@ function setupIpc() {
     if (!code && !recoveryCode) return { ok: false, error: "Authentication code or recovery code is required" };
     const result = await stationClient.completeMfa({ code, recoveryCode });
     if (!result.ok) return { ok: false, error: result.body?.error || "Authentication code was not accepted" };
-    await sendHeartbeat();
-    return stationSetupState();
+    return refreshStationAfterAuthentication();
   });
   ipcMain.handle("register-station", async (_event, payload) => {
     const locationId = typeof payload?.locationId === "string" && payload.locationId ? payload.locationId : undefined;
