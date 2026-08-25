@@ -37,11 +37,24 @@ import { createRoot, type Root } from "react-dom/client";
 
 const VIEWER = readFileSync("client/src/components/grading/image-viewer.tsx", "utf8");
 const ASIDE = readFileSync("client/src/components/grading-workflow/WorkstationPreviewAside.tsx", "utf8");
+const PANEL = readFileSync("client/src/components/grading/grading-panel.tsx", "utf8");
 
 describe("rail containment — ImageViewer reserves space for its controls", () => {
   it("the rail root is a flex COLUMN that fills the host, not block flow", () => {
     // `space-y-2` in the rail is the defect. It must remain for the inline layout only.
     expect(VIEWER).toMatch(/className=\{fillHost \? "flex h-full min-h-0 flex-col gap-1" : "space-y-2"\}/);
+  });
+
+  it("the portal wrappers carry definite remaining height from the rail host into the viewer", () => {
+    // The ImageViewer's own `h-full` is inert if any portaled ancestor remains
+    // an auto-height block. Keep the whole host -> section -> inset -> viewer
+    // chain height-bearing in the canonical rail while leaving inline layout
+    // unchanged.
+    expect(PANEL).toContain(
+      'className={previewHost ? "flex h-full min-h-0 flex-col" : "space-y-2"}'
+    );
+    expect(PANEL).toContain('className={previewHost ? "min-h-0 flex-1" : undefined}');
+    expect(PANEL).toContain('className={previewHost ? "relative h-full min-h-0" : "relative"}');
   });
 
   it("the card frame absorbs ONLY the leftover height (flex-1 min-h-0)", () => {

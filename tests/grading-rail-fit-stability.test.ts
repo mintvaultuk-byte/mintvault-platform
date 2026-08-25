@@ -64,8 +64,11 @@ describe("FIT is deterministic and has no cumulative state", () => {
 });
 
 describe("natural-dimension authority is per displayed source", () => {
-  it("clears dimensions on side or variant changes and reloads from the img element", () => {
-    expect(VIEWER).toMatch(/useEffect\(\(\) => \{\s*setImgNaturalDims\(null\);\s*\}, \[side, variant\]\);/);
+  it("re-reads an already-decoded img on side or variant changes", () => {
+    expect(VIEWER).toMatch(/useLayoutEffect\(\(\) => \{/);
+    expect(VIEWER).toContain("image?.complete && image.naturalWidth > 0 && image.naturalHeight > 0");
+    expect(VIEWER).toContain("setImgNaturalDims({ width: image.naturalWidth, height: image.naturalHeight })");
+    expect(VIEWER).toMatch(/\}, \[side, variant\]\);/);
     expect(VIEWER).toContain("e.currentTarget.naturalWidth");
     expect(VIEWER).toContain("e.currentTarget.naturalHeight");
   });

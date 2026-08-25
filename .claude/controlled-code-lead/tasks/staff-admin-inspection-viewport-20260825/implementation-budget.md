@@ -36,9 +36,9 @@ This reforecast was written before proceeding to full-suite/browser proof.
 |---|---|
 | Files changed | 40: 9 existing runtime/harness files plus 1 new geometry module; 17 existing regression files plus 1 new geometry test; index plus 11 task records |
 | Lines changed | 1,450 additions / 1,575 deletions in the frozen commit; most deletions retire the adaptive/visual-viewport feedback implementation and tests that pinned it |
-| Commits | 1 local candidate commit planned; no push/merge/deploy |
-| Exact final focused proof | 30 test files / 696 assertions; typecheck, lint 0 errors, production build and diff whitespace green |
+| Commits | 1 rejected local candidate plus 1 replacement repair commit planned; no push/merge/deploy |
+| Exact final focused proof | 30 test files / 778 assertions; typecheck, lint 0 errors, production build and diff whitespace green |
 | Broad proof | near-final revision: 429 files / 6,860 tests passed / 6 skipped; final monolithic retry rejected as authoritative when the repository's documented shared-Partner-env race produced skips/failures |
-| Browser proof | blocked before execution: required ChatGPT Chrome Extension absent |
+| Browser proof | supported in-app rendered geometry/anchoring executed and exposed two HIGHs; Chrome page-zoom proof remains blocked because the required extension is absent |
 
 The revised ceiling was not exceeded and runtime scope did not expand.

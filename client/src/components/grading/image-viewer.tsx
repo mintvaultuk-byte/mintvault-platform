@@ -657,8 +657,18 @@ export default function ImageViewer({
     return () => observer.disconnect();
   }, [fillHost, fullscreen, markMode, showReference]);
 
-  useEffect(() => {
-    setImgNaturalDims(null);
+  useLayoutEffect(() => {
+    const image = imgElRef.current;
+    // FRONT and BACK can legitimately resolve to the same already-cached URL
+    // (including review fixtures and duplicated captures). React then keeps the
+    // same <img> node and the browser emits no second `load` event. Re-read the
+    // decoded element synchronously so FIT and every image-relative overlay do
+    // not fall back to an unmeasured, letterboxed plane after the side switch.
+    if (image?.complete && image.naturalWidth > 0 && image.naturalHeight > 0) {
+      setImgNaturalDims({ width: image.naturalWidth, height: image.naturalHeight });
+    } else {
+      setImgNaturalDims(null);
+    }
   }, [side, variant]);
 
   const fittedPlacement: InspectionPlacement | null =

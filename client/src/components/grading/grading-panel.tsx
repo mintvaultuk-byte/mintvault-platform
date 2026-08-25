@@ -3123,7 +3123,11 @@ export default function GradingPanel({
       >
         {/* LEFT — Image viewer + defect list */}
         <PreviewSurface host={previewHost}>
-          <div className="space-y-2" data-canonical-section="card-images" data-testid="section-card-images">
+          <div
+            className={previewHost ? "flex h-full min-h-0 flex-col" : "space-y-2"}
+            data-canonical-section="card-images"
+            data-testid="section-card-images"
+          >
             {/* FRONT/BACK chip row — kept as the compact inspection switcher.
               ImageViewer omits its duplicate chip row and follows `viewerSide`;
               there is deliberately no filter-row spacer below this control. */}
@@ -3185,8 +3189,11 @@ export default function GradingPanel({
               </div>
             </div>}
 
-            <div style={{ margin: "8px 12px 0" }}>
-              <div className="relative" style={{ overflow: "visible" }}>
+            <div className={previewHost ? "min-h-0 flex-1" : undefined} style={{ margin: "8px 12px 0" }}>
+              <div
+                className={previewHost ? "relative h-full min-h-0" : "relative"}
+                style={{ overflow: "visible" }}
+              >
                 <ImageViewer
                   apiBase={apiBase}
                   urls={urls}

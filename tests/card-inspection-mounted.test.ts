@@ -126,6 +126,40 @@ describe("mounted controlled card inspection", () => {
     expect(viewport.dataset.inspectionZoom).toBe("1.25");
   });
 
+  it("retains natural dimensions when FRONT and BACK share an already-loaded image URL", async () => {
+    await act(async () =>
+      root.render(
+        /* @__PURE__ */ React.createElement(ImageViewer, {
+          urls: { front_working: IMAGE, back_working: IMAGE },
+          workingEvidence: ADMITTED_WORKING_EVIDENCE,
+          defects: [],
+          onDefectAdded: () => {},
+          highlightId: null,
+          fillHost: true,
+        })
+      )
+    );
+    const image = host.querySelector<HTMLImageElement>('[data-testid="grading-card-image"]')!;
+    Object.defineProperties(image, {
+      complete: { configurable: true, value: true },
+      naturalWidth: { configurable: true, value: 500 },
+      naturalHeight: { configurable: true, value: 700 },
+    });
+    await act(async () => image.dispatchEvent(new Event("load", { bubbles: true })));
+    expect(host.querySelector<HTMLElement>('[data-testid="grading-image-viewport"]')!.dataset.cardNaturalW).toBe(
+      "500"
+    );
+
+    const back = [...host.querySelectorAll<HTMLButtonElement>("button")].find(
+      (button) => button.textContent?.trim() === "back"
+    )!;
+    await act(async () => back.click());
+    const switched = host.querySelector<HTMLElement>('[data-testid="grading-image-viewport"]')!;
+    expect(switched.dataset.inspectionSide).toBe("back");
+    expect(switched.dataset.cardNaturalW).toBe("500");
+    expect(switched.dataset.cardNaturalH).toBe("700");
+  });
+
   it("keeps real drag pan, zoom and side state while the workstation stage changes", async () => {
     function Host() {
       const [inspection, setInspection] = useState(createCardInspectionState);

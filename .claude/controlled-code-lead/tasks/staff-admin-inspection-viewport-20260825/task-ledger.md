@@ -26,7 +26,7 @@
 | 3 — Lead verification | done | 2026-08-25 | coordinate/data/blast-radius contracts re-read at production baseline |
 | 4 — Implementation authorisation | done | 2026-08-25 | owner attachment explicitly authorises the locked presentation scope |
 | 5 — Implementation | done | 2026-08-25 | bounded presentation-only viewport, stable shell and regression replacements complete |
-| 6 — Regression | partial / release-held | 2026-08-25 | exact local automated gates green; real Chrome and final hostile review blocked/pending |
+| 6 — Regression | partial / release-held | 2026-08-25 | first candidate rejected by runtime acceptance; repaired tree is locally green; exact new-SHA Chrome and hostile gates pending |
 | 7 — Final report | pending local freeze | 2026-08-25 | report must state staging unsafe and stop before deployment |
 
 ## Reviewer status
@@ -40,7 +40,16 @@
 - `npm run check`: pass.
 - `npm run lint`: pass, 0 errors / 2,749 repository warnings.
 - `npm run build`: pass; Vite transformed 3,355 modules and server/one-off bundles built.
-- Exact final focused/protected matrix: 30 files / 696 assertions passed.
+- First frozen candidate `82cbf17d4d6e7a4ed35a2170cae0ba24054b925d`
+  was rejected after supported in-app browser acceptance proved two HIGH viewer
+  defects: zero rendered height through the canonical portal wrapper chain
+  (SIV-006), and loss of natural dimensions when FRONT/BACK reused one decoded
+  image URL (SIV-007).
+- Both HIGHs were reproduced with RED regressions and repaired without changing
+  stored coordinates, evidence authority, grading semantics or role capability.
+- Current exact focused/protected matrix: 30 files / 778 assertions passed.
+- Current `npm run check`, lint and production build pass; lint remains at the
+  repository baseline of 0 errors / 2,749 warnings.
 - Near-final broad disposable-DB run: 429 files / 6,860 tests passed / 6 skipped.
 - Final broad retry was stopped after the repository's documented monolithic
   Partner `process.env` collision produced skips and two Partner migration
@@ -51,12 +60,15 @@
   while TypeScript and production build parse the source successfully.
 - Browser control diagnostics: Chrome running, extension ID
   `hehggadaopoacecdllhhajmbjkdcmajg` absent from all inspected profiles; no
-  real-browser matrix or screenshot claimed.
+  Chrome page-zoom matrix is claimed. The supported in-app browser supplied
+  rendered responsive/interaction evidence and exposed SIV-006/SIV-007, but it
+  has no browser page-zoom capability and cannot satisfy SIV-005.
 - No migration, schema change, defect rewrite, evidence-authority change or
   protected grading-file change.
 
 ## Next authorised action
 
-Freeze the local candidate, run the governance postflight, then report and stop.
-Browser acceptance requires the owner to install/enable the Chrome control
-extension; push, staging mutation, migration and deployment remain unauthorised.
+Freeze a replacement candidate, run the independent Claude Opus hostile review
+against that exact SHA, complete every supported in-app acceptance proof, and
+retry the Chrome connection. Push, staging mutation, migration and deployment
+remain unauthorised.

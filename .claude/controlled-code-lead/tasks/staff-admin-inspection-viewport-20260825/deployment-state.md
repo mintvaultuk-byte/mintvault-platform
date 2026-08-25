@@ -12,7 +12,8 @@
 - Branch: `codex/staff-admin-inspection-viewport-20260825`
 - Worktree: `/private/tmp/mintvault-staff-admin-inspection-viewport-20260825`
 - Baseline: exact production SHA above.
-- Candidate: one local commit will freeze this working tree; the final owner report records its exact SHA.
+- Rejected candidate: `82cbf17d4d6e7a4ed35a2170cae0ba24054b925d` (SIV-006/SIV-007).
+- Replacement candidate: one new local commit will freeze the repaired working tree; the final owner report records its exact SHA.
 - Pushed: no.
 - Deployed to staging: no.
 - Deployed to production: no.
@@ -25,7 +26,7 @@
 
 ## Readiness decision
 
-- Local automated candidate: green.
+- Repaired local automated tree: green.
 - Staging-safe: **no** — mandatory real Chrome zoom/anchoring and final hostile
   diff review are not complete.
 - The required Chrome control channel is unavailable because the ChatGPT Chrome
