@@ -87,9 +87,17 @@ export function CanonicalGradingWorkstationShell({
 }: CanonicalGradingWorkstationShellProps) {
   return (
     <div ref={rootRef} className={WORKSTATION_FILL_CLASS} data-testid="grading-workspace" data-canonical-shell="true">
-      <div className={`flex min-h-0 flex-1 flex-col gap-2 ${WORKSTATION_TWO_PANE_CLASS}`}>
+      {/* Below 540px both panes need a definite, reachable height. Super Admin's
+          mobile shell is auto-height, while Staff / Grader / Admin Review /
+          Partner shells are fixed-height. Giving the row a narrow-only scroll
+          owner serves both: the auto-height route can page-scroll and bounded
+          role shells can scroll between two full-height stacked panes. */}
+      <div className={`flex min-h-0 flex-1 flex-col gap-2 max-[539px]:overflow-y-auto ${WORKSTATION_TWO_PANE_CLASS}`}>
         {previewAside}
-        <div className="flex min-h-0 min-w-0 flex-1 flex-col" data-testid="grading-control-panel">
+        <div
+          className="flex min-h-0 min-w-0 flex-1 flex-col max-[539px]:h-[100dvh] max-[539px]:flex-none"
+          data-testid="grading-control-panel"
+        >
           {children}
         </div>
       </div>

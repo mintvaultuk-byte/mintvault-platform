@@ -209,7 +209,9 @@ describe("11. no horizontal overflow risk at 1440x900 (structural check)", () =>
   it("the preview aside and control panel are both flex items with min-w-0/shrink control (no fixed oversized widths)", () => {
     expect(ASIDE).toContain("min-[540px]:shrink-0"); // aside has an explicit, bounded share
     // The control-panel column (min-w-0 flex item) is owned by the canonical shell.
-    expect(SHELL).toContain('className="flex min-h-0 min-w-0 flex-1 flex-col" data-testid="grading-control-panel"');
+    expect(SHELL).toContain(
+      'className="flex min-h-0 min-w-0 flex-1 flex-col max-[539px]:h-[100dvh] max-[539px]:flex-none"'
+    );
   });
   it("the workflow bar can shrink/scroll instead of forcing overflow", () => {
     expect(BAR).toContain("min-w-0");

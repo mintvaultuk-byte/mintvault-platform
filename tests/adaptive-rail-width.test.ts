@@ -16,7 +16,7 @@ const VIEWER = read("client/src/components/grading/image-viewer.tsx");
 
 describe("the left rail is stable and card-independent", () => {
   it("uses one fixed 45/55 two-pane split for every role", () => {
-    expect(ASIDE).toContain('"max-[539px]:basis-1/2 max-[539px]:flex-1 min-[540px]:w-[45%] min-[540px]:shrink-0"');
+    expect(ASIDE).toContain('"max-[539px]:h-[100dvh] max-[539px]:flex-none min-[540px]:w-[45%] min-[540px]:shrink-0"');
     expect(ASIDE).toContain('data-layout-boundary="540"');
     expect(SHELL).toContain('WORKSTATION_TWO_PANE_CLASS = "min-[540px]:flex-row"');
   });
@@ -43,9 +43,15 @@ describe("the left rail is stable and card-independent", () => {
     }
   });
 
-  it("stacks only below the documented usable-width floor", () => {
+  it("stacks only below the documented usable-width floor with a definite mobile rail height", () => {
     expect(539).toBeLessThan(540);
-    expect(ASIDE).toContain("max-[539px]:basis-1/2");
+    expect(ASIDE).toContain("max-[539px]:h-[100dvh]");
+    expect(ASIDE).toContain("max-[539px]:flex-none");
+    expect(ASIDE).not.toContain("max-[539px]:basis-1/2");
+    expect(ASIDE).not.toContain("max-[539px]:flex-1");
+    expect(SHELL).toContain("max-[539px]:overflow-y-auto");
+    expect(SHELL).toContain("max-[539px]:h-[100dvh]");
+    expect(SHELL).toContain("max-[539px]:flex-none");
     expect(SHELL).toContain("min-[540px]:flex-row");
   });
 });

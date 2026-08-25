@@ -56,7 +56,7 @@ const ROUTE_MOUNTS = { STAFF, GRADER, ADMIN_STAFF, PARTNER, ADMIN_DASH, CERT_FOR
 // below the shell" regression (a fixed-calc shell shorter than a taller parent).
 const SHELL_FILL = "flex min-h-0 flex-col h-full";
 const GEOMETRY_ROW = "${WORKSTATION_TWO_PANE_CLASS}";
-const GEOMETRY_COL = 'className="flex min-h-0 min-w-0 flex-1 flex-col" data-testid="grading-control-panel"';
+const GEOMETRY_COL = 'className="flex min-h-0 min-w-0 flex-1 flex-col max-[539px]:h-[100dvh] max-[539px]:flex-none"';
 
 describe("Canonical grading workstation — one shell, capability-only role differences", () => {
   it("1. Super Admin grading mounts GradingWorkstation without a full-form stage injection", () => {

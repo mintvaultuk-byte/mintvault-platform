@@ -35,9 +35,17 @@ import type { CardInspectionState } from "./card-inspection-state";
  * card becomes height-bound and the extra width only narrows the controls. Right pane at
  * the tightest tested viewport is 456.8px, with no content overflow and its own vertical
  * scroll intact.
+ *
+ * Below 540px the shell stacks and the admin focus surface deliberately returns
+ * to normal page flow. The rail therefore cannot use a percentage flex-basis:
+ * its parent has auto height in that mode, so browser zoom can leave only the
+ * utility/control rows' intrinsic height and collapse the actual card viewport
+ * to zero. A definite 100dvh rail gives the image a real box while preserving
+ * the mobile page-scroll fallback; `flex-none` prevents sibling content from
+ * shrinking that box.
  */
 export const WORKSTATION_PREVIEW_WIDTH_CLASS =
-  "max-[539px]:basis-1/2 max-[539px]:flex-1 min-[540px]:w-[45%] min-[540px]:shrink-0";
+  "max-[539px]:h-[100dvh] max-[539px]:flex-none min-[540px]:w-[45%] min-[540px]:shrink-0";
 
 export function WorkstationPreviewAside({
   certificateId,
