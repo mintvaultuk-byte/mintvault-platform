@@ -12,6 +12,7 @@ import {
   verifyStationSignature,
 } from "./station-identity";
 import { CaptureGeometryError, assertLegalCaptureWindow } from "../lib/lide400-capture-authority";
+import { classifyMintVaultRuntimeEnvironment } from "../lib/database-environment-guard";
 import {
   STANDARD_TCG,
   captureWindowRectMm,
@@ -135,6 +136,61 @@ function safeObject(value: unknown, field: string, allowed: readonly string[]): 
     throw new StationServiceError("validation", `${field} needs scanner model, device ID or serial`);
   }
   return out;
+}
+
+/**
+ * ImageCaptureCore uses both names for the same Canon LiDE 400 across healthy
+ * and transient-error states.  The scanner identity is calibration authority,
+ * so this equivalence belongs on the server as well as in the Mac client.
+ * Nothing except the two known Canon spellings is collapsed.
+ */
+function canonicalScannerHardware(value: unknown, field = "scannerHardware"): Record<string, string> {
+  const hardware = safeObject(value, field, ["manufacturer", "model", "serial", "deviceId"]);
+  const manufacturer = String(hardware.manufacturer || "").trim();
+  const model = String(hardware.model || "")
+    .trim()
+    .replace(/\s+/g, " ");
+  if (
+    manufacturer.toLowerCase() === "canon" &&
+    (model.toLowerCase() === "canon lide 400" || model.toLowerCase() === "canoscan lide 400")
+  ) {
+    return { ...hardware, manufacturer: "Canon", model: "Canon LiDE 400" };
+  }
+  return hardware;
+}
+
+function storedHardwareFingerprint(value: unknown, fallback: string | null): string | null {
+  if (fallback == null) return null;
+  try {
+    return fingerprint(canonicalScannerHardware(value, "storedScannerHardware"));
+  } catch {
+    // A malformed historical JSON value must not be silently blessed as an
+    // equivalent device. Comparing its persisted fingerprint fails closed.
+    return fallback;
+  }
+}
+
+export function strictStagingCalibrationRecoveryRuntime(env: NodeJS.ProcessEnv = process.env): boolean {
+  return env.FLY_APP_NAME === "mintvault-v2" && classifyMintVaultRuntimeEnvironment(env) === "staging";
+}
+
+const STAGING_CANON_CALIBRATION_RECOVERY = Object.freeze({
+  stationCode: "MV-STN-6DIISWMIEU2IKRG4",
+  calibrationId: "f7b7fe4f-aefb-423c-a4a5-dc9cec8fabcf",
+});
+
+/**
+ * Owner-authorised, one-station staging recovery target for the 2026-08-26
+ * LiDE 400 alias incident. Returning null everywhere else keeps the ordinary
+ * heartbeat incapable of ambient calibration mutation.
+ */
+export function approvedStagingCanonCalibrationRecoveryId(
+  stationCode: string,
+  env: NodeJS.ProcessEnv = process.env
+): string | null {
+  return strictStagingCalibrationRecoveryRuntime(env) && stationCode === STAGING_CANON_CALIBRATION_RECOVERY.stationCode
+    ? STAGING_CANON_CALIBRATION_RECOVERY.calibrationId
+    : null;
 }
 
 function canonicalJson(value: unknown): string {
@@ -555,24 +611,21 @@ export async function recordStationHeartbeat(
     captureState?: unknown;
     lastFailureCode?: unknown;
   },
-  actorUserId: string | null = null
+  actorUserId: string | null = null,
+  options: { approvedExistingCalibrationId?: string | null } = {}
 ): Promise<{
   calibrationStatus: CalibrationStatus;
   hardwareChanged: boolean;
   profileChanged: boolean;
   fixedProfileProvisioned: boolean;
+  existingCalibrationRestored: boolean;
 }> {
   const appVersion = input.appVersion == null ? station.appVersion : boundedText(input.appVersion, "appVersion", 64);
   if (typeof input.scannerConnected !== "boolean")
     throw new StationServiceError("validation", "scannerConnected is invalid");
-  const scannerHardware = safeObject(input.scannerHardware, "scannerHardware", [
-    "manufacturer",
-    "model",
-    "serial",
-    "deviceId",
-  ]);
-  const hardwareFingerprint = fingerprint(scannerHardware);
-  const scannerProfileVersion =
+  const reportedScannerHardware = canonicalScannerHardware(input.scannerHardware);
+  const reportedHardwareFingerprint = fingerprint(reportedScannerHardware);
+  const reportedScannerProfileVersion =
     input.scannerProfileVersion == null
       ? station.scannerProfileVersion
       : boundedText(input.scannerProfileVersion, "scannerProfileVersion", 120);
@@ -585,6 +638,7 @@ export async function recordStationHeartbeat(
   return withPartnerAdminTransaction(async (client) => {
     const current = await client.query<{
       scanner_connected: boolean;
+      scanner_hardware: Record<string, unknown>;
       scanner_hardware_fingerprint: string | null;
       scanner_profile_version: string | null;
       calibration_status: CalibrationStatus;
@@ -592,7 +646,7 @@ export async function recordStationHeartbeat(
       capture_state: string;
       last_failure_code: string | null;
     }>(
-      `SELECT scanner_connected, scanner_hardware_fingerprint, scanner_profile_version,
+      `SELECT scanner_connected, scanner_hardware, scanner_hardware_fingerprint, scanner_profile_version,
               calibration_status, current_calibration_id, capture_state, last_failure_code
          FROM partner_stations WHERE id=$1 AND tenant_id=$2 FOR UPDATE`,
       [station.id, station.tenantId]
@@ -600,15 +654,42 @@ export async function recordStationHeartbeat(
     if (current.rows.length !== 1)
       throw new StationServiceError("station_not_active", "Station is no longer available");
     const previous = current.rows[0];
+    const previousComparableFingerprint = storedHardwareFingerprint(
+      previous.scanner_hardware,
+      previous.scanner_hardware_fingerprint
+    );
     const hardwareChanged =
-      previous.scanner_hardware_fingerprint != null && previous.scanner_hardware_fingerprint !== hardwareFingerprint;
+      input.scannerConnected === true &&
+      previousComparableFingerprint != null &&
+      previousComparableFingerprint !== reportedHardwareFingerprint;
     // A jig calibration is inseparable from both the physical scanner and the
     // locked acquisition profile. A new profile may have a different platen
     // transform, DPI or acquisition implementation even when the USB identity
     // is unchanged, so it must require a fresh calibration before evidence.
     const profileChanged =
-      previous.scanner_profile_version != null && previous.scanner_profile_version !== scannerProfileVersion;
+      input.scannerConnected === true &&
+      previous.scanner_profile_version != null &&
+      previous.scanner_profile_version !== reportedScannerProfileVersion;
     const calibrationInvalidated = hardwareChanged || profileChanged;
+    /*
+     * A disconnected heartbeat reports transport/fallback observations, not a
+     * newly proved physical device. Preserve the last connected identity and
+     * profile verbatim. For a connected known-alias heartbeat, preserve the
+     * existing persisted fingerprint too, so a historical calibration remains
+     * internally consistent while the comparison uses the canonical identity.
+     */
+    const preservePreviousHardware =
+      previous.scanner_hardware_fingerprint != null &&
+      (input.scannerConnected === false ||
+        (!hardwareChanged && previous.calibration_status === "VALID" && previous.current_calibration_id != null));
+    const scannerHardware = preservePreviousHardware ? previous.scanner_hardware : reportedScannerHardware;
+    const hardwareFingerprint = preservePreviousHardware
+      ? previous.scanner_hardware_fingerprint
+      : reportedHardwareFingerprint;
+    const scannerProfileVersion =
+      previous.scanner_profile_version != null && (input.scannerConnected === false || !profileChanged)
+        ? previous.scanner_profile_version
+        : reportedScannerProfileVersion;
     /*
      * FIRST-RUN FIXED PROFILE PROVISIONING.
      *
@@ -623,12 +704,12 @@ export async function recordStationHeartbeat(
      * replaces a current calibration, and never treats a changed scanner/profile as a fresh station.
      * Those cases remain INVALID until an authorised maintenance process resolves them.
      */
-    const model = String(scannerHardware.model || "")
+    const model = String(reportedScannerHardware.model || "")
       .trim()
       .replace(/\s+/g, " ")
       .toLowerCase();
     const isCanonLide400 =
-      String(scannerHardware.manufacturer || "")
+      String(reportedScannerHardware.manufacturer || "")
         .trim()
         .toLowerCase() === "canon" &&
       (model === "canon lide 400" || model === "canoscan lide 400");
@@ -719,9 +800,149 @@ export async function recordStationHeartbeat(
         );
       }
     }
+    let restoredCalibration: {
+      id: string;
+      calibrationFingerprint: string;
+      hardwareFingerprint: string;
+      scannerProfileVersion: string;
+    } | null = null;
+
+    /*
+     * STAGING-ONLY REATTACHMENT OF AN EXISTING CALIBRATION.
+     *
+     * No request-body geometry or calibration id exists. The signed heartbeat
+     * supplies only the current physical identity; the server may reattach only
+     * one already-VALID row that exactly matches the locked station, tenant,
+     * location, hardware fingerprint and profile. The route derives maintenance
+     * authority from the MFA-passed operator session, and this service repeats
+     * the strict Fly staging gate so production cannot enter the path even if a
+     * caller is wired incorrectly later.
+     */
+    const mayRestoreExistingCalibration =
+      options.approvedExistingCalibrationId === STAGING_CANON_CALIBRATION_RECOVERY.calibrationId &&
+      strictStagingCalibrationRecoveryRuntime() &&
+      station.code === STAGING_CANON_CALIBRATION_RECOVERY.stationCode &&
+      previous.calibration_status === "INVALID" &&
+      previous.current_calibration_id == null &&
+      input.scannerConnected === true &&
+      !calibrationInvalidated &&
+      isCanonLide400 &&
+      scannerProfileVersion === STANDARD_TCG.scannerProfileVersion &&
+      pendingUploadCount === 0 &&
+      captureState.toUpperCase() === "IDLE" &&
+      lastFailureCode == null;
+
+    if (mayRestoreExistingCalibration) {
+      const quiescence = await client.query<{
+        live_capture: boolean;
+        live_staging: boolean;
+        already_restored: boolean;
+      }>(
+        `SELECT
+           EXISTS (
+             SELECT 1 FROM scanner_capture_sessions c
+              WHERE c.station_id=$1 AND c.state IN ('armed','claimed','capturing')
+           ) AS live_capture,
+           EXISTS (
+             SELECT 1
+               FROM scanner_evidence_staging e
+               JOIN scanner_capture_sessions c ON c.id=e.capture_session_id
+              WHERE (e.station_id=$1 OR c.station_id=$1)
+                AND e.state IN ('granted','finalizing')
+           ) AS live_staging,
+           EXISTS (
+             SELECT 1 FROM partner_station_events e
+              WHERE e.station_id=$1
+                AND e.event_type='station_existing_calibration_restored'
+                AND e.detail->>'calibrationId'=$2
+           ) AS already_restored`,
+        [station.id, options.approvedExistingCalibrationId]
+      );
+      if (quiescence.rows[0]?.live_capture || quiescence.rows[0]?.live_staging) {
+        throw new StationServiceError(
+          "calibration_required",
+          "Existing calibration cannot be restored while Scanner work is still active"
+        );
+      }
+      if (quiescence.rows[0]?.already_restored) {
+        throw new StationServiceError(
+          "calibration_required",
+          "The approved one-time calibration recovery has already been consumed"
+        );
+      }
+
+      const candidates = await client.query<{
+        id: string;
+        calibration_fingerprint: string;
+        scanner_hardware_fingerprint: string;
+        scanner_hardware: Record<string, unknown>;
+        scanner_profile_version: string;
+        acquisition_region: Record<string, number>;
+        working_region: Record<string, number>;
+        placement_tolerance_mm: Record<string, number>;
+        calibration_version: string;
+      }>(
+        `SELECT id, calibration_fingerprint, scanner_hardware_fingerprint, scanner_hardware,
+                scanner_profile_version, acquisition_region, working_region,
+                placement_tolerance_mm, calibration_version
+           FROM partner_station_calibrations
+          WHERE station_id=$1 AND tenant_id=$2 AND location_id=$3
+            AND health_status='VALID'
+            AND scanner_hardware_fingerprint=$4
+            AND scanner_profile_version=$5
+            AND id=$6::uuid
+          ORDER BY created_at DESC, id
+          FOR UPDATE`,
+        [
+          station.id,
+          station.tenantId,
+          station.locationId,
+          hardwareFingerprint,
+          scannerProfileVersion,
+          options.approvedExistingCalibrationId,
+        ]
+      );
+      if (candidates.rows.length !== 1) {
+        throw new StationServiceError(
+          "calibration_required",
+          "Existing calibration recovery requires exactly one matching VALID calibration"
+        );
+      }
+      const candidate = candidates.rows[0];
+      const candidateHardware = canonicalScannerHardware(candidate.scanner_hardware, "calibrationScannerHardware");
+      const acquisitionRegion = assertLegalCalibrationRegion(
+        finiteRegion(candidate.acquisition_region, "calibrationAcquisitionRegion")
+      );
+      const workingRegion = finiteRegion(candidate.working_region, "calibrationWorkingRegion");
+      const placementToleranceMm = finiteMargins(candidate.placement_tolerance_mm, "calibrationPlacementToleranceMm");
+      const expectedCalibrationFingerprint = fingerprint({
+        scannerHardwareFingerprint: candidate.scanner_hardware_fingerprint,
+        scannerProfileVersion: candidate.scanner_profile_version,
+        acquisitionRegion,
+        workingRegion,
+        placementToleranceMm,
+        calibrationVersion: candidate.calibration_version,
+      });
+      if (
+        fingerprint(candidateHardware) !== candidate.scanner_hardware_fingerprint ||
+        candidate.calibration_fingerprint !== expectedCalibrationFingerprint
+      ) {
+        throw new StationServiceError(
+          "calibration_required",
+          "Existing calibration provenance is inconsistent and cannot be restored"
+        );
+      }
+      restoredCalibration = {
+        id: candidate.id,
+        calibrationFingerprint: candidate.calibration_fingerprint,
+        hardwareFingerprint: candidate.scanner_hardware_fingerprint,
+        scannerProfileVersion: candidate.scanner_profile_version,
+      };
+    }
+
     const calibrationStatus: CalibrationStatus = calibrationInvalidated
       ? "INVALID"
-      : fixedProfileCalibrationId
+      : fixedProfileCalibrationId || restoredCalibration
         ? "VALID"
         : previous.calibration_status;
     const updated = await client.query<{ id: string }>(
@@ -730,9 +951,48 @@ export async function recordStationHeartbeat(
               scanner_hardware_fingerprint=$5, scanner_profile_version=$6,
               pending_upload_count=$7, capture_state=$8, last_failure_code=$9,
               calibration_status=$10,
-              current_calibration_id=CASE WHEN $11 THEN NULL WHEN $12::uuid IS NOT NULL THEN $12::uuid ELSE current_calibration_id END,
+              current_calibration_id=CASE
+                WHEN $11 THEN NULL
+                WHEN $12::uuid IS NOT NULL THEN $12::uuid
+                WHEN $13::uuid IS NOT NULL THEN $13::uuid
+                ELSE current_calibration_id
+              END,
               last_seen_at=now(), updated_at=now()
-        WHERE id=$1 AND status='ACTIVE'
+        WHERE id=$1 AND tenant_id=$14 AND location_id=$15 AND status='ACTIVE'
+          AND (
+            $13::uuid IS NULL
+            OR (
+              calibration_status='INVALID' AND current_calibration_id IS NULL
+              AND $3::boolean=true AND $7::integer=0 AND upper($8::text)='IDLE' AND $9::text IS NULL
+              AND scanner_hardware_fingerprint::text IS NOT DISTINCT FROM $16::text
+              AND scanner_profile_version IS NOT DISTINCT FROM $17::text
+              AND EXISTS (
+                SELECT 1 FROM partner_station_calibrations k
+                 WHERE k.id=$13::uuid AND k.station_id=partner_stations.id
+                   AND k.tenant_id=partner_stations.tenant_id AND k.location_id=partner_stations.location_id
+                   AND k.health_status='VALID'
+                   AND k.scanner_hardware_fingerprint=$5
+                   AND k.scanner_profile_version=$6
+              )
+              AND NOT EXISTS (
+                SELECT 1 FROM partner_station_events e
+                 WHERE e.station_id=partner_stations.id
+                   AND e.event_type='station_existing_calibration_restored'
+                   AND e.detail->>'calibrationId'=$13::text
+              )
+              AND NOT EXISTS (
+                SELECT 1 FROM scanner_capture_sessions c
+                 WHERE c.station_id=partner_stations.id AND c.state IN ('armed','claimed','capturing')
+              )
+              AND NOT EXISTS (
+                SELECT 1
+                  FROM scanner_evidence_staging e
+                  JOIN scanner_capture_sessions c ON c.id=e.capture_session_id
+                 WHERE (e.station_id=partner_stations.id OR c.station_id=partner_stations.id)
+                   AND e.state IN ('granted','finalizing')
+              )
+            )
+          )
         RETURNING id`,
       [
         station.id,
@@ -747,12 +1007,39 @@ export async function recordStationHeartbeat(
         calibrationStatus,
         calibrationInvalidated,
         fixedProfileCalibrationId,
+        restoredCalibration?.id || null,
+        station.tenantId,
+        station.locationId,
+        previous.scanner_hardware_fingerprint,
+        previous.scanner_profile_version,
       ]
     );
     if (updated.rows.length !== 1) throw new StationServiceError("station_not_active", "Station is no longer active");
     const connectionChanged = previous.scanner_connected !== input.scannerConnected;
     const captureStateChanged = previous.capture_state !== captureState;
     const failureChanged = previous.last_failure_code !== lastFailureCode;
+    if (restoredCalibration) {
+      await client.query(
+        `INSERT INTO partner_station_events
+           (tenant_id,location_id,station_id,actor_user_id,event_type,detail)
+         VALUES ($1,$2,$3,$4,'station_existing_calibration_restored',$5::jsonb)`,
+        [
+          station.tenantId,
+          station.locationId,
+          station.id,
+          actorUserId,
+          JSON.stringify({
+            calibrationId: restoredCalibration.id,
+            calibrationFingerprint: restoredCalibration.calibrationFingerprint,
+            hardwareFingerprint: restoredCalibration.hardwareFingerprint,
+            scannerProfileVersion: restoredCalibration.scannerProfileVersion,
+            previousCalibrationStatus: previous.calibration_status,
+            previousCalibrationId: previous.current_calibration_id,
+            recovery: "existing-valid-canon-calibration",
+          }),
+        ]
+      );
+    }
     // Heartbeats update the current row every interval, but append at most one
     // event only when an operator-relevant transition/failure actually changes.
     if (hardwareChanged || profileChanged || connectionChanged || captureStateChanged || failureChanged) {
@@ -787,6 +1074,7 @@ export async function recordStationHeartbeat(
       hardwareChanged,
       profileChanged,
       fixedProfileProvisioned: fixedProfileCalibrationId != null,
+      existingCalibrationRestored: restoredCalibration != null,
     };
   });
 }

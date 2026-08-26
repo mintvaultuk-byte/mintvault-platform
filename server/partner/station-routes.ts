@@ -11,6 +11,7 @@ import { partnerRateLimit } from "./rate-limit";
 import { StationIdentityError } from "./station-identity";
 import {
   StationServiceError,
+  approvedStagingCanonCalibrationRecoveryId,
   assertStationCaptureReady,
   authenticateStationRequest,
   getStationEnrollmentStatus,
@@ -19,6 +20,7 @@ import {
   recordStationHeartbeat,
   resolveActiveStationByCode,
   requestStationEnrollment,
+  strictStagingCalibrationRecoveryRuntime,
   type StationPrincipal,
 } from "./station-service";
 import { authorizePartnerScannerCertificate } from "./grading-routes";
@@ -424,15 +426,31 @@ export function partnerStationRouter(): Router {
     partnerStationHeartbeatRateLimit,
     async (req, res) => {
       try {
-        const result = await recordStationHeartbeat(req.station!, {
-          appVersion: req.body?.appVersion,
-          scannerConnected: req.body?.scannerConnected,
-          scannerHardware: req.body?.scannerHardware,
-          scannerProfileVersion: req.body?.scannerProfileVersion,
-          pendingUploadCount: req.body?.pendingUploadCount,
-          captureState: req.body?.captureState,
-          lastFailureCode: req.body?.lastFailureCode,
-        }, req.partner!.userId);
+        const result = await recordStationHeartbeat(
+          req.station!,
+          {
+            appVersion: req.body?.appVersion,
+            scannerConnected: req.body?.scannerConnected,
+            scannerHardware: req.body?.scannerHardware,
+            scannerProfileVersion: req.body?.scannerProfileVersion,
+            pendingUploadCount: req.body?.pendingUploadCount,
+            captureState: req.body?.captureState,
+            lastFailureCode: req.body?.lastFailureCode,
+          },
+          req.partner!.userId,
+          {
+            // Recovery authority is derived only from the already-resolved,
+            // MFA-passed operator session. It is never accepted from the body,
+            // and the service repeats the strict staging runtime check.
+            approvedExistingCalibrationId:
+              strictStagingCalibrationRecoveryRuntime() &&
+              !req.partner!.viewOnly &&
+              !req.partner!.sensitiveDisabled &&
+              req.partner!.permissions.has("partner.stations.calibrate")
+                ? approvedStagingCanonCalibrationRecoveryId(req.station!.code)
+                : null,
+          }
+        );
         res.json({ ok: true, ...result });
       } catch (error) {
         stationError(res, error);

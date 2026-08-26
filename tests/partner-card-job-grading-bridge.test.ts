@@ -27,6 +27,7 @@
  */
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { Client } from "pg";
+import crypto from "node:crypto";
 import { mkdtemp, mkdir, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
@@ -48,6 +49,7 @@ let leases: typeof import("../server/partner/grading-lease-service");
 let grading: typeof import("../server/partner/grading-routes");
 let printEligibility: typeof import("../server/partner/print-eligibility");
 let drizzle: typeof import("../server/db");
+let stationService: typeof import("../server/partner/station-service");
 let savedEnv: Record<string, string | undefined> = {};
 let localEvidenceRoot = "";
 
@@ -62,6 +64,7 @@ const adminActor = { actorType: "admin" as const, actorUserId: null, actorEmail:
  */
 const RUN_SALT = Math.random().toString(36).slice(2, 8);
 let stationSeq = 0;
+let recoveryFixtureSeq = 0;
 
 interface Fixture {
   label: string;
@@ -199,6 +202,33 @@ async function seedMintVaultTables(): Promise<void> {
   ]) {
     await admin.query(`ALTER TABLE ${t} OWNER TO pn_migrator`);
   }
+}
+
+/**
+ * The recovery guard joins the real capture session to the bounded R2 staging grant. This suite
+ * predates migration 0047 and hand-models the core Scanner tables, so add the exact columns that
+ * boundary reads after migration 0045 has created the station FK target.
+ */
+async function seedScannerEvidenceStaging(): Promise<void> {
+  await admin.query(`CREATE TABLE scanner_evidence_staging (
+    id uuid primary key default gen_random_uuid(),
+    capture_session_id text not null references scanner_capture_sessions(id) on delete restrict,
+    station_id uuid references partner_stations(id) on delete restrict,
+    object_key text not null unique,
+    expected_sha256 char(64) not null check (expected_sha256 ~ '^[0-9a-f]{64}$'),
+    expected_bytes bigint not null check (expected_bytes > 0 and expected_bytes <= 134217728),
+    capture_provenance jsonb not null,
+    state text not null default 'granted' check (state in ('granted','finalizing','accepted','failed','expired')),
+    expires_at timestamptz not null,
+    finalizing_at timestamptz,
+    accepted_at timestamptz,
+    failure_reason text,
+    staging_deleted_at timestamptz,
+    cleanup_claimed_at timestamptz,
+    created_at timestamptz not null default now(),
+    updated_at timestamptz not null default now()
+  )`);
+  await admin.query("ALTER TABLE scanner_evidence_staging OWNER TO pn_migrator");
 }
 
 async function makeTenant(label: string): Promise<Fixture> {
@@ -490,6 +520,257 @@ async function settle<T>(p: Promise<T>): Promise<{ ok: true; value: T } | { ok: 
   }
 }
 
+const LOCKED_SCANNER_PROFILE = "mintvault-canon-lide-400-v3";
+const APPROVED_RECOVERY_STATION_CODE = "MV-STN-6DIISWMIEU2IKRG4";
+const APPROVED_RECOVERY_CALIBRATION_ID = "f7b7fe4f-aefb-423c-a4a5-dc9cec8fabcf";
+// Exact geometry of the already-existing STAGING row authorised for reattachment. Its Y origin is
+// intentionally at the measured LiDE 400 platen's legal maximum (297.0107 - 130 = 167.0107).
+const RECOVERY_ACQUISITION_REGION = { x: 0, y: 167.01, width: 100, height: 130 };
+const RECOVERY_WORKING_REGION = { x: 4.6, y: 171.61, width: 90.8, height: 120.8 };
+const RECOVERY_TOLERANCE = { left: 4.6, top: 4.6, right: 4.6, bottom: 4.6 };
+const RECOVERY_CALIBRATION_VERSION = "capture-geometry-v1";
+
+function fixtureCanonicalJson(value: unknown): string {
+  if (value === null || typeof value !== "object") return JSON.stringify(value);
+  if (Array.isArray(value)) return `[${value.map(fixtureCanonicalJson).join(",")}]`;
+  return `{${Object.keys(value as Record<string, unknown>)
+    .sort()
+    .map((key) => `${JSON.stringify(key)}:${fixtureCanonicalJson((value as Record<string, unknown>)[key])}`)
+    .join(",")}}`;
+}
+
+function fixtureFingerprint(value: unknown): string {
+  return crypto.createHash("sha256").update(fixtureCanonicalJson(value)).digest("hex");
+}
+
+type RecoveryFixture = {
+  fixture: Fixture;
+  station: import("../server/partner/station-service").StationPrincipal;
+  calibrationId: string;
+  hardware: Record<string, string>;
+  hardwareFingerprint: string;
+  calibrationFingerprint: string;
+};
+
+/**
+ * Build the exact state that the incident exposed: an ACTIVE station with one immutable, VALID
+ * Canon calibration whose pointer was cleared. No new geometry is accepted by the recovery call;
+ * the heartbeat can only prove that this already-stored row still matches the connected scanner.
+ */
+async function prepareRecoveryFixture(
+  label: string,
+  calibrationStatus: "VALID" | "INVALID" = "INVALID",
+  approvedTarget = false
+): Promise<RecoveryFixture> {
+  recoveryFixtureSeq += 1;
+  // `makeTenant` embeds its label before the A/B discriminator in a 16-char station suffix. Keep
+  // this label deliberately short so both stations remain globally distinct in the real schema.
+  const fixture = await makeTenant(`h${recoveryFixtureSeq}${label.slice(-1)}`);
+  const stationRow = (
+    await admin.query<{
+      id: string;
+      tenant_id: string;
+      location_id: string;
+      station_code: string;
+      current_calibration_id: string;
+    }>(
+      `SELECT id, tenant_id, location_id, station_code, current_calibration_id
+         FROM partner_stations WHERE id=$1`,
+      [fixture.stationA]
+    )
+  ).rows[0];
+  let calibrationId = stationRow.current_calibration_id;
+  if (approvedTarget) {
+    // Clear the FK before replacing the disposable fixture UUID with the exact owner-approved row.
+    await admin.query(`UPDATE partner_stations SET current_calibration_id=NULL, station_code=$2 WHERE id=$1`, [
+      stationRow.id,
+      APPROVED_RECOVERY_STATION_CODE,
+    ]);
+    await admin.query(`UPDATE partner_station_calibrations SET id=$2 WHERE id=$1`, [
+      calibrationId,
+      APPROVED_RECOVERY_CALIBRATION_ID,
+    ]);
+    stationRow.station_code = APPROVED_RECOVERY_STATION_CODE;
+    calibrationId = APPROVED_RECOVERY_CALIBRATION_ID;
+  }
+  const hardware = {
+    manufacturer: "Canon",
+    model: "Canon LiDE 400",
+    deviceId: `mac-${stationRow.station_code}`,
+  };
+  const hardwareFingerprint = fixtureFingerprint(hardware);
+  const calibrationFingerprint = fixtureFingerprint({
+    scannerHardwareFingerprint: hardwareFingerprint,
+    scannerProfileVersion: LOCKED_SCANNER_PROFILE,
+    acquisitionRegion: RECOVERY_ACQUISITION_REGION,
+    workingRegion: RECOVERY_WORKING_REGION,
+    placementToleranceMm: RECOVERY_TOLERANCE,
+    calibrationVersion: RECOVERY_CALIBRATION_VERSION,
+  });
+  await admin.query(
+    `UPDATE partner_station_calibrations
+        SET calibration_fingerprint=$2, scanner_hardware_fingerprint=$3,
+            scanner_hardware=$4::jsonb, scanner_profile_version=$5,
+            acquisition_region=$6::jsonb, working_region=$7::jsonb,
+            placement_tolerance_mm=$8::jsonb, calibration_version=$9,
+            health_status='VALID', created_by_user_id=$10
+      WHERE id=$1`,
+    [
+      calibrationId,
+      calibrationFingerprint,
+      hardwareFingerprint,
+      JSON.stringify(hardware),
+      LOCKED_SCANNER_PROFILE,
+      JSON.stringify(RECOVERY_ACQUISITION_REGION),
+      JSON.stringify(RECOVERY_WORKING_REGION),
+      JSON.stringify(RECOVERY_TOLERANCE),
+      RECOVERY_CALIBRATION_VERSION,
+      fixture.owner,
+    ]
+  );
+  await admin.query(
+    `UPDATE partner_stations
+        SET status='ACTIVE', app_version='1.5.7', scanner_connected=true,
+            scanner_hardware=$2::jsonb, scanner_hardware_fingerprint=$3,
+            scanner_profile_version=$4, calibration_status=$5,
+            current_calibration_id=$6::uuid, pending_upload_count=0,
+            capture_state='IDLE', last_failure_code=NULL
+      WHERE id=$1`,
+    [
+      stationRow.id,
+      JSON.stringify(hardware),
+      hardwareFingerprint,
+      LOCKED_SCANNER_PROFILE,
+      calibrationStatus,
+      calibrationStatus === "VALID" ? calibrationId : null,
+    ]
+  );
+  return {
+    fixture,
+    station: {
+      id: stationRow.id,
+      code: stationRow.station_code,
+      tenantId: stationRow.tenant_id,
+      locationId: stationRow.location_id,
+      appVersion: "1.5.7",
+      scannerProfileVersion: LOCKED_SCANNER_PROFILE,
+      calibrationStatus,
+      currentCalibrationId: calibrationStatus === "VALID" ? calibrationId : null,
+    },
+    calibrationId,
+    hardware,
+    hardwareFingerprint,
+    calibrationFingerprint,
+  };
+}
+
+async function resetApprovedRecoveryFixture(prepared: RecoveryFixture): Promise<void> {
+  await admin.query(
+    `UPDATE scanner_evidence_staging
+        SET state='expired', updated_at=now()
+      WHERE station_id=$1 AND state IN ('granted','finalizing')`,
+    [prepared.station.id]
+  );
+  await admin.query(
+    `UPDATE scanner_capture_sessions
+        SET state='expired'
+      WHERE station_id=$1 AND state IN ('armed','claimed','capturing')`,
+    [prepared.station.id]
+  );
+  await admin.query(
+    `UPDATE partner_station_calibrations
+        SET health_status=CASE WHEN id=$2::uuid THEN 'VALID' ELSE 'INVALID' END
+      WHERE station_id=$1`,
+    [prepared.station.id, prepared.calibrationId]
+  );
+  await admin.query(
+    `UPDATE partner_stations
+        SET status='ACTIVE', scanner_connected=true, scanner_hardware=$2::jsonb,
+            scanner_hardware_fingerprint=$3, scanner_profile_version=$4,
+            calibration_status='INVALID', current_calibration_id=NULL,
+            pending_upload_count=0, capture_state='IDLE', last_failure_code=NULL
+      WHERE id=$1`,
+    [prepared.station.id, JSON.stringify(prepared.hardware), prepared.hardwareFingerprint, LOCKED_SCANNER_PROFILE]
+  );
+}
+
+function healthyHeartbeatInput(prepared: RecoveryFixture, model = "Canon LiDE 400") {
+  return {
+    appVersion: "1.5.7",
+    scannerConnected: true,
+    scannerHardware: { ...prepared.hardware, model },
+    scannerProfileVersion: LOCKED_SCANNER_PROFILE,
+    pendingUploadCount: 0,
+    captureState: "IDLE",
+    lastFailureCode: null,
+  };
+}
+
+async function inRecoveryRuntime<T>(
+  runtime: "staging" | "production" | "test",
+  operation: () => Promise<T>
+): Promise<T> {
+  const previousRuntime = process.env.MINTVAULT_RUNTIME_ENV;
+  const previousFlyApp = process.env.FLY_APP_NAME;
+  process.env.MINTVAULT_RUNTIME_ENV = runtime;
+  process.env.FLY_APP_NAME = runtime === "staging" ? "mintvault-v2" : `mintvault-${runtime}`;
+  try {
+    return await operation();
+  } finally {
+    if (previousRuntime === undefined) delete process.env.MINTVAULT_RUNTIME_ENV;
+    else process.env.MINTVAULT_RUNTIME_ENV = previousRuntime;
+    if (previousFlyApp === undefined) delete process.env.FLY_APP_NAME;
+    else process.env.FLY_APP_NAME = previousFlyApp;
+  }
+}
+
+async function stationIdentityState(stationId: string) {
+  return (
+    await admin.query<{
+      scanner_connected: boolean;
+      scanner_hardware: Record<string, unknown>;
+      scanner_hardware_fingerprint: string | null;
+      scanner_profile_version: string | null;
+      calibration_status: string;
+      current_calibration_id: string | null;
+    }>(
+      `SELECT scanner_connected, scanner_hardware, scanner_hardware_fingerprint,
+              scanner_profile_version, calibration_status, current_calibration_id
+         FROM partner_stations WHERE id=$1`,
+      [stationId]
+    )
+  ).rows[0];
+}
+
+async function addRecoveryBlockingWork(
+  prepared: RecoveryFixture,
+  captureState: "armed" | "captured",
+  stagingState?: "granted" | "finalizing"
+): Promise<void> {
+  opSeq += 1;
+  const certificateId = (
+    await admin.query<{ id: number }>(`INSERT INTO certificates (certificate_number) VALUES ($1) RETURNING id`, [
+      `MV-HB-${RUN_SALT}-${opSeq}`,
+    ])
+  ).rows[0].id;
+  const captureSessionId = `heartbeat-recovery-${RUN_SALT}-${opSeq}`;
+  await admin.query(
+    `INSERT INTO scanner_capture_sessions
+       (id, certificate_id, side, workstation_id, station_id, scanner_profile_version, state, expires_at)
+     VALUES ($1,$2,'front',$3,$4,$5,$6,now()+interval '10 minutes')`,
+    [captureSessionId, certificateId, prepared.station.code, prepared.station.id, LOCKED_SCANNER_PROFILE, captureState]
+  );
+  if (stagingState) {
+    await admin.query(
+      `INSERT INTO scanner_evidence_staging
+         (capture_session_id, station_id, object_key, expected_sha256, expected_bytes,
+          capture_provenance, state, expires_at)
+       VALUES ($1,$2,$3,$4,1024,'{}'::jsonb,$5,now()+interval '10 minutes')`,
+      [captureSessionId, prepared.station.id, `scanner-staging/${RUN_SALT}/${opSeq}`, "a".repeat(64), stagingState]
+    );
+  }
+}
+
 /**
  * Run the draft-write guard in the EXACT composition applyCertGradeDraft builds:
  *   UPDATE certificates SET ... WHERE id = ? AND grade_approved_at IS NULL <guard> RETURNING id
@@ -510,6 +791,7 @@ async function runDraftWriteGuard(p: PartnerPrincipal, certificateId: number): P
 
 let shopA: Fixture;
 let shopB: Fixture;
+let approvedRecovery: RecoveryFixture;
 
 describe("Card Job → canonical grading bridge (real PostgreSQL)", () => {
   beforeAll(async () => {
@@ -530,12 +812,15 @@ describe("Card Job → canonical grading bridge (real PostgreSQL)", () => {
       "0045_partner_stations",
       "0087_partner_grading_edit_lease",
     ]);
+    await seedScannerEvidenceStaging();
     savedEnv = {
       MINTVAULT_DATABASE_URL: process.env.MINTVAULT_DATABASE_URL,
       PARTNER_ADMIN_DATABASE_URL: process.env.PARTNER_ADMIN_DATABASE_URL,
       PARTNER_DATABASE_URL: process.env.PARTNER_DATABASE_URL,
       PARTNER_CONNECTOR_DATABASE_URL: process.env.PARTNER_CONNECTOR_DATABASE_URL,
       MINTVAULT_LOCAL_EVIDENCE_DIR: process.env.MINTVAULT_LOCAL_EVIDENCE_DIR,
+      MINTVAULT_RUNTIME_ENV: process.env.MINTVAULT_RUNTIME_ENV,
+      FLY_APP_NAME: process.env.FLY_APP_NAME,
     };
     localEvidenceRoot = await mkdtemp(join(tmpdir(), "mintvault-bridge-evidence-"));
     process.env.MINTVAULT_LOCAL_EVIDENCE_DIR = localEvidenceRoot;
@@ -551,10 +836,12 @@ describe("Card Job → canonical grading bridge (real PostgreSQL)", () => {
     leases = await import("../server/partner/grading-lease-service");
     grading = await import("../server/partner/grading-routes");
     printEligibility = await import("../server/partner/print-eligibility");
+    stationService = await import("../server/partner/station-service");
     drizzle = await import("../server/db");
 
     shopA = await makeTenant("alpha");
     shopB = await makeTenant("beta");
+    approvedRecovery = await prepareRecoveryFixture("canon-recovery", "INVALID", true);
     await addCredits(shopA.tenantId, 60, `bridge-alpha-credits-${RUN_SALT}`);
     await addCredits(shopB.tenantId, 20, `bridge-beta-credits-${RUN_SALT}`);
   }, 240_000);
@@ -1822,5 +2109,344 @@ describe("Card Job → canonical grading bridge (real PostgreSQL)", () => {
     expect(Number(calibrations.rows[0].n)).toBe(1);
     expect(Number(events.rows[0].n)).toBe(1);
     expect(current.rows[0]).toEqual({ current_calibration_id: first.id, calibration_status: "VALID" });
+  });
+
+  it("AT-B25: a disconnected transport/fallback heartbeat preserves the last proved scanner identity and calibration", async () => {
+    const prepared = await prepareRecoveryFixture("heartbeat-disconnect", "VALID");
+    const before = await stationIdentityState(prepared.station.id);
+    const result = await stationService.recordStationHeartbeat(prepared.station, {
+      appVersion: "1.5.7",
+      scannerConnected: false,
+      scannerHardware: {
+        manufacturer: "Not the attached scanner",
+        model: "transport unavailable",
+        deviceId: "fallback-observation",
+      },
+      scannerProfileVersion: "transient-error-profile",
+      pendingUploadCount: 0,
+      captureState: "IDLE",
+      lastFailureCode: "scanner_disconnected",
+    });
+    const after = await stationIdentityState(prepared.station.id);
+
+    expect(result.hardwareChanged).toBe(false);
+    expect(result.profileChanged).toBe(false);
+    expect(result.existingCalibrationRestored).toBe(false);
+    expect(after.scanner_connected).toBe(false);
+    expect(after.scanner_hardware).toEqual(before.scanner_hardware);
+    expect(after.scanner_hardware_fingerprint).toBe(before.scanner_hardware_fingerprint);
+    expect(after.scanner_profile_version).toBe(before.scanner_profile_version);
+    expect(after.calibration_status).toBe("VALID");
+    expect(after.current_calibration_id).toBe(prepared.calibrationId);
+  });
+
+  it("AT-B26: connected Canon/CanoScan aliases are one physical identity and retain the current calibration", async () => {
+    const prepared = await prepareRecoveryFixture("heartbeat-alias", "VALID");
+    const before = await stationIdentityState(prepared.station.id);
+    const result = await stationService.recordStationHeartbeat(
+      prepared.station,
+      healthyHeartbeatInput(prepared, "CanoScan LiDE 400")
+    );
+    const after = await stationIdentityState(prepared.station.id);
+
+    expect(result.hardwareChanged).toBe(false);
+    expect(result.profileChanged).toBe(false);
+    expect(result.existingCalibrationRestored).toBe(false);
+    expect(after.scanner_hardware).toEqual(before.scanner_hardware);
+    expect(after.scanner_hardware_fingerprint).toBe(prepared.hardwareFingerprint);
+    expect(after.scanner_profile_version).toBe(LOCKED_SCANNER_PROFILE);
+    expect(after.calibration_status).toBe("VALID");
+    expect(after.current_calibration_id).toBe(prepared.calibrationId);
+  });
+
+  it("AT-B27: a truly different connected device or profile still invalidates and detaches calibration", async () => {
+    const deviceChange = await prepareRecoveryFixture("heartbeat-device-change", "VALID");
+    const deviceResult = await stationService.recordStationHeartbeat(deviceChange.station, {
+      ...healthyHeartbeatInput(deviceChange),
+      scannerHardware: { ...deviceChange.hardware, deviceId: "different-physical-device" },
+    });
+    const afterDevice = await stationIdentityState(deviceChange.station.id);
+    expect(deviceResult.hardwareChanged).toBe(true);
+    expect(deviceResult.profileChanged).toBe(false);
+    expect(afterDevice.calibration_status).toBe("INVALID");
+    expect(afterDevice.current_calibration_id).toBeNull();
+    expect(afterDevice.scanner_hardware_fingerprint).not.toBe(deviceChange.hardwareFingerprint);
+
+    const profileChange = await prepareRecoveryFixture("heartbeat-profile-change", "VALID");
+    const profileResult = await stationService.recordStationHeartbeat(profileChange.station, {
+      ...healthyHeartbeatInput(profileChange),
+      scannerProfileVersion: "mintvault-canon-lide-400-v4",
+    });
+    const afterProfile = await stationIdentityState(profileChange.station.id);
+    expect(profileResult.hardwareChanged).toBe(false);
+    expect(profileResult.profileChanged).toBe(true);
+    expect(afterProfile.calibration_status).toBe("INVALID");
+    expect(afterProfile.current_calibration_id).toBeNull();
+    expect(afterProfile.scanner_profile_version).toBe("mintvault-canon-lide-400-v4");
+  });
+
+  it("AT-B28: permission absence, production/test runtime and every non-approved station cannot restore", async () => {
+    await resetApprovedRecoveryFixture(approvedRecovery);
+    const noPermission = await inRecoveryRuntime("staging", () =>
+      stationService.recordStationHeartbeat(
+        approvedRecovery.station,
+        healthyHeartbeatInput(approvedRecovery),
+        approvedRecovery.fixture.owner,
+        { approvedExistingCalibrationId: null }
+      )
+    );
+    const production = await inRecoveryRuntime("production", () =>
+      stationService.recordStationHeartbeat(
+        approvedRecovery.station,
+        healthyHeartbeatInput(approvedRecovery),
+        approvedRecovery.fixture.owner,
+        { approvedExistingCalibrationId: APPROVED_RECOVERY_CALIBRATION_ID }
+      )
+    );
+    const testRuntime = await inRecoveryRuntime("test", () =>
+      stationService.recordStationHeartbeat(
+        approvedRecovery.station,
+        healthyHeartbeatInput(approvedRecovery),
+        approvedRecovery.fixture.owner,
+        { approvedExistingCalibrationId: APPROVED_RECOVERY_CALIBRATION_ID }
+      )
+    );
+    const unrelated = await prepareRecoveryFixture("heartbeat-not-approved", "INVALID");
+    const wrongStation = await inRecoveryRuntime("staging", () =>
+      stationService.recordStationHeartbeat(
+        unrelated.station,
+        healthyHeartbeatInput(unrelated),
+        unrelated.fixture.owner,
+        { approvedExistingCalibrationId: APPROVED_RECOVERY_CALIBRATION_ID }
+      )
+    );
+
+    expect(noPermission.existingCalibrationRestored).toBe(false);
+    expect(production.existingCalibrationRestored).toBe(false);
+    expect(testRuntime.existingCalibrationRestored).toBe(false);
+    expect(wrongStation.existingCalibrationRestored).toBe(false);
+    expect((await stationIdentityState(approvedRecovery.station.id)).calibration_status).toBe("INVALID");
+    expect((await stationIdentityState(approvedRecovery.station.id)).current_calibration_id).toBeNull();
+    expect((await stationIdentityState(unrelated.station.id)).calibration_status).toBe("INVALID");
+    expect(
+      stationService.approvedStagingCanonCalibrationRecoveryId(APPROVED_RECOVERY_STATION_CODE, {
+        FLY_APP_NAME: "mintvault-v2",
+        MINTVAULT_RUNTIME_ENV: "staging",
+      })
+    ).toBe(APPROVED_RECOVERY_CALIBRATION_ID);
+    expect(
+      stationService.approvedStagingCanonCalibrationRecoveryId("MV-STN-NOTTHEAPPROVED2", {
+        FLY_APP_NAME: "mintvault-v2",
+        MINTVAULT_RUNTIME_ENV: "staging",
+      })
+    ).toBeNull();
+    expect(
+      stationService.approvedStagingCanonCalibrationRecoveryId(APPROVED_RECOVERY_STATION_CODE, {
+        FLY_APP_NAME: "mintvault-v2",
+        MINTVAULT_RUNTIME_ENV: "production",
+      })
+    ).toBeNull();
+  });
+
+  it("AT-B29: live capture and live R2 staging work both refuse recovery and roll back the heartbeat", async () => {
+    await resetApprovedRecoveryFixture(approvedRecovery);
+    await addRecoveryBlockingWork(approvedRecovery, "armed");
+    const liveCapture = await inRecoveryRuntime("staging", () =>
+      settle(
+        stationService.recordStationHeartbeat(
+          approvedRecovery.station,
+          healthyHeartbeatInput(approvedRecovery),
+          approvedRecovery.fixture.owner,
+          { approvedExistingCalibrationId: APPROVED_RECOVERY_CALIBRATION_ID }
+        )
+      )
+    );
+    expect(liveCapture).toEqual({ ok: false, code: "calibration_required" });
+    expect((await stationIdentityState(approvedRecovery.station.id)).current_calibration_id).toBeNull();
+
+    await resetApprovedRecoveryFixture(approvedRecovery);
+    await addRecoveryBlockingWork(approvedRecovery, "captured", "granted");
+    const liveStaging = await inRecoveryRuntime("staging", () =>
+      settle(
+        stationService.recordStationHeartbeat(
+          approvedRecovery.station,
+          healthyHeartbeatInput(approvedRecovery),
+          approvedRecovery.fixture.owner,
+          { approvedExistingCalibrationId: APPROVED_RECOVERY_CALIBRATION_ID }
+        )
+      )
+    );
+    expect(liveStaging).toEqual({ ok: false, code: "calibration_required" });
+    const after = await stationIdentityState(approvedRecovery.station.id);
+    expect(after.calibration_status).toBe("INVALID");
+    expect(after.current_calibration_id).toBeNull();
+    expect(
+      Number(
+        (
+          await admin.query<{ n: string }>(
+            `SELECT count(*)::text AS n FROM partner_station_events
+              WHERE station_id=$1 AND event_type='station_existing_calibration_restored'`,
+            [approvedRecovery.station.id]
+          )
+        ).rows[0].n
+      )
+    ).toBe(0);
+  });
+
+  it("AT-B29b: an alternate matching VALID row cannot redirect the exact approved recovery target", async () => {
+    await resetApprovedRecoveryFixture(approvedRecovery);
+    await admin.query(`UPDATE partner_station_calibrations SET health_status='INVALID' WHERE id=$1`, [
+      approvedRecovery.calibrationId,
+    ]);
+    const alternateWorkingRegion = { ...RECOVERY_WORKING_REGION, x: 25.6 };
+    const alternateFingerprint = fixtureFingerprint({
+      scannerHardwareFingerprint: approvedRecovery.hardwareFingerprint,
+      scannerProfileVersion: LOCKED_SCANNER_PROFILE,
+      acquisitionRegion: RECOVERY_ACQUISITION_REGION,
+      workingRegion: alternateWorkingRegion,
+      placementToleranceMm: RECOVERY_TOLERANCE,
+      calibrationVersion: RECOVERY_CALIBRATION_VERSION,
+    });
+    const alternateId = (
+      await admin.query<{ id: string }>(
+        `INSERT INTO partner_station_calibrations
+           (tenant_id,location_id,station_id,calibration_fingerprint,scanner_hardware_fingerprint,
+            scanner_hardware,scanner_profile_version,acquisition_region,working_region,
+            placement_tolerance_mm,calibration_version,health_status,created_by_user_id)
+         VALUES ($1,$2,$3,$4,$5,$6::jsonb,$7,$8::jsonb,$9::jsonb,$10::jsonb,$11,'VALID',$12)
+         RETURNING id`,
+        [
+          approvedRecovery.station.tenantId,
+          approvedRecovery.station.locationId,
+          approvedRecovery.station.id,
+          alternateFingerprint,
+          approvedRecovery.hardwareFingerprint,
+          JSON.stringify(approvedRecovery.hardware),
+          LOCKED_SCANNER_PROFILE,
+          JSON.stringify(RECOVERY_ACQUISITION_REGION),
+          JSON.stringify(alternateWorkingRegion),
+          JSON.stringify(RECOVERY_TOLERANCE),
+          RECOVERY_CALIBRATION_VERSION,
+          approvedRecovery.fixture.owner,
+        ]
+      )
+    ).rows[0].id;
+    const refusal = await inRecoveryRuntime("staging", () =>
+      settle(
+        stationService.recordStationHeartbeat(
+          approvedRecovery.station,
+          healthyHeartbeatInput(approvedRecovery),
+          approvedRecovery.fixture.owner,
+          { approvedExistingCalibrationId: APPROVED_RECOVERY_CALIBRATION_ID }
+        )
+      )
+    );
+
+    expect(refusal).toEqual({ ok: false, code: "calibration_required" });
+    const state = await stationIdentityState(approvedRecovery.station.id);
+    expect(state.calibration_status).toBe("INVALID");
+    expect(state.current_calibration_id).toBeNull();
+    expect(state.current_calibration_id).not.toBe(alternateId);
+  });
+
+  it("AT-B30: exact recovery reattaches the same immutable row once, races idempotently, and can never resurrect it later", async () => {
+    await resetApprovedRecoveryFixture(approvedRecovery);
+    const calibrationBefore = (
+      await admin.query<{ row: Record<string, unknown> }>(
+        `SELECT to_jsonb(k) AS row FROM partner_station_calibrations k WHERE id=$1`,
+        [approvedRecovery.calibrationId]
+      )
+    ).rows[0].row;
+    const countBefore = Number(
+      (
+        await admin.query<{ n: string }>(
+          `SELECT count(*)::text AS n FROM partner_station_calibrations WHERE station_id=$1`,
+          [approvedRecovery.station.id]
+        )
+      ).rows[0].n
+    );
+    const raced = await inRecoveryRuntime("staging", () =>
+      Promise.all([
+        stationService.recordStationHeartbeat(
+          approvedRecovery.station,
+          healthyHeartbeatInput(approvedRecovery, "Canon LiDE 400"),
+          approvedRecovery.fixture.owner,
+          { approvedExistingCalibrationId: APPROVED_RECOVERY_CALIBRATION_ID }
+        ),
+        stationService.recordStationHeartbeat(
+          approvedRecovery.station,
+          healthyHeartbeatInput(approvedRecovery, "CanoScan LiDE 400"),
+          approvedRecovery.fixture.owner,
+          { approvedExistingCalibrationId: APPROVED_RECOVERY_CALIBRATION_ID }
+        ),
+      ])
+    );
+    expect(raced.filter((result) => result.existingCalibrationRestored)).toHaveLength(1);
+    expect(raced.every((result) => result.calibrationStatus === "VALID")).toBe(true);
+
+    const ordinaryRetry = await inRecoveryRuntime("staging", () =>
+      stationService.recordStationHeartbeat(
+        approvedRecovery.station,
+        healthyHeartbeatInput(approvedRecovery),
+        approvedRecovery.fixture.owner,
+        { approvedExistingCalibrationId: APPROVED_RECOVERY_CALIBRATION_ID }
+      )
+    );
+    expect(ordinaryRetry.existingCalibrationRestored).toBe(false);
+
+    const [state, calibrationAfter, calibrationCount, restoreEvents] = await Promise.all([
+      stationIdentityState(approvedRecovery.station.id),
+      admin.query<{ row: Record<string, unknown> }>(
+        `SELECT to_jsonb(k) AS row FROM partner_station_calibrations k WHERE id=$1`,
+        [approvedRecovery.calibrationId]
+      ),
+      admin.query<{ n: string }>(`SELECT count(*)::text AS n FROM partner_station_calibrations WHERE station_id=$1`, [
+        approvedRecovery.station.id,
+      ]),
+      admin.query<{ n: string }>(
+        `SELECT count(*)::text AS n FROM partner_station_events
+          WHERE station_id=$1 AND event_type='station_existing_calibration_restored'
+            AND detail->>'calibrationId'=$2`,
+        [approvedRecovery.station.id, approvedRecovery.calibrationId]
+      ),
+    ]);
+    expect(state.calibration_status).toBe("VALID");
+    expect(state.current_calibration_id).toBe(approvedRecovery.calibrationId);
+    expect(calibrationAfter.rows[0].row).toEqual(calibrationBefore);
+    expect(Number(calibrationCount.rows[0].n)).toBe(countBefore);
+    expect(Number(restoreEvents.rows[0].n)).toBe(1);
+
+    // The append-only event consumes this narrowly authorised exception. If the pointer is ever
+    // lost again, even an exact signed/MFA heartbeat cannot silently resurrect the calibration.
+    await admin.query(
+      `UPDATE partner_stations SET calibration_status='INVALID', current_calibration_id=NULL WHERE id=$1`,
+      [approvedRecovery.station.id]
+    );
+    const consumed = await inRecoveryRuntime("staging", () =>
+      settle(
+        stationService.recordStationHeartbeat(
+          approvedRecovery.station,
+          healthyHeartbeatInput(approvedRecovery),
+          approvedRecovery.fixture.owner,
+          { approvedExistingCalibrationId: APPROVED_RECOVERY_CALIBRATION_ID }
+        )
+      )
+    );
+    expect(consumed).toEqual({ ok: false, code: "calibration_required" });
+    const consumedState = await stationIdentityState(approvedRecovery.station.id);
+    expect(consumedState.calibration_status).toBe("INVALID");
+    expect(consumedState.current_calibration_id).toBeNull();
+    expect(
+      Number(
+        (
+          await admin.query<{ n: string }>(
+            `SELECT count(*)::text AS n FROM partner_station_events
+              WHERE station_id=$1 AND event_type='station_existing_calibration_restored'
+                AND detail->>'calibrationId'=$2`,
+            [approvedRecovery.station.id, approvedRecovery.calibrationId]
+          )
+        ).rows[0].n
+      )
+    ).toBe(1);
   });
 });
