@@ -5,8 +5,9 @@
 - **Issue:** SCN-GEOMETRY-001
 - **Detected in:** Scanner v1.5.7 against `mintvault-v2` STAGING
 - **Server baseline:** `ebcab6dba185a029bf0a22c75934eb1357adda11`
-- **Repair implementation:** `5db0663df7e5f9941907562b5bbbffb6655003c0`
-- **Deployment:** Pending final exact-SHA release clearance; production untouched
+- **Repair implementation:** `72757f47228609d275a127c659647478e2f88aa7`
+- **Deployment:** First STAGING image build failed safely before release; corrected candidate pending
+  final exact-SHA clearance; production untouched
 
 ## Observed failure
 
@@ -74,7 +75,24 @@ refused once any capture session references the corrected calibration.
 | Real PostgreSQL 17.10 inspect -> apply -> replay -> rollback | PASS; old row byte-equivalent, two append-only calibration rows, exact pointer/events |
 | Protected real PostgreSQL Card Job/grading bridge | 45/45 PASS |
 | TypeScript, focused ESLint, production build and Graphify freshness | PASS |
-| Targeted hostile review after repairs | CLEAR; no actionable BLOCKER/HIGH/MEDIUM |
+| Docker build-context entrypoint regression | 4/4 PASS; every `scripts/` build entrypoint must be explicitly re-admitted |
+| Exact-SHA hostile review before packaging correction | `413f124b60c5f0b916775977e1bef687a1aa9c9c` CLEAR; no actionable BLOCKER/HIGH/MEDIUM |
+
+## Preserved failed STAGING deploy attempt
+
+The authorised safe-deploy attempt for exact candidate
+`413f124b60c5f0b916775977e1bef687a1aa9c9c` proved that live STAGING remained at
+`ebcab6dba185a029bf0a22c75934eb1357adda11`, that the candidate contained the live commit, and that
+the live SHA did not move during preflight. The remote builder then failed before producing or
+releasing an image because `.dockerignore` excluded
+`scripts/staging/repair-canon-lide400-geometry.ts`. Its automatic retry failed at the same boundary.
+No Fly release, machine update, database write or Scanner state change occurred.
+
+The packaging repair re-admits only the exact incident entrypoint while leaving every other
+`scripts/staging` tool excluded. The existing Docker-context test now derives every `scripts/`
+entrypoint from `script/build.ts` and requires a matching allowlist entry, so this class of local-green
+but remote-unbuildable defect fails in CI. The corrected candidate must repeat full postflight,
+exact-SHA hostile review and STAGING safe-deploy before the calibration command is invoked.
 
 ## Remaining physical acceptance
 
