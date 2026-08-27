@@ -23,6 +23,7 @@ import { join } from "node:path";
 
 const ROOT = join(__dirname, "..");
 const DOCKERIGNORE = readFileSync(join(ROOT, ".dockerignore"), "utf8");
+const BUILD_SCRIPT = readFileSync(join(ROOT, "script/build.ts"), "utf8");
 
 /** Files under scripts/ explicitly re-admitted to the build context with a `!` entry. */
 function allowlistedScripts(): string[] {
@@ -83,6 +84,19 @@ describe("the Docker build context contains everything the build imports", () =>
       missing,
       `Docker build context is missing files the build imports — this fails on the Fly builder, ` +
         `NOT in CI, because CI builds the whole repo:\n  ${missing.join("\n  ")}`
+    ).toEqual([]);
+  });
+
+  it("re-admits every scripts entrypoint bundled by the build", () => {
+    const allow = new Set(allowlistedScripts());
+    const entrypoints = [...BUILD_SCRIPT.matchAll(/entryPoints:\s*\[\s*["'](scripts\/[^"']+\.ts)["']/g)].map(
+      (match) => match[1]
+    );
+
+    expect(entrypoints.length).toBeGreaterThan(0);
+    expect(
+      entrypoints.filter((entrypoint) => !allow.has(entrypoint)),
+      "script/build.ts bundles a scripts entrypoint that .dockerignore does not re-admit"
     ).toEqual([]);
   });
 

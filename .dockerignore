@@ -52,6 +52,11 @@ uploads
 !scripts/run-mvgs-v2-migration.ts
 # Exception: one-off set-designation data repair (dry-run default, see file header)
 !scripts/repair-set-designations.ts
+# Exception: incident-specific STAGING Canon geometry repair (dry-run default).
+# Re-admit only the exact entrypoint; the rest of scripts/staging remains excluded.
+!scripts/staging/
+scripts/staging/*
+!scripts/staging/repair-canon-lide400-geometry.ts
 # cornelius-engineering-os:begin id=generated-egress v=1
 # Generated engineering intelligence must not enter Docker build context
 graphify-out/
