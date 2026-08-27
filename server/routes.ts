@@ -3236,7 +3236,27 @@ export async function registerRoutes(httpServer: Server, app: Express): Promise<
         res.setHeader("Cache-Control", "public, max-age=3600");
         res.setHeader("Access-Control-Allow-Origin", "*");
         if (result.ContentLength != null) res.setHeader("Content-Length", String(result.ContentLength));
-        (result.Body as NodeJS.ReadableStream).pipe(res);
+        // pipe() does NOT forward source errors and does NOT destroy the source
+        // when the destination goes away. Without both handlers an R2 reset
+        // mid-transfer is an unhandled 'error' that kills the process, and a
+        // client disconnect strands the R2 socket in the shared S3Client agent.
+        // Same shape as the export download in routes/vault-quest-admin.ts.
+        const body = result.Body as NodeJS.ReadableStream & { destroy?: () => void };
+        res.on("close", () => body.destroy?.());
+        body.on("error", (streamErr: any) => {
+          console.error(`[slab-image] R2 stream error for ${certNumber}/${kind} (${key}): ${streamErr?.message}`);
+          if (!res.headersSent) {
+            // The image headers above are already staged. Sending a 502 while
+            // Content-Length still advertises the object size makes the client
+            // wait for bytes that never come, so clear them first.
+            res.removeHeader("Content-Length");
+            res.removeHeader("Content-Type");
+            res.status(502).end();
+          } else {
+            res.destroy();
+          }
+        });
+        body.pipe(res);
       } catch (r2Err: any) {
         // Missing object (e.g. label not generated yet) → 404; anything else → 502
         const code = r2Err?.name === "NoSuchKey" || r2Err?.$metadata?.httpStatusCode === 404 ? 404 : 502;
@@ -4093,6 +4113,21 @@ export async function registerRoutes(httpServer: Server, app: Express): Promise<
 
       res.setHeader("Content-Type", "application/pdf");
       res.setHeader("Content-Disposition", `attachment; filename="MintVault-DGR-${certId}.pdf"`);
+      // doc.pipe(res) flushes the PDF header immediately, so the catch below
+      // (guarded on !res.headersSent) can no longer answer once drawing starts.
+      // Without these the response is never ended on a mid-render failure and
+      // the document is retained behind a hung socket.
+      doc.on("error", (docErr: any) => {
+        console.error(`[report/pdf] document error for ${certId}: ${docErr?.message}`);
+        if (!res.headersSent) {
+          res.removeHeader("Content-Type");
+          res.removeHeader("Content-Disposition");
+          res.status(500).json({ error: "PDF generation failed" });
+        } else {
+          res.destroy();
+        }
+      });
+      res.on("close", () => doc.destroy?.());
       doc.pipe(res);
 
       const GOLD = "#D4AF37";
