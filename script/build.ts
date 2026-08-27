@@ -120,6 +120,22 @@ async function buildAll() {
     logLevel: "info",
   });
 
+  // Incident-specific, STAGING-only Canon LiDE 400 geometry repair. The
+  // artifact is inert unless deliberately invoked and is dry-run by default.
+  console.log("building STAGING Canon geometry repair script...");
+  await esbuild({
+    entryPoints: ["scripts/staging/repair-canon-lide400-geometry.ts"],
+    platform: "node",
+    bundle: true,
+    format: "cjs",
+    outfile: "dist/repair-canon-lide400-geometry.cjs",
+    define: {
+      "process.env.NODE_ENV": '"production"',
+    },
+    external: externals,
+    logLevel: "info",
+  });
+
   // Numbered migration runner for explicit one-off execution inside the Fly
   // production image. Normal web startup remains dist/index.cjs; this artifact
   // only runs when an operator deliberately invokes:

@@ -120,7 +120,8 @@ async function resolveArmedAcquisitionRegion(
        FROM partner_stations s
        JOIN partner_station_calibrations k ON k.id = s.current_calibration_id
       WHERE s.id = $1
-      LIMIT 1`,
+      LIMIT 1
+      FOR SHARE OF s`,
     [stationId]
   );
   const row = found.rows[0];
@@ -911,8 +912,7 @@ export async function getScannerCaptureStatus(
       [sessionId, deviceId]
     );
     const row = found.rows[0] as
-      | (Record<string, unknown> & { evidence_accepted?: boolean; card_registered?: boolean })
-      | undefined;
+      (Record<string, unknown> & { evidence_accepted?: boolean; card_registered?: boolean }) | undefined;
     if (!row) throw new Error("Capture session not found for this scanner");
     if (
       (row.state === "armed" || row.state === "claimed") &&
