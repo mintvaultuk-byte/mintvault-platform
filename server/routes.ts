@@ -142,6 +142,7 @@ import { certIsPristine } from "./lib/cert-pristine";
 import { resolveDraftGradeAuthority } from "./lib/draft-grade-authority";
 import { enqueueScanJob } from "./lib/scan-job-queue";
 import { scannerEvidenceAdmission } from "./lib/scanner-evidence-admission";
+import { phoneUploadAdmission } from "./lib/phone-upload-admission";
 import { isServiceValidForCarrier } from "@shared/carriers";
 import { deriveVariantFromIdentification, splitSetDesignation } from "@shared/variant-derive";
 import {
@@ -8790,7 +8791,58 @@ Defects (admin-confirmed): ${defectLines}`;
 
   // ── Build 4: Public phone upload endpoint ─────────────────────────────────
 
-  app.post("/api/upload/:certId/:imageType", phoneUpload.single("image"), async (req, res) => {
+  /**
+   * Fail-closed gate, deliberately BEFORE multer.
+   *
+   * The upload token is a stateless HMAC over (certId, imageType, exp) — see
+   * server/lib/upload-token.ts — so verifying it needs only the URL path and the
+   * query string, with no database or network I/O. That means it can run before
+   * a single body byte is buffered.
+   *
+   * Previously the check lived inside the handler, i.e. AFTER
+   * phoneUpload.single() had already read up to 30 MB into memory. Measured on
+   * the real server: 12 concurrent unauthenticated requests (all answered 401)
+   * allocated 771.8 MB, because every body was buffered in full before the
+   * token was looked at. Unauthenticated traffic now costs an HMAC, not 30 MB.
+   *
+   * The in-handler check below is intentionally KEPT as defence in depth.
+   */
+  const requirePhoneUploadToken = (req: ExpressRequest, res: ExpressResponse, next: ExpressNextFunction) => {
+    const token = req.query.token;
+    if (typeof token !== "string" || token.length === 0) {
+      return res.status(401).json({ error: "Token required" });
+    }
+    if (!verifyUploadToken(String(req.params.certId), String(req.params.imageType), token)) {
+      return res.status(401).json({ error: "Invalid or expired token" });
+    }
+    next();
+  };
+
+  /**
+   * Run multer and translate its own rejections into accurate statuses.
+   * Previously a file over the 30 MB cap surfaced as MulterError -> the global
+   * handler -> 500 "Internal server error"; an over-large photo is a client
+   * condition (413), not a server fault.
+   */
+  const phoneUploadWithLimits = (req: ExpressRequest, res: ExpressResponse, next: ExpressNextFunction) => {
+    phoneUpload.single("image")(req, res, (err: any) => {
+      if (!err) return next();
+      if (err?.code === "LIMIT_FILE_SIZE") {
+        return res.status(413).json({ error: "Image is too large (30 MB maximum)" });
+      }
+      if (err instanceof Error && err.message === "Images only") {
+        return res.status(400).json({ error: "Images only" });
+      }
+      return next(err);
+    });
+  };
+
+  app.post(
+    "/api/upload/:certId/:imageType",
+    requirePhoneUploadToken,
+    phoneUploadAdmission.middleware,
+    phoneUploadWithLimits,
+    async (req, res) => {
     try {
       const { autoCrop, checkImageQuality } = await import("./image-processing");
       const token = req.query.token as string;
@@ -8834,7 +8886,8 @@ Defects (admin-confirmed): ${defectLines}`;
     } catch (err: any) {
       sendServerError(res, err);
     }
-  });
+    }
+  );
 
   // ── Build 4: Hot folder upload ─────────────────────────────────────────────
 
