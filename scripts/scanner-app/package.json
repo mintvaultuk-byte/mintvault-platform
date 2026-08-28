@@ -15,7 +15,7 @@
     "experiment:lide400-quality": "node experiment-lide400-quality.js"
   },
   "dependencies": {
-    "chokidar": "^4.0.1",
+    "chokidar": "^5.0.0",
     "form-data": "^4.0.0",
     "node-fetch": "^3.3.2",
     "sharp": "^0.33.5"
