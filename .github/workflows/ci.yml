@@ -365,7 +365,7 @@ jobs:
           --health-retries 20
 
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
         with:
           # Full history so the grading-release-scope guard (tests/helpers/grading-release-scope.ts)
           # can reach its pinned base commits (d69ad147/fc57b53b); it fail-closes on a shallow clone.
@@ -662,7 +662,7 @@ jobs:
       contents: read
       pull-requests: read
     steps:
-      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v4
       - name: Dependency review (block HIGH on the PR diff)
         uses: actions/dependency-review-action@v4
         with:
@@ -675,7 +675,7 @@ jobs:
     permissions:
       contents: read
     steps:
-      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v4
         with:
           fetch-depth: 0 # full history so gitleaks can scan all commits on the ref
       - name: Gitleaks
@@ -695,7 +695,7 @@ jobs:
       matrix:
         language: [javascript-typescript]
     steps:
-      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v4
       - name: Initialize CodeQL
         uses: github/codeql-action/init@v3
         with:
