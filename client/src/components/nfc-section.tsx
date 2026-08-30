@@ -1,4 +1,4 @@
-import { useState, useCallback } from "react";
+import { useState, useCallback, useEffect } from "react";
 import { useMutation, useQueryClient } from "@tanstack/react-query";
 import { apiRequest } from "@/lib/queryClient";
 import type { CertificateRecord } from "@shared/schema";
@@ -19,6 +19,29 @@ import {
 import { Wifi, WifiOff, CheckCircle2, Lock, Loader2, ExternalLink, Trash2, ShieldCheck, KeyRound } from "lucide-react";
 
 const NFC_BASE_URL = "https://mintvaultuk.com/nfc";
+const NFC_LOCK_METHOD = "web_nfc_make_read_only";
+const NFC_LOCK_RECOVERY_METHOD = "operator_verified_read_only_recovery";
+const NFC_LOCK_CANCEL_METHOD = "operator_verified_writable";
+
+interface NfcLockReceipt {
+  attemptToken: string;
+  uid: string;
+  physicalLockConfirmed: boolean;
+}
+
+function nfcLockReceiptKey(certificateId: number): string {
+  return `mintvault:nfc-lock:${certificateId}`;
+}
+
+function readNfcLockReceipt(certificateId: number): NfcLockReceipt | null {
+  if (typeof window === "undefined") return null;
+  try {
+    const parsed = JSON.parse(window.localStorage.getItem(nfcLockReceiptKey(certificateId)) || "null");
+    return parsed && typeof parsed.attemptToken === "string" && typeof parsed.uid === "string" ? parsed : null;
+  } catch {
+    return null;
+  }
+}
 
 type NfcOp = "idle" | "reading" | "writing" | "locking" | "testing";
 
@@ -33,6 +56,8 @@ function nfcStatus(cert: CertificateRecord): {
 } {
   if (!cert.nfcUid) return { label: "No NFC assigned", color: "outline", icon: <WifiOff className="h-3 w-3" /> };
   if (cert.nfcLocked) return { label: "Tag locked", color: "default", icon: <Lock className="h-3 w-3" /> };
+  if (cert.nfcLockPendingAt)
+    return { label: "Lock reconciliation pending", color: "destructive", icon: <ShieldCheck className="h-3 w-3" /> };
   if (cert.nfcWrittenAt)
     return { label: "Tag written", color: "secondary", icon: <CheckCircle2 className="h-3 w-3" /> };
   return { label: "Tag detected", color: "outline", icon: <Wifi className="h-3 w-3" /> };
@@ -59,10 +84,25 @@ export default function NfcSection({ cert, onUpdated }: Props) {
   const [manualUid, setManualUid] = useState("");
   const [manualChipType, setManualChipType] = useState("");
   const [overwritePending, setOverwritePending] = useState<{ uid: string; chipType?: string } | null>(null);
+  const [lockReceipt, setLockReceipt] = useState<NfcLockReceipt | null>(() => readNfcLockReceipt(cert.id));
+  const [reconciliationReason, setReconciliationReason] = useState("");
 
   const nfcUrl = `${NFC_BASE_URL}/${cert.certId}`;
   const status = nfcStatus(cert);
   const supported = nfcAvailable();
+  const lockPending = !!cert.nfcLockPendingAt;
+
+  useEffect(() => {
+    const receipt = readNfcLockReceipt(cert.id);
+    setLockReceipt(receipt);
+    if (cert.nfcLocked) window.localStorage.removeItem(nfcLockReceiptKey(cert.id));
+  }, [cert.id, cert.nfcLocked]);
+
+  function retainLockReceipt(receipt: NfcLockReceipt | null) {
+    setLockReceipt(receipt);
+    if (receipt) window.localStorage.setItem(nfcLockReceiptKey(cert.id), JSON.stringify(receipt));
+    else window.localStorage.removeItem(nfcLockReceiptKey(cert.id));
+  }
 
   function invalidate() {
     queryClient.invalidateQueries({ queryKey: ["/api/admin/certificates"] });
@@ -99,15 +139,49 @@ export default function NfcSection({ cert, onUpdated }: Props) {
     },
   });
 
+  const prepareLockMutation = useMutation({
+    mutationFn: async (uid: string) => {
+      const response = await apiRequest("POST", `/api/admin/certificates/${cert.id}/nfc/lock/prepare`, {
+        lockMethod: NFC_LOCK_METHOD,
+        uid,
+      });
+      return response.json() as Promise<{ certificate: CertificateRecord; attemptToken: string | null }>;
+    },
+  });
+
   const lockMutation = useMutation({
-    mutationFn: () => apiRequest("POST", `/api/admin/certificates/${cert.id}/nfc/lock`, {}),
+    mutationFn: async (data: {
+      uid: string;
+      lockMethod: string;
+      attemptToken?: string;
+      physicalLockConfirmed?: boolean;
+      operatorReadOnlyVerified?: boolean;
+      reason?: string;
+    }) => {
+      const response = await apiRequest("POST", `/api/admin/certificates/${cert.id}/nfc/lock`, data);
+      return response.json() as Promise<CertificateRecord>;
+    },
     onSuccess: async (res) => {
-      const updated = await res.json();
-      onUpdated(updated);
+      onUpdated(res);
       invalidate();
+      retainLockReceipt(null);
+      setReconciliationReason("");
       toast({ title: "Tag locked", description: "This tag is now permanently read-only." });
     },
-    onError: () => toast({ title: "Lock failed", variant: "destructive" }),
+  });
+
+  const cancelLockMutation = useMutation({
+    mutationFn: async (data: { uid: string; attemptToken: string; verificationMethod: string; reason: string }) => {
+      const response = await apiRequest("POST", `/api/admin/certificates/${cert.id}/nfc/lock/cancel`, data);
+      return response.json() as Promise<CertificateRecord>;
+    },
+    onSuccess: (updated) => {
+      onUpdated(updated);
+      invalidate();
+      retainLockReceipt(null);
+      setReconciliationReason("");
+      toast({ title: "Lock intent cancelled", description: "The verified-writable tag may be changed again." });
+    },
   });
 
   const verifyMutation = useMutation({
@@ -176,30 +250,107 @@ export default function NfcSection({ cert, onUpdated }: Props) {
   }, [supported, nfcUrl, pendingUid, pendingChipType, cert, saveMutation, toast]);
 
   const handleLock = useCallback(async () => {
-    if (!supported) return;
+    if (!supported || !cert.nfcUid) return;
     setOp("locking");
+    let browserConfirmed = false;
     try {
+      // Freeze the authoritative UID before touching the irreversible device.
+      const prepared = await prepareLockMutation.mutateAsync(cert.nfcUid);
+      onUpdated(prepared.certificate);
+      invalidate();
+      if (!prepared.attemptToken) throw new Error("Lock intent exists but its one-time token is unavailable.");
+      let receipt: NfcLockReceipt = {
+        attemptToken: prepared.attemptToken,
+        uid: cert.nfcUid,
+        physicalLockConfirmed: false,
+      };
+      retainLockReceipt(receipt);
+
       const reader = new (window as any).NDEFReader();
       toast({ title: "Tap the tag to lock…", description: "This cannot be undone." });
-      try {
-        await reader.makeReadOnly();
-      } catch {
-        // makeReadOnly may not be available on all devices — still mark as locked in DB
-      }
-      await lockMutation.mutateAsync();
+      await reader.makeReadOnly();
+      browserConfirmed = true;
+      receipt = { ...receipt, physicalLockConfirmed: true };
+      // Persist browser completion before the network confirmation. A retry
+      // resends only this confirmation and never calls makeReadOnly again.
+      retainLockReceipt(receipt);
+      await lockMutation.mutateAsync({
+        uid: receipt.uid,
+        attemptToken: receipt.attemptToken,
+        physicalLockConfirmed: true,
+        lockMethod: NFC_LOCK_METHOD,
+      });
       setOp("idle");
     } catch (err: any) {
       setOp("idle");
-      toast({ title: "Lock failed", description: err.message || "Could not lock tag.", variant: "destructive" });
+      invalidate();
+      toast({
+        title: browserConfirmed ? "Database confirmation pending" : "Physical lock outcome needs reconciliation",
+        description: browserConfirmed
+          ? "Do not tap the tag again. Use Finalize database lock below."
+          : "The binding is frozen. Verify the tag's actual read-only state before cancelling or recovering.",
+        variant: "destructive",
+      });
     }
-  }, [supported, lockMutation, toast]);
+  }, [supported, cert.nfcUid, prepareLockMutation, lockMutation, toast, onUpdated]);
+
+  const handleRetryLockConfirmation = useCallback(async () => {
+    if (!lockReceipt?.physicalLockConfirmed) return;
+    setOp("locking");
+    try {
+      await lockMutation.mutateAsync({
+        uid: lockReceipt.uid,
+        attemptToken: lockReceipt.attemptToken,
+        physicalLockConfirmed: true,
+        lockMethod: NFC_LOCK_METHOD,
+      });
+    } finally {
+      setOp("idle");
+    }
+  }, [lockReceipt, lockMutation]);
+
+  const handleOperatorRecovery = useCallback(async () => {
+    if (!cert.nfcUid || !reconciliationReason.trim()) return;
+    setOp("locking");
+    try {
+      await lockMutation.mutateAsync({
+        uid: cert.nfcUid,
+        lockMethod: NFC_LOCK_RECOVERY_METHOD,
+        operatorReadOnlyVerified: true,
+        reason: reconciliationReason.trim(),
+      });
+    } finally {
+      setOp("idle");
+    }
+  }, [cert.nfcUid, reconciliationReason, lockMutation]);
+
+  const handleCancelLockIntent = useCallback(async () => {
+    if (!lockReceipt || !reconciliationReason.trim()) return;
+    setOp("locking");
+    try {
+      await cancelLockMutation.mutateAsync({
+        uid: lockReceipt.uid,
+        attemptToken: lockReceipt.attemptToken,
+        verificationMethod: NFC_LOCK_CANCEL_METHOD,
+        reason: reconciliationReason.trim(),
+      });
+    } finally {
+      setOp("idle");
+    }
+  }, [lockReceipt, reconciliationReason, cancelLockMutation]);
 
   const handleTest = useCallback(() => {
     window.open(nfcUrl, "_blank");
     verifyMutation.mutate();
   }, [nfcUrl, verifyMutation]);
 
-  const isBusy = op !== "idle" || saveMutation.isPending || lockMutation.isPending || clearMutation.isPending;
+  const isBusy =
+    op !== "idle" ||
+    saveMutation.isPending ||
+    prepareLockMutation.isPending ||
+    lockMutation.isPending ||
+    cancelLockMutation.isPending ||
+    clearMutation.isPending;
 
   return (
     <div
@@ -226,7 +377,9 @@ export default function NfcSection({ cert, onUpdated }: Props) {
         <InfoRow label="Chip type" value={pendingChipType || cert.nfcChipType || "—"} testId="nfc-chip-type" />
         <InfoRow
           label="Writable"
-          value={cert.nfcUid ? (cert.nfcLocked ? "Locked" : "Yes") : "—"}
+          value={
+            cert.nfcUid ? (cert.nfcLocked ? "Locked" : lockPending ? "Frozen pending reconciliation" : "Yes") : "—"
+          }
           testId="nfc-writable"
         />
         <InfoRow
@@ -269,8 +422,55 @@ export default function NfcSection({ cert, onUpdated }: Props) {
         </div>
       )}
 
+      {lockPending && !cert.nfcLocked && (
+        <div className="rounded-md border border-[color-mix(in_srgb,var(--admin-red)_40%,transparent)] bg-[color-mix(in_srgb,var(--admin-red)_10%,transparent)] p-3 space-y-3 text-xs">
+          <div className="text-[var(--admin-red)] font-semibold">Physical-lock reconciliation required</div>
+          <p className="text-[var(--admin-ink-dim)]">
+            UID <span className="font-mono">{cert.nfcLockPendingUid || cert.nfcUid}</span> is frozen. Do not run the
+            physical lock again. If this browser already saw it complete, finalize the database record. Otherwise,
+            independently verify whether the tag is read-only before choosing a recovery action.
+          </p>
+          {lockReceipt?.physicalLockConfirmed && (
+            <Button
+              size="sm"
+              onClick={handleRetryLockConfirmation}
+              disabled={isBusy}
+              data-testid="btn-nfc-lock-finalize"
+            >
+              Finalize database lock (no tag operation)
+            </Button>
+          )}
+          <Input
+            value={reconciliationReason}
+            onChange={(event) => setReconciliationReason(event.target.value)}
+            placeholder="Record how the physical state was independently verified"
+            data-testid="input-nfc-lock-reconciliation-reason"
+          />
+          <div className="flex flex-wrap gap-2">
+            <Button
+              size="sm"
+              variant="destructive"
+              onClick={handleOperatorRecovery}
+              disabled={isBusy || !reconciliationReason.trim()}
+              data-testid="btn-nfc-lock-recover-readonly"
+            >
+              Verified read-only — finalize with audit
+            </Button>
+            <Button
+              size="sm"
+              variant="outline"
+              onClick={handleCancelLockIntent}
+              disabled={isBusy || !lockReceipt || !reconciliationReason.trim()}
+              data-testid="btn-nfc-lock-cancel-writable"
+            >
+              Verified writable — cancel intent
+            </Button>
+          </div>
+        </div>
+      )}
+
       {/* Manual UID entry — for USB NFC writers / desktop workflows */}
-      {!cert.nfcLocked && (
+      {!cert.nfcLocked && !lockPending && (
         <div className="rounded-md border border-[var(--admin-line)] bg-[var(--admin-panel2)] p-3 space-y-2">
           <div className="flex items-center gap-1.5 text-xs text-[var(--admin-gold)]/70 font-medium uppercase tracking-wider">
             <KeyRound className="h-3 w-3" />
@@ -338,7 +538,7 @@ export default function NfcSection({ cert, onUpdated }: Props) {
           size="sm"
           variant="outline"
           onClick={handleWrite}
-          disabled={isBusy || !supported || !!cert.nfcLocked}
+          disabled={isBusy || !supported || !!cert.nfcLocked || lockPending}
           data-testid="btn-nfc-write"
           className="border-[var(--admin-line)] text-[var(--admin-gold-hi)] hover:bg-[color-mix(in_srgb,var(--admin-gold)_10%,transparent)]"
         >
@@ -354,7 +554,7 @@ export default function NfcSection({ cert, onUpdated }: Props) {
           size="sm"
           variant="outline"
           onClick={() => setShowLockConfirm(true)}
-          disabled={isBusy || !cert.nfcUid || !!cert.nfcLocked}
+          disabled={isBusy || !cert.nfcUid || !!cert.nfcLocked || lockPending}
           data-testid="btn-nfc-lock"
           className="border-[color-mix(in_srgb,var(--admin-amber)_40%,transparent)] text-[var(--admin-amber)] hover:bg-[color-mix(in_srgb,var(--admin-amber)_15%,transparent)]"
         >
@@ -378,7 +578,7 @@ export default function NfcSection({ cert, onUpdated }: Props) {
           size="sm"
           variant="ghost"
           onClick={() => setShowClearConfirm(true)}
-          disabled={isBusy || !cert.nfcUid}
+          disabled={isBusy || !cert.nfcUid || lockPending}
           data-testid="btn-nfc-clear"
           className="text-[var(--admin-red)] hover:bg-[color-mix(in_srgb,var(--admin-red)_15%,transparent)] hover:text-[var(--admin-red)]"
         >
