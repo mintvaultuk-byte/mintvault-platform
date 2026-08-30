@@ -8,10 +8,49 @@ dist
 # ─── Secrets / env (Fly injects via fly secrets at runtime) ───────────
 .env
 .env.*
+**/.env
+**/.env.*
+*.pem
+**/*.pem
+*.key
+**/*.key
+*.p12
+**/*.p12
+*.pfx
+**/*.pfx
+*.dump
+**/*.dump
+*.backup
+**/*.backup
+*.sqlite
+**/*.sqlite
+*.sqlite3
+**/*.sqlite3
+.npmrc
+**/.npmrc
+.netrc
+**/.netrc
 
 # ─── VCS / OS / editor noise ──────────────────────────────────────────
 .git
 .gitignore
+.github
+.husky
+.engineering
+engineering
+.claude
+.agents
+.codex
+.cursor
+.gemini
+.windsurf
+.replit
+**/.claude
+**/.agents
+**/.codex
+**/.cursor
+**/.gemini
+**/.windsurf
 .DS_Store
 .vscode
 .idea
@@ -20,6 +59,47 @@ dist
 *.log
 coverage
 .nyc_output
+.cache
+**/.cache
+tmp
+.tmp
+tests
+
+# ─── Local customer/scanner/evidence/runtime state ──────────────────
+# These paths are never build inputs. Keep this list explicit because an ignored
+# local file still enters `docker build` unless it is independently dockerignored.
+.local
+**/.local
+mintvault-scans
+**/mintvault-scans
+.mintvault-scanner-tools
+**/.mintvault-scanner-tools
+scans
+**/scans
+scanner-data
+**/scanner-data
+scanner-output
+**/scanner-output
+scanner-runtime
+**/scanner-runtime
+evidence
+**/evidence
+runtime-evidence
+**/runtime-evidence
+backups
+**/backups
+*.tif
+**/*.tif
+*.tiff
+**/*.tiff
+*.raw
+**/*.raw
+*.dng
+**/*.dng
+*.heic
+**/*.heic
+*.heif
+**/*.heif
 
 # ─── Standalone local tooling NOT part of the web build ───────────────
 # scripts/scanner-app + scripts/scanner-watcher are macOS native scanner
@@ -40,9 +120,10 @@ scripts/db/*
 
 # ─── Project meta / documentation (not needed by build or runtime) ────
 docs
-.claude
 attached_assets
+**/attached_assets
 uploads
+**/uploads
 
 # ─── Markdown — keep README, drop everything else at the repo root ────
 *.md

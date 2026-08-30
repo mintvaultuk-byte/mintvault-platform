@@ -1,4 +1,5 @@
 import type { NextFunction, Request, Response } from "express";
+import { uploadMemoryAdmission, uploadMemoryBudget } from "./upload-memory-admission";
 
 /**
  * Bounded admission ahead of the phone-QR upload's memory storage.
@@ -84,4 +85,8 @@ export function createPhoneUploadAdmission(
   };
 }
 
-export const phoneUploadAdmission = createPhoneUploadAdmission();
+export const phoneUploadAdmission = {
+  // Measured 30 MiB buffering + worst realistic 48 MP decode peaks near 180 MiB.
+  middleware: uploadMemoryAdmission("phone_upload", 192),
+  stats: uploadMemoryBudget.stats,
+};

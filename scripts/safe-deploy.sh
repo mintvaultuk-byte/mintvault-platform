@@ -26,7 +26,6 @@
 # Usage:
 #   scripts/safe-deploy.sh staging     # → mintvault-v2 (fly.v2.toml)
 #   scripts/safe-deploy.sh prod        # → mintvault    (fly.toml)
-#   scripts/safe-deploy.sh prod --allow-behind   # skip GUARD 1 (rarely needed)
 #   scripts/safe-deploy.sh prod --reconciled-from <LIVE_SHA>
 #         Acknowledge that the candidate deliberately supersedes a DIVERGENT live
 #         release whose semantics it already carries. It must name the commit the
@@ -68,8 +67,14 @@ esac
 case "$TARGET" in
   staging) APP="mintvault-v2"; CONFIG="fly.v2.toml"; HOST="https://mintvault-v2.fly.dev" ;;
   prod)    APP="mintvault";    CONFIG="fly.toml";    HOST="https://mintvault.fly.dev" ;;
-  *) echo "usage: $0 {staging|prod} [--allow-behind]" >&2; exit 2 ;;
+  *) echo "usage: $0 {staging|prod} [--allow-behind (staging only)]" >&2; exit 2 ;;
 esac
+
+if [ "$TARGET" = "prod" ] && [ "$ALLOW_BEHIND" -eq 1 ]; then
+  echo "🚫 BLOCKED: --allow-behind is a staging-only diagnostic escape hatch." >&2
+  echo "   Production must deploy the exact clean origin/main commit." >&2
+  exit 2
+fi
 
 REPO_ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 cd "$REPO_ROOT"
@@ -80,7 +85,7 @@ if [ -z "${FLY_API_TOKEN:-}" ] && [ -f "$HOME/.fly/config.yml" ]; then
   export FLY_API_TOKEN
 fi
 
-SHA="$(git rev-parse --short HEAD)"
+SHA="$(git rev-parse HEAD)"
 BRANCH="$(git rev-parse --abbrev-ref HEAD)"
 echo "── safe-deploy → $APP ($CONFIG) ──"
 echo "   branch=$BRANCH  commit=$SHA"
@@ -90,6 +95,13 @@ echo "   VITE_PARTNER_NETWORK_CONSOLIDATION=$PARTNER_NETWORK_CONSOLIDATION"
 git fetch origin --quiet
 BASE="$(git merge-base HEAD origin/main)"
 REMOTE="$(git rev-parse origin/main)"
+if [ "$TARGET" = "prod" ] && [ "$SHA" != "$REMOTE" ]; then
+  echo "🚫 BLOCKED: production only accepts the exact origin/main commit." >&2
+  echo "   candidate=$SHA" >&2
+  echo "   origin/main=$REMOTE" >&2
+  echo "   Merge the reviewed pull request, fetch origin, and deploy that exact SHA." >&2
+  exit 1
+fi
 if [ "$BASE" != "$REMOTE" ] && [ "$ALLOW_BEHIND" -ne 1 ]; then
   echo "🚫 BLOCKED: this checkout is BEHIND origin/main — deploying would ship stale code"
   echo "   and could wipe newer work off $APP (the clobber we already hit twice)."
@@ -97,11 +109,18 @@ if [ "$BASE" != "$REMOTE" ] && [ "$ALLOW_BEHIND" -ne 1 ]; then
   git --no-pager log --oneline HEAD..origin/main | sed 's/^/     behind: /' | head -10
   exit 1
 fi
-# Only MODIFIED TRACKED files gate the deploy (they change the artifact).
-# Untracked files are informational — most (docs, scratch) are dockerignored.
+# Staging may deliberately exercise modified tracked files. Production gates
+# every worktree change because either tracked or untracked files can enter the
+# Docker context, regardless of what a developer expects .dockerignore to omit.
 DIRTY_TRACKED="$(git status --porcelain | grep -v '^??' || true)"
 UNTRACKED="$(git status --porcelain | grep '^??' || true)"
-[ -n "$UNTRACKED" ] && { echo "   note: untracked files (not gating):"; echo "$UNTRACKED" | sed 's/^/     /' | head -5; }
+[ -n "$UNTRACKED" ] && { echo "   note: untracked files:"; echo "$UNTRACKED" | sed 's/^/     /' | head -5; }
+if [ "$TARGET" = "prod" ] && { [ -n "$DIRTY_TRACKED" ] || [ -n "$UNTRACKED" ]; }; then
+  echo "🚫 BLOCKED: production builds require a completely clean worktree." >&2
+  echo "   Tracked and untracked files can both enter the Docker build context." >&2
+  echo "   Commit the reviewed change or move non-release files outside the checkout." >&2
+  exit 1
+fi
 if [ -n "$DIRTY_TRACKED" ]; then
   echo "⚠  MODIFIED tracked files — these WILL be built into this deploy:"
   echo "$DIRTY_TRACKED" | sed 's/^/     /' | head -20
@@ -109,7 +128,11 @@ if [ -n "$DIRTY_TRACKED" ]; then
     printf "   continue? [y/N] "; read -r ans; [ "$ans" = "y" ] || { echo "aborted."; exit 1; }
   fi
 fi
-echo "✔ GUARD 1: checkout is current with origin/main"
+if [ "$TARGET" = "prod" ]; then
+  echo "✔ GUARD 1: clean checkout exactly matches origin/main"
+else
+  echo "✔ GUARD 1: checkout is current with origin/main"
+fi
 
 # ── GUARD 1L: the candidate must CONTAIN what is live right now ──────────────
 # Read the live commit from the running server, not from git, not from `fly

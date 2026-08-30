@@ -64,7 +64,7 @@ describe("release route rate-limit hardening", () => {
     expect(staff).toMatch(/scanner-capture-sessions",\s*requireCapability\("scan"\),\s*staffScanCaptureLimit/);
     expect(staff).toMatch(/scanner-capture-sessions\/:sessionId",\s*requireCapability\("scan"\),\s*staffScanReadLimit/);
     expect(staff).toMatch(
-      /scan\/certificates\/:id\/upload",\s*requireCapability\("scan"\),\s*staffScanUploadLimit,\s*scanUpload\.fields/
+      /scan\/certificates\/:id\/upload",\s*requireCapability\("scan"\),\s*staffScanUploadLimit,\s*uploadMemoryAdmission\("staff_scan", 128\),\s*scanUpload\.fields/
     );
     expect(grader).toMatch(/certificates\/:id\/grade",\s*requireCapability\("grade"\),\s*graderGradeMutationRateLimit/);
     expect(grader).toMatch(

@@ -1,8 +1,10 @@
 const GIT_SHA_PATTERN = /^[a-f0-9]{7,40}$/i;
+const FULL_GIT_SHA_PATTERN = /^[a-f0-9]{40}$/i;
 
-function normalizedGitSha(value: string | null | undefined): string | null {
+function normalizedGitSha(value: string | null | undefined, fullLengthRequired: boolean): string | null {
   const trimmed = value?.trim() ?? "";
-  return GIT_SHA_PATTERN.test(trimmed) ? trimmed.toLowerCase() : null;
+  const pattern = fullLengthRequired ? FULL_GIT_SHA_PATTERN : GIT_SHA_PATTERN;
+  return pattern.test(trimmed) ? trimmed.toLowerCase() : null;
 }
 
 export interface BuildProvenanceInput {
@@ -19,11 +21,11 @@ export interface BuildProvenanceInput {
  * Refusing the latter prevents `/api/version` from silently serving `unknown`.
  */
 export function resolveBuildGitSha({ checkoutSha, environmentSha, production }: BuildProvenanceInput): string {
-  const sha = normalizedGitSha(checkoutSha) ?? normalizedGitSha(environmentSha);
+  const sha = normalizedGitSha(checkoutSha, production) ?? normalizedGitSha(environmentSha, production);
   if (sha) return sha;
   if (production) {
     throw new Error(
-      "Production build provenance is required: pass a 7–40 character hexadecimal GIT_SHA build argument"
+      "Production build provenance is required: pass the full 40-character hexadecimal GIT_SHA build argument"
     );
   }
   return "unknown";

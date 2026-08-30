@@ -10,7 +10,7 @@ import { resolveBuildGitSha } from "./build-provenance";
 // Git is absent and no valid build argument was injected.
 const checkoutGitSha = (() => {
   try {
-    return execSync("git rev-parse --short HEAD", { encoding: "utf-8" }).trim();
+    return execSync("git rev-parse HEAD", { encoding: "utf-8" }).trim();
   } catch {
     return null;
   }
