@@ -19,8 +19,8 @@ official workflows.
 | -------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | `npm run db:preflight`           | Read-only. Lists every live object (tables, views, matviews, schemas, orphan sequences, enums) and **fails closed** if any is unknown (not managed and not in the classified inventory). |
 | `npm run db:lint-sql <file.sql>` | Scans a migration for destructive statements (DROP/TRUNCATE/rename/unqualified DELETE/…). Exits non-zero on a blocking finding. Regex heuristic, not a full parser.                      |
-| `npm run db:migrate`             | Dry-run: shows the pending plan, lints, applies nothing.                                                                                                                                 |
-| `npm run db:migrate -- --apply`  | Applies pending migrations under an advisory lock, recording each in the `schema_migrations` journal.                                                                                    |
+| `npm run db:migrate`             | Dry-run through `MINTVAULT_MIGRATION_DATABASE_URL`: shows the pending plan, lints, applies nothing.                                                                                      |
+| `npm run db:migrate -- --apply`  | Applies pending migrations through the separately held migration credential under an advisory lock, recording each in the `schema_migrations` journal.                                   |
 | `npm run db:push`                | Local-only schema prototyping. Guarded — blocked against non-local hosts.                                                                                                                |
 
 Config: `drizzle.config.ts` scopes Drizzle to a **fail-closed allowlist** derived from
@@ -48,58 +48,55 @@ node dist/index.cjs
 
 There is no `release_command`, and migrations do not run when the web server starts.
 
-For production, run the migration command only as a deliberate one-off Fly Machine using an exact
-reviewed image ref. Do not paste `MINTVAULT_DATABASE_URL` into a local shell; Fly injects app
-secrets into Machines at boot.
+`MINTVAULT_DATABASE_URL` is the restricted web LOGIN and is never accepted as production migration
+authority. The migration runner requires a distinct `MINTVAULT_MIGRATION_DATABASE_URL`. That secret
+must not be installed on the public web app: release readiness rejects a production web process
+that can see it.
+
+Run production/staging migrations only from an owner-approved, separately scoped execution
+environment using an exact reviewed image ref. A protected GitHub Environment or dedicated
+migration app are acceptable patterns, provided the environment holds only its target's migration
+secret, requires an independent reviewer before apply, locks concurrent runs, verifies the exact
+default-branch SHA, and retains the dry-run/apply evidence. These controls and secrets are external
+release gates until their configuration is independently evidenced; this repository does not claim
+they exist and no autonomous agent may create or invoke them.
 
 First production execution must be a dry-run, reviewed by the operator, and only then applied.
 
-Dry-run template, not to be run until independently reviewed:
+Illustrative dry-run shape, not to be run until the protected execution environment is independently
+reviewed (the privileged URL is injected there, never copied from the web app):
 
 ```sh
-fly machine run registry.fly.io/mintvault:<exact-reviewed-image-tag> \
-  --app mintvault \
-  --region lhr \
-  --name mintvault-migration-plan-<reviewed-short-sha> \
-  --restart no \
-  --rm \
-  --vm-size shared-cpu-1x \
-  "node /app/dist/migrate.cjs --plan"
+MINTVAULT_MIGRATION_DATABASE_URL=<protected-environment-injection> \
+  node /app/dist/migrate.cjs
 ```
 
-After the dry-run output is reviewed and approved by the operator, run the apply command:
+After the retained dry-run is reviewed and the protected apply environment is approved:
 
 ```sh
-fly machine run registry.fly.io/mintvault:<exact-reviewed-image-tag> \
-  --app mintvault \
-  --region lhr \
-  --name mintvault-migration-apply-<reviewed-short-sha> \
-  --restart no \
-  --rm \
-  --vm-size shared-cpu-1x \
-  "node /app/dist/migrate.cjs --apply"
+MINTVAULT_MIGRATION_DATABASE_URL=<protected-environment-injection> \
+  node /app/dist/migrate.cjs --apply
 ```
 
-Pre-run evidence to capture:
+Pre-run evidence to capture without secret values:
 
 ```sh
-git rev-parse HEAD
-fly image show --app mintvault --json
-fly secrets list --app mintvault
-fly machine list --app mintvault
+exact default-branch commit SHA
+exact reviewed image digest / embedded commit
+protected environment name and approval record
+dry-run artifact and migration checksums
 ```
 
 Post-run evidence to capture:
 
 ```sh
-fly logs --app mintvault
-fly machine status <one-off-machine-id> --app mintvault
-fly machine list --app mintvault
+journal rows/checksums/status/completed_at/applied_by
+runner exit status and redacted output
+post-migration readiness result from the restricted web LOGIN
 ```
 
-The one-off Machine must exit after the runner completes. `--restart no` prevents Fly from
-restarting a failed migration worker, and `--rm` removes the Machine after exit. It must not replace
-or scale the existing web Machines and must not be used as a deploy command.
+The migration execution must exit after the runner completes, must never replace or scale web
+Machines, and must not be used as a deploy command.
 
 ## Creating and shipping a migration
 
@@ -112,7 +109,8 @@ or scale the existing web Machines and must not be used as a deploy command.
    destructive, owner-approved change is applied with `db:migrate -- --apply --allow-destructive`.
 3. **Test on a disposable database** (never staging/prod):
    - Stand up a throwaway local Postgres.
-   - Point `MINTVAULT_DATABASE_URL` at it (`127.0.0.1`).
+   - Point `MINTVAULT_MIGRATION_DATABASE_URL` at it (`127.0.0.1`). Exact-loopback
+     `MINTVAULT_DATABASE_URL` fallback exists only under `NODE_ENV=test|development`.
    - `npm run db:preflight` (should pass), `npm run db:migrate` (plan), then `-- --apply`.
    - Verify the schema and re-run `-- --apply` to confirm idempotency (applies 0).
 4. **Inspect the plan** on the target: `npm run db:migrate` (dry-run) shows exactly what is
