@@ -202,7 +202,9 @@ describe("correction route, audit, image, stats, and UI wiring", () => {
 
   it("registers a single Super Admin correction endpoint with optimistic locking and mandatory audit", () => {
     expect(correctionService).toContain('"/api/admin/certificates/:id/correction"');
-    expect(correctionService).toMatch(/requireSuperAdmin,\s*upload\.fields/s);
+    expect(correctionService).toMatch(
+      /requireSuperAdmin,\s*uploadMemoryAdmission\("admin_certificate_correction", 256\),\s*upload\.fields/s
+    );
     expect(correctionService).toContain("FOR UPDATE");
     expect(correctionService).toContain("EXTRACT(EPOCH FROM updated_at)::text AS correction_version");
     expect(correctionService).toContain("String(input.expectedVersion) !== currentVersion");

@@ -224,50 +224,6 @@ export function stripGraderPii(value: any): any {
   return value;
 }
 
-// ── Boot migration (idempotent, additive) ─────────────────────────────────────
-
-/**
- * Adds the assignment columns + indexes to submissions. Safe on every boot
- * (ADD COLUMN IF NOT EXISTS). Backfill rule (documented): a submission whose
- * linked certificate is already graded-live (grade_approved_at IS NOT NULL) is
- * marked 'approved'; everything else keeps the 'unassigned' default. Writes a
- * one-time audit_log row (entity_type='schema') the first time it runs.
- */
-export async function migrateGraderSchema(): Promise<void> {
-  await db.execute(sql`
-    ALTER TABLE submissions
-      ADD COLUMN IF NOT EXISTS assigned_grader_id VARCHAR,
-      ADD COLUMN IF NOT EXISTS grading_status VARCHAR(20) NOT NULL DEFAULT 'unassigned',
-      ADD COLUMN IF NOT EXISTS assigned_at TIMESTAMPTZ,
-      ADD COLUMN IF NOT EXISTS graded_at TIMESTAMPTZ
-  `);
-  await db.execute(sql`CREATE INDEX IF NOT EXISTS idx_submissions_assigned_grader ON submissions (assigned_grader_id)`);
-  await db.execute(sql`CREATE INDEX IF NOT EXISTS idx_submissions_grading_status ON submissions (grading_status)`);
-
-  // Backfill: mark already-graded-live submissions 'approved'. Only touches rows
-  // still at the 'unassigned' default, so it's idempotent and never clobbers an
-  // active assignment/review.
-  await db.execute(sql`
-    UPDATE submissions s SET grading_status = 'approved'
-    WHERE s.grading_status = 'unassigned'
-      AND EXISTS (
-        SELECT 1 FROM cards c
-        JOIN certificates cert ON cert.card_id = c.id
-        WHERE c.submission_id = s.id AND cert.grade_approved_at IS NOT NULL
-      )
-  `);
-
-  // One-time audit (no per-boot spam).
-  await db.execute(sql`
-    INSERT INTO audit_log (entity_type, entity_id, action, admin_user, details)
-    SELECT 'schema', 'submissions', 'grader_schema_migrate', NULL,
-           ${{ columns: ["assigned_grader_id", "grading_status", "assigned_at", "graded_at"] }}::jsonb
-    WHERE NOT EXISTS (SELECT 1 FROM audit_log WHERE action = 'grader_schema_migrate')
-  `);
-
-  console.log("[grader-migrate] submissions assignment columns + indexes ensured");
-}
-
 // ── Role middleware ───────────────────────────────────────────────────────────
 
 /**
@@ -1355,80 +1311,8 @@ export async function autoApproveAssignedGradeAtRevision(
 }
 
 // ════════════════════════════════════════════════════════════════════════════
-// GRADER V2 — cert-level migration, assignment, reject/approve, earnings
+// GRADER V2 — cert-level assignment, reject/approve, earnings
 // ════════════════════════════════════════════════════════════════════════════
-
-/**
- * Grader v2 boot migration: cert-level assignment + workflow columns. Idempotent
- * + additive (ADD COLUMN IF NOT EXISTS). Backfill: certs already graded-live
- * (grade_approved_at NOT NULL) → 'approved', only touching the 'unassigned'
- * default. One-time audit row. The v1 submission-level columns (migrateGraderSchema)
- * stay in place but are now DEAD.
- */
-export async function migrateGraderCertSchema(): Promise<void> {
-  await db.execute(sql`
-    ALTER TABLE certificates
-      ADD COLUMN IF NOT EXISTS assigned_grader_id VARCHAR,
-      ADD COLUMN IF NOT EXISTS grader_status VARCHAR(20) NOT NULL DEFAULT 'unassigned',
-      ADD COLUMN IF NOT EXISTS assigned_at TIMESTAMPTZ,
-      ADD COLUMN IF NOT EXISTS graded_at TIMESTAMPTZ,
-      ADD COLUMN IF NOT EXISTS rejection_reason TEXT,
-      ADD COLUMN IF NOT EXISTS redo_count INTEGER NOT NULL DEFAULT 0
-  `);
-  await db.execute(
-    sql`CREATE INDEX IF NOT EXISTS idx_certificates_assigned_grader ON certificates (assigned_grader_id)`
-  );
-  await db.execute(sql`CREATE INDEX IF NOT EXISTS idx_certificates_grader_status ON certificates (grader_status)`);
-  await db.execute(sql`
-    UPDATE certificates SET grader_status = 'approved'
-    WHERE grader_status = 'unassigned' AND grade_approved_at IS NOT NULL
-  `);
-  await db.execute(sql`
-    INSERT INTO audit_log (entity_type, entity_id, action, admin_user, details)
-    SELECT 'schema', 'certificates', 'grader_cert_schema_migrate', NULL,
-           ${{ columns: ["assigned_grader_id", "grader_status", "assigned_at", "graded_at", "rejection_reason", "redo_count"] }}::jsonb
-    WHERE NOT EXISTS (SELECT 1 FROM audit_log WHERE action = 'grader_cert_schema_migrate')
-  `);
-  console.log("[grader-cert-migrate] certificates assignment columns + indexes ensured");
-}
-
-// ── Per-operator grading pipeline schema (Phase 0) ──────────────────────────
-// Additive-only foundation for the per-operator pipeline. The certificates
-// columns are all nullable and UN-backfillable — captured at scan/submit from
-// Phase 1/3 onward; existing inventory stays NULL (forward-only). users.review_rate
-// defaults 100 (every card manually reviewed) and is dialled down as an operator
-// earns trust (Phase 4). NOTHING reads or writes these columns yet — Phase 0 is a
-// pure migration. Idempotent (IF NOT EXISTS) + resume-safe; one-time audit row.
-// assigned_grader_id is already indexed (migrateGraderCertSchema), so only the new
-// attribution columns get indexes here (ahead of Phase 3/5 read-scaling).
-export async function migratePerOperatorSchema(): Promise<void> {
-  await db.execute(sql`
-    ALTER TABLE certificates
-      ADD COLUMN IF NOT EXISTS scanned_by VARCHAR,
-      ADD COLUMN IF NOT EXISTS graded_by VARCHAR,
-      ADD COLUMN IF NOT EXISTS operator_grade NUMERIC,
-      ADD COLUMN IF NOT EXISTS operator_subgrades JSONB,
-      ADD COLUMN IF NOT EXISTS review_required BOOLEAN
-  `);
-  await db.execute(sql`
-    ALTER TABLE users
-      ADD COLUMN IF NOT EXISTS review_rate INTEGER NOT NULL DEFAULT 100
-  `);
-  await db.execute(sql`CREATE INDEX IF NOT EXISTS idx_certificates_graded_by ON certificates (graded_by)`);
-  await db.execute(sql`CREATE INDEX IF NOT EXISTS idx_certificates_scanned_by ON certificates (scanned_by)`);
-  await db.execute(sql`
-    INSERT INTO audit_log (entity_type, entity_id, action, admin_user, details)
-    SELECT 'schema', 'certificates', 'per_operator_schema_migrate', NULL,
-           ${{
-             certificates: ["scanned_by", "graded_by", "operator_grade", "operator_subgrades", "review_required"],
-             users: ["review_rate"],
-             indexes: ["idx_certificates_graded_by", "idx_certificates_scanned_by"],
-             phase: 0,
-           }}::jsonb
-    WHERE NOT EXISTS (SELECT 1 FROM audit_log WHERE action = 'per_operator_schema_migrate')
-  `);
-  console.log("[per-operator-migrate] certificates operator columns + users.review_rate + indexes ensured");
-}
 
 /** Submission tracking_number for a cert (queue display context only — no PII). */
 export async function getSubmissionRefForCert(certId: number): Promise<string | null> {

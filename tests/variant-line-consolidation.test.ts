@@ -263,6 +263,7 @@ describe("MVGS / grading calculations are not touched (item 14)", () => {
         // parser, so a regex literal cannot swallow the diff (N1).
         const addedCode = addedCodeOf(diff, "+");
         const addedJs = addedJsOf(diff, "+");
+        const removedJs = addedJsOf(diff, "-");
         expect(hasMalformedEscape(diff), "server/grader.ts contains a malformed escape sequence").toBe(false);
         const signatureA =
           /\bvalidateGradeDraftIdentityAndVariant\s*\(/.test(addedJs) &&
@@ -363,8 +364,29 @@ describe("MVGS / grading calculations are not touched (item 14)", () => {
         const signatureH =
           /mvgs_rules_version\s*=\s*\$\{authority\.rulesVersion\}/.test(addedCode) &&
           /\bauthority\.rulesVersion\b/.test(addedJs);
+        // I) Runtime-DDL retirement. The convergence pass moves these three
+        // schema mutators into numbered migration 0115. Admit deletion only:
+        // no executable JavaScript may be added, all three exact boot helpers
+        // must be removed together, and no grading authority/calculation entry
+        // point may occur in the removed executable surface.
+        const retiredSchemaFunctions = removedJs.match(/\bexport\s+async\s+function\s+\w+\s*\(/g) ?? [];
+        const signatureI =
+          addedJs.trim() === "" &&
+          retiredSchemaFunctions.length === 3 &&
+          ["migrateGraderSchema", "migrateGraderCertSchema", "migratePerOperatorSchema"].every((name) =>
+            new RegExp(`\\bexport\\s+async\\s+function\\s+${name}\\s*\\(`).test(removedJs)
+          ) &&
+          !/\b(calculate|scoreMvgs|resolveDraftGradeAuthority|approveGraderCert|applyCertGradeDraft)\b/.test(removedJs);
         expect(
-          signatureA || signatureB || signatureC || signatureD || signatureE || signatureF || signatureG || signatureH,
+          signatureA ||
+            signatureB ||
+            signatureC ||
+            signatureD ||
+            signatureE ||
+            signatureF ||
+            signatureG ||
+            signatureH ||
+            signatureI,
           "server/grader.ts changed but matches no founder-authorised signature"
         ).toBe(true);
         // The B3 sub-grade COMPLETENESS check that signature C extracts verbatim from
