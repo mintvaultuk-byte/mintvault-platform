@@ -163,7 +163,8 @@ describe("PKG-1 grading-credit owner binding (PostgreSQL 17.10)", () => {
         used_for_submission_id integer,
         source text,
         reserved_at timestamptz,
-        reserved_until timestamptz
+        reserved_until timestamptz,
+        reserved_for_tracking_number text
       )`);
     await admin.query(`
       CREATE TABLE submissions (
@@ -192,19 +193,39 @@ describe("PKG-1 grading-credit owner binding (PostgreSQL 17.10)", () => {
     it("reserves exactly one available credit and refuses a second when none remain", async () => {
       const a = await seedUser();
       const creditId = await grantCredit(a.id);
+      const firstSubmissionId = await newSubmissionRow();
+      const secondSubmissionId = await newSubmissionRow();
 
-      const first = await submissions.reserveCredit(a.id, "member", testDb);
+      const first = await submissions.reserveCredit(a.id, "member", `MV-SUB-${firstSubmissionId}`, testDb);
       expect(first).toBe(creditId);
 
       // The user's only credit is now reserved — a concurrent checkout gets nothing.
-      const second = await submissions.reserveCredit(a.id, "member", testDb);
+      const second = await submissions.reserveCredit(a.id, "member", `MV-SUB-${secondSubmissionId}`, testDb);
       expect(second).toBeNull();
     });
 
     it("returns null for a user with no credit (guest-equivalent)", async () => {
       const a = await seedUser();
-      const reserved = await submissions.reserveCredit(a.id, "member", testDb);
+      const subId = await newSubmissionRow();
+      const reserved = await submissions.reserveCredit(a.id, "member", `MV-SUB-${subId}`, testDb);
       expect(reserved).toBeNull();
+    });
+
+    it("never reuses an elapsed reservation while its original PaymentIntent can still be paid", async () => {
+      const a = await seedUser();
+      const creditId = await grantCredit(a.id);
+      const firstSubmissionId = await newSubmissionRow();
+      const secondSubmissionId = await newSubmissionRow();
+
+      expect(await submissions.reserveCredit(a.id, "member", `MV-SUB-${firstSubmissionId}`, testDb)).toBe(creditId);
+      await admin.query(`UPDATE member_credits SET reserved_until=NOW() - INTERVAL '1 minute' WHERE id=$1`, [creditId]);
+
+      expect(await submissions.reserveCredit(a.id, "member", `MV-SUB-${secondSubmissionId}`, testDb)).toBeNull();
+      const binding = await admin.query<{ reserved_for_tracking_number: string }>(
+        `SELECT reserved_for_tracking_number FROM member_credits WHERE id=$1`,
+        [creditId]
+      );
+      expect(binding.rows[0].reserved_for_tracking_number).toBe(`MV-SUB-${firstSubmissionId}`);
     });
   });
 
@@ -221,10 +242,10 @@ describe("PKG-1 grading-credit owner binding (PostgreSQL 17.10)", () => {
     it("(1) same-user success: consumes the reserving user's exact reserved credit once", async () => {
       const a = await seedUser();
       const creditId = await grantCredit(a.id);
-      const reserved = await submissions.reserveCredit(a.id, "member", testDb);
+      const subId = await newSubmissionRow();
+      const reserved = await submissions.reserveCredit(a.id, "member", `MV-SUB-${subId}`, testDb);
       expect(reserved).toBe(creditId);
 
-      const subId = await newSubmissionRow();
       const res = await submissions.fulfilPaidSubmission(
         { id: subId, submissionId: `MV-SUB-${subId}`, email: a.email },
         creditMeta({ reservedCreditId: reserved, creditOwnerUserId: a.id }),
@@ -243,10 +264,10 @@ describe("PKG-1 grading-credit owner binding (PostgreSQL 17.10)", () => {
       const victim = await seedUser(); // owns a credit; email points here
       const attackerCredit = await grantCredit(attacker.id);
       const victimCredit = await grantCredit(victim.id);
-      const reserved = await submissions.reserveCredit(attacker.id, "member", testDb);
+      const subId = await newSubmissionRow();
+      const reserved = await submissions.reserveCredit(attacker.id, "member", `MV-SUB-${subId}`, testDb);
       expect(reserved).toBe(attackerCredit);
 
-      const subId = await newSubmissionRow();
       // Submission email belongs to the VICTIM; owner metadata is the ATTACKER (server-bound).
       const res = await submissions.fulfilPaidSubmission(
         { id: subId, submissionId: `MV-SUB-${subId}`, email: victim.email },
@@ -266,9 +287,8 @@ describe("PKG-1 grading-credit owner binding (PostgreSQL 17.10)", () => {
     it("(3a) email with no account but valid reservation: still consumes the owner's reserved credit", async () => {
       const a = await seedUser();
       const creditId = await grantCredit(a.id);
-      const reserved = await submissions.reserveCredit(a.id, "member", testDb);
-
       const subId = await newSubmissionRow();
+      const reserved = await submissions.reserveCredit(a.id, "member", `MV-SUB-${subId}`, testDb);
       const res = await submissions.fulfilPaidSubmission(
         { id: subId, submissionId: `MV-SUB-${subId}`, email: "nobody-no-account@example.test" },
         creditMeta({ reservedCreditId: reserved, creditOwnerUserId: a.id }),
@@ -284,11 +304,11 @@ describe("PKG-1 grading-credit owner binding (PostgreSQL 17.10)", () => {
     it("(3b) discount without a live reservation: fails closed and records reconciliation evidence", async () => {
       const a = await seedUser();
       const creditId = await grantCredit(a.id);
-      const reserved = await submissions.reserveCredit(a.id, "member", testDb);
+      const subId = await newSubmissionRow();
+      const reserved = await submissions.reserveCredit(a.id, "member", `MV-SUB-${subId}`, testDb);
       // The reserved row is consumed by another order before this fulfilment runs.
       await admin.query(`UPDATE member_credits SET used_at=NOW() WHERE id=$1`, [creditId]);
 
-      const subId = await newSubmissionRow();
       const res = await submissions.fulfilPaidSubmission(
         { id: subId, submissionId: `MV-SUB-${subId}`, email: "nobody@example.test" },
         creditMeta({ reservedCreditId: reserved, creditOwnerUserId: a.id }),
@@ -310,10 +330,10 @@ describe("PKG-1 grading-credit owner binding (PostgreSQL 17.10)", () => {
       const b = await seedUser();
       const aCredit = await grantCredit(a.id);
       const bCredit = await grantCredit(b.id);
-      const reserved = await submissions.reserveCredit(a.id, "member", testDb); // A's row
+      const subId = await newSubmissionRow();
+      const reserved = await submissions.reserveCredit(a.id, "member", `MV-SUB-${subId}`, testDb); // A's row
       expect(reserved).toBe(aCredit);
 
-      const subId = await newSubmissionRow();
       // Owner bound to B but the reserved id is A's row — the owner pin must reject it.
       const res = await submissions.fulfilPaidSubmission(
         { id: subId, submissionId: `MV-SUB-${subId}`, email: a.email },
@@ -333,10 +353,10 @@ describe("PKG-1 grading-credit owner binding (PostgreSQL 17.10)", () => {
       const a = await seedUser();
       const reservedCredit = await grantCredit(a.id);
       const spareCredit = await grantCredit(a.id); // A has TWO credits
-      const reserved = await submissions.reserveCredit(a.id, "member", testDb);
+      const subId = await newSubmissionRow();
+      const reserved = await submissions.reserveCredit(a.id, "member", `MV-SUB-${subId}`, testDb);
       expect(reserved).toBe(reservedCredit);
 
-      const subId = await newSubmissionRow();
       const meta = creditMeta({ reservedCreditId: reserved, creditOwnerUserId: a.id });
       const submission = { id: subId, submissionId: `MV-SUB-${subId}`, email: a.email };
 
@@ -355,9 +375,8 @@ describe("PKG-1 grading-credit owner binding (PostgreSQL 17.10)", () => {
       const a = await seedUser();
       const reservedCredit = await grantCredit(a.id);
       const spareCredit = await grantCredit(a.id);
-      const reserved = await submissions.reserveCredit(a.id, "member", testDb);
-
       const subId = await newSubmissionRow();
+      const reserved = await submissions.reserveCredit(a.id, "member", `MV-SUB-${subId}`, testDb);
       const meta = creditMeta({ reservedCreditId: reserved, creditOwnerUserId: a.id });
       const submission = { id: subId, submissionId: `MV-SUB-${subId}`, email: a.email };
 
@@ -405,10 +424,10 @@ describe("PKG-1 grading-credit owner binding (PostgreSQL 17.10)", () => {
       const victim = await seedUser(); // email points here
       const aCredit = await grantCredit(a.id);
       const victimCredit = await grantCredit(victim.id);
-      const reserved = await submissions.reserveCredit(a.id, "member", testDb);
+      const subId = await newSubmissionRow();
+      const reserved = await submissions.reserveCredit(a.id, "member", `MV-SUB-${subId}`, testDb);
       expect(reserved).toBe(aCredit);
 
-      const subId = await newSubmissionRow();
       // reservedCreditId present, creditOwnerUserId ABSENT (a PI created just before
       // owner-binding shipped). Email belongs to the victim and must be ignored.
       const res = await submissions.fulfilPaidSubmission(

@@ -2,17 +2,18 @@
  * server/account-auth.ts
  *
  * Unified email + password account authentication for MintVault.
- * Handles: password hashing, token management, DB queries, schema migration.
+ * Handles: password hashing, token management, and DB queries.
  *
  * Uses bcrypt cost 12 for password hashing.
  * All tokens are 32-byte random hex strings stored in the DB.
- * Schema migration is idempotent — safe to run on every startup.
+ * Schema is owned exclusively by the numbered migration runner.
  */
 
 import bcrypt from "bcryptjs";
 import crypto from "crypto";
 import { db } from "./db";
 import { sql } from "drizzle-orm";
+import { enqueueCustomerNotification } from "./customer-notification-outbox";
 
 const BCRYPT_ROUNDS = 12;
 
@@ -39,33 +40,86 @@ export function generateToken(): string {
   return crypto.randomBytes(32).toString("hex");
 }
 
-export async function createEmailVerificationToken(userId: string): Promise<string> {
+export async function createEmailVerificationToken(
+  userId: string,
+  transaction?: Pick<typeof db, "execute">
+): Promise<string> {
   const token = generateToken();
   const expiresAt = new Date(Date.now() + 24 * 60 * 60 * 1_000);
-  await db.execute(sql`
-    INSERT INTO email_verification_tokens (user_id, token, expires_at)
-    VALUES (${userId}, ${token}, ${expiresAt.toISOString()})
-  `);
+  const create = async (tx: Pick<typeof db, "execute">) => {
+    const owner = await tx.execute(sql`
+      SELECT email, display_name FROM public.users WHERE id=${userId} AND deleted_at IS NULL FOR KEY SHARE
+    `);
+    const row = owner.rows[0] as { email: string; display_name: string | null } | undefined;
+    if (!row) throw new Error("email verification owner unavailable");
+    await tx.execute(sql`
+      INSERT INTO public.email_verification_tokens (user_id, token, expires_at)
+      VALUES (${userId}, ${token}, ${expiresAt.toISOString()})
+    `);
+    await enqueueCustomerNotification(tx, {
+      eventKey: `account-verify:${userId}:${crypto.createHash("sha256").update(token).digest("hex").slice(0, 24)}`,
+      kind: "ACCOUNT_VERIFY",
+      aggregateType: "user",
+      aggregateId: userId,
+      recipient: row.email,
+      payload: { token, displayName: row.display_name },
+      expiresAt,
+    });
+  };
+  if (transaction) await create(transaction);
+  else await db.transaction(create);
   return token;
 }
 
 export async function createPasswordResetToken(userId: string): Promise<string> {
   const token = generateToken();
   const expiresAt = new Date(Date.now() + 60 * 60 * 1_000);
-  await db.execute(sql`
-    INSERT INTO password_reset_tokens (user_id, token, expires_at)
-    VALUES (${userId}, ${token}, ${expiresAt.toISOString()})
-  `);
+  await db.transaction(async (tx) => {
+    const owner = await tx.execute(sql`
+      SELECT email FROM public.users WHERE id=${userId} AND deleted_at IS NULL FOR KEY SHARE
+    `);
+    const row = owner.rows[0] as { email: string } | undefined;
+    if (!row) throw new Error("password reset owner unavailable");
+    await tx.execute(sql`
+      INSERT INTO public.password_reset_tokens (user_id, token, expires_at)
+      VALUES (${userId}, ${token}, ${expiresAt.toISOString()})
+    `);
+    await enqueueCustomerNotification(tx, {
+      eventKey: `password-reset:${userId}:${crypto.createHash("sha256").update(token).digest("hex").slice(0, 24)}`,
+      kind: "PASSWORD_RESET",
+      aggregateType: "user",
+      aggregateId: userId,
+      recipient: row.email,
+      payload: { token },
+      expiresAt,
+    });
+  });
   return token;
 }
 
 export async function createAccountMagicLinkToken(userId: string): Promise<string> {
   const token = generateToken();
   const expiresAt = new Date(Date.now() + 15 * 60 * 1_000);
-  await db.execute(sql`
-    INSERT INTO account_magic_link_tokens (user_id, token, expires_at)
-    VALUES (${userId}, ${token}, ${expiresAt.toISOString()})
-  `);
+  await db.transaction(async (tx) => {
+    const owner = await tx.execute(sql`
+      SELECT email FROM public.users WHERE id=${userId} AND deleted_at IS NULL FOR KEY SHARE
+    `);
+    const row = owner.rows[0] as { email: string } | undefined;
+    if (!row) throw new Error("account magic-link owner unavailable");
+    await tx.execute(sql`
+      INSERT INTO public.account_magic_link_tokens (user_id, token, expires_at)
+      VALUES (${userId}, ${token}, ${expiresAt.toISOString()})
+    `);
+    await enqueueCustomerNotification(tx, {
+      eventKey: `account-magic:${userId}:${crypto.createHash("sha256").update(token).digest("hex").slice(0, 24)}`,
+      kind: "ACCOUNT_MAGIC_LINK",
+      aggregateType: "user",
+      aggregateId: userId,
+      recipient: row.email,
+      payload: { token },
+      expiresAt,
+    });
+  });
   return token;
 }
 
@@ -136,540 +190,4 @@ export async function writeAuthAudit(
   } catch {
     /* non-critical */
   }
-}
-
-// ── Schema migration (idempotent) ────────────────────────────────────────────
-
-export async function migrateAccountSchema(): Promise<void> {
-  // Add new columns to users table
-  await db.execute(sql`
-    ALTER TABLE users
-      ADD COLUMN IF NOT EXISTS password_hash TEXT,
-      ADD COLUMN IF NOT EXISTS display_name TEXT,
-      ADD COLUMN IF NOT EXISTS email_verified BOOLEAN NOT NULL DEFAULT false,
-      ADD COLUMN IF NOT EXISTS email_verified_at TIMESTAMP,
-      ADD COLUMN IF NOT EXISTS last_login_at TIMESTAMP,
-      ADD COLUMN IF NOT EXISTS last_login_ip TEXT,
-      ADD COLUMN IF NOT EXISTS failed_login_count INTEGER NOT NULL DEFAULT 0,
-      ADD COLUMN IF NOT EXISTS locked_until TIMESTAMP
-  `);
-
-  // Case-insensitive unique index on email
-  await db.execute(sql`
-    CREATE UNIQUE INDEX IF NOT EXISTS users_email_lower_idx ON users (LOWER(email))
-  `);
-
-  // Showroom columns
-  await db.execute(sql`
-    ALTER TABLE users
-      ADD COLUMN IF NOT EXISTS username TEXT,
-      ADD COLUMN IF NOT EXISTS showroom_active BOOLEAN NOT NULL DEFAULT false,
-      ADD COLUMN IF NOT EXISTS showroom_bio TEXT,
-      ADD COLUMN IF NOT EXISTS showroom_claimed_at TIMESTAMP
-  `);
-
-  // Case-insensitive unique index on username
-  await db.execute(sql`
-    CREATE UNIQUE INDEX IF NOT EXISTS users_username_lower_idx ON users (LOWER(username))
-  `);
-
-  // Vault Club subscription columns
-  await db.execute(sql`
-    ALTER TABLE users
-      ADD COLUMN IF NOT EXISTS vault_club_tier TEXT,
-      ADD COLUMN IF NOT EXISTS vault_club_status TEXT,
-      ADD COLUMN IF NOT EXISTS vault_club_started_at TIMESTAMP,
-      ADD COLUMN IF NOT EXISTS vault_club_renews_at TIMESTAMP,
-      ADD COLUMN IF NOT EXISTS vault_club_cancels_at TIMESTAMP,
-      ADD COLUMN IF NOT EXISTS vault_club_billing_interval TEXT,
-      ADD COLUMN IF NOT EXISTS vault_club_grace_until TIMESTAMP,
-      ADD COLUMN IF NOT EXISTS stripe_customer_id TEXT,
-      ADD COLUMN IF NOT EXISTS stripe_subscription_id TEXT,
-      ADD COLUMN IF NOT EXISTS ai_credits_user_balance INTEGER NOT NULL DEFAULT 0,
-      ADD COLUMN IF NOT EXISTS ai_credits_last_refilled_at TIMESTAMP,
-      ADD COLUMN IF NOT EXISTS member_credits_last_granted_at TIMESTAMPTZ
-  `);
-
-  // Backfill member_credits_last_granted_at for users who already have member credits
-  try {
-    await db.execute(sql`
-      UPDATE users SET member_credits_last_granted_at = NOW() - INTERVAL '92 days'
-      WHERE member_credits_last_granted_at IS NULL
-        AND id IN (SELECT DISTINCT user_id FROM member_credits)
-    `);
-  } catch (e: any) {
-    console.log("[auth-schema] member_credits_last_granted_at backfill skipped:", e.message);
-  }
-
-  // Vault Club events audit table
-  await db.execute(sql`
-    CREATE TABLE IF NOT EXISTS vault_club_events (
-      id               SERIAL PRIMARY KEY,
-      user_id          TEXT REFERENCES users(id) ON DELETE CASCADE,
-      stripe_event_id  TEXT UNIQUE NOT NULL,
-      event_type       TEXT NOT NULL,
-      tier             TEXT,
-      status           TEXT,
-      amount_pence     INTEGER,
-      raw_payload      JSONB,
-      created_at       TIMESTAMP DEFAULT NOW()
-    )
-  `);
-
-  // ── v230 rename: reholder_credits → member_credits ────────────────────────
-  // RENAME runs first — before CREATE TABLE — so CREATE doesn't block the rename
-  try {
-    await db.execute(sql`ALTER TABLE IF EXISTS reholder_credits RENAME TO member_credits`);
-    console.log("[v230-migrate] renamed reholder_credits → member_credits");
-  } catch (e: any) {
-    if (e.code !== "42P07" && e.code !== "42P01") console.error("[v230-migrate] rename failed:", e.message);
-  }
-
-  // Create table for fresh installs (no-op if rename already created it)
-  await db.execute(sql`
-    CREATE TABLE IF NOT EXISTS member_credits (
-      id                    SERIAL PRIMARY KEY,
-      user_id               TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
-      granted_at            TIMESTAMP DEFAULT NOW(),
-      expires_at            TIMESTAMP,
-      used_at               TIMESTAMP,
-      used_for_submission_id INTEGER,
-      source                TEXT NOT NULL
-    )
-  `);
-
-  // Compat view so any lingering references to old name still resolve
-  try {
-    await db.execute(sql`DROP VIEW IF EXISTS reholder_credits`);
-    await db.execute(sql`CREATE OR REPLACE VIEW reholder_credits AS SELECT * FROM member_credits`);
-    console.log("[v230-migrate] compat view reholder_credits → member_credits created");
-  } catch (e: any) {
-    // If reholder_credits still exists as a base table (shouldn't after rename), skip
-    console.log("[v230-migrate] compat view skipped:", e.message);
-  }
-  try {
-    await db.execute(sql`ALTER TABLE member_credits ALTER COLUMN credit_type SET DEFAULT 'member'`);
-    await db.execute(sql`UPDATE member_credits SET credit_type = 'member' WHERE credit_type = 'reholder'`);
-  } catch (e: any) {
-    // credit_type column may not exist yet on fresh installs — Phase 6 migration adds it
-  }
-  try {
-    await db.execute(sql`
-      INSERT INTO audit_log (entity_type, entity_id, action, details, created_at)
-      VALUES ('schema', 'member_credits', 'table_renamed',
-              '{"from": "reholder_credits", "to": "member_credits", "compat_view_active": true, "compat_view_drop_after": "2026-04-23"}'::jsonb,
-              NOW())
-      ON CONFLICT DO NOTHING
-    `);
-  } catch (e: any) {
-    // Non-critical
-  }
-
-  // ── v231: Deactivate Black Label Review tier (becomes auto-upgrade) ────────
-  try {
-    const r = await db.execute(sql`
-      UPDATE service_tiers
-      SET is_active = false, updated_at = NOW()
-      WHERE tier_id = 'gold' AND name = 'BLACK LABEL REVIEW' AND is_active = true
-      RETURNING id
-    `);
-    if (r.rows.length > 0) {
-      console.log("[v231-migrate] Black Label tier deactivated (becomes auto-upgrade)");
-      await db.execute(sql`
-        INSERT INTO audit_log (entity_type, entity_id, action, details, created_at)
-        VALUES ('service_tier', 'gold', 'deactivated',
-                '{"reason": "Black Label becomes free automatic upgrade, not paid tier", "effective_from": "2026-04-16"}'::jsonb,
-                NOW())
-        ON CONFLICT DO NOTHING
-      `);
-    }
-  } catch (e: any) {
-    console.log("[v231-migrate] Black Label deactivation skipped:", e.message);
-  }
-
-  // ── v232: Add source column to certificates for scan-ingest tracking ────────
-  try {
-    await db.execute(
-      sql`ALTER TABLE certificates ADD COLUMN IF NOT EXISTS source TEXT NOT NULL DEFAULT 'customer_submission'`
-    );
-    console.log("[v232-migrate] certificates.source column ensured");
-  } catch (e: any) {
-    console.log("[v232-migrate] source column skipped:", e.message);
-  }
-
-  // ── v233: Backfill model_version on grading_sessions ───────────────────────
-  try {
-    // Backfill all existing rows (graded before Opus 4.7 switch) with the prior model
-    await db.execute(sql`
-      UPDATE grading_sessions SET model_version = 'claude-sonnet-4-6'
-      WHERE model_version IS NULL
-    `);
-    console.log("[v233-migrate] grading_sessions.model_version backfilled");
-  } catch (e: any) {
-    console.log("[v233-migrate] model_version backfill skipped:", e.message);
-  }
-
-  // ── v234 (Phase Y): crop_geometry column for scanner/admin pipeline convergence ───
-  // Stores reCentreBitmap pre-padding + post-asymmetry forensics per side.
-  // Nullable — does not affect existing rows; new uploads populate via scan-ingest
-  // and admin CaptureWizard pipelines.
-  try {
-    await db.execute(sql`ALTER TABLE certificates ADD COLUMN IF NOT EXISTS crop_geometry JSONB`);
-    console.log("[v234-migrate] certificates.crop_geometry column ensured");
-  } catch (e: any) {
-    console.log("[v234-migrate] crop_geometry column skipped:", e.message);
-  }
-
-  // ── v235 (Option B): ai_defect_candidates column for Haiku defect pass ────
-  // Populated by scan-ingest's suggestDefectsFromBuffer call. Admin confirms
-  // or rejects each candidate; confirmed ones move into the persisted
-  // `defects` array. Nullable; pre-Option-B certs leave it null.
-  try {
-    await db.execute(sql`ALTER TABLE certificates ADD COLUMN IF NOT EXISTS ai_defect_candidates JSONB`);
-    console.log("[v235-migrate] certificates.ai_defect_candidates column ensured");
-  } catch (e: any) {
-    console.log("[v235-migrate] ai_defect_candidates column skipped:", e.message);
-  }
-
-  // ── v417 PII redaction audit row — one-shot, idempotent ──────────────────
-  // Records the security-fix deploy in the audit_log so post-launch we can
-  // point ICO / customers at when the public-endpoint PII-leak class was
-  // closed. WHERE NOT EXISTS keeps this idempotent across boot cycles —
-  // audit_log has no unique constraint on entity_id, so we gate manually.
-  try {
-    await db.execute(sql`
-      INSERT INTO audit_log (entity_type, entity_id, action, admin_user, details, created_at)
-      SELECT 'system', 'v417_pii_redaction', 'security_fix', 'mintvaultuk@gmail.com',
-             ${JSON.stringify({
-               summary: "Public-endpoint PII redaction (v417 Phase 2)",
-               fixes: [
-                 "Replaced /api/vault ownership[].owner email-fallback with getOwnerChain + numbered labels",
-                 "Replaced gradedBy / approvedBy with 'MintVault UK' on /api/vault, /api/cert/:id/report, public DGR PDF",
-                 "Gated nfcUid on /api/vault behind viewerIsOwner check",
-                 "Added stripEmailsFromText sanitiser; applied to defect descriptions, gradeExplanation, authNotes on public endpoints",
-               ],
-               risks_closed: {
-                 critical: 1,
-                 medium: 2,
-                 low: 0,
-               },
-               source: "v417-phase-1-audit",
-             })}::jsonb,
-             NOW()
-      WHERE NOT EXISTS (SELECT 1 FROM audit_log WHERE entity_id = 'v417_pii_redaction')
-    `);
-    console.log("[v417-pii-audit] redaction-deploy audit row ensured");
-  } catch (e: any) {
-    console.log("[v417-pii-audit] audit row skipped:", e.message);
-  }
-
-  // ── v418 privacy-policy alignment audit row — one-shot, idempotent ───────
-  // Records the addition of the grader-attribution sub-clause (11.3) that
-  // brings the privacy policy into alignment with v417's PII-redaction
-  // behaviour. Same gating pattern as v417 above. The policy itself stays
-  // unpublished — LEGAL_PAGES_LIVE remains false until Stage B bundles
-  // Companies-House + ICO + solicitor review + flag flip in one deploy.
-  try {
-    await db.execute(sql`
-      INSERT INTO audit_log (entity_type, entity_id, action, admin_user, details, created_at)
-      SELECT 'system', 'v418_privacy_policy_v417_alignment', 'legal_content_update', 'mintvaultuk@gmail.com',
-             ${JSON.stringify({
-               change: "Added grader-attribution sub-clause 11.3 aligning with v417 PII redaction",
-               flag_state: "LEGAL_PAGES_LIVE remains false",
-               terms_version_bumped: false,
-             })}::jsonb,
-             NOW()
-      WHERE NOT EXISTS (SELECT 1 FROM audit_log WHERE entity_id = 'v418_privacy_policy_v417_alignment')
-    `);
-    console.log("[v418-privacy-policy-audit] alignment audit row ensured");
-  } catch (e: any) {
-    console.log("[v418-privacy-policy-audit] audit row skipped:", e.message);
-  }
-
-  // Add user_id column to estimate_credits for logged-in users
-  // (additive migration — anonymous email-based flow unchanged)
-  await db.execute(sql`
-    ALTER TABLE estimate_credits ADD COLUMN IF NOT EXISTS user_id TEXT REFERENCES users(id)
-  `);
-  await db.execute(sql`
-    CREATE INDEX IF NOT EXISTS estimate_credits_user_id_idx ON estimate_credits (user_id)
-  `);
-
-  // Password reset tokens
-  await db.execute(sql`
-    CREATE TABLE IF NOT EXISTS password_reset_tokens (
-      id          SERIAL PRIMARY KEY,
-      user_id     TEXT NOT NULL,
-      token       TEXT UNIQUE NOT NULL,
-      expires_at  TIMESTAMP NOT NULL,
-      consumed_at TIMESTAMP,
-      created_at  TIMESTAMP NOT NULL DEFAULT NOW()
-    )
-  `);
-
-  // Email verification tokens
-  await db.execute(sql`
-    CREATE TABLE IF NOT EXISTS email_verification_tokens (
-      id          SERIAL PRIMARY KEY,
-      user_id     TEXT NOT NULL,
-      token       TEXT UNIQUE NOT NULL,
-      expires_at  TIMESTAMP NOT NULL,
-      consumed_at TIMESTAMP,
-      created_at  TIMESTAMP NOT NULL DEFAULT NOW()
-    )
-  `);
-
-  // Magic link tokens for account logins
-  await db.execute(sql`
-    CREATE TABLE IF NOT EXISTS account_magic_link_tokens (
-      id          SERIAL PRIMARY KEY,
-      user_id     TEXT NOT NULL,
-      token       TEXT UNIQUE NOT NULL,
-      expires_at  TIMESTAMP NOT NULL,
-      consumed_at TIMESTAMP,
-      created_at  TIMESTAMP NOT NULL DEFAULT NOW()
-    )
-  `);
-
-  // Magic link tokens for customer dashboard logins
-  // Email-identified (no users row required). Replaces in-memory Map that
-  // failed on multi-machine prod — see audit_log entry below.
-  await db.execute(sql`
-    CREATE TABLE IF NOT EXISTS customer_magic_link_tokens (
-      id          SERIAL PRIMARY KEY,
-      email       TEXT NOT NULL,
-      token       TEXT UNIQUE NOT NULL,
-      expires_at  TIMESTAMP NOT NULL,
-      consumed_at TIMESTAMP,
-      created_at  TIMESTAMP NOT NULL DEFAULT NOW()
-    )
-  `);
-  await db.execute(sql`
-    CREATE INDEX IF NOT EXISTS customer_magic_link_tokens_email_created_idx
-      ON customer_magic_link_tokens (email, created_at DESC)
-  `);
-  try {
-    const existing = await db.execute(sql`
-      SELECT 1 FROM audit_log
-      WHERE entity_type = 'schema'
-        AND entity_id = 'customer_magic_link_tokens'
-        AND action = 'table_created'
-      LIMIT 1
-    `);
-    if (existing.rows.length === 0) {
-      await db.execute(sql`
-        INSERT INTO audit_log (entity_type, entity_id, action, details, created_at)
-        VALUES ('schema', 'customer_magic_link_tokens', 'table_created',
-                '{"reason":"fix magic-link failure on multi-machine prod","migration":"in-memory Map -> Postgres","ttl_minutes":15,"fixes":"~50% login failure rate when POST and GET landed on different Fly machines"}'::jsonb,
-                NOW())
-      `);
-      console.log("[customer-magic-link-migrate] table created + audit logged");
-    }
-  } catch (e: any) {
-    console.log("[customer-magic-link-migrate] audit_log skipped:", e.message);
-  }
-
-  // ── PIN-based authentication (v1 launch) ──────────────────────────────────
-  // Replaces magic-link as primary login for cert-owners + admin. Magic-link
-  // demoted to first-time enrollment + forgot-PIN reset.
-  // Schema sequence (LOCK-1 from PIN auth checkpoint):
-  //   1. ALTER users +pin_hash +pin_set_at +pin_failed_count +pin_locked_until
-  //   2. CREATE pin_attempts, pin_reset_tokens
-  //   3. UPDATE users SET role='admin' WHERE email = ADMIN canonical (idempotent)
-  //   4. audit_log entries for first-time table creation / role assignment
-  await db.execute(sql`ALTER TABLE users ADD COLUMN IF NOT EXISTS pin_hash TEXT`);
-  await db.execute(sql`ALTER TABLE users ADD COLUMN IF NOT EXISTS pin_set_at TIMESTAMPTZ`);
-  await db.execute(sql`ALTER TABLE users ADD COLUMN IF NOT EXISTS pin_failed_count INTEGER NOT NULL DEFAULT 0`);
-  await db.execute(sql`ALTER TABLE users ADD COLUMN IF NOT EXISTS pin_locked_until TIMESTAMPTZ`);
-
-  await db.execute(sql`
-    CREATE TABLE IF NOT EXISTS pin_attempts (
-      id           SERIAL PRIMARY KEY,
-      email        TEXT NOT NULL,
-      success      BOOLEAN NOT NULL,
-      reason       TEXT,
-      ip_hash      TEXT,
-      attempted_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
-    )
-  `);
-  await db.execute(sql`
-    CREATE INDEX IF NOT EXISTS pin_attempts_email_attempted_idx
-      ON pin_attempts (email, attempted_at DESC)
-  `);
-
-  await db.execute(sql`
-    CREATE TABLE IF NOT EXISTS pin_reset_tokens (
-      id          SERIAL PRIMARY KEY,
-      email       TEXT NOT NULL,
-      token       TEXT UNIQUE NOT NULL,
-      expires_at  TIMESTAMPTZ NOT NULL,
-      consumed_at TIMESTAMPTZ,
-      created_at  TIMESTAMPTZ NOT NULL DEFAULT NOW()
-    )
-  `);
-  await db.execute(sql`
-    CREATE INDEX IF NOT EXISTS pin_reset_tokens_email_created_idx
-      ON pin_reset_tokens (email, created_at DESC)
-  `);
-
-  // Idempotent admin role assignment. The admin login flow (LOCK-3) reads
-  // the admin user's pin_hash via ADMIN_EMAIL ('mintvaultuk@gmail.com',
-  // see server/auth.ts:4), so the row must exist with role='admin' on
-  // exactly that email. The hard-coded address below MUST stay in sync
-  // with the ADMIN_EMAIL constant. No-op if the email isn't in the users
-  // table yet (admin account-holder signup happens via /api/auth/signup
-  // separately).
-  try {
-    await db.execute(sql`
-      UPDATE users SET role = 'admin', updated_at = NOW()
-      WHERE LOWER(email) = LOWER('mintvaultuk@gmail.com')
-        AND COALESCE(role, '') <> 'admin'
-        AND deleted_at IS NULL
-    `);
-  } catch (e: any) {
-    console.log("[pin-migrate] admin role assignment skipped:", e.message);
-  }
-
-  // Audit_log entries — only on first-time creation
-  try {
-    const existingPinAttempts = await db.execute(sql`
-      SELECT 1 FROM audit_log
-      WHERE entity_type = 'schema' AND entity_id = 'pin_attempts' AND action = 'table_created'
-      LIMIT 1
-    `);
-    if (existingPinAttempts.rows.length === 0) {
-      await db.execute(sql`
-        INSERT INTO audit_log (entity_type, entity_id, action, details, created_at)
-        VALUES ('schema', 'pin_attempts', 'table_created',
-                '{"reason":"v1 launch: PIN-based auth replaces magic-link as primary login","cost_factor":12,"lockout_threshold":3,"lockout_duration_minutes":15}'::jsonb,
-                NOW())
-      `);
-      console.log("[pin-migrate] pin_attempts table created + audit logged");
-    }
-    const existingPinResets = await db.execute(sql`
-      SELECT 1 FROM audit_log
-      WHERE entity_type = 'schema' AND entity_id = 'pin_reset_tokens' AND action = 'table_created'
-      LIMIT 1
-    `);
-    if (existingPinResets.rows.length === 0) {
-      await db.execute(sql`
-        INSERT INTO audit_log (entity_type, entity_id, action, details, created_at)
-        VALUES ('schema', 'pin_reset_tokens', 'table_created',
-                '{"reason":"v1 launch: PIN reset flow via magic-link","ttl_minutes":15,"single_use":true}'::jsonb,
-                NOW())
-      `);
-      console.log("[pin-migrate] pin_reset_tokens table created + audit logged");
-    }
-    const existingPinCols = await db.execute(sql`
-      SELECT 1 FROM audit_log
-      WHERE entity_type = 'schema' AND entity_id = 'users.pin_columns' AND action = 'columns_added'
-      LIMIT 1
-    `);
-    if (existingPinCols.rows.length === 0) {
-      await db.execute(sql`
-        INSERT INTO audit_log (entity_type, entity_id, action, details, created_at)
-        VALUES ('schema', 'users.pin_columns', 'columns_added',
-                '{"columns":["pin_hash","pin_set_at","pin_failed_count","pin_locked_until"],"reason":"v1 launch PIN auth"}'::jsonb,
-                NOW())
-      `);
-      console.log("[pin-migrate] users PIN columns added + audit logged");
-    }
-  } catch (e: any) {
-    console.log("[pin-migrate] audit_log skipped:", e.message);
-  }
-
-  // Pending account-switch nonces — used by /account/switch confirm flow.
-  // When a magic-link verify produces a different email than the active
-  // session, we issue a 5-min HMAC-signed cookie tied to a row here. Atomic
-  // consume on POST /account/switch/confirm. Idempotent CREATE — safe to
-  // re-run on every boot.
-  await db.execute(sql`
-    CREATE TABLE IF NOT EXISTS pending_switch_nonces (
-      nonce        TEXT PRIMARY KEY,
-      email_target TEXT NOT NULL,
-      issued_at    TIMESTAMPTZ NOT NULL DEFAULT NOW(),
-      consumed_at  TIMESTAMPTZ
-    )
-  `);
-  await db.execute(sql`
-    CREATE INDEX IF NOT EXISTS pending_switch_nonces_issued_at_idx
-      ON pending_switch_nonces (issued_at)
-  `);
-  try {
-    const existingSwitch = await db.execute(sql`
-      SELECT 1 FROM audit_log
-      WHERE entity_type = 'schema'
-        AND entity_id = 'pending_switch_nonces'
-        AND action = 'table_created'
-      LIMIT 1
-    `);
-    if (existingSwitch.rows.length === 0) {
-      await db.execute(sql`
-        INSERT INTO audit_log (entity_type, entity_id, action, details, created_at)
-        VALUES ('schema', 'pending_switch_nonces', 'table_created',
-                '{"reason":"v1 launch UX/privacy: confirm page when magic-link would switch active session","ttl_minutes":5,"single_use":true,"cleanup_window_hours":1}'::jsonb,
-                NOW())
-      `);
-      console.log("[pending-switch-nonces-migrate] table created + audit logged");
-    }
-  } catch (e: any) {
-    console.log("[pending-switch-nonces-migrate] audit_log skipped:", e.message);
-  }
-
-  // Login attempts (rate limiting + audit)
-  await db.execute(sql`
-    CREATE TABLE IF NOT EXISTS login_attempts (
-      id         SERIAL PRIMARY KEY,
-      email      TEXT NOT NULL,
-      ip         TEXT NOT NULL,
-      success    BOOLEAN NOT NULL,
-      user_agent TEXT,
-      created_at TIMESTAMP NOT NULL DEFAULT NOW()
-    )
-  `);
-  await db.execute(sql`
-    CREATE INDEX IF NOT EXISTS login_attempts_email_created_idx
-      ON login_attempts (email, created_at DESC)
-  `);
-  await db.execute(sql`
-    CREATE INDEX IF NOT EXISTS login_attempts_ip_created_idx
-      ON login_attempts (ip, created_at DESC)
-  `);
-
-  // ── Submission Tracking Dashboard columns ──────────────────────────────────
-  await db.execute(sql`
-    ALTER TABLE submissions
-      ADD COLUMN IF NOT EXISTS royal_mail_outbound_tracking TEXT,
-      ADD COLUMN IF NOT EXISTS royal_mail_return_status TEXT,
-      ADD COLUMN IF NOT EXISTS royal_mail_return_status_at TIMESTAMP,
-      ADD COLUMN IF NOT EXISTS estimated_completion_date TIMESTAMP,
-      ADD COLUMN IF NOT EXISTS queued_at TIMESTAMP,
-      ADD COLUMN IF NOT EXISTS grading_started_at TIMESTAMP,
-      ADD COLUMN IF NOT EXISTS encapsulating_at TIMESTAMP,
-      ADD COLUMN IF NOT EXISTS delivered_at TIMESTAMP,
-      ADD COLUMN IF NOT EXISTS on_receipt_photo_urls TEXT,
-      ADD COLUMN IF NOT EXISTS status_history JSONB DEFAULT '[]'::jsonb
-  `);
-
-  // ── Homepage founding-members waitlist (replaces stats trio CTA, 2026-04-27) ─
-  // Idempotent additive migration. Soft-delete only (deleted_at). Email
-  // uniqueness enforced case-insensitively via lower(email) partial index
-  // so callers can keep the original capitalisation while still being
-  // collision-checked.
-  await db.execute(sql`
-    CREATE TABLE IF NOT EXISTS waitlist_signups (
-      id          SERIAL PRIMARY KEY,
-      email       TEXT NOT NULL,
-      source      TEXT NOT NULL DEFAULT 'homepage_founding_member',
-      ip_address  TEXT,
-      user_agent  TEXT,
-      created_at  TIMESTAMP NOT NULL DEFAULT NOW(),
-      deleted_at  TIMESTAMP
-    )
-  `);
-  await db.execute(sql`
-    CREATE UNIQUE INDEX IF NOT EXISTS waitlist_signups_email_lower_idx
-      ON waitlist_signups (LOWER(email))
-      WHERE deleted_at IS NULL
-  `);
 }

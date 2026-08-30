@@ -14,55 +14,16 @@ import { fulfilPaidSubmission } from "./routes/submissions";
 import { sendVaultClubWelcomeEmail, sendVaultClubCancelledEmail, sendVaultClubPaymentFailedEmail } from "./email";
 
 /**
- * Boot migration for payment idempotency. Idempotent + additive — safe to run
- * on every boot.
- *  - stripe_webhook_events: a generic processed-event ledger so a replayed
- *    Stripe event id becomes a no-op (belt-and-suspenders behind the atomic
- *    paid-transition gate inside fulfilPaidSubmission).
- *  - uq_member_credits_used_for_submission: a partial UNIQUE index guaranteeing
- *    a single submission can never consume more than one Vault Club credit. It
- *    is wrapped in its own try/catch with a LOUD log: if a legacy duplicate
- *    already exists the index build fails HERE (never silently) without
- *    blocking boot, so the data issue is surfaced rather than swallowed.
+ * Record that a grading event reached its submission-level idempotency gate.
+ * This is deliberately an after-the-fact record, never a pre-fulfilment claim:
+ * if either the paid transition or this insert fails, Stripe can retry safely.
  */
-export async function migratePaymentIdempotencySchema(): Promise<void> {
+async function recordStripeEventProcessed(eventId: string, eventType: string): Promise<void> {
   await db.execute(sql`
-    CREATE TABLE IF NOT EXISTS stripe_webhook_events (
-      stripe_event_id TEXT PRIMARY KEY,
-      event_type TEXT,
-      processed_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
-    )
-  `);
-  try {
-    await db.execute(sql`
-      CREATE UNIQUE INDEX IF NOT EXISTS uq_member_credits_used_for_submission
-        ON member_credits (used_for_submission_id)
-        WHERE used_for_submission_id IS NOT NULL
-    `);
-    console.log("[payment-idempotency-migrate] stripe_webhook_events + uq_member_credits_used_for_submission ensured");
-  } catch (e: any) {
-    console.error(
-      "[payment-idempotency-migrate] ⚠️ uq_member_credits_used_for_submission FAILED — " +
-        "likely a pre-existing duplicate used_for_submission_id. Resolve manually; boot continues.",
-      e?.message || e
-    );
-  }
-}
-
-/**
- * Atomically claim a Stripe event id for processing. Returns true the FIRST time
- * an id is seen (caller should process), false if it was already recorded
- * (caller should skip). The INSERT ... ON CONFLICT DO NOTHING makes the claim
- * race-safe across concurrent webhook deliveries.
- */
-async function claimStripeEvent(eventId: string, eventType: string): Promise<boolean> {
-  const res = await db.execute(sql`
     INSERT INTO stripe_webhook_events (stripe_event_id, event_type)
     VALUES (${eventId}, ${eventType})
     ON CONFLICT (stripe_event_id) DO NOTHING
-    RETURNING stripe_event_id
   `);
-  return res.rows.length > 0;
 }
 
 /** Transaction-capable executor. Production passes the real `db`; tests inject a
@@ -87,7 +48,7 @@ interface EstimateCheckoutSession {
  * lost a paying customer's credits (Stripe never retried).
  *
  * This performs the event-id CLAIM and the credit GRANT inside ONE transaction,
- * reusing the SAME `stripe_webhook_events` ledger the grading flow uses:
+ * reusing the shared `stripe_webhook_events` payment-idempotency ledger:
  *  - replayed / redelivered event  → the claim conflicts (0 rows) → grant skipped
  *    (exactly-once credit, even under concurrent deliveries of the same event).
  *  - transient failure mid-grant   → the whole transaction rolls back, releasing
@@ -95,9 +56,9 @@ interface EstimateCheckoutSession {
  *    credit loss.
  *
  * Amount and owner are NOT taken from raw browser input: `credits` is fixed
- * server-side at checkout from ESTIMATE_PACKAGES and carried in Stripe metadata
- * (which only our server can set); the browser only ever chose a validated
- * package key and its own email.
+ * server-side at checkout from ESTIMATE_PACKAGES and `user_id` is copied from
+ * the authenticated server session. Both are carried in Stripe metadata, which
+ * only our server can set.
  *
  * Returns { granted, reason } and NEVER throws for a permanent condition
  * (not-paid / malformed metadata / duplicate) — the caller returns 200 and Stripe
@@ -116,22 +77,21 @@ export async function fulfilEstimateCreditsPurchase(
   // Only fulfil a genuinely paid session. checkout.session.completed can fire for
   // delayed/async payment methods before funds settle — fail closed on anything
   // that is not explicitly "paid".
-  if (session.payment_status && session.payment_status !== "paid") {
+  if (session.payment_status !== "paid") {
     console.log(
       `[webhook] estimate_credits session ${session.id} payment_status=${session.payment_status} — not fulfilling`
     );
     return { granted: false, reason: "not_paid" };
   }
 
-  const email = (meta.email || "").trim().toLowerCase();
   const userId = (meta.user_id || "").trim();
   const credits = parseInt(meta.credits || "0", 10);
 
   // Malformed / incomplete metadata → nothing safe to fulfil. Permanent condition,
   // so do NOT throw (a retry can't help); surface loudly for reconciliation.
-  if ((!email && !userId) || !Number.isInteger(credits) || credits <= 0) {
+  if (!userId || !Number.isInteger(credits) || credits <= 0) {
     console.error(
-      `[webhook] estimate_credits malformed metadata (email/user_id/credits) event=${eventId} session=${session.id} — skipping`
+      `[webhook] estimate_credits malformed metadata (user_id/credits) event=${eventId} session=${session.id} — skipping`
     );
     return { granted: false, reason: "malformed_metadata" };
   }
@@ -148,23 +108,19 @@ export async function fulfilEstimateCreditsPurchase(
       return { granted: false, reason: "duplicate_event" };
     }
 
-    if (userId) {
-      // Logged-in purchase — credit the account balance directly.
-      await tx.execute(sql`
-        UPDATE users SET ai_credits_user_balance = ai_credits_user_balance + ${credits} WHERE id = ${userId}
-      `);
-    } else {
-      // Anonymous / email purchase.
-      await tx.execute(sql`
-        INSERT INTO estimate_credits (email, credits_remaining, credits_purchased, credits_used)
-        VALUES (${email}, ${credits}, ${credits}, 0)
-        ON CONFLICT (email) DO UPDATE SET
-          credits_remaining = estimate_credits.credits_remaining + ${credits},
-          credits_purchased = estimate_credits.credits_purchased + ${credits},
-          updated_at = NOW()
-      `);
+    const granted = await tx.execute(sql`
+      UPDATE users
+         SET ai_credits_user_balance = ai_credits_user_balance + ${credits}
+       WHERE id = ${userId}
+         AND deleted_at IS NULL
+      RETURNING id
+    `);
+    if (granted.rows.length !== 1) {
+      // Throw so the event claim rolls back and Stripe can retry. A paid event
+      // must never be marked processed when no live owner received its credits.
+      throw new Error("estimate-credit owner unavailable during paid fulfilment");
     }
-    console.log(`[webhook] estimate_credits: +${credits} for ${userId || email} (event ${eventId})`);
+    console.log(`[webhook] estimate_credits: +${credits} for user ${userId} (event ${eventId})`);
     return { granted: true };
   });
 }
@@ -213,25 +169,27 @@ export class WebhookHandlers {
         return;
       }
 
-      // Belt-and-suspenders event dedup. The atomic paid-transition gate inside
-      // fulfilPaidSubmission is the real guard; this just avoids reprocessing a
-      // replayed Stripe event id at all (e.g. Stripe re-delivering on timeout).
-      const fresh = await claimStripeEvent(event.id, event.type);
-      if (!fresh) {
-        console.log(`[webhook] event ${event.id} (${event.type}) already processed — skipping`);
-        return;
-      }
-
       // SHARED idempotent fulfilment — the SAME function /api/confirm-payment
       // calls. Whoever wins the atomic paid transition runs the once-only
       // side-effects (mark paid, consume credit, redeem promo, link user,
       // email); the other caller is a logged no-op. This closes the inverse gap
       // where a webhook-only completion previously never consumed the credit or
-      // redeemed the promo code.
-      await fulfilPaidSubmission(submission, pi.metadata || {}, pi.amount || 0, {}, {
-        currency: pi.currency,
-        paidAt: new Date(),
-      });
+      // redeemed the promo code. Do NOT claim this event in a separate committed
+      // statement first: if the paid transition then fails, Stripe must be able
+      // to retry the same event. The submission row's atomic draft-to-paid UPDATE
+      // is the same-database idempotency authority for grading payments.
+      await fulfilPaidSubmission(
+        submission,
+        pi.metadata || {},
+        pi.amount || 0,
+        {},
+        {
+          currency: pi.currency,
+          paidAt: new Date(),
+          paymentIntentId: pi.id,
+        }
+      );
+      await recordStripeEventProcessed(event.id, event.type);
       console.log(`[webhook] Submission ${submission.submissionId} fulfilment dispatched (paymentStatus=paid)`);
     }
 
@@ -259,7 +217,7 @@ export class WebhookHandlers {
        * PARTNER Grading Credit pack purchase — the ONLY path that may grant a Partner credit.
        * The success page the buyer is redirected to grants nothing, in any environment.
        *
-       * DELIBERATELY NOT PRE-CLAIMED VIA claimStripeEvent(), unlike the estimate path above.
+       * DELIBERATELY NOT PRE-CLAIMED INTO stripe_webhook_events, unlike the estimate path above.
        * That path can claim safely because its claim and its grant happen in ONE transaction on
        * the SAME connection. A partner grant does not: `stripe_webhook_events` is written through
        * the main `db`, while the credit ledger is written through the separate partner ADMIN pool,

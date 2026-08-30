@@ -176,7 +176,7 @@ export type PinAttemptReason =
   | "weak_pin"
   | "pin_set"
   | "pin_reset"
-  | "reset_link_sent"
+  | "reset_link_queued"
   | "admin_blocked"
   // AG-3b: a Super Admin re-proving themselves before a destructive action. Recorded distinctly
   // rather than borrowed from "ok", because "logged in" and "authorised a station revocation"
@@ -206,7 +206,7 @@ export async function logPinEvent(
     "lockout_triggered",
     "locked",
     "pin_reset",
-    "reset_link_sent",
+    "reset_link_queued",
     "weak_pin",
     "admin_blocked",
   ];

@@ -89,6 +89,10 @@ async function userBalance(id: string): Promise<number | null> {
   return r.rowCount === 0 ? null : r.rows[0].ai_credits_user_balance;
 }
 
+async function seedUser(email: string): Promise<string> {
+  return (await pool.query(`INSERT INTO users (email) VALUES ($1) RETURNING id`, [email])).rows[0].id as string;
+}
+
 async function eventCount(eventId: string): Promise<number> {
   const r = await pool.query(`SELECT 1 FROM stripe_webhook_events WHERE stripe_event_id=$1`, [eventId]);
   return r.rowCount ?? 0;
@@ -121,7 +125,8 @@ describe("PKG-2 estimate-credit idempotency (PostgreSQL 17.10)", () => {
       CREATE TABLE users (
         id varchar PRIMARY KEY DEFAULT gen_random_uuid(),
         email varchar UNIQUE,
-        ai_credits_user_balance INTEGER NOT NULL DEFAULT 0
+        ai_credits_user_balance INTEGER NOT NULL DEFAULT 0,
+        deleted_at timestamptz
       )`);
 
     pool = new pg.Pool({ connectionString: cluster.url, max: 6 });
@@ -149,41 +154,45 @@ describe("PKG-2 estimate-credit idempotency (PostgreSQL 17.10)", () => {
   // 1 — successful purchase grants exactly the intended credits once.
   it("grants exactly the purchased credits once for a paid session", async () => {
     const evt = nextEventId();
-    const res = await fulfil(evt, session({ email: "buyer@example.com", credits: 15 }));
+    const userId = await seedUser("buyer@example.com");
+    const res = await fulfil(evt, session({ email: "buyer@example.com", userId, credits: 15 }));
     expect(res.granted).toBe(true);
-    expect(await emailCredits("buyer@example.com")).toEqual({ remaining: 15, purchased: 15, used: 0 });
+    expect(await userBalance(userId)).toBe(15);
+    expect(await emailCredits("buyer@example.com")).toBeNull();
     expect(await eventCount(evt)).toBe(1);
   });
 
   // 2 — webhook replay: the SAME event delivered twice grants only once.
   it("does not double-grant when the same event id is redelivered", async () => {
     const evt = nextEventId();
-    const s = session({ email: "buyer@example.com", credits: 15 });
+    const userId = await seedUser("buyer@example.com");
+    const s = session({ email: "buyer@example.com", userId, credits: 15 });
     const first = await fulfil(evt, s);
     const second = await fulfil(evt, s);
     expect(first.granted).toBe(true);
     expect(second.granted).toBe(false);
     expect(second.reason).toBe("duplicate_event");
-    expect((await emailCredits("buyer@example.com"))!.remaining).toBe(15); // not 30
+    expect(await userBalance(userId)).toBe(15); // not 30
   });
 
   // 3 — concurrent fulfilment: two simultaneous deliveries of the same event
   //     (e.g. dual webhook endpoints during a DNS cutover) grant exactly once.
   it("grants exactly once under two concurrent deliveries of the same event", async () => {
     const evt = nextEventId();
-    const s = session({ email: "buyer@example.com", credits: 100 });
+    const userId = await seedUser("buyer@example.com");
+    const s = session({ email: "buyer@example.com", userId, credits: 100 });
     const [a, b] = await Promise.all([fulfil(evt, s), fulfil(evt, s)]);
     const granted = [a, b].filter((r) => r.granted).length;
     expect(granted).toBe(1);
-    expect((await emailCredits("buyer@example.com"))!.remaining).toBe(100); // never 200
+    expect(await userBalance(userId)).toBe(100); // never 200
     expect(await eventCount(evt)).toBe(1);
   });
 
   // 6 — logged-in purchase credits ONLY the bound user; a different account is
   //     never touched. Owner comes from server-set metadata, not the credited email.
   it("credits only the bound user_id on the logged-in path (no cross-account grant)", async () => {
-    const a = (await pool.query(`INSERT INTO users (email) VALUES ('a@x.com') RETURNING id`)).rows[0].id as string;
-    const b = (await pool.query(`INSERT INTO users (email) VALUES ('b@x.com') RETURNING id`)).rows[0].id as string;
+    const a = await seedUser("a@x.com");
+    const b = await seedUser("b@x.com");
     const res = await fulfil(nextEventId(), session({ email: "a@x.com", userId: a, credits: 5 }));
     expect(res.granted).toBe(true);
     expect(await userBalance(a)).toBe(5);
@@ -194,7 +203,11 @@ describe("PKG-2 estimate-credit idempotency (PostgreSQL 17.10)", () => {
   // 9 — unpaid session grants nothing (fail closed on payment_status).
   it("grants nothing for a session that is not paid", async () => {
     const evt = nextEventId();
-    const res = await fulfil(evt, session({ email: "buyer@example.com", credits: 15, paymentStatus: "unpaid" }));
+    const userId = await seedUser("buyer@example.com");
+    const res = await fulfil(
+      evt,
+      session({ email: "buyer@example.com", userId, credits: 15, paymentStatus: "unpaid" })
+    );
     expect(res.granted).toBe(false);
     expect(res.reason).toBe("not_paid");
     expect(await emailCredits("buyer@example.com")).toBeNull();
@@ -203,11 +216,11 @@ describe("PKG-2 estimate-credit idempotency (PostgreSQL 17.10)", () => {
 
   // 8 & 10 — malformed / incomplete metadata grants nothing (safe rejection).
   it.each([
-    { label: "missing credits", opts: { email: "b@x.com" } },
-    { label: "zero credits", opts: { email: "b@x.com", credits: 0 } },
-    { label: "negative credits", opts: { email: "b@x.com", credits: -5 } },
-    { label: "non-numeric credits", opts: { email: "b@x.com", credits: "abc" } },
-    { label: "no owner (no email, no user_id)", opts: { credits: 5 } },
+    { label: "missing credits", opts: { userId: "synthetic-user" } },
+    { label: "zero credits", opts: { userId: "synthetic-user", credits: 0 } },
+    { label: "negative credits", opts: { userId: "synthetic-user", credits: -5 } },
+    { label: "non-numeric credits", opts: { userId: "synthetic-user", credits: "abc" } },
+    { label: "no user_id", opts: { email: "b@x.com", credits: 5 } },
   ])("grants nothing for malformed metadata: $label", async ({ opts }) => {
     const evt = nextEventId();
     const res = await fulfil(evt, session(opts as any));
@@ -216,10 +229,27 @@ describe("PKG-2 estimate-credit idempotency (PostgreSQL 17.10)", () => {
     expect(await eventCount(evt)).toBe(0);
   });
 
+  it("does not treat an absent payment_status as paid", async () => {
+    const userId = await seedUser("buyer@example.com");
+    const malformed = session({ email: "buyer@example.com", userId, credits: 5 }) as any;
+    delete malformed.payment_status;
+    const evt = nextEventId();
+    expect(await fulfil(evt, malformed)).toMatchObject({ granted: false, reason: "not_paid" });
+    expect(await userBalance(userId)).toBe(0);
+    expect(await eventCount(evt)).toBe(0);
+  });
+
+  it("rolls back rather than claiming a paid event whose bound user no longer exists", async () => {
+    const evt = nextEventId();
+    await expect(fulfil(evt, session({ userId: "missing-user", credits: 5 }))).rejects.toThrow(/owner unavailable/);
+    expect(await eventCount(evt)).toBe(0);
+  });
+
   // 11 — partial failure rolls back atomically: a mid-grant error must release the
   //      event claim, so no credit is granted AND the event is not recorded.
   it("rolls back the event claim when the grant fails (no claim-then-crash loss)", async () => {
     const evt = nextEventId();
+    const userId = await seedUser("buyer@example.com");
     // Executor whose transaction runs on the REAL cluster but throws on the 2nd
     // statement (the grant) after the 1st (the claim) has run inside the tx.
     const failingRunner = {
@@ -245,31 +275,33 @@ describe("PKG-2 estimate-credit idempotency (PostgreSQL 17.10)", () => {
       webhooks.fulfilEstimateCreditsPurchase(
         evt,
         "checkout.session.completed",
-        session({ email: "buyer@example.com", credits: 15 }),
+        session({ email: "buyer@example.com", userId, credits: 15 }),
         { exec: failingRunner as any }
       )
     ).rejects.toThrow(/simulated grant failure/);
 
     // Rolled back: no credit, and the event id was NOT recorded.
-    expect(await emailCredits("buyer@example.com")).toBeNull();
+    expect(await userBalance(userId)).toBe(0);
     expect(await eventCount(evt)).toBe(0);
 
     // 12 — retry after the partial failure re-fulfils exactly once.
-    const retry = await fulfil(evt, session({ email: "buyer@example.com", credits: 15 }));
+    const retry = await fulfil(evt, session({ email: "buyer@example.com", userId, credits: 15 }));
     expect(retry.granted).toBe(true);
-    expect((await emailCredits("buyer@example.com"))!.remaining).toBe(15);
+    expect(await userBalance(userId)).toBe(15);
     expect(await eventCount(evt)).toBe(1);
   });
 
   // 15 — separate purchases (distinct event ids) each grant their own credits once.
   it("keeps separate purchases independent (distinct event ids each grant once)", async () => {
-    const r1 = await fulfil(nextEventId(), session({ email: "one@x.com", credits: 5, id: "cs_1" }));
-    const r2 = await fulfil(nextEventId(), session({ email: "two@x.com", credits: 15, id: "cs_2" }));
+    const one = await seedUser("one@x.com");
+    const two = await seedUser("two@x.com");
+    const r1 = await fulfil(nextEventId(), session({ email: "one@x.com", userId: one, credits: 5, id: "cs_1" }));
+    const r2 = await fulfil(nextEventId(), session({ email: "two@x.com", userId: two, credits: 15, id: "cs_2" }));
     // Same buyer, second genuine purchase = a different event id → accumulates.
-    const r3 = await fulfil(nextEventId(), session({ email: "one@x.com", credits: 100, id: "cs_3" }));
+    const r3 = await fulfil(nextEventId(), session({ email: "one@x.com", userId: one, credits: 100, id: "cs_3" }));
     expect([r1.granted, r2.granted, r3.granted]).toEqual([true, true, true]);
-    expect((await emailCredits("one@x.com"))!.remaining).toBe(105);
-    expect((await emailCredits("two@x.com"))!.remaining).toBe(15);
+    expect(await userBalance(one)).toBe(105);
+    expect(await userBalance(two)).toBe(15);
   });
 
   // 4, 5, 13 documented: estimate fulfilment is webhook-ONLY (no manual-confirm

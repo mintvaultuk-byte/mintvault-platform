@@ -1,12 +1,13 @@
 /**
- * Customer session identity — every account login path must establish the key the
- * collection is read by.
+ * Customer session identity — login paths stamp a live, versioned users-row
+ * authority before the collection can be read.
  *
  * WHY THIS SUITE EXISTS — the defect found on production 2026-08-23:
  *
- *   The whole customer-facing surface is gated on `requireCustomer`, which reads
- *   ONE session key: `customerEmail`. `/api/customer/me` and
- *   `/api/customer/certificates` (the Vault Club collection) both sit behind it.
+ *   The whole customer-facing surface used to trust one cached session key:
+ *   `customerEmail`. That made a stale or unverified email an authorization
+ *   credential. `requireCustomer` now resolves the live users row, validates the
+ *   credential-version stamp, and requires verified email ownership.
  *
  *   `/api/auth/magic-link/verify` set `userId` + `userEmail`, then redirected to
  *   `/dashboard` — and never set `customerEmail`. Reproduced on staging with a
@@ -31,7 +32,12 @@ const execute = vi.hoisted(() => vi.fn(async () => ({ rows: [] as Record<string,
 const findUserById = vi.hoisted(() => vi.fn());
 const findUserByEmail = vi.hoisted(() => vi.fn());
 
-vi.mock("../server/db", () => ({ db: { execute } }));
+vi.mock("../server/db", () => ({
+  db: {
+    execute,
+    transaction: vi.fn(async (work: (tx: { execute: typeof execute }) => unknown) => work({ execute })),
+  },
+}));
 vi.mock("../server/storage", () => ({ storage: { writeAuditLog: vi.fn(async () => {}), getUserByEmail: vi.fn() } }));
 vi.mock("../server/account-auth", async (importOriginal) => {
   const actual = await importOriginal<typeof import("../server/account-auth")>();
@@ -101,6 +107,7 @@ function fakeReq(extra: Record<string, unknown>) {
     headers: {},
     ip: "127.0.0.1",
     protocol: "https",
+    sessionID: "acting-session",
     get: (h: string) => (h.toLowerCase() === "host" ? "mintvault.test" : undefined),
     ...extra,
   };
@@ -122,7 +129,7 @@ async function collectionReadable(session: Record<string, unknown>): Promise<boo
   const { requireCustomer } = await import("../server/customer-auth");
   let passed = false;
   const res = fakeRes();
-  requireCustomer({ session } as any, res as any, () => {
+  await requireCustomer({ session } as any, res as any, () => {
     passed = true;
   });
   return passed;
@@ -143,30 +150,54 @@ describe("customer session identity — the key the collection is read by", () =
     expect(routes.has("GET /api/auth/magic-link/verify")).toBe(true);
     expect(routes.has("POST /api/auth/signup")).toBe(true);
     expect(routes.has("PUT /api/auth/change-email")).toBe(true);
+    expect(routes.has("PUT /api/auth/change-password")).toBe(true);
   });
 
-  it("REGRESSION: account magic-link login makes the collection readable", async () => {
-    const user = { id: "u-1", email: "claimant@example.test", deleted_at: null, display_name: null };
+  it("REGRESSION: account magic-link verifies and stamps the live identity", async () => {
+    const user = {
+      id: "u-1",
+      email: "claimant@example.test",
+      deleted_at: null,
+      display_name: null,
+      credential_version: 4,
+    };
     execute.mockResolvedValueOnce({ rows: [{ user_id: "u-1" }] }); // token consume
-    execute.mockResolvedValue({ rows: [] }); // last_login_at update
+    execute.mockResolvedValueOnce({
+      rows: [{ id: "u-1", email: "claimant@example.test", credential_version: 4 }],
+    }); // verification + login update
+    execute.mockResolvedValueOnce({
+      rows: [{ id: "u-1", email: "claimant@example.test", email_verified: true, credential_version: 4 }],
+    }); // live requireCustomer authority
     findUserById.mockResolvedValue(user);
 
     const session = fakeSession();
     const res = fakeRes();
-    await routes.get("GET /api/auth/magic-link/verify")!(
-      fakeReq({ query: { token: "magic-token" }, session }),
-      res
-    );
+    await routes.get("GET /api/auth/magic-link/verify")!(fakeReq({ query: { token: "magic-token" }, session }), res);
 
     expect(res.redirected).toBe("/dashboard");
     expect(session.userId).toBe("u-1");
     expect(session.customerEmail).toBe("claimant@example.test");
+    expect(session.credentialVersion).toBe(4);
     expect(await collectionReadable(session)).toBe(true);
   });
 
-  it("REGRESSION: signup makes the collection readable", async () => {
+  it("REGRESSION: signup is authenticated but cannot read customer records before verification", async () => {
     findUserByEmail.mockResolvedValue(null);
-    execute.mockResolvedValue({ rows: [{ id: "u-2", email: "new@example.test", display_name: null }] });
+    execute
+      .mockResolvedValueOnce({
+        rows: [
+          {
+            id: "u-2",
+            email: "new@example.test",
+            display_name: null,
+            email_verified: false,
+            credential_version: 1,
+          },
+        ],
+      })
+      .mockResolvedValueOnce({
+        rows: [{ id: "u-2", email: "new@example.test", email_verified: false, credential_version: 1 }],
+      });
 
     const session = fakeSession();
     const res = fakeRes();
@@ -178,14 +209,17 @@ describe("customer session identity — the key the collection is read by", () =
     expect(res.body, JSON.stringify(res.body)).toBeTruthy();
     expect(res.statusCode, JSON.stringify(res.body)).toBe(201);
     expect(session.customerEmail).toBe("new@example.test");
-    expect(await collectionReadable(session)).toBe(true);
+    expect(session.credentialVersion).toBe(1);
+    expect(await collectionReadable(session)).toBe(false);
   });
 
   it("REGRESSION: changing email moves the collection identity off the old address", async () => {
     const user = { id: "u-3", email: "old@example.test", password_hash: "h", display_name: null, deleted_at: null };
     findUserById.mockResolvedValue(user);
     findUserByEmail.mockResolvedValue(null);
-    execute.mockResolvedValue({ rows: [] });
+    execute
+      .mockResolvedValueOnce({ rows: [{ email: "new@example.test", credential_version: 2 }] })
+      .mockResolvedValueOnce({ rows: [{ sid: "peer-session" }] });
 
     const session = fakeSession({ userId: "u-3", userEmail: "old@example.test", customerEmail: "old@example.test" });
     const res = fakeRes();
@@ -198,10 +232,63 @@ describe("customer session identity — the key the collection is read by", () =
     expect(session.userEmail).toBe("new@example.test");
     // The old address must not keep serving its collection to this session.
     expect(session.customerEmail).toBe("new@example.test");
+    expect(session.credentialVersion).toBe(2);
   });
 
   it("requireCustomer still refuses a session that carries only the account identity", async () => {
     const accountOnly = fakeSession({ userId: "u-9", userEmail: "someone@example.test" });
     expect(await collectionReadable(accountOnly)).toBe(false);
+  });
+
+  it("REGRESSION: a password change preserves the acting session and rejects a stale peer even if row cleanup fails", async () => {
+    const user = {
+      id: "u-10",
+      email: "owner@example.test",
+      password_hash: "old-hash",
+      deleted_at: null,
+      email_verified: true,
+      credential_version: 7,
+    };
+    findUserById.mockResolvedValue(user);
+    execute
+      .mockResolvedValueOnce({ rows: [{ credential_version: 8 }] }) // password + version rotation
+      .mockResolvedValueOnce({ rows: [{ id: 42 }] }) // durable password-changed notification enqueue
+      .mockRejectedValueOnce(new Error("session store temporarily unavailable")); // physical peer cleanup
+
+    const current = fakeSession({
+      userId: "u-10",
+      userEmail: "owner@example.test",
+      customerEmail: "owner@example.test",
+      authUserId: "u-10",
+      authRole: "customer",
+      credentialVersion: 7,
+    });
+    const peer = fakeSession({
+      userId: "u-10",
+      userEmail: "owner@example.test",
+      customerEmail: "owner@example.test",
+      authUserId: "u-10",
+      authRole: "customer",
+      credentialVersion: 7,
+    });
+    const res = fakeRes();
+
+    await routes.get("PUT /api/auth/change-password")!(
+      fakeReq({ body: { current_password: "old-password-1", new_password: "new-password-2" }, session: current }),
+      res
+    );
+
+    expect(res.statusCode, JSON.stringify(res.body)).toBe(200);
+    expect(current.credentialVersion).toBe(8);
+
+    execute
+      .mockResolvedValueOnce({
+        rows: [{ id: "u-10", email: "owner@example.test", email_verified: true, credential_version: 8 }],
+      })
+      .mockResolvedValueOnce({
+        rows: [{ id: "u-10", email: "owner@example.test", email_verified: true, credential_version: 8 }],
+      });
+    expect(await collectionReadable(current)).toBe(true);
+    expect(await collectionReadable(peer)).toBe(false);
   });
 });

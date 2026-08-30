@@ -1,4 +1,4 @@
-import { useState, useRef, useEffect } from "react";
+import { useState, useRef, useEffect, useCallback } from "react";
 import { Link } from "wouter";
 import { Upload, Loader2, ArrowRight, AlertTriangle } from "lucide-react";
 import HeaderV2 from "@/components/v2/header-v2";
@@ -42,6 +42,8 @@ interface EstimateResult {
 }
 
 type StateKey = "idle-empty" | "idle-previewed" | "loading" | "result" | "paywall" | "error";
+type SessionState = "loading" | "authenticated" | "anonymous" | "unavailable";
+type BalanceLoadResult = "authenticated" | "anonymous" | "error" | "cancelled";
 
 // ── Constants ──────────────────────────────────────────────────────────────
 
@@ -52,6 +54,11 @@ const PACKS = [
 ];
 
 const LOADING_STAGES = ["Reading image…", "Identifying card…", "Scoring subgrades…", "Drafting report…"];
+
+// Stripe can redirect before its webhook has committed the new credit balance.
+// Refresh a small, bounded number of times rather than leaving a successful
+// customer looking at a stale balance or polling indefinitely.
+const POST_PAYMENT_BALANCE_DELAYS_MS = [0, 1_200, 2_500] as const;
 
 const TIPS = [
   { label: "Remove from sleeve", body: "Glare from plastic confuses the AI" },
@@ -79,10 +86,6 @@ function ConfidencePill({ value }: { value: string }) {
   );
 }
 
-function isValidEmail(s: string) {
-  return /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(s.trim());
-}
-
 // ── Page ───────────────────────────────────────────────────────────────────
 
 export default function ToolsEstimateV2() {
@@ -92,17 +95,52 @@ export default function ToolsEstimateV2() {
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [showPaywall, setShowPaywall] = useState(false);
-  const [email, setEmail] = useState("");
   const [selectedPack, setSelectedPack] = useState<string | null>(null);
   const [credits, setCredits] = useState<number | null>(null);
+  const [sessionState, setSessionState] = useState<SessionState>("loading");
+  const [balanceLoading, setBalanceLoading] = useState(true);
+  const [balanceError, setBalanceError] = useState<string | null>(null);
+  const [paymentStatus, setPaymentStatus] = useState<"success" | "cancelled" | null>(null);
   const [checkoutLoading, setCheckoutLoading] = useState(false);
+  const [checkoutError, setCheckoutError] = useState<string | null>(null);
   const [loadingStage, setLoadingStage] = useState(0);
-  const [showRestore, setShowRestore] = useState(false);
-  const [restoreEmail, setRestoreEmail] = useState("");
-  const [restoreLoading, setRestoreLoading] = useState(false);
-  const [restoreError, setRestoreError] = useState<string | null>(null);
   const [dragging, setDragging] = useState(false);
   const fileInputRef = useRef<HTMLInputElement>(null);
+
+  const loadSessionBalance = useCallback(async (signal?: AbortSignal): Promise<BalanceLoadResult> => {
+    if (signal?.aborted) return "cancelled";
+    setBalanceLoading(true);
+    setBalanceError(null);
+    try {
+      const response = await fetch("/api/tools/estimate/credits", {
+        credentials: "include",
+        signal,
+      });
+      const data = await response.json().catch(() => ({}));
+
+      if (response.status === 401) {
+        setSessionState("anonymous");
+        setCredits(null);
+        return "anonymous";
+      }
+      if (!response.ok || typeof data.credits !== "number" || data.credits < 0) {
+        throw new Error(data.error || "We couldn't load your account credits.");
+      }
+
+      setSessionState("authenticated");
+      setCredits(data.credits);
+      return "authenticated";
+    } catch (cause) {
+      if (signal?.aborted || (cause instanceof DOMException && cause.name === "AbortError")) {
+        return "cancelled";
+      }
+      setSessionState((current) => (current === "authenticated" ? current : "unavailable"));
+      setBalanceError(cause instanceof Error ? cause.message : "We couldn't load your account credits.");
+      return "error";
+    } finally {
+      if (!signal?.aborted) setBalanceLoading(false);
+    }
+  }, []);
 
   // Derived state
   let stateKey: StateKey;
@@ -125,21 +163,46 @@ export default function ToolsEstimateV2() {
     return () => clearInterval(id);
   }, [loading]);
 
-  // On mount: auto-load credits if email is in the URL (post-Stripe-return or stable-link).
+  // Balance ownership comes only from the authenticated session. Legacy email
+  // query parameters are stripped without reading or submitting their values.
   useEffect(() => {
     const qs = new URLSearchParams(window.location.search);
-    const e = qs.get("estimate_credits") || qs.get("email");
-    if (e && isValidEmail(e)) {
-      setEmail(e);
-      fetch(`/api/tools/estimate/credits?email=${encodeURIComponent(e.toLowerCase())}`)
-        .then((r) => r.json())
-        .then((d) => {
-          if (typeof d.credits === "number") setCredits(d.credits);
-        })
-        .catch(() => {});
+    const payment = qs.get("payment");
+    setPaymentStatus(payment === "success" || payment === "cancelled" ? payment : null);
+
+    const hadLegacyIdentity = qs.has("estimate_credits") || qs.has("email");
+    qs.delete("estimate_credits");
+    qs.delete("email");
+    if (hadLegacyIdentity) {
+      const search = qs.toString();
+      window.history.replaceState(
+        window.history.state,
+        "",
+        `${window.location.pathname}${search ? `?${search}` : ""}${window.location.hash}`
+      );
     }
-    // eslint-disable-next-line
-  }, []);
+
+    const controller = new AbortController();
+    let timer: ReturnType<typeof setTimeout> | undefined;
+
+    const refresh = async (attempt: number) => {
+      const outcome = await loadSessionBalance(controller.signal);
+      if (
+        payment === "success" &&
+        outcome !== "anonymous" &&
+        outcome !== "cancelled" &&
+        attempt + 1 < POST_PAYMENT_BALANCE_DELAYS_MS.length
+      ) {
+        timer = setTimeout(() => void refresh(attempt + 1), POST_PAYMENT_BALANCE_DELAYS_MS[attempt + 1]);
+      }
+    };
+
+    void refresh(0);
+    return () => {
+      controller.abort();
+      if (timer) clearTimeout(timer);
+    };
+  }, [loadSessionBalance]);
 
   // Revoke preview object URLs when the file changes or the page unmounts.
   useEffect(() => {
@@ -156,6 +219,7 @@ export default function ToolsEstimateV2() {
     setPreview(URL.createObjectURL(f));
     setResult(null);
     setError(null);
+    setCheckoutError(null);
     setShowPaywall(false);
   }
 
@@ -165,6 +229,7 @@ export default function ToolsEstimateV2() {
     setPreview(null);
     setResult(null);
     setError(null);
+    setCheckoutError(null);
     setShowPaywall(false);
     setSelectedPack(null);
     if (fileInputRef.current) fileInputRef.current.value = "";
@@ -178,8 +243,11 @@ export default function ToolsEstimateV2() {
     try {
       const fd = new FormData();
       fd.append("image", file);
-      if (email && credits !== null && credits > 0) fd.append("email", email);
-      const res = await fetch("/api/tools/estimate", { method: "POST", body: fd });
+      const res = await fetch("/api/tools/estimate", {
+        method: "POST",
+        credentials: "include",
+        body: fd,
+      });
       const data = await res.json().catch(() => ({}));
       if (res.status === 402) {
         setShowPaywall(true);
@@ -191,61 +259,38 @@ export default function ToolsEstimateV2() {
       }
       setResult(data as EstimateResult);
       if (typeof data.credits_remaining === "number") setCredits(data.credits_remaining);
-    } catch (e: any) {
-      setError(e?.message || "Network error. Try again in a moment.");
+    } catch (cause) {
+      setError(cause instanceof Error ? cause.message : "Network error. Try again in a moment.");
     } finally {
       setLoading(false);
     }
   }
 
   async function handlePurchasePack() {
-    if (!selectedPack || !isValidEmail(email)) return;
+    if (!selectedPack || sessionState !== "authenticated") return;
     setCheckoutLoading(true);
+    setCheckoutError(null);
     try {
       const res = await fetch("/api/tools/estimate/checkout", {
         method: "POST",
+        credentials: "include",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
-          email: email.trim().toLowerCase(),
           package: selectedPack,
           return_path: "/tools/estimate",
         }),
       });
-      const data = await res.json();
+      const data = await res.json().catch(() => ({}));
+      if (res.status === 401) {
+        setSessionState("anonymous");
+        setCredits(null);
+      }
       if (!res.ok || !data.url) throw new Error(data.error || "Checkout failed");
       window.location.href = data.url;
-    } catch (e: any) {
-      setError(e?.message || "Checkout failed. Try again in a moment.");
-      setShowPaywall(false);
-      setCheckoutLoading(false);
-    }
-  }
-
-  async function handleRestoreCredits() {
-    if (!isValidEmail(restoreEmail)) {
-      setRestoreError("Enter a valid email address.");
-      return;
-    }
-    setRestoreLoading(true);
-    setRestoreError(null);
-    try {
-      const r = await fetch(
-        `/api/tools/estimate/credits?email=${encodeURIComponent(restoreEmail.trim().toLowerCase())}`
-      );
-      const d = await r.json();
-      if (!r.ok) throw new Error(d.error || "Failed");
-      if (typeof d.credits !== "number" || d.credits <= 0) {
-        setRestoreError("No credits found for that email. Buy a pack above.");
-        return;
-      }
-      setEmail(restoreEmail.trim().toLowerCase());
-      setCredits(d.credits);
-      setShowPaywall(false);
-      setShowRestore(false);
-    } catch (e: any) {
-      setRestoreError(e?.message || "Couldn't reach credits API.");
+    } catch (cause) {
+      setCheckoutError(cause instanceof Error ? cause.message : "Checkout failed. Try again in a moment.");
     } finally {
-      setRestoreLoading(false);
+      setCheckoutLoading(false);
     }
   }
 
@@ -300,6 +345,37 @@ export default function ToolsEstimateV2() {
       {/* ── SECTION B: TOOL PANEL ──────────────────────────────────── */}
       <section className="frost-paper">
         <div className="mx-auto max-w-3xl px-6 pb-16 md:pb-24">
+          {paymentStatus && (
+            <div
+              data-testid="estimate-payment-status"
+              role="status"
+              aria-live="polite"
+              className="mb-5 rounded-lg border px-4 py-3 font-body text-sm"
+              style={{
+                borderColor: paymentStatus === "success" ? "var(--v2-gold-soft)" : "var(--v2-line)",
+                backgroundColor: paymentStatus === "success" ? "rgba(212,175,55,0.06)" : "var(--v2-paper-raised)",
+                color: "var(--v2-ink)",
+              }}
+            >
+              {paymentStatus === "cancelled" ? (
+                "Checkout cancelled. No payment was taken."
+              ) : balanceLoading ? (
+                "Payment complete. Refreshing your account credits…"
+              ) : sessionState === "authenticated" && credits !== null ? (
+                `Payment complete. Your account now shows ${credits} ${credits === 1 ? "credit" : "credits"}.`
+              ) : sessionState === "anonymous" ? (
+                <>
+                  Payment complete.{" "}
+                  <Link href="/login" className="underline">
+                    Sign in
+                  </Link>{" "}
+                  to load your account credits.
+                </>
+              ) : (
+                "Payment complete. We couldn't refresh your balance yet; use Refresh balance below to try again."
+              )}
+            </div>
+          )}
           <div
             className={stateKey === "idle-empty" ? "relative" : "relative rounded-xl p-6 md:p-10"}
             style={
@@ -441,8 +517,8 @@ export default function ToolsEstimateV2() {
                 >
                   {credits !== null && credits > 0
                     ? `Uses 1 of ${credits} credits`
-                    : email
-                      ? ""
+                    : sessionState === "authenticated"
+                      ? "Uses today's free estimate if available"
                       : "Uses today's free estimate"}
                 </p>
               </div>
@@ -682,7 +758,9 @@ export default function ToolsEstimateV2() {
                         key={p.id}
                         type="button"
                         onClick={() => setSelectedPack(p.id)}
-                        className="relative p-6 rounded-xl border transition-all hover:scale-[1.02] text-left"
+                        disabled={sessionState !== "authenticated"}
+                        aria-pressed={isSelected}
+                        className="relative p-6 rounded-xl border transition-all enabled:hover:scale-[1.02] disabled:cursor-default text-left"
                         style={{
                           borderColor: p.featured
                             ? "var(--v2-gold-soft)"
@@ -721,96 +799,113 @@ export default function ToolsEstimateV2() {
                   })}
                 </div>
 
-                <div className="mt-6">
-                  <label
-                    htmlFor="mv-email-input"
-                    className="font-mono-v2 text-[10px] uppercase tracking-widest"
-                    style={{ color: "var(--v2-ink-mute)" }}
-                  >
-                    Email
-                  </label>
-                  <input
-                    id="mv-email-input"
-                    type="email"
-                    className="w-full mt-1 px-4 py-3 rounded outline-none"
-                    style={{
-                      border: "1px solid var(--v2-line)",
-                      backgroundColor: "var(--v2-paper)",
-                      color: "var(--v2-ink)",
-                    }}
-                    value={email}
-                    onChange={(e) => setEmail(e.target.value)}
-                    placeholder="you@example.com"
-                  />
-                  <p
-                    className="font-mono-v2 text-[10px] uppercase tracking-widest mt-2"
-                    style={{ color: "var(--v2-ink-mute)" }}
-                  >
-                    We email your credits &mdash; no password, no account.
-                  </p>
-                </div>
-
-                <GradientButton
-                  as="button"
-                  type="button"
-                  onClick={handlePurchasePack}
-                  disabled={!selectedPack || !isValidEmail(email) || checkoutLoading}
-                  className="gradient-btn-filled mt-4 w-full md:w-auto"
-                >
-                  {checkoutLoading && <Loader2 size={14} className="animate-spin" />}
-                  {selectedPack
-                    ? `Continue with ${PACKS.find((p) => p.id === selectedPack)?.credits} pack`
-                    : "Select a pack"}
-                  {!checkoutLoading && selectedPack && <ArrowRight size={14} />}
-                </GradientButton>
-
-                <div className="mt-6 pt-4" style={{ borderTop: "1px solid var(--v2-line-soft)" }}>
-                  <p className="font-body text-sm" style={{ color: "var(--v2-ink-soft)" }}>
-                    Already bought credits?{" "}
-                    <button
+                {sessionState === "authenticated" ? (
+                  <div className="mt-6">
+                    <p className="font-body text-sm" style={{ color: "var(--v2-ink-soft)" }}>
+                      This pack will be attached to your signed-in MintVault account. Your account email must be
+                      verified before checkout.
+                    </p>
+                    <GradientButton
+                      as="button"
                       type="button"
-                      onClick={() => setShowRestore((v) => !v)}
-                      className="underline"
-                      style={{ color: "var(--v2-ink)" }}
+                      data-testid="estimate-checkout"
+                      onClick={handlePurchasePack}
+                      disabled={!selectedPack || checkoutLoading}
+                      className="gradient-btn-filled mt-4 w-full md:w-auto"
                     >
-                      Restore from email
-                    </button>
-                  </p>
+                      {checkoutLoading && <Loader2 size={14} className="animate-spin" />}
+                      {selectedPack
+                        ? `Continue with ${PACKS.find((p) => p.id === selectedPack)?.credits} pack`
+                        : "Select a pack"}
+                      {!checkoutLoading && selectedPack && <ArrowRight size={14} />}
+                    </GradientButton>
+                    {checkoutError && (
+                      <p role="alert" className="font-body text-sm mt-3" style={{ color: "#c44" }}>
+                        {checkoutError}
+                      </p>
+                    )}
 
-                  {showRestore && (
-                    <div className="mt-3 flex flex-col md:flex-row gap-2 md:items-stretch">
-                      <input
-                        type="email"
-                        value={restoreEmail}
-                        onChange={(e) => setRestoreEmail(e.target.value)}
-                        placeholder="your email"
-                        aria-label="Restore credits email"
-                        className="flex-1 px-4 py-2.5 rounded outline-none font-body text-sm"
-                        style={{
-                          border: "1px solid var(--v2-line)",
-                          backgroundColor: "var(--v2-paper)",
-                          color: "var(--v2-ink)",
-                        }}
-                      />
+                    <div className="mt-6 pt-4" style={{ borderTop: "1px solid var(--v2-line-soft)" }}>
+                      <p className="font-body text-sm" style={{ color: "var(--v2-ink-soft)" }}>
+                        Bought credits before accounts were required? Sign in with the same verified email and they are
+                        restored automatically.
+                      </p>
                       <GradientButton
                         as="button"
                         type="button"
-                        onClick={handleRestoreCredits}
-                        disabled={restoreLoading || !isValidEmail(restoreEmail)}
+                        onClick={() => void loadSessionBalance()}
+                        disabled={balanceLoading}
                         height="44px"
-                        className="gradient-btn-filled"
+                        className="gradient-btn-filled mt-3"
                       >
-                        {restoreLoading && <Loader2 size={14} className="animate-spin" />}
-                        Check
+                        {balanceLoading && <Loader2 size={14} className="animate-spin" />}
+                        Refresh balance
                       </GradientButton>
+                      {balanceError && (
+                        <p role="alert" className="font-body text-xs mt-2" style={{ color: "#c44" }}>
+                          {balanceError}
+                        </p>
+                      )}
                     </div>
-                  )}
-                  {restoreError && (
-                    <p className="font-body text-xs mt-2" style={{ color: "#c44" }}>
-                      {restoreError}
+                  </div>
+                ) : sessionState === "loading" ? (
+                  <div className="mt-6 flex items-center gap-2" role="status" aria-live="polite">
+                    <Loader2 size={16} className="animate-spin" style={{ color: "var(--v2-gold)" }} />
+                    <p className="font-body text-sm" style={{ color: "var(--v2-ink-soft)" }}>
+                      Checking your MintVault account…
                     </p>
-                  )}
-                </div>
+                  </div>
+                ) : (
+                  <div
+                    data-testid="estimate-account-required"
+                    className="mt-6 rounded-lg border p-5"
+                    style={{ borderColor: "var(--v2-gold-soft)", backgroundColor: "rgba(212,175,55,0.05)" }}
+                  >
+                    <h3 className="font-display italic text-xl" style={{ color: "var(--v2-ink)" }}>
+                      {sessionState === "unavailable"
+                        ? "We couldn't check your account."
+                        : "Sign in to buy or restore credits."}
+                    </h3>
+                    <p className="font-body text-sm mt-2" style={{ color: "var(--v2-ink-soft)" }}>
+                      {sessionState === "unavailable"
+                        ? "Paid checkout stays disabled until we can confirm your session. Try the account check again."
+                        : "Paid packs belong to a verified MintVault account. If you bought credits before accounts were required, sign in with the same verified email and your balance is restored automatically."}
+                    </p>
+                    {sessionState === "unavailable" && balanceError && (
+                      <p role="alert" className="font-body text-sm mt-3" style={{ color: "#c44" }}>
+                        {balanceError}
+                      </p>
+                    )}
+                    <div className="mt-4 flex flex-wrap gap-3">
+                      {sessionState === "unavailable" ? (
+                        <GradientButton
+                          as="button"
+                          type="button"
+                          onClick={() => void loadSessionBalance()}
+                          disabled={balanceLoading}
+                          height="44px"
+                          className="gradient-btn-filled"
+                        >
+                          {balanceLoading && <Loader2 size={14} className="animate-spin" />}
+                          Try again
+                        </GradientButton>
+                      ) : (
+                        <>
+                          <Link href="/login" className="no-underline">
+                            <GradientButton height="44px" className="gradient-btn-filled">
+                              Sign in
+                            </GradientButton>
+                          </Link>
+                          <Link href="/signup" className="no-underline">
+                            <GradientButton height="44px" className="gradient-btn-filled">
+                              Create account
+                            </GradientButton>
+                          </Link>
+                        </>
+                      )}
+                    </div>
+                  </div>
+                )}
               </div>
             )}
 

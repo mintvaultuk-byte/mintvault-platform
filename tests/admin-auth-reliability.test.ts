@@ -285,6 +285,89 @@ describe("admin auth reliability", () => {
     });
   });
 
+  it("never lets a password-only pending admin replace an existing PIN through setup", async () => {
+    await withAuthApp(async ({ base }) => {
+      let cookies: string[] = [];
+      const password = await request(
+        base,
+        "/api/admin/session",
+        {
+          method: "POST",
+          headers: { "content-type": "application/json" },
+          body: JSON.stringify({ password: "correct-passphrase" }),
+        },
+        cookies
+      );
+      expect(password.status).toBe(200);
+      cookies = mergeCookies(cookies, password);
+
+      const setup = await request(
+        base,
+        "/api/auth/pin/setup",
+        {
+          method: "POST",
+          headers: { "content-type": "application/json" },
+          body: JSON.stringify({ pin: "654321" }),
+        },
+        cookies
+      );
+
+      expect(setup.status).toBe(401);
+      expect(await setup.json()).toMatchObject({ error: expect.stringMatching(/expired|start again/i) });
+      expect(dbExecute).toHaveBeenCalledTimes(2); // lockout read + successful-password counter reset only
+    });
+  });
+
+  it("allows first-time admin PIN setup only after the live no-PIN check establishes setup authority", async () => {
+    adminUserState.user.pinHash = "";
+    dbExecute
+      .mockResolvedValueOnce({ rows: [] }) // durable password lockout read
+      .mockResolvedValueOnce({ rows: [] }) // successful-password counter reset
+      .mockResolvedValueOnce({ rows: [{ id: "admin-user-1", credential_version: 2 }] }); // guarded PIN write
+
+    await withAuthApp(async ({ base }) => {
+      let cookies: string[] = [];
+      const password = await request(
+        base,
+        "/api/admin/session",
+        {
+          method: "POST",
+          headers: { "content-type": "application/json" },
+          body: JSON.stringify({ password: "correct-passphrase" }),
+        },
+        cookies
+      );
+      cookies = mergeCookies(cookies, password);
+
+      const pinCheck = await request(
+        base,
+        "/api/admin/pin",
+        {
+          method: "POST",
+          headers: { "content-type": "application/json" },
+          body: JSON.stringify({ pin: "654321" }),
+        },
+        cookies
+      );
+      expect(pinCheck.status).toBe(200);
+      expect(await pinCheck.json()).toEqual({ step: "PIN_SETUP_REQUIRED" });
+      cookies = mergeCookies(cookies, pinCheck);
+
+      const setup = await request(
+        base,
+        "/api/auth/pin/setup",
+        {
+          method: "POST",
+          headers: { "content-type": "application/json" },
+          body: JSON.stringify({ pin: "654321" }),
+        },
+        cookies
+      );
+      expect(setup.status).toBe(200);
+      expect(await setup.json()).toEqual({ ok: true, redirect: "/admin" });
+    });
+  });
+
   it("persists sessions across a server restart and a second app instance", async () => {
     const store = new MemoryStore();
     let cookies: string[] = [];

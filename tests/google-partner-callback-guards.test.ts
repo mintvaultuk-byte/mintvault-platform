@@ -34,6 +34,11 @@ vi.mock("../server/partner/google-presence-service", async (importOriginal) => {
 });
 
 import { partnerApiRouter } from "../server/partner/routes";
+import {
+  markSharedPostgresPartnerRateLimitStoreUnavailable,
+  MemoryRateLimitStore,
+  setPartnerRateLimitStore,
+} from "../server/partner/rate-limit";
 
 describe("Google OAuth callback mutation guards (HTTP)", () => {
   let server: http.Server;
@@ -42,6 +47,7 @@ describe("Google OAuth callback mutation guards (HTTP)", () => {
   let clientIp: string;
 
   beforeEach(async () => {
+    setPartnerRateLimitStore(new MemoryRateLimitStore());
     spies.fresh.mockReset().mockResolvedValue(false);
     spies.complete.mockReset().mockResolvedValue({
       locationId: "11111111-1111-4111-8111-111111111111",
@@ -74,6 +80,7 @@ describe("Google OAuth callback mutation guards (HTTP)", () => {
 
   afterEach(async () => {
     await new Promise<void>((resolve) => server.close(() => resolve()));
+    markSharedPostgresPartnerRateLimitStoreUnavailable();
   });
 
   async function callback(mode: string): Promise<Response> {

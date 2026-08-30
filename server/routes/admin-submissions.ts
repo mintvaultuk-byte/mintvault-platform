@@ -15,6 +15,7 @@ import { db } from "../db";
 import { sql } from "drizzle-orm";
 import { PartnerSubmissionCreditLifecycleError } from "../partner/partner-submission-credit-lifecycle";
 import { cancelPendingReviewRequest, queueReviewRequest } from "../review-request-service";
+import { isDestinationSubmissionPartnerLinked } from "../partner/operational-authority";
 
 function getSignedUrlSecret(): string {
   const s = process.env.SIGNED_URL_SECRET;
@@ -698,24 +699,14 @@ export function registerAdminSubmissionRoutes(app: Express): void {
       // debit remains consumed. There is no compensating-credit workflow in this endpoint, so fail
       // explicitly rather than creating an irreversible overcharge. A pre-connector database has
       // no mapping table and retains its established step-back behaviour.
-      const partnerMappingTable = await db.execute(sql`
-        SELECT to_regclass('public.partner_connector_imports') AS relation
-      `);
-      if ((partnerMappingTable.rows[0] as { relation?: string | null } | undefined)?.relation) {
-        const partnerLink = await db.execute(sql`
-          SELECT 1
-            FROM partner_connector_imports
-           WHERE destination_submission_id = ${typeof submission.id === "string" ? parseInt(submission.id, 10) : submission.id}
-           LIMIT 1
-        `);
-        if (partnerLink.rows.length > 0) {
-          return res.status(409).json({
-            error:
-              "Partner-linked submissions cannot be stepped back because their grading credit is immutable. Use the approved credit-adjustment or reconciliation path.",
-            code: "partner_credit_lifecycle_conflict",
-            currentStatus: current,
-          });
-        }
+      const destinationSubmissionId = typeof submission.id === "string" ? parseInt(submission.id, 10) : submission.id;
+      if (await isDestinationSubmissionPartnerLinked(destinationSubmissionId)) {
+        return res.status(409).json({
+          error:
+            "Partner-linked submissions cannot be stepped back because their grading credit is immutable. Use the approved credit-adjustment or reconciliation path.",
+          code: "partner_credit_lifecycle_conflict",
+          currentStatus: current,
+        });
       }
 
       // Single source of truth for backward pairs — must match the trigger.
