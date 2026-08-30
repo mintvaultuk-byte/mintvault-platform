@@ -6,13 +6,21 @@ import rateLimit from "express-rate-limit";
 import { registerRoutes } from "./routes";
 import { csrfOriginCheck } from "./lib/csrf-origin";
 import { withAdvisoryLock } from "./lib/advisory-lock";
-import { trackInterval, trackTimeout, beginJob, endJob, isShuttingDown, runGracefulShutdown } from "./lib/lifecycle";
+import {
+  trackInterval,
+  trackTimeout,
+  beginJob,
+  endJob,
+  isShuttingDown,
+  runTrackedJob,
+  runGracefulShutdown,
+} from "./lib/lifecycle";
 import { serveStatic } from "./static";
 import { cleanupStalePreGradeImages } from "./r2";
 import { createRequestLogger } from "./lib/request-logger";
 import { db, pool } from "./db";
 import { sql } from "drizzle-orm";
-import { sendVaultClubGraceExpiredEmail, sendTransferV2Completed } from "./email";
+import { sendVaultClubGraceExpiredEmail } from "./email";
 import { createServer } from "http";
 import { WebhookHandlers } from "./webhookHandlers";
 import { adminIpAllowlist } from "./auth";
@@ -22,9 +30,13 @@ import "./command-centre/registry";
 import { startConnectorRuntime, stopConnectorRuntime } from "./partner/connector-runtime";
 import { validatePartnerRbacAtBoot } from "./partner/permissions";
 import pg from "pg";
-import path from "path";
 import { partnerAccountingTopologyReadiness } from "./partner/db";
 import { adminClientIpRateLimitKey } from "./lib/admin-client-ip";
+import { checkReleaseReadiness } from "./readiness";
+import { createPublicAuthRateLimit, PUBLIC_AUTH_RATE_LIMIT_WINDOW_MS } from "./lib/public-auth-rate-limit";
+import { securePostgresPoolConnection } from "./lib/postgres-transport-security";
+import { PostgresFixedWindowRateLimitStore } from "./lib/public-auth-rate-limit-store-pg";
+import { requestBodyMemoryAdmission } from "./lib/upload-memory-admission";
 
 const app = express();
 const httpServer = createServer(app);
@@ -74,7 +86,9 @@ app.use((req, res, next) => {
   })();
   if (appUrlHost && host === appUrlHost) return next();
   if (host === "mintvault.fly.dev" || host.endsWith(".fly.dev")) {
-    console.log(`[canonical-redirect] ${req.method} ${req.originalUrl} from host=${host}`);
+    // req.originalUrl may contain password-reset, magic-link, claim or transfer
+    // bearer tokens. Preserve it only in the Location target; logs get path only.
+    console.log(`[canonical-redirect] ${req.method} ${req.path} from host=${host}`);
     return res.redirect(301, `https://mintvaultuk.com${req.originalUrl}`);
   }
   next();
@@ -84,23 +98,17 @@ app.get("/health", (_req, res) => {
   res.status(200).json({ status: "ok" });
 });
 
-// Readiness probe (Phase 5): unlike /health (pure liveness), /ready also verifies
-// the DB is reachable AND the schema is migrated — the core `certificates` table
-// exists — so a rolling deploy only routes traffic to a machine that can actually
-// serve. Returns a generic status only (no host/schema/error detail).
+// Unlike /health (pure liveness), /ready proves this build's migration, critical
+// relation and permanent-identity trigger contract before traffic is admitted.
+// Returns a generic status only (no host/schema/error detail).
 // NOT rate-limited by design: it is the platform (Fly) readiness probe with one
-// cheap catalog lookup; a limiter here could cause false 429s that make Fly route
+// bounded catalog query; a limiter here could cause false 429s that make Fly route
 // traffic away from healthy machines — i.e. it would BREAK health checks. Intentional.
 // codeql[js/missing-rate-limiting]
 app.get("/ready", async (_req, res) => {
-  try {
-    const result = await pool.query("SELECT to_regclass('public.certificates') AS t");
-    const schemaReady = result.rows[0]?.t != null;
-    if (!schemaReady) return res.status(503).json({ status: "not-ready" });
-    return res.status(200).json({ status: "ready" });
-  } catch {
-    return res.status(503).json({ status: "not-ready" });
-  }
+  const readiness = await checkReleaseReadiness(pool);
+  if (!readiness.ok) return res.status(503).json({ status: "not-ready" });
+  return res.status(200).json({ status: "ready" });
 });
 
 // H-c — /api/db-check removed: it was an unauthenticated debug probe that leaked
@@ -141,23 +149,35 @@ app.use(
   })
 );
 
-const authRateLimit = rateLimit({
-  windowMs: 15 * 60 * 1000, // 15 min
-  max: 5,
-  standardHeaders: true,
-  legacyHeaders: false,
-  validate: false,
-  message: { error: "Too many requests. Please try again in 15 minutes." },
-  keyGenerator: (req) => {
-    const fwd = req.headers["x-forwarded-for"];
-    if (fwd) return (Array.isArray(fwd) ? fwd[0] : fwd.split(",")[0]).trim();
-    return req.ip || req.socket.remoteAddress || "unknown";
-  },
-});
-app.use("/api/auth/login", authRateLimit);
-app.use("/api/auth/signup", authRateLimit);
-app.use("/api/auth/forgot-password", authRateLimit);
-app.use("/api/auth/magic-link", authRateLimit);
+const authMailRateLimit = createPublicAuthRateLimit(
+  new PostgresFixedWindowRateLimitStore(pool, PUBLIC_AUTH_RATE_LIMIT_WINDOW_MS, "public:auth_mail:")
+);
+const authCredentialRateLimit = createPublicAuthRateLimit(
+  new PostgresFixedWindowRateLimitStore(pool, PUBLIC_AUTH_RATE_LIMIT_WINDOW_MS, "public:auth_credential:")
+);
+const authTokenConsumeRateLimit = createPublicAuthRateLimit(
+  new PostgresFixedWindowRateLimitStore(pool, PUBLIC_AUTH_RATE_LIMIT_WINDOW_MS, "public:auth_token_consume:"),
+  { max: 30, message: "Too many link attempts. Please request a new link and try again later." }
+);
+
+// Exact method/path mounts prevent a more-specific token-consume route from
+// accidentally sharing the mail-send budget through Express prefix matching.
+for (const path of [
+  "/api/auth/signup",
+  "/api/auth/forgot-password",
+  "/api/auth/magic-link",
+  "/api/customer/magic-link",
+  "/api/auth/pin/forgot",
+]) {
+  app.post(path, authMailRateLimit);
+}
+for (const path of ["/api/auth/login", "/api/auth/reset-password", "/api/auth/pin/login", "/api/auth/pin/setup"]) {
+  app.post(path, authCredentialRateLimit);
+}
+app.get("/api/customer/verify/:token", authTokenConsumeRateLimit);
+app.get("/api/auth/magic-link/verify", authTokenConsumeRateLimit);
+app.get("/auth/pin/reset/:token", authTokenConsumeRateLimit);
+app.get("/api/auth/verify-email", authTokenConsumeRateLimit);
 app.use("/api/admin", adminIpAllowlist);
 /**
  * `/api/super-admin/*` inherits the SAME allowlist (hostile-review F5).
@@ -209,9 +229,12 @@ app.post("/api/stripe/webhook", express.raw({ type: "application/json" }), async
   }
 });
 
+app.use(requestBodyMemoryAdmission);
 app.use(
   express.json({
-    limit: "10mb",
+    // Source inventory found no base64/file JSON consumer. Large media uses
+    // bounded multipart or direct object staging, so global JSON is capped at 1 MiB.
+    limit: "1mb",
     verify: (req, _res, buf) => {
       req.rawBody = buf;
     },
@@ -222,11 +245,9 @@ app.use(express.urlencoded({ extended: false }));
 
 const PgStore = connectPgSimple(session);
 const sessionPool = new pg.Pool({
-  connectionString: getDatabaseUrl(),
-  // The disposable runtime harness runs the real application with NODE_ENV=test
-  // against loopback PostgreSQL, which has no TLS listener. Production, staging
-  // and normal development retain their existing TLS transport unchanged.
-  ssl: process.env.NODE_ENV === "test" ? false : { rejectUnauthorized: false },
+  // Only an exact loopback database may use plaintext. Every remote session
+  // store verifies the PostgreSQL server certificate and hostname.
+  ...securePostgresPoolConnection(getDatabaseUrl(), "MINTVAULT_DATABASE_URL"),
   max: 8,
   // 30s tolerates Neon autosuspend cold-start (see server/db.ts for the
   // same rationale). Session reads/writes happen on nearly every request,
@@ -283,9 +304,8 @@ app.use("/api/admin", adminRateLimit);
  */
 app.use(createRequestLogger(log));
 
-log(`ADMIN_PASSWORD env var: ${process.env.ADMIN_PASSWORD ? "SET" : "NOT SET"}`, "auth");
-// ADMIN_PIN env-var log removed 2026-05-04 — PIN is now per-user bcrypt on users.pin_hash.
-log(`SESSION_SECRET env var: ${process.env.SESSION_SECRET ? "SET" : "NOT SET (using fallback)"}`, "auth");
+// Secret/config posture is validated by readiness and never advertised in logs.
+log("authentication configuration loaded", "auth");
 
 // Daily safety-net: purge any pre-grade-checker images older than 1 hour from R2.
 // These should never exist (the estimate endpoint uses in-memory processing only),
@@ -347,22 +367,8 @@ async function runTransferV2Sweep() {
     if (expired.length > 0) {
       log(`[transfer-v2] Expired ${expired.length} stale transfer(s)`, "transfer-v2");
 
-      // v435 — wire the previously-orphaned sendTransferV2Expired email so
-      // both parties learn the transfer didn't go through. Inline try/catch
-      // per recipient so one failed send doesn't skip the rest.
-      const { sendTransferV2Expired } = await import("./email");
       const { storage: storageForAudit } = await import("./storage");
       for (const row of expired) {
-        try {
-          await sendTransferV2Expired({ email: row.fromEmail, certId: row.certId, reason: row.reason });
-        } catch (e: any) {
-          log(`[transfer-v2] Expired email to fromEmail failed: ${e.message}`, "transfer-v2");
-        }
-        try {
-          await sendTransferV2Expired({ email: row.toEmail, certId: row.certId, reason: row.reason });
-        } catch (e: any) {
-          log(`[transfer-v2] Expired email to toEmail failed: ${e.message}`, "transfer-v2");
-        }
         try {
           await storageForAudit.writeAuditLog("transfer", String(row.transferId), "transfer_v2.expired", null, {
             certId: row.certId,
@@ -384,19 +390,6 @@ async function runTransferV2Sweep() {
         const result = await storage.finaliseTransferV2(transfer.id);
         if (result.success) {
           log(`[transfer-v2] Auto-finalised transfer ${transfer.id} for cert ${result.certId}`, "transfer-v2");
-
-          // Email both parties
-          try {
-            await sendTransferV2Completed({ email: transfer.fromEmail, certId: result.certId!, role: "outgoing" });
-            await sendTransferV2Completed({
-              email: result.toEmail!,
-              certId: result.certId!,
-              role: "incoming",
-              newKeeperName: result.ownerName,
-            });
-          } catch (emailErr: any) {
-            log(`[transfer-v2] Completion emails failed (non-fatal): ${emailErr.message}`, "transfer-v2");
-          }
         }
       } catch (fErr: any) {
         log(`[transfer-v2] Failed to finalise transfer ${transfer.id}: ${fErr.message}`, "transfer-v2");
@@ -426,6 +419,14 @@ async function runTransferV2Sweep() {
 
   await registerRoutes(httpServer, app);
 
+  // Durable R2/B2 publication is process authority, not just schema. Register
+  // every migrated business finalizer before arming the reconciler; readiness
+  // remains false until the complete required-kind registry is present.
+  const { registerBuiltInObjectWriteFinalizers } = await import("./object-write-finalizers");
+  registerBuiltInObjectWriteFinalizers();
+  const { installObjectWriteReconciler } = await import("./jobs/object-write-reconciliation");
+  installObjectWriteReconciler();
+
   // Phase 5: wrap each recurring job that mutates state or sends email/publishes
   // in a Postgres advisory lock so only ONE machine runs a given tick (prod runs
   // 2 machines). Non-blocking + fail-closed; on a single machine the lock is
@@ -433,18 +434,15 @@ async function runTransferV2Sweep() {
   // tick never starts once shutdown begins, and counts as an active job while it
   // runs so shutdown drains it before the DB pools are closed. Timers use
   // trackInterval/trackTimeout so shutdown can cancel them (no new tick starts).
-  const guard = (name: string, fn: () => Promise<void>) => () => {
-    if (isShuttingDown()) return Promise.resolve();
-    beginJob();
-    return withAdvisoryLock(pool, name, fn)
-      .then(
+  const guard = (name: string, fn: () => Promise<void>) => () =>
+    runTrackedJob(() =>
+      withAdvisoryLock(pool, name, fn).then(
         (r) => {
           if (!r.ran) log("skipped — lock held by another instance", name);
         },
         (e: any) => log(`error: ${e?.message ?? e}`, name)
       )
-      .finally(() => endJob());
-  };
+    );
 
   // Run cleanup once on startup, then every 24 hours
   const guardedPreGradeCleanup = guard("pre-grade-cleanup", runPreGradeCleanup);
@@ -481,11 +479,55 @@ async function runTransferV2Sweep() {
     const { processPartnerSuppliesNotificationBatch } = await import("./partner/supplies-service");
     const result = await processPartnerSuppliesNotificationBatch();
     if (result.processed > 0) {
-      log(`processed=${result.processed} sent=${result.sent} failed=${result.failed}`, "partner-supplies-notifications");
+      log(
+        `processed=${result.processed} sent=${result.sent} failed=${result.failed}`,
+        "partner-supplies-notifications"
+      );
     }
   });
   trackTimeout(guardedPartnerSuppliesNotifications, 60_000);
   trackInterval(guardedPartnerSuppliesNotifications, 15 * 60 * 1000);
+
+  // Paid grading submissions use a durable main-database fulfilment outbox.
+  // Request paths attempt work immediately, while this fleet-wide reconciler
+  // recovers a process death after the paid transition. The row lease is the
+  // correctness authority; the advisory lock avoids redundant fleet scans.
+  const guardedGradingPaymentFulfilment = guard("grading-payment-fulfilment", async () => {
+    const { reconcileGradingPaymentFulfilments } = await import("./routes/submissions");
+    const result = await reconcileGradingPaymentFulfilments();
+    if (result.examined > 0) {
+      log(
+        `examined=${result.examined} completed=${result.completed} failed=${result.failed} ` +
+          `reconciliation_required=${result.reconciliationRequired}`,
+        "grading-payment-fulfilment"
+      );
+    }
+    if (result.reconciliationRequired > 0) {
+      console.error(`[grading-payment-fulfilment] RECONCILIATION REQUIRED count=${result.reconciliationRequired}`);
+    }
+  });
+  trackTimeout(guardedGradingPaymentFulfilment, 75_000);
+  trackInterval(guardedGradingPaymentFulfilment, 5 * 60 * 1000);
+
+  // A paid/free estimate credit is reserved before the bounded Anthropic call.
+  // Caught failures compensate immediately; this durable sweep closes the SIGKILL
+  // window by refunding reservations abandoned beyond the live-request ceiling.
+  // `guard` makes the immediate and recurring runs fleet-singleton, lifecycle-
+  // tracked work, so shutdown drains an active refund before closing either pool.
+  const guardedEstimateCreditReservationRecovery = guard("estimate-credit-reservation-recovery", async () => {
+    const { refundStaleEstimateCreditReservations } = await import("./estimate-credit-consumption");
+    const result = await refundStaleEstimateCreditReservations();
+    if (result.refunded > 0) {
+      log(`examined=${result.examined} refunded=${result.refunded}`, "estimate-credit-reservation-recovery");
+    }
+    if (result.unrecoverable > 0) {
+      console.error(
+        `[estimate-credit-reservation-recovery] UNRECOVERABLE source rows missing count=${result.unrecoverable}`
+      );
+    }
+  });
+  guardedEstimateCreditReservationRecovery();
+  trackInterval(guardedEstimateCreditReservationRecovery, 5 * 60 * 1000);
 
   // Partner credit reservations are a temporary hold, never a manual-maintenance obligation. The
   // domain service treats a pre-0017 database as a no-op for application-first rollout; once G6B
@@ -562,6 +604,19 @@ async function runTransferV2Sweep() {
         "partner-card-job-reconciliation"
       );
     }
+    if (result.captureDrift.repaired > 0 || result.captureDrift.alreadyAdvanced > 0) {
+      log(
+        `capture drift repaired=${result.captureDrift.repaired} already_advanced=${result.captureDrift.alreadyAdvanced}`,
+        "partner-card-job-reconciliation"
+      );
+    }
+    if (result.captureDrift.refused > 0) {
+      // eslint-disable-next-line no-console
+      console.error(
+        `[partner-card-job-reconciliation] CAPTURE DRIFT COULD NOT BE REPAIRED refused=${result.captureDrift.refused}\n  ` +
+          result.sample.filter((s) => s.startsWith("CAPTURE REFUSED")).join("\n  ")
+      );
+    }
     if (result.drift.refused > 0) {
       // eslint-disable-next-line no-console
       console.error(
@@ -625,12 +680,13 @@ async function runTransferV2Sweep() {
     }
   }, 60_000);
 
-  // R2 → B2 cold-archive sweep. First run after 60s (let migrations finish
-  // + B2 client lazy-init on first use), then daily. Idempotent at the
-  // object level via existsInB2 — safe across both Fly machines without
-  // a distributed lock. dryRun=false here; admin endpoint allows manual
-  // dry-runs separately. Defaults: ageDays=90 (Compliance retention),
-  // batchSize=50 (~~5 minutes per tick at realistic per-cert bytes).
+  // R2 → B2 scanner-evidence cold-archive sweep. Runtime boot is validation-
+  // only: the 60s delay starts work after the readiness window; it does not
+  // wait for or apply migrations. Existing B2 bytes, SHA-256 and full remaining
+  // COMPLIANCE retention are verified before reuse. Concurrent finalizers lock
+  // the certificate and re-check the evidence ledger before marking completion.
+  // dryRun=false here; the admin endpoint permits manual dry-runs separately.
+  // Defaults: ageDays=90 and batchSize=50.
   async function runArchivalSweep() {
     try {
       const { archiveStaleImages } = await import("./workers/r2-to-b2-archival");
@@ -669,6 +725,37 @@ async function runTransferV2Sweep() {
   const guardedScanReconciler = guard("scan-reconciler", runScanReconciler);
   trackTimeout(guardedScanReconciler, 90_000);
   trackInterval(guardedScanReconciler, 5 * 60 * 1000);
+
+  // Encrypted, provider-idempotent customer notifications. Claims use
+  // SKIP LOCKED, so every replica may run this bounded worker safely.
+  let customerNotificationWorkerInFlight = false;
+  const runCustomerNotificationWorker = async () => {
+    if (isShuttingDown() || customerNotificationWorkerInFlight) return;
+    customerNotificationWorkerInFlight = true;
+    beginJob();
+    try {
+      const { processCustomerNotificationBatch } = await import("./customer-notification-outbox");
+      const result = await processCustomerNotificationBatch({ limit: 20 });
+      if (result.examined || result.reconciliationRequired) {
+        log(
+          `processed=${result.examined} sent=${result.sent} failed=${result.failed} reconciliation=${result.reconciliationRequired}`,
+          "customer-notification-worker"
+        );
+      }
+    } catch (err: any) {
+      const code = err?.code ?? err?.cause?.code;
+      if (code !== "42P01") log("worker failed; retrying on next interval", "customer-notification-worker");
+    } finally {
+      customerNotificationWorkerInFlight = false;
+      endJob();
+    }
+  };
+  trackTimeout(() => {
+    void runCustomerNotificationWorker();
+  }, 10_000);
+  trackInterval(() => {
+    void runCustomerNotificationWorker();
+  }, 60_000);
 
   // Durable scanner derivative worker. Unlike the legacy in-process FIFO, the
   // PostgreSQL job row survives a Fly restart and is claimed with SKIP LOCKED,

@@ -20,18 +20,10 @@
 import { Pool } from "pg";
 import { VARIANT_OPTIONS } from "@/lib/variantOptions";
 import { buildAuditRows, summariseAudit, type LegacyAuditRow } from "@shared/rarity-legacy-audit";
+import { securePostgresPoolConnection } from "../server/lib/postgres-transport-security";
 
 const LOCAL_DEFAULT = "postgresql://postgres@127.0.0.1:55432/mintvault_vq_phase10_local";
 const url = process.env.AUDIT_DATABASE_URL || process.env.TEST_DATABASE_URL || LOCAL_DEFAULT;
-
-function isLocal(u: string): boolean {
-  try {
-    const h = new URL(u).hostname;
-    return h === "127.0.0.1" || h === "localhost";
-  } catch {
-    return false;
-  }
-}
 
 function printTable(rows: LegacyAuditRow[]): void {
   if (rows.length === 0) {
@@ -46,7 +38,7 @@ function printTable(rows: LegacyAuditRow[]): void {
       pad("CLASS", 11) +
       pad("PROPOSED", 30) +
       pad("CONF", 8) +
-      "REVIEW?",
+      "REVIEW?"
   );
   console.log("  " + "-".repeat(90));
   for (const r of rows) {
@@ -57,7 +49,7 @@ function printTable(rows: LegacyAuditRow[]): void {
         pad(r.classification, 11) +
         pad(r.proposedValue ?? "—", 30) +
         pad(r.confidence, 8) +
-        (r.reviewRequired ? "YES" : "no"),
+        (r.reviewRequired ? "YES" : "no")
     );
   }
 }
@@ -65,7 +57,7 @@ function printTable(rows: LegacyAuditRow[]): void {
 async function liveDbAudit(pool: Pool): Promise<LegacyAuditRow[]> {
   try {
     const res = await pool.query<{ value: string | null; count: string }>(
-      "SELECT variant AS value, COUNT(*)::text AS count FROM certificates GROUP BY variant",
+      "SELECT variant AS value, COUNT(*)::text AS count FROM certificates GROUP BY variant"
     );
     const counts = res.rows.map((row) => ({ value: row.value ?? "", count: Number(row.count) }));
     return buildAuditRows(counts);
@@ -93,9 +85,10 @@ async function main(): Promise<void> {
     }
   })();
   console.log(`\n=== Rarity legacy audit (READ-ONLY) ===`);
-  console.log(`Target DB: ${host}${isLocal(url) ? " [local]" : " [remote — read-only]"}\n`);
+  const local = ["127.0.0.1", "localhost", "::1"].includes(new URL(url).hostname.toLowerCase());
+  console.log(`Target DB: ${host}${local ? " [local]" : " [remote — read-only]"}\n`);
 
-  const pool = new Pool({ connectionString: url, ssl: isLocal(url) ? false : { rejectUnauthorized: false }, max: 2 });
+  const pool = new Pool({ ...securePostgresPoolConnection(url, "AUDIT_DATABASE_URL"), max: 2 });
   try {
     console.log("── 1 · LIVE DB (certificates.variant) ─────────────────────────────");
     const live = await liveDbAudit(pool);
@@ -103,7 +96,7 @@ async function main(): Promise<void> {
     const liveSummary = summariseAudit(live);
     console.log(
       `\n  Summary: ${liveSummary.distinctValues} distinct value(s), ${liveSummary.totalRecords} record(s) — ` +
-        `high ${liveSummary.high}, medium ${liveSummary.medium}, low ${liveSummary.low}, review-required ${liveSummary.reviewRequired}\n`,
+        `high ${liveSummary.high}, medium ${liveSummary.medium}, low ${liveSummary.low}, review-required ${liveSummary.reviewRequired}\n`
     );
 
     console.log("── 2 · CATALOGUE (all known VARIANT_OPTIONS codes) ────────────────");
@@ -112,7 +105,7 @@ async function main(): Promise<void> {
     const catSummary = summariseAudit(cat);
     console.log(
       `\n  Summary: ${catSummary.distinctValues} known code(s) — ` +
-        `high ${catSummary.high}, medium ${catSummary.medium}, low ${catSummary.low}, review-required ${catSummary.reviewRequired}`,
+        `high ${catSummary.high}, medium ${catSummary.medium}, low ${catSummary.low}, review-required ${catSummary.reviewRequired}`
     );
     console.log(`\n(No data was written. This audit is read-only.)\n`);
   } finally {

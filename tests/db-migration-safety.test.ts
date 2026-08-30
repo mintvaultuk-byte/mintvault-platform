@@ -334,6 +334,16 @@ describe("destructive-SQL linter (expanded object coverage)", () => {
     expect(hasBlocking(lintSql("DROP TABLE parent CASCADE;"))).toBe(true);
   });
 
+  it("does not confuse a TRUNCATE trigger event with a destructive TRUNCATE statement", () => {
+    expect(
+      lintSql(`
+        CREATE TRIGGER refuse_clear
+          BEFORE TRUNCATE ON cert_counter
+          FOR EACH STATEMENT EXECUTE FUNCTION refuse_clear();`)
+    ).toEqual([]);
+    expect(hasBlocking(lintSql("TRUNCATE cert_counter;"))).toBe(true);
+  });
+
   it("allows DELETE/UPDATE with WHERE and safe additive SQL", () => {
     expect(hasBlocking(lintSql("DELETE FROM certificates WHERE id = 1;"))).toBe(false);
     const additive = `
@@ -439,12 +449,43 @@ describe("destructive-SQL linter (expanded object coverage)", () => {
       migration.replace("'partner_first_shop_onboarded'", "'partner_first_shop_created'"),
       migration.replace("'partner_first_shop_onboarded'", "'partner_first_shop_onboarded','unreviewed_action'"),
     ]) {
-      expect(unapprovedBlockingFindings(migrationPath, weakened, findings).map((x) => x.kind)).toContain("drop_constraint");
+      expect(unapprovedBlockingFindings(migrationPath, weakened, findings).map((x) => x.kind)).toContain(
+        "drop_constraint"
+      );
     }
   });
 });
 
 describe("migration runner planning (pure)", () => {
+  it("requires separate migration authority outside exact-loopback test/development", async () => {
+    const { resolveMigrationDatabaseUrl } = await import("../scripts/db/migrate");
+    expect(
+      resolveMigrationDatabaseUrl({
+        NODE_ENV: "production",
+        MINTVAULT_DATABASE_URL: "postgres://runtime@db.example.test/mintvault",
+        MINTVAULT_MIGRATION_DATABASE_URL: "postgres://migrator@db.example.test/mintvault",
+      })
+    ).toBe("postgres://migrator@db.example.test/mintvault");
+    expect(() =>
+      resolveMigrationDatabaseUrl({
+        NODE_ENV: "production",
+        MINTVAULT_DATABASE_URL: "postgres://owner@db.example.test/mintvault",
+      })
+    ).toThrow(/MINTVAULT_MIGRATION_DATABASE_URL is required/);
+    expect(() =>
+      resolveMigrationDatabaseUrl({
+        NODE_ENV: "test",
+        MINTVAULT_DATABASE_URL: "postgres://owner@db.example.test/mintvault",
+      })
+    ).toThrow(/exact loopback/);
+    expect(
+      resolveMigrationDatabaseUrl({
+        NODE_ENV: "test",
+        MINTVAULT_DATABASE_URL: "postgres://postgres@127.0.0.1:55433/mintvault_test",
+      })
+    ).toBe("postgres://postgres@127.0.0.1:55433/mintvault_test");
+  });
+
   it("exports listMigrationFiles", async () => {
     const { listMigrationFiles } = await import("../scripts/db/migrate");
     expect(typeof listMigrationFiles).toBe("function");

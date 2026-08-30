@@ -34,6 +34,8 @@ import { toDirectEndpoint } from "./read-only-session";
 import { basename, dirname, join } from "node:path";
 import { createHash } from "node:crypto";
 import { lintSql, isApprovedDestructiveFinding, unapprovedBlockingFindings } from "./lint-destructive-sql";
+import { securePostgresPoolConnection } from "../../server/lib/postgres-transport-security";
+import type pg from "pg";
 
 function defaultMigrationsDir(): string {
   const entry = process.argv[1] ?? "";
@@ -157,10 +159,12 @@ export function assertNotSharedBackend(ownPid: number, probePid: number): void {
 export async function assertDedicatedBackend(
   connectionString: string,
   ownPid: number,
-  ssl: { rejectUnauthorized: boolean } | undefined
+  // Backwards-compatible test call shape only. Caller SSL is never authority;
+  // every probe re-derives strict transport from the canonical URL.
+  _ignoredLegacySsl?: unknown
 ): Promise<void> {
   const { Client } = await import("pg");
-  const probe = new Client({ connectionString, ssl, connectionTimeoutMillis: 20_000 });
+  const probe = new Client(migrationClientConfig(connectionString));
   probe.on("error", () => {
     /* a probe failure is reported by the awaited query below */
   });
@@ -179,6 +183,13 @@ export async function assertDedicatedBackend(
       /* nothing can leak through a closed connection */
     }
   }
+}
+
+export function migrationClientConfig(connectionString: string): pg.ClientConfig {
+  return {
+    ...securePostgresPoolConnection(connectionString, "MINTVAULT_DATABASE_URL"),
+    connectionTimeoutMillis: 20_000,
+  };
 }
 
 interface MigrationFile {
@@ -883,11 +894,39 @@ export async function applyScopedMigration(
   }
 }
 
+export function resolveMigrationDatabaseUrl(env: NodeJS.ProcessEnv = process.env): string {
+  if (env.MINTVAULT_MIGRATION_DATABASE_URL) return env.MINTVAULT_MIGRATION_DATABASE_URL;
+
+  const fallback = env.MINTVAULT_DATABASE_URL;
+  const mode = (env.NODE_ENV ?? "").trim().toLowerCase();
+  if (!fallback || (mode !== "test" && mode !== "development")) {
+    throw new Error(
+      "MINTVAULT_MIGRATION_DATABASE_URL is required; the production web runtime credential is never migration authority."
+    );
+  }
+  let parsed: URL;
+  try {
+    parsed = new URL(fallback);
+  } catch {
+    throw new Error("The local MINTVAULT_DATABASE_URL migration fallback must be a valid PostgreSQL URL.");
+  }
+  const loopback = parsed.hostname === "localhost" || parsed.hostname === "127.0.0.1" || parsed.hostname === "::1";
+  if (!/^postgres(?:ql)?:$/.test(parsed.protocol) || !loopback) {
+    throw new Error(
+      "MINTVAULT_DATABASE_URL may substitute for migration authority only in test/development on exact loopback."
+    );
+  }
+  return fallback;
+}
+
 async function main(): Promise<void> {
-  const url = process.env.MINTVAULT_DATABASE_URL;
-  if (!url) {
-    console.error("MINTVAULT_DATABASE_URL is required");
+  let url: string;
+  try {
+    url = resolveMigrationDatabaseUrl();
+  } catch (error) {
+    console.error(`🚫 ${(error as Error).message}`);
     process.exit(2);
+    return;
   }
   const apply = process.argv.includes("--apply");
   const allowDestructive = process.argv.includes("--allow-destructive");
@@ -902,13 +941,11 @@ async function main(): Promise<void> {
     process.exit(2);
     return;
   }
-  const client = new Client({
-    connectionString: endpoint.url,
-    ssl: endpoint.url.includes("127.0.0.1") ? undefined : { rejectUnauthorized: false },
-    connectionTimeoutMillis: 20_000,
-  });
+  const client = new Client(migrationClientConfig(endpoint.url));
   try {
     await client.connect();
+    const pid = Number((await client.query<{ pid: number }>("SELECT pg_backend_pid() AS pid")).rows[0]?.pid);
+    await assertDedicatedBackend(endpoint.url, pid);
   } catch (e) {
     // No silent pooled fallback: a migration that cannot prove single-runner exclusivity
     // must not run at all.
