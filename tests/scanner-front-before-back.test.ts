@@ -33,9 +33,10 @@ describe("§23 FRONT-before-BACK is enforced server-side", () => {
     expect(src).toMatch(/Back capture refused until an immutable front master exists/);
   });
 
-  it("the legacy multipart evidence route carries the same refusal", () => {
+  it("the multipart compatibility route delegates to the same finalisation authority", () => {
     const src = read("server/routes.ts");
-    expect(src).toMatch(/Back capture refused until an immutable front master exists/);
+    expect(src).toMatch(/finaliseScannerEvidence\(/);
+    expect(src).toMatch(/reconcileAcceptedScannerEvidence\(/);
   });
 
   it("the staged BACK-before-FRONT refusal is retryable, so a valid BACK upload is not discarded", () => {
@@ -82,14 +83,14 @@ describe("§33 a committed FRONT survives a BACK failure", () => {
   });
 
   it("a supersede is scoped to one side, so a BACK write cannot retire the FRONT", () => {
-    const src = read("server/scan-ingest-service.ts");
+    const src = read("server/lib/scanner-evidence-persistence.ts");
     // The current-row lookup that feeds the supersede is bound to a single side.
     expect(src).toMatch(/certificate_id\s*=\s*\$1\s+AND\s+side\s*=\s*\$2\s+AND\s+is_current\s*=\s*true/i);
   });
 
   it("the per-side advisory lock keys on the side, so the two sides never contend", () => {
-    const src = read("server/scan-ingest-service.ts");
-    expect(src).toMatch(/evidence:\$\{certId\}:\$\{side\}/);
+    const src = read("server/lib/scanner-evidence-persistence.ts");
+    expect(src).toMatch(/evidence:\$\{intent\.certificateId\}:\$\{intent\.side\}/);
   });
 });
 

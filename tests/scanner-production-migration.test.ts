@@ -14,7 +14,7 @@ const TEST_URL = process.env.SCANNER_MIGRATION_TEST_DATABASE_URL || "";
  *
  * Every property that makes this safe is unchanged and still enforced: the host must be loopback,
  * so a remote Neon staging/production host is rejected outright; and the database must still be
- * named `mintvault_dgn_release_*`, so even on loopback it cannot be aimed at a real local database.
+ * named `mintvault_scanner_*_test`, so even on loopback it cannot be aimed at a real local database.
  * Only the set of accepted disposable ports is widened to the ones this repository provisions.
  */
 const DISPOSABLE_PORTS = [
@@ -28,10 +28,10 @@ function assertDisposableUrl(url: string): void {
   if (
     !["127.0.0.1", "localhost"].includes(parsed.hostname) ||
     !DISPOSABLE_PORTS.includes(parsed.port) ||
-    !/^\/mintvault_dgn_release_[a-z0-9_]+$/i.test(parsed.pathname)
+    !/^\/mintvault_scanner_[a-z0-9_]+_test$/i.test(parsed.pathname)
   ) {
     throw new Error(
-      `SCANNER_MIGRATION_TEST_DATABASE_URL must name a local mintvault_dgn_release_* disposable database on port ${DISPOSABLE_PORTS.join(", ")}`
+      `SCANNER_MIGRATION_TEST_DATABASE_URL must name a local mintvault_scanner_*_test disposable database on port ${DISPOSABLE_PORTS.join(", ")}`
     );
   }
 }

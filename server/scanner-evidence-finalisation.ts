@@ -96,9 +96,9 @@ export async function finaliseScannerEvidence(input: {
   mimeType: string;
   provenanceInput: unknown;
   trusted: TrustedCapturePrincipal;
+  stagingId?: string | null;
 }): Promise<FinalisedScannerEvidence> {
-  const { inspectScannerEvidence, uploadRawScannerSide, markRawUploaded, setScanStatus } =
-    await import("./scan-ingest-service");
+  const { inspectScannerEvidence, uploadRawScannerSide } = await import("./scan-ingest-service");
   const { parseLide400CaptureProvenance, assertLide400Evidence } = await import("./lib/lide400-profile");
   const { assessLide400CardFrame } = await import("./lib/lide400-card-frame");
 
@@ -183,11 +183,10 @@ export async function finaliseScannerEvidence(input: {
         tenantId: input.trusted.tenantId,
         locationId: input.trusted.locationId,
         actorId: input.trusted.actorId ?? input.session.actorId,
+        stagingId: input.stagingId ?? null,
       },
     }
   );
-  await markRawUploaded(input.session.certificateId);
-  await setScanStatus(input.session.certificateId, "processing");
   return { inspection, provenance, frameAssessment };
 }
 

@@ -12,12 +12,10 @@
  * lives only on submissions and is NEVER returned by any /api/staff/* surface.
  */
 import type { Request, Response, NextFunction } from "express";
-import sharp from "sharp";
 import { db } from "./db";
 import { sql } from "drizzle-orm";
 import { storage } from "./storage";
 import { hashPassword, verifyPassword, validatePassword } from "./account-auth";
-import { uploadToR2 } from "./r2";
 import { invalidateGraderSessionCache } from "./grader";
 import {
   STAFF_ABSOLUTE_SESSION_MS,
@@ -42,56 +40,6 @@ function isValidStaffEmail(value: string): boolean {
   const domain = value.slice(at + 1);
   const dot = domain.lastIndexOf(".");
   return dot > 0 && dot < domain.length - 1;
-}
-
-// ── Boot migrations (idempotent, additive, collision-checked: confirmed new) ──
-
-/** users.can_grade / can_scan / can_print / can_edit_sets + backfill grader→can_grade. */
-export async function migrateStaffCapabilitiesSchema(): Promise<void> {
-  await db.execute(sql`
-    ALTER TABLE users
-      ADD COLUMN IF NOT EXISTS can_grade BOOLEAN NOT NULL DEFAULT false,
-      ADD COLUMN IF NOT EXISTS can_scan  BOOLEAN NOT NULL DEFAULT false,
-      ADD COLUMN IF NOT EXISTS can_print BOOLEAN NOT NULL DEFAULT false,
-      ADD COLUMN IF NOT EXISTS can_edit_sets BOOLEAN NOT NULL DEFAULT false
-  `);
-  // Backfill: existing grader / senior_grader users get can_grade. Only touches
-  // rows still at the false default, so it's idempotent and never flips a flag
-  // an admin set. NEVER touches customer/admin roles.
-  await db.execute(sql`
-    UPDATE users SET can_grade = true
-    WHERE role IN ('grader', 'senior_grader') AND can_grade = false AND deleted_at IS NULL
-  `);
-  await db.execute(sql`
-    INSERT INTO audit_log (entity_type, entity_id, action, admin_user, details)
-    SELECT 'schema', 'users', 'staff_capabilities_migrate', NULL,
-           ${{
-             columns: ["can_grade", "can_scan", "can_print", "can_edit_sets"],
-             backfill: "role IN (grader,senior_grader) -> can_grade; can_edit_sets defaults false",
-           }}::jsonb
-    WHERE NOT EXISTS (SELECT 1 FROM audit_log WHERE action = 'staff_capabilities_migrate')
-  `);
-  console.log("[staff-caps-migrate] users capability columns ensured + grader backfill");
-}
-
-/** submissions.scan_assigned_to / scan_status / scan_assigned_at (NEW — not the
- *  dead v1 grader columns). */
-export async function migrateScanSchema(): Promise<void> {
-  await db.execute(sql`
-    ALTER TABLE submissions
-      ADD COLUMN IF NOT EXISTS scan_assigned_to VARCHAR,
-      ADD COLUMN IF NOT EXISTS scan_status VARCHAR(20) NOT NULL DEFAULT 'unassigned',
-      ADD COLUMN IF NOT EXISTS scan_assigned_at TIMESTAMPTZ
-  `);
-  await db.execute(sql`CREATE INDEX IF NOT EXISTS idx_submissions_scan_assigned ON submissions (scan_assigned_to)`);
-  await db.execute(sql`CREATE INDEX IF NOT EXISTS idx_submissions_scan_status ON submissions (scan_status)`);
-  await db.execute(sql`
-    INSERT INTO audit_log (entity_type, entity_id, action, admin_user, details)
-    SELECT 'schema', 'submissions', 'scan_schema_migrate', NULL,
-           ${{ columns: ["scan_assigned_to", "scan_status", "scan_assigned_at"] }}::jsonb
-    WHERE NOT EXISTS (SELECT 1 FROM audit_log WHERE action = 'scan_schema_migrate')
-  `);
-  console.log("[scan-migrate] submissions scan columns + indexes ensured");
 }
 
 // ── Middleware ────────────────────────────────────────────────────────────────
@@ -699,50 +647,4 @@ export async function authorizeScanCert(staffId: string, certId: number): Promis
   `);
   const row = r.rows[0] as any;
   return row ? Number(row.sid) : null;
-}
-
-/**
- * Store a raw scan onto a certificate (the scanner's job is capture; the grader
- * crops via the card tool). Re-encodes to JPEG (strips EXIF), uploads to the
- * same R2 key the admin upload path uses, sets the original + canonical display
- * path. Then, if every card in the submission now has front+back, flips the
- * submission to 'scanned'. PII-FREE. Returns whether the submission is complete.
- */
-export async function recordScanUpload(
-  certId: number,
-  certIdStr: string,
-  side: "front" | "back",
-  buffer: Buffer,
-  submissionId: number,
-  staffEmail: string
-): Promise<{ submissionScanned: boolean }> {
-  const jpeg = await sharp(buffer).rotate().jpeg({ quality: 85, mozjpeg: true }).toBuffer();
-  const key = `grading/${certIdStr}/${side}_original.jpg`;
-  await uploadToR2(key, jpeg, "image/jpeg");
-  if (side === "front") {
-    await db.execute(
-      sql`UPDATE certificates SET grading_front_original = ${key}, front_image_path = ${key}, updated_at = NOW() WHERE id = ${certId}`
-    );
-  } else {
-    await db.execute(
-      sql`UPDATE certificates SET grading_back_original = ${key}, back_image_path = ${key}, updated_at = NOW() WHERE id = ${certId}`
-    );
-  }
-  await storage.writeAuditLog("certificate", String(certId), "scan_upload", staffEmail, {
-    side,
-    submission_id: submissionId,
-  });
-
-  // Submission complete when every card has both originals.
-  const cards = await scanCardsForSubmission(submissionId);
-  const complete = cards.length > 0 && cards.every((c) => c.hasFront && c.hasBack);
-  if (complete) {
-    await db.execute(
-      sql`UPDATE submissions SET scan_status = 'scanned', updated_at = NOW() WHERE id = ${submissionId} AND scan_status = 'assigned'`
-    );
-    await storage.writeAuditLog("submission", String(submissionId), "scan_complete", staffEmail, {
-      cards: cards.length,
-    });
-  }
-  return { submissionScanned: complete };
 }

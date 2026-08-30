@@ -1,4 +1,5 @@
 import type { NextFunction, Request, Response } from "express";
+import { uploadMemoryAdmission, uploadMemoryBudget } from "./upload-memory-admission";
 
 /**
  * Bounded admission ahead of multer's legacy memory storage.
@@ -52,4 +53,8 @@ export function createScannerEvidenceAdmission(
   };
 }
 
-export const scannerEvidenceAdmission = createScannerEvidenceAdmission();
+export const scannerEvidenceAdmission = {
+  // 128 MiB TIFF plus raw decode and evidence-derivative headroom.
+  middleware: uploadMemoryAdmission("scanner_evidence", 512),
+  stats: uploadMemoryBudget.stats,
+};

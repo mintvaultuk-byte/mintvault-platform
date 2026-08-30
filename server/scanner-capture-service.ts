@@ -6,11 +6,12 @@
 import { randomUUID } from "node:crypto";
 import { pool } from "./db";
 import { hashLockKey } from "./lib/advisory-lock";
+import { CaptureGeometryError, type AcquisitionRegionMm } from "./lib/lide400-capture-authority";
 import {
-  CaptureGeometryError,
-  resolveAuthoritativeAcquisitionRegion,
-  type AcquisitionRegionMm,
-} from "./lib/lide400-capture-authority";
+  withScannerCaptureOperationalAuthority,
+  type ScannerCaptureMainAnchor,
+  type ScannerCaptureOperationalAuthority,
+} from "./partner/operational-authority";
 
 /**
  * A station was asked to arm a card while it is already holding a live target for a DIFFERENT one.
@@ -104,44 +105,6 @@ function mapRow(row: Record<string, unknown>): ScannerCaptureSession {
 }
 
 /**
- * Resolve the station's current VALID calibration and return the rectangle to snapshot.
- *
- * Runs inside the arming transaction, on a row the arm already has the station id for, so it costs
- * one indexed join at arm time and NOTHING in the evidence hot path — the region travels on the
- * session row that path already loads.
- */
-async function resolveArmedAcquisitionRegion(
-  client: { query: (text: string, values?: unknown[]) => Promise<{ rows: Record<string, unknown>[] }> },
-  stationId: string,
-  scannerProfileVersion: string
-): Promise<{ calibrationId: string; region: AcquisitionRegionMm }> {
-  const found = await client.query(
-    `SELECT k.id, k.station_id, k.health_status, k.scanner_profile_version, k.calibration_version, k.acquisition_region
-       FROM partner_stations s
-       JOIN partner_station_calibrations k ON k.id = s.current_calibration_id
-      WHERE s.id = $1
-      LIMIT 1
-      FOR SHARE OF s`,
-    [stationId]
-  );
-  const row = found.rows[0];
-  const region = resolveAuthoritativeAcquisitionRegion(
-    row
-      ? {
-          id: row.id == null ? null : String(row.id),
-          stationId: row.station_id == null ? null : String(row.station_id),
-          healthStatus: row.health_status == null ? null : String(row.health_status),
-          scannerProfileVersion: row.scanner_profile_version == null ? null : String(row.scanner_profile_version),
-          calibrationVersion: row.calibration_version == null ? null : String(row.calibration_version),
-          acquisitionRegion: row.acquisition_region,
-        }
-      : null,
-    { stationId, scannerProfileVersion }
-  );
-  return { calibrationId: String(row!.id), region };
-}
-
-/**
  * ONE CARD, ONE RECTANGLE — the invariant that was asserted in comments and implemented nowhere.
  *
  * A certificate whose FRONT and BACK were acquired from two different physical rectangles is not one
@@ -232,68 +195,7 @@ function finiteRegionOrNull(value: unknown): AcquisitionRegionMm | null {
   return out as AcquisitionRegionMm;
 }
 
-export async function ensureScannerCaptureSchema(): Promise<void> {
-  const client = await pool.connect();
-  try {
-    await client.query(`
-    CREATE TABLE IF NOT EXISTS scanner_capture_sessions (
-      id TEXT PRIMARY KEY,
-      certificate_id INTEGER NOT NULL REFERENCES certificates(id) ON DELETE RESTRICT,
-      card_id INTEGER,
-      submission_item_id INTEGER,
-      submission_id INTEGER,
-      side VARCHAR(5) NOT NULL CHECK (side IN ('front', 'back')),
-      workstation_id TEXT NOT NULL,
-      station_id UUID,
-      scanner_profile_version TEXT NOT NULL,
-      actor_id TEXT,
-      state VARCHAR(16) NOT NULL CHECK (state IN ('armed','claimed','capturing','captured','failed','expired','cancelled')),
-      claimed_by_device_id TEXT,
-      physical_released BOOLEAN NOT NULL DEFAULT false,
-      recapture BOOLEAN NOT NULL DEFAULT false,
-      failure_reason TEXT,
-      created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
-      claimed_at TIMESTAMPTZ,
-      captured_at TIMESTAMPTZ,
-      expires_at TIMESTAMPTZ NOT NULL
-    )
-    `);
-    await client.query(`
-    CREATE UNIQUE INDEX IF NOT EXISTS uq_scanner_capture_one_active_target
-      ON scanner_capture_sessions (certificate_id, side)
-      WHERE state IN ('armed', 'claimed', 'capturing')
-    `);
-    await client.query(`
-    CREATE INDEX IF NOT EXISTS idx_scanner_capture_claim
-      ON scanner_capture_sessions (state, expires_at, workstation_id, created_at)
-    `);
-    await client.query(`ALTER TABLE scanner_capture_sessions ADD COLUMN IF NOT EXISTS station_id UUID`);
-    await client.query(
-      `ALTER TABLE scanner_capture_sessions ADD COLUMN IF NOT EXISTS physical_released BOOLEAN NOT NULL DEFAULT false`
-    );
-    /*
-     * The server-owned capture window, snapshotted when a side is armed. Mirrored here as idempotent
-     * runtime DDL for the same reason `station_id` above is — this table is created by this function
-     * on a fresh database — and journalled properly as migration 0091 so a deployed database is not
-     * left carrying columns no migration records. Both must exist: runtime DDL alone was how this
-     * repo previously ended up reconciling undocumented drift.
-     */
-    await client.query(`ALTER TABLE scanner_capture_sessions ADD COLUMN IF NOT EXISTS calibration_id UUID`);
-    await client.query(`ALTER TABLE scanner_capture_sessions ADD COLUMN IF NOT EXISTS acquisition_region JSONB`);
-    await client.query(`
-      CREATE INDEX IF NOT EXISTS idx_scanner_capture_station_claim
-        ON scanner_capture_sessions (station_id, created_at) WHERE state = 'armed'
-    `);
-    await client.query(`
-      CREATE INDEX IF NOT EXISTS idx_scanner_capture_expiry
-        ON scanner_capture_sessions (expires_at, id) WHERE state IN ('armed','claimed') AND physical_released = false
-    `);
-  } finally {
-    client.release();
-  }
-}
-
-export async function createScannerCaptureSession(input: {
+type CreateScannerCaptureInput = {
   certificateId: number;
   side: unknown;
   workstationId: unknown;
@@ -301,9 +203,54 @@ export async function createScannerCaptureSession(input: {
   actorId: string | null;
   recapture: boolean;
   scannerProfileVersion: string;
-}): Promise<ScannerCaptureSession> {
+};
+
+export async function createScannerCaptureSession(input: CreateScannerCaptureInput): Promise<ScannerCaptureSession> {
   const side = cleanSide(input.side);
   const workstationId = cleanStationId(input.workstationId);
+  if (!input.stationId) {
+    return createScannerCaptureSessionOnMain(input, side, workstationId, null, null);
+  }
+  const anchorResult = await pool.query(
+    `SELECT c.id, c.card_id, c.submission_item_id,
+            COALESCE(card.submission_id, item.submission_id) AS destination_submission_id,
+            c.origin_type, c.origin_partner_id, c.origin_location_id
+       FROM certificates c
+       LEFT JOIN cards card ON card.id=c.card_id
+       LEFT JOIN submission_items item ON item.id=c.submission_item_id
+      WHERE c.id=$1 AND c.deleted_at IS NULL
+      LIMIT 1`,
+    [input.certificateId]
+  );
+  const row = anchorResult.rows[0] as Record<string, unknown> | undefined;
+  if (!row) throw new Error("Certificate not found or inactive");
+  const anchor: ScannerCaptureMainAnchor = {
+    certificateId: Number(row.id),
+    cardId: row.card_id == null ? null : Number(row.card_id),
+    submissionItemId: row.submission_item_id == null ? null : Number(row.submission_item_id),
+    destinationSubmissionId: row.destination_submission_id == null ? null : Number(row.destination_submission_id),
+    originType: row.origin_type == null ? null : String(row.origin_type),
+    originPartnerId: row.origin_partner_id == null ? null : String(row.origin_partner_id),
+    originLocationId: row.origin_location_id == null ? null : String(row.origin_location_id),
+  };
+  return withScannerCaptureOperationalAuthority(
+    {
+      stationId: input.stationId,
+      workstationId,
+      scannerProfileVersion: input.scannerProfileVersion,
+      anchor,
+    },
+    (authority) => createScannerCaptureSessionOnMain(input, side, workstationId, authority, anchor)
+  );
+}
+
+async function createScannerCaptureSessionOnMain(
+  input: CreateScannerCaptureInput,
+  side: CaptureSide,
+  workstationId: string,
+  operationalAuthority: ScannerCaptureOperationalAuthority | null,
+  anchor: ScannerCaptureMainAnchor | null
+): Promise<ScannerCaptureSession> {
   const client = await pool.connect();
   try {
     await client.query("BEGIN");
@@ -334,7 +281,8 @@ export async function createScannerCaptureSession(input: {
     const cert = await client.query(
       `
       SELECT c.id, c.certificate_number, c.card_id, c.submission_item_id,
-             COALESCE(card.submission_id, item.submission_id) AS submission_id
+             COALESCE(card.submission_id, item.submission_id) AS submission_id,
+             c.origin_type, c.origin_partner_id, c.origin_location_id
         FROM certificates c
         LEFT JOIN cards card ON card.id = c.card_id
         LEFT JOIN submission_items item ON item.id = c.submission_item_id
@@ -345,6 +293,22 @@ export async function createScannerCaptureSession(input: {
     );
     const row = cert.rows[0] as Record<string, unknown> | undefined;
     if (!row) throw new Error("Certificate not found or inactive");
+    if (input.stationId) {
+      if (!operationalAuthority || !anchor || operationalAuthority.stationId !== input.stationId) {
+        throw new Error("Partner station authority is unavailable");
+      }
+      if (
+        Number(row.id) !== anchor.certificateId ||
+        (row.card_id == null ? null : Number(row.card_id)) !== anchor.cardId ||
+        (row.submission_item_id == null ? null : Number(row.submission_item_id)) !== anchor.submissionItemId ||
+        (row.submission_id == null ? null : Number(row.submission_id)) !== anchor.destinationSubmissionId ||
+        String(row.origin_type ?? "") !== "PARTNER" ||
+        String(row.origin_partner_id ?? "") !== operationalAuthority.tenantId ||
+        String(row.origin_location_id ?? "") !== operationalAuthority.locationId
+      ) {
+        throw new Error("Certificate binding changed while scanner capture was being armed");
+      }
+    }
     /*
      * WALK-IN (P6) CARD JOB PATH, checked FIRST (AT-23 §B, 2026-08-14). A counter-started
      * certificate is minted directly inside the NEW transaction — it has no legacy cards /
@@ -356,27 +320,11 @@ export async function createScannerCaptureSession(input: {
      * tenant_id AND location_id equal this ACTIVE station's. Partner A's station still cannot arm
      * Partner B's certificate, and a station cannot reach another location's job.
      */
-    let walkInStationBound = false;
-    if (input.stationId && row.card_id == null && row.submission_item_id == null) {
-      const walkInScope = await client.query(
-        `SELECT 1
-           FROM partner_stations station
-           JOIN partner_card_jobs job
-             ON job.tenant_id=station.tenant_id
-            AND job.location_id=station.location_id
-            AND job.certificate_id=$2
-            -- P6c: a CANCELLED Card Job binds nothing. Its credit has been returned, so arming
-            -- against its certificate would let a station photograph a card the shop is no longer
-            -- paying for. The Card Job authorities all carry this predicate; this is the
-            -- independent second lock on the HQ pool, which the browser arming route also reaches.
-            AND job.cancelled_at IS NULL
-          WHERE station.id=$1
-            AND station.status='ACTIVE'
-          LIMIT 1`,
-        [input.stationId, input.certificateId]
-      );
-      walkInStationBound = walkInScope.rows.length === 1;
-    }
+    const walkInStationBound =
+      input.stationId != null &&
+      operationalAuthority?.lineage === "card_job" &&
+      row.card_id == null &&
+      row.submission_item_id == null;
     if (!walkInStationBound) {
       if (row.card_id == null && row.submission_item_id == null) {
         throw new Error("Certificate must be bound to a selected card or submission item before scanner capture");
@@ -385,61 +333,8 @@ export async function createScannerCaptureSession(input: {
         throw new Error("Selected card has no submission binding; scanner capture is refused");
       }
     }
-    if (input.stationId && !walkInStationBound) {
-      // A station is scoped to a Partner tenant/location. A matching legacy
-      // submission must have crossed the connector bridge for this exact
-      // station scope; a caller cannot attach an otherwise-valid card to an
-      // arbitrary active Mac in another tenant or location.
-      const stationScope = await client.query(
-        `SELECT 1
-           FROM partner_stations station
-           JOIN partner_connector_imports imported
-             ON imported.partner_organisation_id=station.tenant_id
-            AND imported.partner_location_id=station.location_id
-            AND imported.destination_submission_id=$2
-          WHERE station.id=$1
-            AND station.status='ACTIVE'
-            AND imported.state IN ('completed','imported')
-          LIMIT 1`,
-        [input.stationId, row.submission_id]
-      );
-      /*
-       * SECOND, EQUALLY STRICT BINDING PATH — a Card Job started at the counter (P6).
-       *
-       * The connector join above proves tenant scope for cards that reached MintVault through a
-       * portal submission and the import bridge. A walk-in card never travels that road: its
-       * certificate is minted directly in the NEW transaction, so it has no connector import row
-       * and the join above can never match it. Without this branch, every Scanner-started card
-       * would be refused at the moment the operator tried to capture the card they had just paid
-       * for.
-       *
-       * This is NOT a relaxation. It demands exactly the same three facts through the Card Job
-       * instead of the import: the certificate belongs to a job whose tenant_id AND location_id
-       * equal this station's, and the station is ACTIVE. Partner A's station still cannot arm
-       * Partner B's certificate, and a station cannot reach a job at another of its own tenant's
-       * locations.
-       */
-      let bound = stationScope.rows.length === 1;
-      if (!bound) {
-        const cardJobScope = await client.query(
-          `SELECT 1
-             FROM partner_stations station
-             JOIN partner_card_jobs job
-               ON job.tenant_id=station.tenant_id
-              AND job.location_id=station.location_id
-              AND job.certificate_id=$2
-              -- P6c: same predicate as the walk-in branch above — a cancelled job binds nothing.
-              AND job.cancelled_at IS NULL
-            WHERE station.id=$1
-              AND station.status='ACTIVE'
-            LIMIT 1`,
-          [input.stationId, input.certificateId]
-        );
-        bound = cardJobScope.rows.length === 1;
-      }
-      if (!bound) {
-        throw new Error("Certificate is not bound to this station's tenant and location");
-      }
+    if (input.stationId && !operationalAuthority) {
+      throw new Error("Certificate is not bound to this station's tenant and location");
     }
     if (!input.recapture) {
       const evidence = await client.query(
@@ -601,9 +496,9 @@ export async function createScannerCaptureSession(input: {
     let calibrationId: string | null = null;
     let acquisitionRegion: AcquisitionRegionMm | null = null;
     if (input.stationId) {
-      const resolved = await resolveArmedAcquisitionRegion(client, input.stationId, input.scannerProfileVersion);
-      calibrationId = resolved.calibrationId;
-      acquisitionRegion = resolved.region;
+      if (!operationalAuthority) throw new Error("Partner station calibration authority is unavailable");
+      calibrationId = operationalAuthority.calibrationId;
+      acquisitionRegion = operationalAuthority.acquisitionRegion;
       await assertSidesShareOneRectangle(client, input.certificateId, side, acquisitionRegion);
     }
     const inserted = await client.query(

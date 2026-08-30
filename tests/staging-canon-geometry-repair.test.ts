@@ -373,8 +373,13 @@ describe("approved STAGING Canon geometry repair", () => {
 
   it("serializes station arming with the geometry pointer transaction", () => {
     const captureService = readFileSync("server/scanner-capture-service.ts", "utf8");
-    expect(captureService).toMatch(
-      /JOIN partner_station_calibrations k ON k\.id = s\.current_calibration_id[\s\S]{0,300}FOR SHARE OF s/
+    const operationalAuthority = readFileSync("server/partner/operational-authority.ts", "utf8");
+    expect(operationalAuthority).toMatch(
+      /JOIN public\.partner_station_calibrations calibration[\s\S]{0,400}FOR SHARE OF station, calibration/
+    );
+    expect(captureService).toContain("withScannerCaptureOperationalAuthority(");
+    expect(captureService).toContain(
+      "(authority) => createScannerCaptureSessionOnMain(input, side, workstationId, authority, anchor)"
     );
   });
 
