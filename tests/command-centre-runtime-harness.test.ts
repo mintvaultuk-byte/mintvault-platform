@@ -63,7 +63,8 @@ describe("Command Centre rendered-runtime harness safety", () => {
 
   it("keeps the loopback session transport exception test-only", () => {
     const server = readFileSync("server/index.ts", "utf8");
-    expect(server).toContain('ssl: process.env.NODE_ENV === "test" ? false : { rejectUnauthorized: false }');
+    expect(server).toContain('securePostgresPoolConnection(getDatabaseUrl(), "MINTVAULT_DATABASE_URL")');
+    expect(server).not.toContain("rejectUnauthorized: false");
   });
 
   it("uses the existing server kill switch for the optional flag-off audit", () => {

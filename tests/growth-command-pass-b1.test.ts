@@ -76,7 +76,9 @@ describe("GB-01 paid confirmation capability", () => {
     expect(SUBMIT_PAGE).toContain('confirmData?.status !== "paid"');
     expect(SUBMIT_PAGE).toContain('typeof confirmData?.packingSlipToken !== "string"');
     expect(SUBMIT_PAGE).toContain("Payment was not completed. Please try again when you are ready.");
-    expect(SUBMISSION_ROUTES).toContain("await fulfilPaidSubmission(submission");
+    expect(SUBMISSION_ROUTES).toMatch(
+      /paymentIntent\.status === "succeeded"[\s\S]+await\s+fulfilPaidSubmission\(\s*submission/
+    );
   });
 
   it("normalises and blocks mismatched multi-card drafts before payment while retaining the server guard", () => {
@@ -161,7 +163,9 @@ describe("GB-02 rendered search policy", () => {
     expect(locs).toContain("/card-grading-near-me");
     expect(locs).not.toContain("/guides");
     expect(locs.some((loc) => loc.startsWith("/guides/"))).toBe(false);
-    expect(locs.some((loc) => /^(?:\/admin(?:\/|$)|\/partner(?:\/|$)|\/cert\/|\/vault\/|\/population\/certs)/.test(loc))).toBe(false);
+    expect(
+      locs.some((loc) => /^(?:\/admin(?:\/|$)|\/partner(?:\/|$)|\/cert\/|\/vault\/|\/population\/certs)/.test(loc))
+    ).toBe(false);
     expect(new Set(locs).size).toBe(locs.length);
   });
 });

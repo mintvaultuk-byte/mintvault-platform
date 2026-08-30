@@ -11,6 +11,7 @@ import type { Express, Request, Response, NextFunction } from "express";
 import { requireAdmin } from "../auth";
 import { uploadToR2, getR2Buffer } from "../r2";
 import { toolsUpload } from "../lib/multer-configs";
+import { uploadMemoryAdmission } from "../lib/upload-memory-admission";
 import { vqStorage, type CharacterBibleContext, type CharacterBiblePatch } from "../vault-quest/storage";
 import { validateArtwork } from "../vault-quest/upload-guard";
 import { intOrNull, isCandidateReferencedInPack } from "../vault-quest/lib/write-sanitize";
@@ -680,7 +681,7 @@ interface GenCandidateResult {
 // outage must never turn a rejection into a 500 — the caller `.catch(() => null)`s it.
 async function quarantineRejectedImage(
   characterId: string,
-  png: Buffer,
+  png: Buffer
 ): Promise<{ key: string; checksum: string } | null> {
   const safe = characterId.replace(/[^A-Za-z0-9_-]/g, "").slice(0, 64);
   if (!safe) return null;
@@ -1425,6 +1426,7 @@ export function registerVaultQuestAdminRoutes(app: Express): void {
   app.post(
     "/api/admin/vault-quest/characters/:characterId/artwork",
     requireAdmin,
+    uploadMemoryAdmission("vq_character_artwork", 128),
     toolsUpload.single("file"),
     async (req: Request, res: Response) => {
       try {
@@ -1534,6 +1536,7 @@ export function registerVaultQuestAdminRoutes(app: Express): void {
   app.post(
     "/api/admin/vault-quest/characters/:characterId/reference/:referenceType/upload",
     requireAdmin,
+    uploadMemoryAdmission("vq_character_reference", 128),
     toolsUpload.single("file"),
     async (req: Request, res: Response) => {
       try {
@@ -1827,7 +1830,9 @@ export function registerVaultQuestAdminRoutes(app: Express): void {
             identityThreshold: identity?.threshold ?? identityThreshold(),
           });
         }
-        const thumb = await (await import("sharp"))
+        const thumb = await (
+          await import("sharp")
+        )
           .default(artwork.png)
           .resize(320, 320, { fit: "inside" })
           .png()
@@ -1869,26 +1874,22 @@ export function registerVaultQuestAdminRoutes(app: Express): void {
   // R2 quarantine keyspace — never a public or long-lived URL, never a candidate. The
   // ref is the URL-encoded quarantine key returned in the 422 above; it is re-validated
   // as a read key inside the `vq/characters/.../quarantine/` space (no traversal).
-  app.get(
-    "/api/admin/vault-quest/quarantine/:ref/image",
-    requireAdmin,
-    async (req: Request, res: Response) => {
-      try {
-        const decoded = decodeURIComponent(String(req.params.ref));
-        if (!decoded.startsWith("vq/characters/") || !decoded.includes("/quarantine/") || decoded.includes("..")) {
-          return res.status(400).json({ error: "invalid quarantine reference" });
-        }
-        const key = assertVqReadKey(decoded);
-        const buf = await getR2Buffer(key);
-        if (!buf) return res.status(404).json({ error: "quarantined source not found" });
-        res.setHeader("Content-Type", "image/png");
-        res.setHeader("Cache-Control", "private, no-store");
-        res.send(buf);
-      } catch (err) {
-        res.status(500).json({ error: err instanceof Error ? err.message : "failed to load quarantined source" });
+  app.get("/api/admin/vault-quest/quarantine/:ref/image", requireAdmin, async (req: Request, res: Response) => {
+    try {
+      const decoded = decodeURIComponent(String(req.params.ref));
+      if (!decoded.startsWith("vq/characters/") || !decoded.includes("/quarantine/") || decoded.includes("..")) {
+        return res.status(400).json({ error: "invalid quarantine reference" });
       }
+      const key = assertVqReadKey(decoded);
+      const buf = await getR2Buffer(key);
+      if (!buf) return res.status(404).json({ error: "quarantined source not found" });
+      res.setHeader("Content-Type", "image/png");
+      res.setHeader("Cache-Control", "private, no-store");
+      res.send(buf);
+    } catch (err) {
+      res.status(500).json({ error: err instanceof Error ? err.message : "failed to load quarantined source" });
     }
-  );
+  });
 
   // Generate N more candidates (default 3, max 3) for THIS character only. Partial-tolerant:
   // if a later image fails (e.g. credits), the ones already created are still returned.
@@ -1934,12 +1935,10 @@ export function registerVaultQuestAdminRoutes(app: Express): void {
           return res.status(400).json({ error: `Invalid job count.`, count: body.count });
         }
         if (requestedCount > VQ_BATCH_MAX_JOBS) {
-          return res
-            .status(400)
-            .json({
-              error: `That asks for more than the ${VQ_BATCH_MAX_JOBS}-job batch limit.`,
-              maxJobs: VQ_BATCH_MAX_JOBS,
-            });
+          return res.status(400).json({
+            error: `That asks for more than the ${VQ_BATCH_MAX_JOBS}-job batch limit.`,
+            maxJobs: VQ_BATCH_MAX_JOBS,
+          });
         }
         const count = Math.max(1, Math.min(VQ_BATCH_MAX_JOBS, requestedCount || VQ_BATCH_MAX_JOBS));
         const referenceType = parseReferenceType(body.referenceType);
@@ -2233,12 +2232,10 @@ export function registerVaultQuestAdminRoutes(app: Express): void {
           const confirmReplaceLocked =
             (req.body as { confirmReplaceLocked?: boolean } | undefined)?.confirmReplaceLocked === true;
           if (character?.locked && !confirmReplaceLocked)
-            return res
-              .status(423)
-              .json({
-                error: "Character is locked — unlock before restoring an older reference, or confirm the restore.",
-                locked: true,
-              });
+            return res.status(423).json({
+              error: "Character is locked — unlock before restoring an older reference, or confirm the restore.",
+              locked: true,
+            });
         }
         const outcome = await restoreArtworkRevision(revisionId, req.session?.adminEmail || "admin");
         if (!outcome.ok) {
@@ -2281,12 +2278,10 @@ export function registerVaultQuestAdminRoutes(app: Express): void {
         // stays locked; promoteCharacterReferenceRevision below still archives the old
         // image and keeps full history either way. Without the flag, still hard-blocked.
         if (character.locked && body.confirmReplaceLocked !== true)
-          return res
-            .status(423)
-            .json({
-              error: "Character is locked — unlock before changing its reference pack, or confirm the Replace action.",
-              locked: true,
-            });
+          return res.status(423).json({
+            error: "Character is locked — unlock before changing its reference pack, or confirm the Replace action.",
+            locked: true,
+          });
         const cand = await vqStorage.getArtworkCandidate(candidateId);
         if (!cand || cand.characterId !== characterId || !cand.r2Key.startsWith("vq/characters/")) {
           return res.status(404).json({ error: "candidate not found for this character" });
@@ -2447,12 +2442,10 @@ export function registerVaultQuestAdminRoutes(app: Express): void {
         // Batch/family hard limit (Phase 3B item 6A) — reject BEFORE any spend/
         // reservation/provider work; never partially run an over-limit family.
         if (fam.length > VQ_FAMILY_MAX_JOBS) {
-          return res
-            .status(400)
-            .json({
-              error: `That family has more than the ${VQ_FAMILY_MAX_JOBS}-stage limit for one press.`,
-              maxJobs: VQ_FAMILY_MAX_JOBS,
-            });
+          return res.status(400).json({
+            error: `That family has more than the ${VQ_FAMILY_MAX_JOBS}-stage limit for one press.`,
+            maxJobs: VQ_FAMILY_MAX_JOBS,
+          });
         }
         if (!(await providerGateOrRespond(res))) return;
         if (!(await vqFeatureGateOrRespond(res, "generation"))) return; // emergency kill switch (Phase 10A-4)
@@ -3595,6 +3588,7 @@ export function registerVaultQuestAdminRoutes(app: Express): void {
   app.post(
     "/api/admin/vault-quest/cards/:cardId/art",
     requireAdmin,
+    uploadMemoryAdmission("vq_card_art", 128),
     toolsUpload.single("file"),
     async (req: Request, res: Response) => {
       try {
@@ -3664,6 +3658,7 @@ export function registerVaultQuestAdminRoutes(app: Express): void {
   app.post(
     "/api/admin/vault-quest/import",
     requireAdmin,
+    uploadMemoryAdmission("vq_import", 64),
     toolsUpload.single("file"),
     async (req: Request, res: Response) => {
       const file = (req as Request & { file?: Express.Multer.File }).file;

@@ -14,6 +14,7 @@ import {
   type AcquisitionCategory,
 } from "./commercial-attribution";
 import { PARTNER_APPLICATION_STATUSES, type PartnerApplicationStatus } from "./partner-applications";
+import { countActivePartners } from "./partner/operational-authority";
 
 export const GROWTH_PERIODS = ["today", "7d", "30d", "90d", "all"] as const;
 export type GrowthPeriod = (typeof GROWTH_PERIODS)[number];
@@ -175,7 +176,12 @@ function mergeCampaignRows(rows: Array<{ row: AttributionRow; partnerLead: boole
     merged.set(key, target);
   }
   return [...merged.values()]
-    .sort((a, b) => b.revenuePence - a.revenuePence || b.partnerApplications - a.partnerApplications || b.paidSubmissions - a.paidSubmissions)
+    .sort(
+      (a, b) =>
+        b.revenuePence - a.revenuePence ||
+        b.partnerApplications - a.partnerApplications ||
+        b.paidSubmissions - a.paidSubmissions
+    )
     .slice(0, 25);
 }
 
@@ -196,7 +202,10 @@ function mergeSourceRows(rows: CampaignPerformance[]): AcquisitionPerformance[] 
     merged.set(row.category, target);
   }
   return [...merged.values()].sort(
-    (a, b) => b.revenuePence - a.revenuePence || b.partnerApplications - a.partnerApplications || b.paidSubmissions - a.paidSubmissions
+    (a, b) =>
+      b.revenuePence - a.revenuePence ||
+      b.partnerApplications - a.partnerApplications ||
+      b.paidSubmissions - a.paidSubmissions
   );
 }
 
@@ -204,7 +213,11 @@ function measured(value: unknown): Metric {
   return { state: "MEASURED", value: numberValue(value) };
 }
 
-export async function getGrowthSummary(period: GrowthPeriod, executor?: QueryExecutor): Promise<GrowthSummary> {
+export async function getGrowthSummary(
+  period: GrowthPeriod,
+  executor?: QueryExecutor,
+  activePartnerCount: () => Promise<number> = countActivePartners
+): Promise<GrowthSummary> {
   const runner = executor ?? (await import("./db")).db;
   const paidWindow = periodFilter(sql`payment_timestamp`, period);
   const applicationWindow = periodFilter(sql`created_at`, period);
@@ -267,10 +280,12 @@ export async function getGrowthSummary(period: GrowthPeriod, executor?: QueryExe
 
   let activePartners: Metric | NotInstrumented;
   try {
-    const result = await runner.execute(sql`SELECT COUNT(*) AS active_count FROM partner_organisations WHERE status = 'ACTIVE'`);
-    activePartners = measured((result.rows[0] as Record<string, unknown> | undefined)?.active_count);
+    activePartners = measured(await activePartnerCount());
   } catch {
-    activePartners = { state: "NOT_INSTRUMENTED", reason: "Active Partner records are unavailable in this environment." };
+    activePartners = {
+      state: "NOT_INSTRUMENTED",
+      reason: "Active Partner records are unavailable in this environment.",
+    };
   }
 
   return {
@@ -294,28 +309,42 @@ export async function getGrowthSummary(period: GrowthPeriod, executor?: QueryExe
       onboarding: measured(applications.onboarding_count),
     },
     activePartners,
-    partnerCardsPerPartner: { state: "NOT_INSTRUMENTED", reason: "No authoritative submission-to-Partner link exists." },
+    partnerCardsPerPartner: {
+      state: "NOT_INSTRUMENTED",
+      reason: "No authoritative submission-to-Partner link exists.",
+    },
     partnerRevenue: { state: "NOT_INSTRUMENTED", reason: "No authoritative paid-order-to-Partner link exists." },
-    repeatCustomerRate: { state: "NOT_INSTRUMENTED", reason: "A privacy-reviewed stable repeat-customer method is not instrumented." },
+    repeatCustomerRate: {
+      state: "NOT_INSTRUMENTED",
+      reason: "A privacy-reviewed stable repeat-customer method is not instrumented.",
+    },
     historical: {
       state: "NOT_INSTRUMENTED",
-      reason: "Earlier orders without verified Stripe amount and paid timestamp remain unattributed rather than estimated.",
+      reason:
+        "Earlier orders without verified Stripe amount and paid timestamp remain unattributed rather than estimated.",
     },
   };
 }
 
 /** Conceptual GB-04B read boundary: sources are derived from the same paid authority as the summary. */
-export async function getAcquisitionPerformance(period: GrowthPeriod, executor?: QueryExecutor): Promise<AcquisitionPerformance[]> {
+export async function getAcquisitionPerformance(
+  period: GrowthPeriod,
+  executor?: QueryExecutor
+): Promise<AcquisitionPerformance[]> {
   return (await getGrowthSummary(period, executor)).sourcePerformance;
 }
 
 /** Conceptual GB-04B read boundary: campaigns are derived from the same paid authority as the summary. */
-export async function getCampaignPerformance(period: GrowthPeriod, executor?: QueryExecutor): Promise<CampaignPerformance[]> {
+export async function getCampaignPerformance(
+  period: GrowthPeriod,
+  executor?: QueryExecutor
+): Promise<CampaignPerformance[]> {
   return (await getGrowthSummary(period, executor)).campaignPerformance;
 }
 
 function leadAttribution(row: LeadRow): { source: AcquisitionCategory | "UNATTRIBUTED"; campaign: string } {
-  const attribution = typeof row.attribution === "object" && row.attribution !== null ? (row.attribution as Record<string, unknown>) : {};
+  const attribution =
+    typeof row.attribution === "object" && row.attribution !== null ? (row.attribution as Record<string, unknown>) : {};
   const normalised = normaliseAttribution({
     utm_source: attribution.utmSource,
     utm_medium: attribution.utmMedium,
