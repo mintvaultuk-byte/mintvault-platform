@@ -12,35 +12,10 @@ import { db } from "../db";
 import { sql } from "drizzle-orm";
 import { storage } from "../storage";
 import { requireAdmin } from "../auth";
-import { sendStolenVerificationEmail } from "../email";
+import { enqueueCustomerNotification } from "../customer-notification-outbox";
 import { normalizeCertId, findCertByIdFlex } from "../routes";
 
-export async function registerStolenRoutes(app: Express): Promise<void> {
-  // ── Startup migration ────────────────────────────────────────────────────
-  try {
-    await db.execute(sql`
-      CREATE TABLE IF NOT EXISTS stolen_reports (
-        id            SERIAL PRIMARY KEY,
-        cert_id       TEXT NOT NULL,
-        reporter_name  TEXT NOT NULL,
-        reporter_email TEXT NOT NULL,
-        description   TEXT,
-        verify_token  TEXT NOT NULL UNIQUE,
-        verified_at   TIMESTAMP,
-        cleared_at    TIMESTAMP,
-        cleared_by    TEXT,
-        created_at    TIMESTAMP NOT NULL DEFAULT NOW()
-      )
-    `);
-    await db.execute(sql`
-      ALTER TABLE certificates
-        ADD COLUMN IF NOT EXISTS stolen_status TEXT,
-        ADD COLUMN IF NOT EXISTS stolen_reported_at TIMESTAMP
-    `);
-  } catch (e: any) {
-    console.error("[stolen] startup migration error:", e.message);
-  }
-
+export function registerStolenRoutes(app: Express): void {
   // Stolen-report — high-friction abuse surface. Generous enough for dealer batch-reports.
   const stolenReportRateLimit = rateLimit({
     windowMs: 24 * 60 * 60 * 1000,
@@ -84,34 +59,42 @@ export async function registerStolenRoutes(app: Express): Promise<void> {
       }
 
       const token = crypto.randomBytes(32).toString("hex");
-      const inserted = await db.execute(sql`
-        INSERT INTO stolen_reports (cert_id, reporter_name, reporter_email, description, verify_token)
-        VALUES (${normalCertId}, ${String(reporterName).slice(0, 200)}, ${reporterLc}, ${description ? String(description).slice(0, 1000) : null}, ${token})
-        RETURNING id
-      `);
-      const reportId = (inserted.rows[0] as any)?.id ?? null;
-
-      await storage.writeAuditLog("certificate", normalCertId, "stolen_reported", reporterLc, {
-        reporterName: String(reporterName).slice(0, 200),
-        description: description ? String(description).slice(0, 1000) : null,
-        reportId,
+      await db.transaction(async (tx) => {
+        const inserted = await tx.execute(sql`
+          INSERT INTO public.stolen_reports (cert_id, reporter_name, reporter_email, description, verify_token)
+          VALUES (${normalCertId}, ${String(reporterName).slice(0, 200)}, ${reporterLc}, ${description ? String(description).slice(0, 1000) : null}, ${token})
+          RETURNING id
+        `);
+        const reportId = String((inserted.rows[0] as { id: string | number }).id);
+        await tx.execute(sql`
+          INSERT INTO public.audit_log (entity_type, entity_id, action, admin_user, details)
+          VALUES ('certificate', ${normalCertId}, 'stolen_reported', ${reporterLc},
+                  ${JSON.stringify({
+                    reporterName: String(reporterName).slice(0, 200),
+                    description: description ? String(description).slice(0, 1000) : null,
+                    reportId,
+                  })}::jsonb)
+        `);
+        await enqueueCustomerNotification(tx, {
+          eventKey: `stolen-verify:${reportId}`,
+          kind: "STOLEN_VERIFY",
+          aggregateType: "stolen_report",
+          aggregateId: reportId,
+          recipient: reporterLc,
+          payload: {
+            token,
+            name: String(reporterName),
+            certId: normalCertId,
+            cardName: cert.cardName || "Unknown card",
+          },
+          expiresAt: new Date(Date.now() + 24 * 60 * 60 * 1000),
+        });
       });
 
-      // Send verification email
-      const verifyUrl = `${req.protocol}://${req.get("host")}/api/stolen/verify/${token}`;
-      try {
-        await sendStolenVerificationEmail(
-          String(reporterEmail),
-          String(reporterName),
-          normalCertId,
-          cert.cardName || "Unknown card",
-          verifyUrl
-        );
-      } catch (emailErr: any) {
-        console.error("[stolen] email send error:", emailErr.message);
-      }
-
-      return res.json({ ok: true, message: "Verification email sent. Please check your inbox to confirm the report." });
+      return res.json({
+        ok: true,
+        message: "Verification email queued. Please check your inbox to confirm the report.",
+      });
     } catch (err: any) {
       console.error("[stolen] POST report error:", err.message);
       return res.status(500).json({ error: "Failed to submit report" });
@@ -147,7 +130,6 @@ export async function registerStolenRoutes(app: Express): Promise<void> {
       `);
       await storage.writeAuditLog("certificate", report.cert_id, "stolen_verified", report.reporter_email || null, {
         reportId: report.id,
-        verifyToken: token,
       });
       return res.redirect(`/stolen-card-protection?verified=true&cert=${report.cert_id}`);
     } catch (err: any) {

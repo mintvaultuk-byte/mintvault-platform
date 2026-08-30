@@ -20,27 +20,13 @@ import { sql } from "drizzle-orm";
 import { storage } from "../storage";
 import { requireAdmin, ADMIN_EMAIL } from "../auth";
 import { requireCustomer } from "../customer-auth";
-import { APP_BASE_URL } from "../app-url";
-import { generateCertificateDocument } from "../certificate-document";
 import { generateClaimInsertPNG, generateClaimInsertPDF, generateClaimInsertSheet } from "../claim-insert";
 import { FEATURE_FLAGS } from "../config/feature-flags";
-import { getOwnerChain } from "../ownership-service";
 import { normalizeCertId } from "../routes";
-import {
-  sendClaimVerification,
-  sendTransferOwnerConfirmation,
-  sendTransferNewOwnerConfirmation,
-  sendTransferV2OutgoingConfirmation,
-  sendTransferV2IncomingConfirmation,
-  sendTransferV2DisputeWindowStarted,
-  sendTransferV2Completed,
-  sendTransferV2Cancelled,
-  sendTransferV2Disputed,
-  sendTransferV2OwnerInvitedByBuyer,
-  sendTransferV2BuyerInitOwnerConfirmed,
-  sendTransferV2BuyerInitOwnerRejected,
-  sendCertificatePdf,
-} from "../email";
+
+function isInactiveCertificateTransferError(error: unknown): boolean {
+  return error instanceof Error && error.message === "This certificate is no longer active and cannot be transferred.";
+}
 
 export function registerTransferRoutes(app: Express): void {
   // ── PUBLIC CLAIM FLOW ──────────────────────────────────────────────────────
@@ -107,31 +93,17 @@ export function registerTransferRoutes(app: Express): void {
           .json({ error: "Invalid certificate number or claim code. Please check your details and try again." });
       }
 
-      const token = await storage.createClaimVerification(
+      await storage.createClaimVerification(
         normalizedId,
         email.trim(),
         name?.trim() || undefined,
         declaredNew === true
       );
 
-      const baseUrl = APP_BASE_URL;
-      const verifyUrl = `${baseUrl}/api/claim/verify?token=${token}`;
-
-      // Surface email-send failures explicitly.
-      try {
-        await sendClaimVerification({ email: email.trim(), certId: normalizedId, verifyUrl });
-      } catch (sendErr: any) {
-        console.error("[claim] sendClaimVerification failed:", sendErr.message);
-        return res.status(500).json({
-          success: false,
-          error: "Could not send verification email. Please try again or contact support@mintvaultuk.com.",
-        });
-      }
-
       return res.json({
         success: true,
         message:
-          "Verification email sent! Please check your inbox and click the link to complete your ownership registration.",
+          "Verification email queued. Please check your inbox and click the link to complete your ownership registration.",
       });
     } catch (err: any) {
       console.error("[claim] Error processing claim request:", err);
@@ -146,22 +118,6 @@ export function registerTransferRoutes(app: Express): void {
 
       const result = await storage.completeClaimByToken(token);
       if (result.success) {
-        // Auto-generate and email the certificate PDF
-        try {
-          const cert = await storage.getCertificateByCertId(result.certId!);
-          if (cert && cert.status !== "voided") {
-            const pdfBuffer = await generateCertificateDocument(cert, result.ownerName);
-            await sendCertificatePdf({
-              email: result.email!,
-              ownerName: result.ownerName,
-              certId: normalizeCertId(cert.certId),
-              cardName: cert.cardName,
-              pdfBuffer,
-            });
-          }
-        } catch (pdfErr: any) {
-          console.error("[claim] PDF generation/email failed (non-fatal):", pdfErr.message);
-        }
         return res.redirect(`/claim?success=true&certId=${encodeURIComponent(result.certId || "")}`);
       } else {
         return res.redirect(`/claim?error=${encodeURIComponent(result.error || "unknown")}`);
@@ -204,6 +160,9 @@ export function registerTransferRoutes(app: Express): void {
       if (!cert) {
         return res.status(404).json({ error: "Certificate not found. Please check your certificate number." });
       }
+      if (cert.status !== "active" || cert.deletedAt) {
+        return res.status(409).json({ error: "This certificate is no longer active and cannot be transferred." });
+      }
       if (cert.ownershipStatus !== "claimed") {
         return res
           .status(400)
@@ -222,27 +181,18 @@ export function registerTransferRoutes(app: Express): void {
         return res.status(400).json({ error: "This certificate does not have a verified owner on record." });
       }
 
-      const ownerToken = await storage.createTransferVerification(
+      await storage.createTransferVerification(
         normalizedId,
         fromEmail.trim(),
         toEmail.trim(),
         newOwnerName?.trim() || undefined
       );
-      const baseUrl = APP_BASE_URL;
-      const confirmUrl = `${baseUrl}/api/transfer/owner-confirm?token=${ownerToken}`;
-
-      await sendTransferOwnerConfirmation({
-        fromEmail: fromEmail.trim(),
-        toEmail: toEmail.trim(),
-        certId: normalizedId,
-        confirmUrl,
-      });
-
       return res.json({
         success: true,
-        message: "Transfer initiated. Please check your inbox and click the confirmation link to proceed.",
+        message: "Transfer initiated. A confirmation email has been queued.",
       });
     } catch (err: any) {
+      if (isInactiveCertificateTransferError(err)) return res.status(409).json({ error: err.message });
       console.error("[transfer] Error initiating transfer:", err);
       return res.status(500).json({ error: "An error occurred. Please try again." });
     }
@@ -259,16 +209,6 @@ export function registerTransferRoutes(app: Express): void {
         return res.redirect(`/transfer?error=${encodeURIComponent(result.error || "unknown")}`);
       }
 
-      const baseUrl = APP_BASE_URL;
-      const newOwnerConfirmUrl = `${baseUrl}/api/transfer/new-owner-confirm?token=${result.newOwnerToken}`;
-
-      await sendTransferNewOwnerConfirmation({
-        toEmail: result.toEmail || "",
-        fromEmail: result.fromEmail || "",
-        certId: result.certId || "",
-        confirmUrl: newOwnerConfirmUrl,
-      });
-
       return res.redirect(`/transfer?step=owner_confirmed&certId=${encodeURIComponent(result.certId || "")}`);
     } catch (err: any) {
       console.error("[transfer] Error confirming owner step:", err);
@@ -284,22 +224,6 @@ export function registerTransferRoutes(app: Express): void {
 
       const result = await storage.completeTransferByNewOwnerToken(token);
       if (result.success) {
-        // Auto-generate and email the certificate PDF to the new owner
-        try {
-          const cert = await storage.getCertificateByCertId(result.certId!);
-          if (cert && cert.status !== "voided") {
-            const pdfBuffer = await generateCertificateDocument(cert, result.ownerName);
-            await sendCertificatePdf({
-              email: result.toEmail!,
-              ownerName: result.ownerName,
-              certId: normalizeCertId(cert.certId),
-              cardName: cert.cardName,
-              pdfBuffer,
-            });
-          }
-        } catch (pdfErr: any) {
-          console.error("[transfer] PDF generation/email failed (non-fatal):", pdfErr.message);
-        }
         return res.redirect(`/transfer?success=true&certId=${encodeURIComponent(result.certId || "")}`);
       } else {
         return res.redirect(`/transfer?error=${encodeURIComponent(result.error || "unknown")}`);
@@ -372,6 +296,9 @@ export function registerTransferRoutes(app: Express): void {
       if (!cert) {
         return res.status(404).json({ error: "Certificate not found." });
       }
+      if (cert.status !== "active" || cert.deletedAt) {
+        return res.status(409).json({ error: "This certificate is no longer active and cannot be transferred." });
+      }
       if ((cert as any).stolenStatus === "reported_stolen") {
         return res.status(403).json({
           error:
@@ -410,7 +337,7 @@ export function registerTransferRoutes(app: Express): void {
         return res.status(400).json({ error: "A transfer is already in progress for this certificate." });
       }
 
-      const ownerToken = await storage.createTransferV2({
+      await storage.createTransferV2({
         certId: normalizedId,
         fromEmail: fromEmail.trim(),
         toEmail: toEmail.trim(),
@@ -419,23 +346,14 @@ export function registerTransferRoutes(app: Express): void {
         referenceNumber: certRefNumber,
       });
 
-      const baseUrl = APP_BASE_URL;
-      const confirmUrl = `${baseUrl}/api/v2/transfers/outgoing-confirm?token=${ownerToken}`;
-
-      await sendTransferV2OutgoingConfirmation({
-        fromEmail: fromEmail.trim(),
-        toEmail: toEmail.trim(),
-        certId: normalizedId,
-        confirmUrl,
-      });
-
       await storage.writeAuditLog("transfer", normalizedId, "transfer_v2.initiated", null, {
         fromEmail: fromEmail.trim().toLowerCase(),
         toEmail: toEmail.trim().toLowerCase(),
       });
 
-      return res.json({ success: true, message: "Transfer initiated. Check your inbox for the confirmation link." });
+      return res.json({ success: true, message: "Transfer initiated. The confirmation email has been queued." });
     } catch (err: any) {
+      if (isInactiveCertificateTransferError(err)) return res.status(409).json({ error: err.message });
       console.error("[transfer-v2] Error initiating:", err);
       return res.status(500).json({ error: "An error occurred. Please try again." });
     }
@@ -451,21 +369,6 @@ export function registerTransferRoutes(app: Express): void {
       if (!result.success || !result.newOwnerToken) {
         return res.redirect(`/transfer?error=${encodeURIComponent(result.error || "unknown")}&v=2`);
       }
-
-      const baseUrl = APP_BASE_URL;
-      const incomingConfirmUrl = `${baseUrl}/transfer/accept?token=${result.newOwnerToken}&v=2`;
-
-      // Compute former-keeper count for DVLA-parity on the incoming-transfer email.
-      const ownerChain = result.certId ? await getOwnerChain(result.certId) : [];
-      const previousOwnersCount = Math.max(0, ownerChain.length - 1);
-
-      await sendTransferV2IncomingConfirmation({
-        toEmail: result.toEmail || "",
-        fromEmail: result.fromEmail || "",
-        certId: result.certId || "",
-        confirmUrl: incomingConfirmUrl,
-        previousOwnersCount,
-      });
 
       // v435 — audit log the outgoing-keeper confirmation step transition.
       await storage.writeAuditLog("transfer", result.certId || "", "transfer_v2.outgoing_confirmed", null, {
@@ -505,33 +408,6 @@ export function registerTransferRoutes(app: Express): void {
             return res.status(403).json({ error: result.error });
           }
           return res.status(400).json({ error: result.error });
-        }
-
-        // Send dispute-window emails to both parties
-        try {
-          const cert = await storage.getCertificateByCertId(result.certId!);
-          if (cert) {
-            const ownerUser = cert.currentOwnerUserId ? await storage.getUser(cert.currentOwnerUserId) : null;
-            const transfer = await storage.getTransferV2ByCertId(result.certId!);
-            const disputeDeadline = transfer?.disputeDeadline || new Date(Date.now() + 14 * 24 * 60 * 60 * 1000);
-
-            if (ownerUser?.email) {
-              await sendTransferV2DisputeWindowStarted({
-                email: ownerUser.email,
-                certId: result.certId!,
-                role: "outgoing",
-                disputeDeadline,
-              });
-            }
-            await sendTransferV2DisputeWindowStarted({
-              email: result.toEmail!,
-              certId: result.certId!,
-              role: "incoming",
-              disputeDeadline,
-            });
-          }
-        } catch (emailErr: any) {
-          console.error("[transfer-v2] Dispute window emails failed (non-fatal):", emailErr.message);
         }
 
         await storage.writeAuditLog("transfer", result.certId!, "transfer_v2.incoming_confirmed", null, {
@@ -622,12 +498,6 @@ export function registerTransferRoutes(app: Express): void {
         reason: reason.trim().slice(0, 200),
       });
 
-      // Notify the other party
-      try {
-        const otherEmail = role === "outgoing" ? transfer.toEmail : transfer.fromEmail;
-        await sendTransferV2Disputed({ email: otherEmail, certId: normalizedId, disputedBy: role });
-      } catch {}
-
       return res.json({
         success: true,
         message: "Dispute raised. The transfer has been paused and MintVault will review.",
@@ -666,20 +536,6 @@ export function registerTransferRoutes(app: Express): void {
         certId: normalizedId,
         cancelledBy: "outgoing",
       });
-
-      // Notify both parties
-      try {
-        await sendTransferV2Cancelled({
-          email: transfer.fromEmail,
-          certId: normalizedId,
-          reason: "Cancelled by current keeper",
-        });
-        await sendTransferV2Cancelled({
-          email: transfer.toEmail,
-          certId: normalizedId,
-          reason: "Cancelled by current keeper",
-        });
-      } catch {}
 
       return res.json({ success: true, message: "Transfer cancelled. Your keepership record is unchanged." });
     } catch (err: any) {
@@ -726,6 +582,9 @@ export function registerTransferRoutes(app: Express): void {
         const cert = await storage.getCertificateByCertId(normalizedCertId);
         if (!cert) {
           return res.status(404).json({ error: "Certificate not found." });
+        }
+        if (cert.status !== "active" || cert.deletedAt) {
+          return res.status(409).json({ error: "This certificate is no longer active and cannot be transferred." });
         }
 
         if ((cert as any).stolenStatus === "reported_stolen") {
@@ -781,7 +640,7 @@ export function registerTransferRoutes(app: Express): void {
           return res.status(409).json({ error: "A transfer is already in progress for this certificate." });
         }
 
-        const { ownerToken, transferId } = await storage.createTransferV2BuyerInit({
+        const { transferId } = await storage.createTransferV2BuyerInit({
           certId: normalizedCertId,
           claimantEmail: claimantEmail.trim(),
           claimantName: typeof claimantName === "string" ? claimantName.trim() : undefined,
@@ -789,19 +648,7 @@ export function registerTransferRoutes(app: Express): void {
           currentOwnerUserId: validation.currentOwnerUserId,
         });
 
-        const baseUrl = APP_BASE_URL;
-        const disputeUrl = `${baseUrl}/api/v2/transfers/buyer-init/owner-dispute?token=${ownerToken}`;
-        const confirmUrl = `${baseUrl}/api/v2/transfers/buyer-init/owner-confirm?token=${ownerToken}`;
         const ownerExpiresAt = new Date(Date.now() + 14 * 24 * 60 * 60 * 1000);
-
-        await sendTransferV2OwnerInvitedByBuyer({
-          ownerEmail: validation.currentOwnerEmail,
-          certId: normalizedCertId,
-          maskedClaimantEmail: maskEmailForAudit(claimantEmail.trim()),
-          ownerExpiresAt,
-          disputeUrl,
-          confirmUrl,
-        });
 
         await storage.writeAuditLog("transfer", String(transferId), "transfer_v2.buyer_init_initiated", null, {
           certId: normalizedCertId,
@@ -816,6 +663,7 @@ export function registerTransferRoutes(app: Express): void {
           transferId,
         });
       } catch (err: any) {
+        if (isInactiveCertificateTransferError(err)) return res.status(409).json({ error: err.message });
         console.error("[transfer-v2-buyer-init] Error:", err);
         return res.status(500).json({ error: "An error occurred. Please try again." });
       }
@@ -831,29 +679,6 @@ export function registerTransferRoutes(app: Express): void {
       const result = await storage.confirmBuyerInitTransfer(token);
       if (!result.success) {
         return res.redirect(`/transfer?error=${encodeURIComponent(result.error || "unknown")}&v=2&path=buyer-init`);
-      }
-
-      // Notify the buyer that the owner confirmed and the dispute window has started.
-      try {
-        await sendTransferV2BuyerInitOwnerConfirmed({
-          claimantEmail: result.claimantEmail!,
-          certId: result.certId!,
-          disputeDeadline: result.disputeDeadline!,
-        });
-        await sendTransferV2DisputeWindowStarted({
-          email: result.ownerEmail!,
-          certId: result.certId!,
-          role: "outgoing",
-          disputeDeadline: result.disputeDeadline!,
-        });
-        await sendTransferV2DisputeWindowStarted({
-          email: result.claimantEmail!,
-          certId: result.certId!,
-          role: "incoming",
-          disputeDeadline: result.disputeDeadline!,
-        });
-      } catch (emailErr: any) {
-        console.error("[transfer-v2-buyer-init] confirm emails failed (non-fatal):", emailErr.message);
       }
 
       await storage.writeAuditLog(
@@ -885,16 +710,6 @@ export function registerTransferRoutes(app: Express): void {
       const result = await storage.disputeBuyerInitTransfer(token);
       if (!result.success) {
         return res.redirect(`/transfer?error=${encodeURIComponent(result.error || "unknown")}&v=2&path=buyer-init`);
-      }
-
-      // Notify the buyer that the owner rejected.
-      try {
-        await sendTransferV2BuyerInitOwnerRejected({
-          claimantEmail: result.claimantEmail!,
-          certId: result.certId!,
-        });
-      } catch (emailErr: any) {
-        console.error("[transfer-v2-buyer-init] reject email failed (non-fatal):", emailErr.message);
       }
 
       await storage.writeAuditLog(
@@ -994,19 +809,6 @@ export function registerTransferRoutes(app: Express): void {
         disputedBy: transfer.disputedBy ?? null,
       });
 
-      // Notify both parties
-      try {
-        await sendTransferV2Completed({ email: transfer.fromEmail, certId: result.certId!, role: "outgoing" });
-        await sendTransferV2Completed({
-          email: result.toEmail!,
-          certId: result.certId!,
-          role: "incoming",
-          newKeeperName: result.ownerName,
-        });
-      } catch (emailErr: any) {
-        console.error("[admin] force-finalise emails failed (non-fatal):", emailErr.message);
-      }
-
       return res.json({ ok: true, certId: result.certId, toEmail: result.toEmail });
     } catch (err: any) {
       console.error("[admin] force-finalise error:", err);
@@ -1045,14 +847,6 @@ export function registerTransferRoutes(app: Express): void {
         fromEmail: transfer.fromEmail,
         toEmail: transfer.toEmail,
       });
-
-      // Notify both parties
-      try {
-        await sendTransferV2Cancelled({ email: transfer.fromEmail, certId: transfer.certId, reason: adminPrefixed });
-        await sendTransferV2Cancelled({ email: transfer.toEmail, certId: transfer.certId, reason: adminPrefixed });
-      } catch (emailErr: any) {
-        console.error("[admin] force-cancel emails failed (non-fatal):", emailErr.message);
-      }
 
       return res.json({ ok: true });
     } catch (err: any) {
@@ -1314,7 +1108,9 @@ export function registerTransferRoutes(app: Express): void {
         JOIN ownership_records o ON o.certificate_id = c.id
           AND o.owner_id = ${userId} AND o.is_current = true
           AND o.collection_public = true
-        WHERE c.grade_approved_by IS NOT NULL
+        WHERE c.status = 'active'
+          AND c.deleted_at IS NULL
+          AND c.grade_approved_at IS NOT NULL
         ORDER BY c.created_at DESC
       `);
       res.json({ cards: rows.rows });
