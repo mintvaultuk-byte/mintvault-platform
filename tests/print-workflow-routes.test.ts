@@ -78,6 +78,7 @@ async function req(path: string, opts: { method?: string; body?: unknown; cookie
   const headers: Record<string, string> = { "content-type": "application/json" };
   if (opts.cookie) headers.cookie = opts.cookie;
   if (opts.staff) headers["x-test-proxy-staff"] = opts.staff;
+  if (path.endsWith("/printing/workflow/batch")) headers["idempotency-key"] = "route-permission-proof";
   return fetch(`${baseUrl}${path}`, {
     method: opts.method ?? "GET",
     headers,

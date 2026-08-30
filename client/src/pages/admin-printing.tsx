@@ -1,4 +1,4 @@
-import { useState, useCallback, useMemo, createContext, useContext } from "react";
+import { useState, useCallback, useMemo, useRef, createContext, useContext } from "react";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { useForm } from "react-hook-form";
 import { apiRequest } from "@/lib/queryClient";
@@ -935,6 +935,16 @@ function SheetPrintingPanel() {
     allCertIds: string[];
   } | null>(null);
   const [reprintSubmitting, setReprintSubmitting] = useState(false);
+  const printAttempts = useRef(new Map<string, string>());
+  const attemptKey = useCallback((kind: string, certIds: string[], reason = "") => {
+    const fingerprint = `${kind}:${[...certIds].sort().join(",")}:${reason.trim()}`;
+    let key = printAttempts.current.get(fingerprint);
+    if (!key) {
+      key = crypto.randomUUID();
+      printAttempts.current.set(fingerprint, key);
+    }
+    return { fingerprint, key };
+  }, []);
 
   const {
     data: allCerts = [],
@@ -1005,28 +1015,11 @@ function SheetPrintingPanel() {
     qc.invalidateQueries({ queryKey: [`${base}/printing/sheets`] });
   }, [refetchCerts, qc, base]);
 
-  // v525 — shared helper for saving the 3-file batch output. PDF + PNG are
-  // streamed from R2 via the server endpoints (no expiring blob URLs); SVG
-  // still arrives as base64 in the POST response and uses a blob URL.
+  // Shared helper for saving committed batch output. Every file is streamed
+  // through a server endpoint resolved from the immutable object manifest.
   // All three filenames share the batchId so the operator can pair them.
   const saveBatchFiles = useCallback(
-    (data: { pdfUrl: string; svg?: string; pngUrl?: string; batchId: string }) => {
-      const decode = (b64: string, mime: string) => {
-        const bin = atob(b64);
-        const buf = new Uint8Array(bin.length);
-        for (let i = 0; i < bin.length; i++) buf[i] = bin.charCodeAt(i);
-        return new Blob([buf], { type: mime });
-      };
-      const saveBlob = (blob: Blob, filename: string) => {
-        const url = URL.createObjectURL(blob);
-        const a = document.createElement("a");
-        a.href = url;
-        a.download = filename;
-        document.body.appendChild(a);
-        a.click();
-        a.remove();
-        URL.revokeObjectURL(url);
-      };
+    (data: { pdfUrl: string; cricutSvgUrl?: string; pngUrl?: string; batchId: string }) => {
       const saveServerUrl = (url: string, filename: string) => {
         const a = document.createElement("a");
         a.href = url;
@@ -1035,9 +1028,12 @@ function SheetPrintingPanel() {
         a.click();
         a.remove();
       };
-      // Multi-sheet (multi-page) batches are guillotine-only — no cut SVG. Only
-      // save the SVG when the server returned one (single-sheet batches).
-      if (data.svg) saveBlob(decode(data.svg, "image/svg+xml"), `mintvault-batch-${data.batchId}.svg`);
+      if (data.cricutSvgUrl) {
+        saveServerUrl(
+          rebaseUrl(data.cricutSvgUrl, base),
+          `mintvault-batch-${data.batchId}-cut.svg`
+        );
+      }
       // PNG is intentionally NOT auto-downloaded here — Chrome's multi-download
       // gate silently blocks the 2nd/3rd file from a single gesture. Reprint
       // flows (this helper's only callers) skip the PNG; the primary Generate
@@ -1061,9 +1057,16 @@ function SheetPrintingPanel() {
     async (certId: string) => {
       setReprintingId(certId);
       try {
-        const res = await apiRequest("POST", `${base}/print-batch`, { certIds: [certId] });
-        const data = (await res.json()) as { pdfUrl: string; svg: string; pngUrl: string; batchId: string };
+        const attempt = attemptKey("batch", [certId]);
+        const res = await apiRequest(
+          "POST",
+          `${base}/print-batch`,
+          { certIds: [certId] },
+          { headers: { "Idempotency-Key": attempt.key } }
+        );
+        const data = (await res.json()) as { pdfUrl: string; cricutSvgUrl?: string; pngUrl?: string; batchId: string };
         saveBatchFiles(data);
+        printAttempts.current.delete(attempt.fingerprint);
         toast({ title: "Single-cert reprint generated", description: `${certId} — batch ${data.batchId.slice(0, 8)}` });
         invalidate();
       } catch (err: any) {
@@ -1142,11 +1145,18 @@ function SheetPrintingPanel() {
   const reprintFromHistory = useCallback(
     async (certIds: string[]) => {
       try {
-        const res = await apiRequest("POST", `${base}/print-batch`, { certIds });
+        const attempt = attemptKey("batch", certIds);
+        const res = await apiRequest(
+          "POST",
+          `${base}/print-batch`,
+          { certIds },
+          { headers: { "Idempotency-Key": attempt.key } }
+        );
         // A historical sheet with > CERTS_PER_PAGE certs reprints as a multi-page
         // guillotine PDF (no svg/png) — saveBatchFiles handles the missing files.
-        const data = (await res.json()) as { pdfUrl: string; svg?: string; pngUrl?: string; batchId: string };
+        const data = (await res.json()) as { pdfUrl: string; cricutSvgUrl?: string; pngUrl?: string; batchId: string };
         saveBatchFiles(data);
+        printAttempts.current.delete(attempt.fingerprint);
         toast({
           title: "Sheet reprinted",
           description: `${certIds.length} cert${certIds.length !== 1 ? "s" : ""} — batch ${data.batchId.slice(0, 8)}`,
@@ -1232,7 +1242,13 @@ function SheetPrintingPanel() {
         }
       }
       try {
-        const res = await apiRequest("POST", `${base}/print-batch`, { certIds });
+        const attempt = attemptKey("batch", certIds);
+        const res = await apiRequest(
+          "POST",
+          `${base}/print-batch`,
+          { certIds },
+          { headers: { "Idempotency-Key": attempt.key } }
+        );
         const data = (await res.json()) as {
           pdfUrl: string;
           svg?: string;
@@ -1244,6 +1260,7 @@ function SheetPrintingPanel() {
           isMultiSheet?: boolean;
           pageCount?: number;
         };
+        printAttempts.current.delete(attempt.fingerprint);
 
         // Multi-sheet (multi-page) batches are guillotine-only — there is no
         // Cricut PNG to download. Single-sheet batches download the PNG (the
@@ -1337,9 +1354,16 @@ function SheetPrintingPanel() {
       }
       setReprintSubmitting(true);
       try {
-        const res = await apiRequest("POST", `${base}/print-batch/reprint`, { certIds, reason });
-        const data = (await res.json()) as { pdfUrl: string; svg: string; pngUrl: string; batchId: string };
+        const attempt = attemptKey("reprint", certIds, reason);
+        const res = await apiRequest(
+          "POST",
+          `${base}/print-batch/reprint`,
+          { certIds, reason },
+          { headers: { "Idempotency-Key": attempt.key } }
+        );
+        const data = (await res.json()) as { pdfUrl: string; cricutSvgUrl?: string; pngUrl?: string; batchId: string };
         saveBatchFiles(data);
+        printAttempts.current.delete(attempt.fingerprint);
         toast({
           title: "Reprint with reason recorded",
           description: `${certIds.length} cert${certIds.length !== 1 ? "s" : ""} — batch ${data.batchId.slice(0, 8)}`,

@@ -99,12 +99,17 @@ export function registerPrintWorkflowRoutes(app: Express): void {
   app.post("/api/admin/printing/workflow/batch", requireAdmin, async (req: Request, res: Response) => {
     try {
       if (!ensurePermission(req, res, "create_batch")) return;
+      const idempotencyKey = req.header("Idempotency-Key")?.trim() ?? "";
+      if (!idempotencyKey) {
+        return res.status(400).json({ error: "Idempotency-Key header required" });
+      }
       const parsed = batchSchema.safeParse(req.body);
       if (!parsed.success) return res.status(400).json({ error: parsed.error.issues[0]?.message ?? "Invalid body" });
       const ids = parsed.data.certIds.map((c) => normalizeCertId(c));
       const result = await createBatchAtomic({
         certIds: ids,
         identity: resolveActor(req),
+        idempotencyKey,
         notes: parsed.data.notes ?? null,
       });
       res.json(result);

@@ -28,6 +28,8 @@ import session from "express-session";
 import type { AddressInfo } from "node:net";
 import type { Server } from "node:http";
 import pg from "pg";
+import { createHash } from "node:crypto";
+import { readFileSync } from "node:fs";
 import { startPostgres17, type DisposablePostgres17 } from "./helpers/postgres17-cluster";
 
 const runtime = vi.hoisted(() => ({ db: null as unknown, pool: null as unknown }));
@@ -46,7 +48,11 @@ vi.mock("../server/db", () => ({
 // R2 is never exercised — this suite posts no images.
 /** R2 is stubbed, but the calls are RECORDED: M-3 asserts that a same-key
  *  replacement uploads the new object and does NOT delete it afterwards. */
-const r2Calls = vi.hoisted(() => ({ uploads: [] as Array<{ key: string; bytes: number }>, deletes: [] as string[] }));
+const r2Calls = vi.hoisted(() => ({
+  uploads: [] as Array<{ key: string; bytes: number }>,
+  deletes: [] as string[],
+  objects: new Map<string, Buffer>(),
+}));
 vi.mock("../server/r2", () => ({
   uploadToR2: vi.fn(async (k: string, buf: Buffer) => {
     r2Calls.uploads.push({ key: k, bytes: buf?.length ?? 0 });
@@ -54,6 +60,17 @@ vi.mock("../server/r2", () => ({
   }),
   deleteFromR2: vi.fn(async (k: string) => {
     r2Calls.deletes.push(k);
+    r2Calls.objects.delete(k);
+  }),
+  uploadCreateOnlyToR2: vi.fn(async (key: string, body: Buffer) => {
+    if (r2Calls.objects.has(key)) throw new Error("conditional create collision");
+    r2Calls.objects.set(key, Buffer.from(body));
+  }),
+  inspectR2ObjectIntegrity: vi.fn(async (key: string) => {
+    const body = r2Calls.objects.get(key);
+    return body
+      ? { exists: true, byteLength: body.length, sha256: createHash("sha256").update(body).digest("hex") }
+      : { exists: false };
   }),
   getR2SignedUrl: vi.fn(async () => "https://example.invalid/signed"),
   // The REAL key builder — the deterministic-key behaviour is the whole point
@@ -128,8 +145,8 @@ async function createSchema(p: pg.Pool): Promise<void> {
       submission_id integer NOT NULL,
       card_name text
     )`);
-  // cert_counter is created at boot by ensureCertCounterTable() in production;
-  // registerRoutes is not run here, so it is created directly.
+  // cert_counter is supplied by numbered migration 0114 in production; this
+  // focused route fixture creates its equivalent minimal shape directly.
   await p.query(`
     CREATE TABLE cert_counter (
       id integer PRIMARY KEY,
@@ -144,6 +161,21 @@ async function createSchema(p: pg.Pool): Promise<void> {
       sort_order integer NOT NULL DEFAULT 0,
       created_at timestamp NOT NULL DEFAULT NOW()
     )`);
+  await p.query(`
+    CREATE ROLE mintvault_app NOLOGIN NOSUPERUSER NOBYPASSRLS;
+    CREATE ROLE partner_runtime NOLOGIN NOSUPERUSER NOBYPASSRLS;
+    CREATE TABLE partner_organisations(id uuid PRIMARY KEY);
+    CREATE OR REPLACE FUNCTION partner_current_tenant()
+    RETURNS uuid LANGUAGE sql STABLE SET search_path=pg_catalog AS $fn$
+      SELECT NULLIF(current_setting('app.tenant_id',true),'')::uuid
+    $fn$;
+    CREATE TABLE schema_migrations(
+      filename text PRIMARY KEY,status text NOT NULL,completed_at timestamptz
+    );
+    INSERT INTO schema_migrations(filename,status,completed_at)
+    VALUES ('0121_main_runtime_role_authority.sql','applied',NOW());
+  `);
+  await p.query(readFileSync("migrations/0122_object_write_intent_reconciliation.sql", "utf8"));
 }
 
 const q = async (text: string, params: unknown[] = []) => (await pool.query(text, params)).rows;
@@ -354,11 +386,27 @@ beforeEach(async () => {
   await (runtime.db as any).delete(certificates);
   await (runtime.db as any).insert(certificates).values({ ...STORED } as any);
   await pool.query("DELETE FROM certificate_images");
+  await pool.query("DELETE FROM object_write_items");
+  await pool.query("DELETE FROM object_write_operations");
   await pool.query("DELETE FROM submission_items");
   await pool.query("DELETE FROM submissions");
   await pool.query("DELETE FROM cert_counter");
+  await pool.query(`
+    INSERT INTO cert_counter (id, last_issued, updated_at)
+    SELECT 1,
+           COALESCE(MAX(
+             CASE
+               WHEN certificate_number ~* '^MV-?[0-9]+$'
+                 THEN regexp_replace(certificate_number, '^MV-?', '', 'i')::bigint
+               ELSE NULL
+             END
+           ), 0),
+           NOW()
+      FROM certificates
+  `);
   r2Calls.uploads.length = 0;
   r2Calls.deletes.length = 0;
+  r2Calls.objects.clear();
 });
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -1504,6 +1552,29 @@ async function post(body: Record<string, unknown>): Promise<{ status: number; js
   return { status: res.status, json: await res.json().catch(() => null) };
 }
 
+const ONE_PIXEL_PNG = Buffer.from(
+  "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNk+A8AAQUBAScY42YAAAAASUVORK5CYII=",
+  "base64"
+);
+
+async function postWithImage(
+  body: Record<string, unknown>,
+  idempotencyKey: string,
+  image = ONE_PIXEL_PNG
+): Promise<{ status: number; json: any }> {
+  const form = new FormData();
+  for (const [key, value] of Object.entries(body)) {
+    form.append(key, typeof value === "string" ? value : JSON.stringify(value));
+  }
+  form.append("frontImage", new Blob([image], { type: "image/png" }), "front.png");
+  const res = await fetch(`${base}/api/admin/certificates`, {
+    method: "POST",
+    headers: { cookie, "Idempotency-Key": idempotencyKey },
+    body: form,
+  });
+  return { status: res.status, json: await res.json().catch(() => null) };
+}
+
 /** The minimum identity the create route requires. */
 const NEW_CERT = {
   cardGame: "pokemon",
@@ -1533,6 +1604,34 @@ async function readCertById(id: number) {
 }
 
 describe("H-1: certificate creation stores the paid-submission link", () => {
+  it("publishes image bytes, certificate pointers and audits through one replayable object intent", async () => {
+    const itemId = await seedSubmissionItem("paid");
+    const key = "certificate-create-route-replay";
+    const first = await postWithImage({ ...NEW_CERT, status: "active", submissionItemId: String(itemId) }, key);
+    expect(first.status).toBe(200);
+    expect(first.json.frontImagePath).toMatch(/^images\/certificate-create\/[a-f0-9]{64}\/front\.png$/);
+    expect(r2Calls.objects.get(first.json.frontImagePath)).toEqual(ONE_PIXEL_PNG);
+    expect((await pool.query("SELECT state FROM object_write_operations")).rows[0].state).toBe("COMMITTED");
+    expect((await pool.query("SELECT count(*)::int AS n FROM certificate_images")).rows[0].n).toBe(1);
+    expect(
+      (await pool.query("SELECT count(*)::int AS n FROM audit_log WHERE entity_id=$1", [first.json.certId])).rows[0].n
+    ).toBe(2);
+
+    const replay = await postWithImage({ ...NEW_CERT, status: "active", submissionItemId: String(itemId) }, key);
+    expect(replay.status).toBe(200);
+    expect(replay.json.id).toBe(first.json.id);
+    expect((await pool.query("SELECT last_issued::int AS n FROM cert_counter WHERE id=1")).rows[0].n).toBe(2);
+    expect((await pool.query("SELECT count(*)::int AS n FROM object_write_operations")).rows[0].n).toBe(1);
+    expect((await pool.query("SELECT count(*)::int AS n FROM audit_log WHERE entity_id=$1", [first.json.certId])).rows[0].n).toBe(2);
+
+    const changed = await postWithImage(
+      { ...NEW_CERT, status: "active", submissionItemId: String(itemId) },
+      key,
+      Buffer.concat([ONE_PIXEL_PNG, Buffer.from([0])])
+    );
+    expect(changed.status).toBe(409);
+  });
+
   it("MANDATORY 2: a certificate created from a valid paid submission item stores the link", async () => {
     const itemId = await seedSubmissionItem("paid");
     const { status, json } = await post({ ...NEW_CERT, submissionItemId: String(itemId) });

@@ -7,7 +7,11 @@ import {
   normaliseGradeType,
 } from "./lib/grade-kind";
 import { normalizeCertId, certNumberFromId } from "./lib/cert-id";
-import { ensurePerfIndexes } from "./lib/perf-indexes";
+import {
+  buildVoidedVerificationResponse,
+  classifyPublicCertificate,
+  filterPublicCertificates,
+} from "./public-certificate-validity";
 import { applyStructuredVariantFromBody } from "./lib/structured-variant";
 import { getCatalogueSnapshot } from "./lib/catalogue-provider";
 import type {
@@ -24,8 +28,6 @@ import {
   stolenReportRateLimit,
   transferActionRateLimit,
   reissueRateLimit,
-  preGradeRateLimit,
-  preGradePreviewRateLimit,
   lookupRateLimit,
   verifyRateLimit,
   showcaseRateLimit,
@@ -34,17 +36,12 @@ import {
   transferRateLimit,
   transferV2RateLimit,
   refNumberRateLimit,
-  magicLinkRateLimit,
   accountSwitchRateLimit,
-  pinLoginRateLimit,
   toolsRateLimit,
-  estimateRateLimit,
-  ADMIN_FREE_EMAIL,
 } from "./lib/rate-limiters";
 import {
   ACCEPTED_UPLOAD_MIMES,
   upload,
-  preGradeUpload,
   receiptUpload,
   gradingUpload,
   attachImagesUpload,
@@ -93,30 +90,29 @@ import { registerStolenRoutes } from "./routes/stolen";
 import { registerClaimRegisterRoutes } from "./routes/admin/claim-register";
 import { registerRedirectRoutes } from "./routes/redirects";
 import { getSitemapEntries } from "./seo-config";
-import {
-  getPublicPartnerSitemapPaths,
-  PublicPartnerPresenceUnavailableError,
-} from "./partner/public-presence-service";
+import { getPublicPartnerSitemapPaths, PublicPartnerPresenceUnavailableError } from "./partner/public-presence-service";
+import { readPartnerOrganisationNames } from "./partner/operational-authority";
 import { registerEmbeddingRoutes } from "./routes/embedding";
 import { registerPromotionRoutes } from "./routes/admin/promotions";
-import { migratePromotionsSchema } from "./services/promotionService";
-import { migratePaymentIdempotencySchema } from "./webhookHandlers";
 import { registerReviewPreviewRoutes } from "./routes/review-preview";
 import { registerCorrectionModeRoutes } from "./correction-mode";
 import {
-  migrateGraderSchema,
-  migrateGraderCertSchema,
-  migratePerOperatorSchema,
   isGraderLocked,
   checkGradePublishGates,
   buildWorkingEvidencePayload,
   buildSuperAdminCertImagesPayload,
 } from "./grader";
 
-import { migrateStaffCapabilitiesSchema, migrateScanSchema } from "./staff";
 import { registerStaffRoutes } from "./routes/staff";
 import { registerPrintWorkflowRoutes } from "./routes/print-workflow";
-import { reconcileStuckPrintBatches, renderAdminUser } from "./print-workflow";
+import {
+  createBatchAtomic,
+  markBatchPrinted,
+  reconcileStuckPrintBatches,
+  renderAdminUser,
+  requestReprint,
+  resolveActor,
+} from "./print-workflow";
 import {
   BUILD_STAMP,
   pricingTiers,
@@ -143,6 +139,17 @@ import { resolveDraftGradeAuthority } from "./lib/draft-grade-authority";
 import { enqueueScanJob } from "./lib/scan-job-queue";
 import { scannerEvidenceAdmission } from "./lib/scanner-evidence-admission";
 import { phoneUploadAdmission } from "./lib/phone-upload-admission";
+import { createHotFolderUploadAuth } from "./lib/hot-folder-upload-auth";
+import { hotFolderUploadAdmission } from "./lib/hot-folder-upload-admission";
+import { refuseRetiredScanIngest } from "./lib/retired-scan-ingest";
+import { parseHotFolderUploadSide } from "./lib/hot-folder-upload-side";
+import { createSharedPublicRateLimit } from "./lib/shared-public-rate-limit";
+import { publicImageProcessingAdmission } from "./lib/public-image-processing-admission";
+import { uploadMemoryAdmission } from "./lib/upload-memory-admission";
+import {
+  decorateSubmissionReceiptPhotos,
+  persistSubmissionReceipt,
+} from "./lib/submission-receipt-persistence";
 import { isServiceValidForCarrier } from "@shared/carriers";
 import { deriveVariantFromIdentification, splitSetDesignation } from "@shared/variant-derive";
 import {
@@ -174,11 +181,19 @@ import {
   resolveBackgroundVariant,
   type SocialStudioBackgroundId,
 } from "@shared/social-studio";
-import { storage } from "./storage";
+import {
+  storage,
+  NFC_PHYSICAL_LOCK_METHOD,
+  NFC_PHYSICAL_LOCK_RECOVERY_METHOD,
+  NFC_PHYSICAL_LOCK_CANCEL_METHOD,
+  isSupportedNfcPhysicalLockMethod,
+} from "./storage";
 import {
   consumeEstimateCredit,
+  estimateAnonymousIpHash,
   getEstimateCreditBalance,
   buildEstimateCheckoutMetadata,
+  settleEstimateCreditReservation,
 } from "./estimate-credit-consumption";
 import { getUncachableStripeClient, getStripePublishableKey } from "./stripeClient";
 import {
@@ -206,13 +221,22 @@ import { generatePdfToken, verifyPdfToken } from "./lib/pdf-token";
 import { generateUploadToken, verifyUploadToken } from "./lib/upload-token";
 import { uploadToR2, getR2SignedUrl, getR2Buffer, deleteFromR2, headR2, r2KeyForImage, r2KeyForLabel } from "./r2";
 import {
-  persistImageUploadAudited,
+  finalizeCertificateImageObjectWrite,
   IMAGE_UPLOAD_JSONB_COLUMNS,
+  IMAGE_UPLOAD_OWNED_COLUMNS,
   IMAGE_VARIANTS_AUDIT_ACTION,
-  COLUMN_TO_CERT_KEY,
 } from "./lib/certificate-image-persistence";
+import { resolveCommittedPrintArtifactKey } from "./lib/print-artifact-persistence";
+import {
+  ObjectWriteAbandonError,
+  ObjectWriteConflictError,
+  ObjectWriteCoordinator,
+  createPoolTransactionRunner,
+  type ObjectWriteItemInput,
+} from "./lib/object-write-coordinator";
+import { objectWriteStore } from "./lib/object-write-store";
 import { generateClaimInsertPNG, generateClaimInsertPDF, generateClaimInsertSheet } from "./claim-insert";
-import { db } from "./db";
+import { db, pool } from "./db";
 import { sql, inArray } from "drizzle-orm";
 import {
   sendSubmissionConfirmation,
@@ -270,9 +294,7 @@ import {
   countRecentFailedAttempts,
   logLoginAttempt,
   writeAuthAudit,
-  migrateAccountSchema,
 } from "./account-auth";
-import { migrateMarketplaceSchema } from "./marketplace-schema";
 import {
   sendWelcomeVerificationEmail,
   sendAccountMagicLinkEmail,
@@ -600,8 +622,10 @@ export async function findCertByNumberUngated(certId: string) {
 export async function findCertByIdFlex(certId: string) {
   const dbCert = await findCertByNumberUngated(certId);
   if (!dbCert) return null;
-  // Public-visibility gate: hide ungraded/unapproved certs from public reads.
-  if ((dbCert as { gradeApprovedAt?: unknown }).gradeApprovedAt == null) return null;
+  // Generic public reads expose valid, approved certificates only. The verify
+  // endpoint deliberately uses the ungated resolver below so it can surface an
+  // explicit revocation response without leaking the historical record.
+  if (classifyPublicCertificate(dbCert) !== "active") return null;
   return dbCert;
 }
 
@@ -668,696 +692,11 @@ async function certToPublic(c: any, viewerUserId?: string | null): Promise<Publi
   };
 }
 
-// v424 — record once-per-deploy that label artwork was resized + de-gradiented.
-// Idempotent on the deterministic entity_id "label_artwork_v424".
-async function recordLabelArtworkV424Audit() {
-  try {
-    await db.execute(sql`
-      INSERT INTO audit_log (entity_type, entity_id, action, admin_user, details, created_at)
-      SELECT
-        'system',
-        'label_artwork_v424',
-        'label_artwork_updated',
-        'mintvaultuk@gmail.com',
-        ${JSON.stringify({
-          changes: ["dimensions_72x22_to_70x20", "gradient_fade_removed_solid_colours_only"],
-          reason: "physical_slab_cutout_70x20_and_readability_complaints",
-          endpoints_affected: [
-            "POST /api/admin/print-batch",
-            "POST /api/admin/printing/generate-sheet",
-            "GET /api/admin/certificates/:id/label/:side",
-          ],
-        })}::jsonb,
-        NOW()
-      WHERE NOT EXISTS (
-        SELECT 1 FROM audit_log WHERE entity_id = 'label_artwork_v424'
-      )
-    `);
-  } catch (err: any) {
-    console.error("[v424-audit] insert failed:", err.message);
-  }
-}
-
-async function migrateServiceTiersV213() {
-  // ── Phase 1: Add new columns — each in its own try/catch so one failure doesn't block others ──
-  for (const stmt of [
-    sql`ALTER TABLE service_tiers ADD COLUMN IF NOT EXISTS display_name TEXT`,
-    sql`ALTER TABLE service_tiers ADD COLUMN IF NOT EXISTS tagline TEXT`,
-    sql`ALTER TABLE service_tiers ADD COLUMN IF NOT EXISTS most_popular BOOLEAN NOT NULL DEFAULT FALSE`,
-  ]) {
-    try {
-      await db.execute(stmt);
-    } catch (e: any) {
-      console.error("[v213-migrate] ALTER service_tiers failed:", e.message);
-    }
-  }
-
-  // ── Phase 2: Seed rows that don't yet exist (ON CONFLICT DO NOTHING) ──────
-  // These only insert if the tier_id doesn't already exist in the table.
-  // On a branched DB with existing data, every INSERT will be skipped — that's expected.
-  const seeds = [
-    {
-      serviceType: "grading",
-      tierId: "standard",
-      name: "VAULT QUEUE",
-      pricePerCard: 1900,
-      turnaroundDays: 40,
-      turnaroundLabel: "40 working days",
-      maxValueGbp: 500,
-      sortOrder: 1,
-    },
-    {
-      serviceType: "grading",
-      tierId: "priority",
-      name: "STANDARD",
-      pricePerCard: 2500,
-      turnaroundDays: 15,
-      turnaroundLabel: "15 working days",
-      maxValueGbp: 1500,
-      sortOrder: 2,
-    },
-    {
-      serviceType: "grading",
-      tierId: "express",
-      name: "EXPRESS",
-      pricePerCard: 4500,
-      turnaroundDays: 5,
-      turnaroundLabel: "5 working days",
-      maxValueGbp: 3000,
-      sortOrder: 3,
-    },
-    {
-      serviceType: "grading",
-      tierId: "gold",
-      name: "BLACK LABEL REVIEW",
-      pricePerCard: 7500,
-      turnaroundDays: 10,
-      turnaroundLabel: "10 working days",
-      maxValueGbp: 7500,
-      sortOrder: 4,
-    },
-    {
-      serviceType: "reholder",
-      tierId: "reholder",
-      name: "REHOLDER",
-      pricePerCard: 1500,
-      turnaroundDays: 15,
-      turnaroundLabel: "15 working days",
-      maxValueGbp: 1000,
-      sortOrder: 1,
-    },
-    {
-      serviceType: "crossover",
-      tierId: "crossover",
-      name: "CROSSOVER",
-      pricePerCard: 3500,
-      turnaroundDays: 15,
-      turnaroundLabel: "15 working days",
-      maxValueGbp: 1500,
-      sortOrder: 1,
-    },
-    {
-      serviceType: "authentication",
-      tierId: "authentication",
-      name: "AUTHENTICATION",
-      pricePerCard: 1500,
-      turnaroundDays: 15,
-      turnaroundLabel: "15 working days",
-      maxValueGbp: 1000,
-      sortOrder: 1,
-    },
-  ];
-  for (const t of seeds) {
-    try {
-      await db.execute(sql`
-        INSERT INTO service_tiers (service_type, tier_id, name, price_per_card, turnaround_days, turnaround_label, max_value_gbp, is_active, sort_order)
-        VALUES (${t.serviceType}, ${t.tierId}, ${t.name}, ${t.pricePerCard}, ${t.turnaroundDays}, ${t.turnaroundLabel}, ${t.maxValueGbp}, true, ${t.sortOrder})
-        ON CONFLICT DO NOTHING
-      `);
-    } catch (e: any) {
-      console.error(`[v213-migrate] seed ${t.tierId} failed:`, e.message);
-    }
-  }
-
-  // ── Phase 3a: UPDATE core columns that definitely exist (name, price, turnaround, etc.) ──
-  // These columns have existed since the table was created — no dependency on Phase 1 ALTERs.
-  // Rollback reference (old prices): standard=1200, priority=1500, express=2000, gold=8500, gold-elite=12500
-  // Ancillary old prices: reholder=800, crossover=1500, authentication=1000
-  const coreUpdates = [
-    {
-      tierId: "standard",
-      name: "VAULT QUEUE",
-      pricePerCard: 1900,
-      turnaroundDays: 40,
-      turnaroundLabel: "40 working days",
-      maxValueGbp: 500,
-      sortOrder: 1,
-    },
-    {
-      tierId: "priority",
-      name: "STANDARD",
-      pricePerCard: 2500,
-      turnaroundDays: 15,
-      turnaroundLabel: "15 working days",
-      maxValueGbp: 1500,
-      sortOrder: 2,
-    },
-    {
-      tierId: "express",
-      name: "EXPRESS",
-      pricePerCard: 4500,
-      turnaroundDays: 5,
-      turnaroundLabel: "5 working days",
-      maxValueGbp: 3000,
-      sortOrder: 3,
-    },
-    {
-      tierId: "gold",
-      name: "BLACK LABEL REVIEW",
-      pricePerCard: 7500,
-      turnaroundDays: 10,
-      turnaroundLabel: "10 working days",
-      maxValueGbp: 7500,
-      sortOrder: 4,
-    },
-    {
-      tierId: "reholder",
-      name: "REHOLDER",
-      pricePerCard: 1500,
-      turnaroundDays: 15,
-      turnaroundLabel: "15 working days",
-      maxValueGbp: 1000,
-      sortOrder: 1,
-    },
-    {
-      tierId: "crossover",
-      name: "CROSSOVER",
-      pricePerCard: 3500,
-      turnaroundDays: 15,
-      turnaroundLabel: "15 working days",
-      maxValueGbp: 1500,
-      sortOrder: 1,
-    },
-    {
-      tierId: "authentication",
-      name: "AUTHENTICATION",
-      pricePerCard: 1500,
-      turnaroundDays: 15,
-      turnaroundLabel: "15 working days",
-      maxValueGbp: 1000,
-      sortOrder: 1,
-    },
-  ];
-  for (const u of coreUpdates) {
-    try {
-      const result = await db.execute(sql`
-        UPDATE service_tiers SET
-          name = ${u.name},
-          price_per_card = ${u.pricePerCard},
-          turnaround_days = ${u.turnaroundDays},
-          turnaround_label = ${u.turnaroundLabel},
-          max_value_gbp = ${u.maxValueGbp},
-          sort_order = ${u.sortOrder},
-          updated_at = NOW()
-        WHERE tier_id = ${u.tierId}
-      `);
-      console.log(`[v213-migrate] core UPDATE ${u.tierId}: ${result.rowCount} row(s)`);
-    } catch (e: any) {
-      console.error(`[v213-migrate] core UPDATE ${u.tierId} failed:`, e.message);
-    }
-  }
-
-  // ── Phase 3b: UPDATE new columns (display_name, tagline, most_popular) ──
-  // These depend on Phase 1 ALTERs succeeding. If the columns don't exist, each UPDATE
-  // will fail and log the error — but Phase 3a prices are already applied.
-  const metaUpdates = [
-    {
-      tierId: "standard",
-      displayName: "Vault Queue",
-      tagline: "For patient collectors. Full Vault treatment, longer queue.",
-      mostPopular: false,
-    },
-    {
-      tierId: "priority",
-      displayName: "Standard",
-      tagline: "Our most popular tier. Professional grading, solid turnaround.",
-      mostPopular: true,
-    },
-    {
-      tierId: "express",
-      displayName: "Express",
-      tagline: "Fast-tracked grading for time-sensitive submissions.",
-      mostPopular: false,
-    },
-    {
-      tierId: "gold",
-      displayName: "Black Label Review",
-      tagline: "Premium service for high-value and investment-grade cards.",
-      mostPopular: false,
-    },
-    {
-      tierId: "reholder",
-      displayName: "Reholder",
-      tagline: "New MintVault slab with updated NFC and certificate.",
-      mostPopular: false,
-    },
-    {
-      tierId: "crossover",
-      displayName: "Crossover",
-      tagline: "Re-grade a card from PSA, BGS, CGC, or another company.",
-      mostPopular: false,
-    },
-    {
-      tierId: "authentication",
-      displayName: "Authentication",
-      tagline: "Verify authenticity and check for alterations.",
-      mostPopular: false,
-    },
-  ];
-  for (const u of metaUpdates) {
-    try {
-      await db.execute(sql`
-        UPDATE service_tiers SET
-          display_name = ${u.displayName},
-          tagline = ${u.tagline},
-          most_popular = ${u.mostPopular}
-        WHERE tier_id = ${u.tierId}
-      `);
-    } catch (e: any) {
-      console.error(`[v213-migrate] meta UPDATE ${u.tierId} failed:`, e.message);
-    }
-  }
-
-  // ── Phase 4: Deactivate gold-elite (no longer offered) ─────────────────────
-  try {
-    const r = await db.execute(sql`UPDATE service_tiers SET is_active = false WHERE tier_id = 'gold-elite'`);
-    console.log(`[v213-migrate] deactivate gold-elite: ${r.rowCount} row(s)`);
-  } catch (e: any) {
-    console.error("[v213-migrate] deactivate gold-elite failed:", e.message);
-  }
-
-  // ── Phase 5: Create value_protection_tiers table ────────────────────────────
-  try {
-    await db.execute(sql`
-      CREATE TABLE IF NOT EXISTS value_protection_tiers (
-        id SERIAL PRIMARY KEY,
-        min_value_pence INTEGER NOT NULL,
-        max_value_pence INTEGER,
-        fee_pence INTEGER NOT NULL,
-        requires_photos BOOLEAN DEFAULT false,
-        display_name TEXT NOT NULL
-      )
-    `);
-    const existing = await db.execute(sql`SELECT COUNT(*) AS cnt FROM value_protection_tiers`);
-    if (parseInt((existing.rows[0] as any)?.cnt ?? "0", 10) === 0) {
-      await db.execute(sql`
-        INSERT INTO value_protection_tiers (min_value_pence, max_value_pence, fee_pence, requires_photos, display_name) VALUES
-        (25000, 99900, 1000, false, '£250 – £999'),
-        (100000, 249900, 2500, false, '£1,000 – £2,499'),
-        (250000, NULL, 5000, true, '£2,500+')
-      `);
-      console.log("[v213-migrate] value_protection_tiers seeded with 3 rows");
-    }
-  } catch (e: any) {
-    console.error("[v213-migrate] value_protection_tiers failed:", e.message);
-  }
-
-  // ── Phase 6: Add credit_type column to member_credits (formerly reholder_credits) ──
-  try {
-    await db.execute(
-      sql`ALTER TABLE member_credits ADD COLUMN IF NOT EXISTS credit_type TEXT NOT NULL DEFAULT 'member'`
-    );
-    console.log("[v213-migrate] member_credits.credit_type column ensured");
-  } catch (e: any) {
-    console.error("[v213-migrate] ALTER member_credits failed:", e.message);
-  }
-
-  // Reserve-at-checkout columns — a credit is atomically reserved when a
-  // discounted PaymentIntent is created, so two concurrent checkouts can't
-  // both apply the same credit (double-spend race). TTL-based: an abandoned
-  // checkout's reservation auto-frees once reserved_until passes, so no
-  // sweeper job is needed. Nullable/additive — safe on live data.
-  try {
-    await db.execute(sql`ALTER TABLE member_credits ADD COLUMN IF NOT EXISTS reserved_at TIMESTAMPTZ`);
-    await db.execute(sql`ALTER TABLE member_credits ADD COLUMN IF NOT EXISTS reserved_until TIMESTAMPTZ`);
-    console.log("[v213-migrate] member_credits.reserved_at/reserved_until columns ensured");
-  } catch (e: any) {
-    console.error("[v213-migrate] ALTER member_credits reservation cols failed:", e.message);
-  }
-
-  console.log("[startup] migrateServiceTiersV213 complete");
-
-  // ── Phase 7: Ownership schema additions (v229) ─────────────────────────────
-  try {
-    await db.execute(sql`ALTER TABLE transfer_verifications ADD COLUMN IF NOT EXISTS new_owner_name TEXT`);
-    await db.execute(sql`ALTER TABLE transfer_verifications ADD COLUMN IF NOT EXISTS new_owner_token_hash TEXT`);
-    await db.execute(sql`ALTER TABLE transfer_verifications ADD COLUMN IF NOT EXISTS new_owner_expires_at TIMESTAMPTZ`);
-    await db.execute(sql`ALTER TABLE transfer_verifications ADD COLUMN IF NOT EXISTS dispute_deadline TIMESTAMPTZ`);
-    await db.execute(sql`ALTER TABLE transfer_verifications ADD COLUMN IF NOT EXISTS disputed_at TIMESTAMPTZ`);
-    await db.execute(sql`ALTER TABLE transfer_verifications ADD COLUMN IF NOT EXISTS dispute_reason TEXT`);
-    await db.execute(sql`ALTER TABLE ownership_history ADD COLUMN IF NOT EXISTS public_name BOOLEAN DEFAULT false`);
-    await db.execute(sql`ALTER TABLE submission_items ADD COLUMN IF NOT EXISTS declared_new BOOLEAN DEFAULT false`);
-    await db.execute(sql`ALTER TABLE certificates ADD COLUMN IF NOT EXISTS reference_number TEXT UNIQUE`);
-    await db.execute(sql`ALTER TABLE certificates ADD COLUMN IF NOT EXISTS logbook_version INTEGER NOT NULL DEFAULT 1`);
-    await db.execute(sql`ALTER TABLE certificates ADD COLUMN IF NOT EXISTS logbook_last_issued_at TIMESTAMPTZ`);
-    console.log("[v229-migrate] ownership + reference_number + logbook_version schema ensured");
-  } catch (e: any) {
-    console.error("[v229-migrate] ownership schema failed:", e.message);
-  }
-
-  // ── Public-name toggle (per-user). Idempotent additive nullable→default false.
-  // Distinct from ownership_history.public_name (per-event, dormant). Audit-log
-  // the first run only — schema-presence check before insert keeps re-runs clean.
-  try {
-    const before = await db.execute(sql`
-      SELECT 1 FROM information_schema.columns
-      WHERE table_name = 'users' AND column_name = 'public_name' LIMIT 1
-    `);
-    const wasPresent = before.rows.length > 0;
-    await db.execute(sql`ALTER TABLE users ADD COLUMN IF NOT EXISTS public_name BOOLEAN NOT NULL DEFAULT false`);
-    if (!wasPresent) {
-      await db.execute(sql`
-        INSERT INTO audit_log (entity_type, entity_id, action, admin_user, details)
-        VALUES ('schema', 'users', 'add_column_public_name', 'startup_migration',
-          ${JSON.stringify({
-            column: "public_name",
-            type: "boolean",
-            nullable: false,
-            default: false,
-            scope: "per-user",
-            note: "Distinct from ownership_history.public_name (per-event); v1 ships per-user toggle.",
-          })}::jsonb)
-      `);
-      console.log("[public-name-migrate] users.public_name added + audit logged");
-    }
-  } catch (e: any) {
-    console.error("[public-name-migrate] failed:", e.message);
-  }
-
-  // ── Cold-archive timestamp + candidate index. Idempotent additive nullable.
-  // Audit-log the first run only — information_schema gate prevents duplicate
-  // audit rows on re-runs.
-  try {
-    const before = await db.execute(sql`
-      SELECT 1 FROM information_schema.columns
-      WHERE table_name = 'certificates' AND column_name = 'archived_to_b2_at' LIMIT 1
-    `);
-    const wasPresent = before.rows.length > 0;
-    await db.execute(sql`ALTER TABLE certificates ADD COLUMN IF NOT EXISTS archived_to_b2_at TIMESTAMP`);
-    // Partial index — only rows still pending archival. Keeps the index small
-    // (most prod certs will eventually have archived_to_b2_at IS NOT NULL).
-    await db.execute(sql`
-      CREATE INDEX IF NOT EXISTS idx_certificates_archive_candidates
-        ON certificates(grade_approved_at)
-        WHERE archived_to_b2_at IS NULL AND deleted_at IS NULL
-    `);
-    if (!wasPresent) {
-      await db.execute(sql`
-        INSERT INTO audit_log (entity_type, entity_id, action, admin_user, details)
-        VALUES ('schema', 'certificates', 'add_column_archived_to_b2_at', 'startup_migration',
-          ${JSON.stringify({
-            column: "archived_to_b2_at",
-            type: "timestamp",
-            nullable: true,
-            default: null,
-            index: "idx_certificates_archive_candidates",
-            index_predicate: "archived_to_b2_at IS NULL AND deleted_at IS NULL",
-            age_signal: "grade_approved_at",
-            note: "Phase 1 cold-archive marker; see server/workers/r2-to-b2-archival.ts.",
-          })}::jsonb)
-      `);
-      console.log(
-        "[archival-b2-migrate] certificates.archived_to_b2_at + idx_certificates_archive_candidates added + audit logged"
-      );
-    }
-  } catch (e: any) {
-    console.error("[archival-b2-migrate] failed:", e.message);
-  }
-
-  // ── Contact-form inbox table. Idempotent CREATE TABLE IF NOT EXISTS.
-  // Audit-log the first run only via information_schema gate.
-  try {
-    const before = await db.execute(sql`
-      SELECT 1 FROM information_schema.tables
-      WHERE table_name = 'contact_inquiries' LIMIT 1
-    `);
-    const wasPresent = before.rows.length > 0;
-    await db.execute(sql`
-      CREATE TABLE IF NOT EXISTS contact_inquiries (
-        id            SERIAL PRIMARY KEY,
-        name          TEXT NOT NULL,
-        email         TEXT NOT NULL,
-        topic         TEXT NOT NULL,
-        message       TEXT NOT NULL,
-        submitted_at  TIMESTAMP NOT NULL DEFAULT NOW(),
-        email_sent_at TIMESTAMP,
-        email_error   TEXT,
-        ip_address    TEXT,
-        user_agent    TEXT,
-        deleted_at    TIMESTAMP
-      )
-    `);
-    await db.execute(sql`
-      CREATE INDEX IF NOT EXISTS idx_contact_inquiries_submitted_at
-        ON contact_inquiries(submitted_at DESC)
-        WHERE deleted_at IS NULL
-    `);
-    if (!wasPresent) {
-      await db.execute(sql`
-        INSERT INTO audit_log (entity_type, entity_id, action, admin_user, details)
-        VALUES ('schema', 'contact_inquiries', 'create_table_contact_inquiries', 'startup_migration',
-          ${JSON.stringify({
-            table: "contact_inquiries",
-            purpose: "customer contact-form inbox; row written before Resend send so messages survive email failures",
-            soft_delete: "deleted_at",
-            index: "idx_contact_inquiries_submitted_at",
-          })}::jsonb)
-      `);
-      console.log("[contact-inquiries-migrate] contact_inquiries table + index added + audit logged");
-    }
-  } catch (e: any) {
-    console.error("[contact-inquiries-migrate] failed:", e.message);
-  }
-
-  // ── v525 — audit_log lookup index for print-batch idempotency checks +
-  // operational reprint history queries. Additive, idempotent, safe on cold
-  // start. The 5-minute idempotency window in /api/admin/print-batch scans
-  // by entity_id + action; without this index the scan was a seq scan over
-  // the full audit_log table.
-  try {
-    const before = await db.execute(sql`
-      SELECT 1 FROM pg_indexes WHERE indexname = 'idx_audit_log_entity_action' LIMIT 1
-    `);
-    const wasPresent = before.rows.length > 0;
-    await db.execute(sql`
-      CREATE INDEX IF NOT EXISTS idx_audit_log_entity_action
-        ON audit_log (entity_id, action, created_at DESC)
-    `);
-    if (!wasPresent) {
-      await db.execute(sql`
-        INSERT INTO audit_log (entity_type, entity_id, action, admin_user, details)
-        VALUES ('schema', 'audit_log', 'create_index_entity_action', 'startup_migration',
-          ${JSON.stringify({
-            index: "idx_audit_log_entity_action",
-            columns: ["entity_id", "action", "created_at DESC"],
-            purpose: "print_batch idempotency lookup + reprint history queries",
-          })}::jsonb)
-      `);
-      console.log("[audit-log-index-migrate] idx_audit_log_entity_action created + audit logged");
-    }
-  } catch (e: any) {
-    console.error("[audit-log-index-migrate] failed:", e.message);
-  }
-
-  // ── Phase 9: Transfer v2 schema additions ─────────────────────────────────
-  try {
-    await db.execute(
-      sql`ALTER TABLE transfer_verifications ADD COLUMN IF NOT EXISTS flow_version VARCHAR(4) NOT NULL DEFAULT 'v1'`
-    );
-  } catch (e: any) {
-    console.error("[transfer-v2] flow_version:", e.message);
-  }
-  try {
-    await db.execute(
-      sql`ALTER TABLE transfer_verifications ADD COLUMN IF NOT EXISTS transfer_status VARCHAR(30) NOT NULL DEFAULT 'pending_owner'`
-    );
-  } catch (e: any) {
-    console.error("[transfer-v2] transfer_status:", e.message);
-  }
-  try {
-    await db.execute(sql`ALTER TABLE transfer_verifications ADD COLUMN IF NOT EXISTS reference_number_provided TEXT`);
-  } catch (e: any) {
-    console.error("[transfer-v2] reference_number_provided:", e.message);
-  }
-  try {
-    await db.execute(sql`ALTER TABLE transfer_verifications ADD COLUMN IF NOT EXISTS outgoing_keeper_user_id VARCHAR`);
-  } catch (e: any) {
-    console.error("[transfer-v2] outgoing_keeper_user_id:", e.message);
-  }
-  try {
-    await db.execute(sql`ALTER TABLE transfer_verifications ADD COLUMN IF NOT EXISTS incoming_keeper_user_id VARCHAR`);
-  } catch (e: any) {
-    console.error("[transfer-v2] incoming_keeper_user_id:", e.message);
-  }
-  try {
-    await db.execute(
-      sql`ALTER TABLE transfer_verifications ADD COLUMN IF NOT EXISTS incoming_confirm_deadline TIMESTAMPTZ`
-    );
-  } catch (e: any) {
-    console.error("[transfer-v2] incoming_confirm_deadline:", e.message);
-  }
-  try {
-    await db.execute(sql`ALTER TABLE transfer_verifications ADD COLUMN IF NOT EXISTS disputed_by VARCHAR(10)`);
-  } catch (e: any) {
-    console.error("[transfer-v2] disputed_by:", e.message);
-  }
-  try {
-    await db.execute(sql`ALTER TABLE transfer_verifications ADD COLUMN IF NOT EXISTS finalised_at TIMESTAMPTZ`);
-  } catch (e: any) {
-    console.error("[transfer-v2] finalised_at:", e.message);
-  }
-  try {
-    await db.execute(sql`ALTER TABLE transfer_verifications ADD COLUMN IF NOT EXISTS cancelled_at TIMESTAMPTZ`);
-  } catch (e: any) {
-    console.error("[transfer-v2] cancelled_at:", e.message);
-  }
-  try {
-    await db.execute(sql`ALTER TABLE transfer_verifications ADD COLUMN IF NOT EXISTS cancellation_reason TEXT`);
-  } catch (e: any) {
-    console.error("[transfer-v2] cancellation_reason:", e.message);
-  }
-  // Index for cron jobs: find v2 transfers in dispute window that need finalising
-  try {
-    await db.execute(
-      sql`CREATE INDEX IF NOT EXISTS idx_transfer_v2_status ON transfer_verifications (transfer_status) WHERE flow_version = 'v2'`
-    );
-  } catch (e: any) {
-    console.error("[transfer-v2] index:", e.message);
-  }
-  console.log("[transfer-v2] schema migration complete");
-
-  // ── Phase 8: Backfill Owner #1 from submissions (v229) ─────────────────────
-  try {
-    // Find graded certs with no ownership_history row
-    const unowned = await db.execute(sql`
-      SELECT c.certificate_number, c.issued_at, c.submission_item_id
-      FROM certificates c
-      WHERE c.grade_approved_at IS NOT NULL
-        AND c.deleted_at IS NULL
-        AND NOT EXISTS (
-          SELECT 1 FROM ownership_history oh WHERE oh.cert_id = c.certificate_number
-        )
-      LIMIT 200
-    `);
-    let backfilled = 0;
-    for (const row of unowned.rows as any[]) {
-      try {
-        let email: string | null = null;
-        let name: string | null = null;
-        if (row.submission_item_id) {
-          const sub = await db.execute(sql`
-            SELECT s.customer_email, s.customer_first_name, s.customer_last_name
-            FROM submission_items si
-            JOIN submissions s ON s.id = si.submission_id
-            WHERE si.id = ${row.submission_item_id}
-            LIMIT 1
-          `);
-          const sr = sub.rows[0] as any;
-          if (sr) {
-            email = sr.customer_email || null;
-            name = [sr.customer_first_name, sr.customer_last_name].filter(Boolean).join(" ") || null;
-          }
-        }
-        await db.execute(sql`
-          INSERT INTO ownership_history (cert_id, from_user_id, to_user_id, to_email, event_type, notes, created_at)
-          VALUES (${row.certificate_number}, NULL, '', ${email}, 'auto_submission', ${name ? `Original submitter: ${name}` : "Auto-assigned from submission"}, ${row.issued_at || new Date().toISOString()})
-        `);
-        backfilled++;
-      } catch {}
-    }
-    if (backfilled > 0) console.log(`[v229-migrate] backfilled owner 1 for ${backfilled} certs`);
-  } catch (e: any) {
-    console.error("[v229-migrate] backfill failed:", e.message);
-  }
-}
-
-async function addRevealWrapColumn() {
-  try {
-    await db.execute(sql`
-      ALTER TABLE submissions ADD COLUMN IF NOT EXISTS reveal_wrap BOOLEAN NOT NULL DEFAULT FALSE
-    `);
-  } catch {}
-}
-
-async function seedEstimateCreditsTable() {
-  try {
-    await db.execute(sql`
-      CREATE TABLE IF NOT EXISTS estimate_credits (
-        id SERIAL PRIMARY KEY,
-        email TEXT NOT NULL UNIQUE,
-        credits_remaining INTEGER NOT NULL DEFAULT 0,
-        credits_purchased INTEGER NOT NULL DEFAULT 0,
-        credits_used INTEGER NOT NULL DEFAULT 0,
-        created_at TIMESTAMP DEFAULT NOW(),
-        updated_at TIMESTAMP DEFAULT NOW()
-      )
-    `);
-  } catch {}
-}
-
 const ESTIMATE_PACKAGES: Record<string, { credits: number; pricePence: number; label: string }> = {
   "5": { credits: 5, pricePence: 200, label: "5 estimates" },
   "15": { credits: 15, pricePence: 400, label: "15 estimates" },
   "100": { credits: 100, pricePence: 1000, label: "100 estimates" },
 };
-
-async function createAiGradeCorrectionsTable() {
-  await db.execute(sql`
-    CREATE TABLE IF NOT EXISTS ai_grade_corrections (
-      id                SERIAL PRIMARY KEY,
-      cert_id           TEXT,
-      ai_estimated_grade INTEGER,
-      ai_centering      TEXT,
-      ai_corners        TEXT,
-      ai_edges          TEXT,
-      ai_surface        TEXT,
-      actual_grade      INTEGER,
-      actual_centering  INTEGER,
-      actual_corners    INTEGER,
-      actual_edges      INTEGER,
-      actual_surface    INTEGER,
-      graded_by         TEXT,
-      correction_notes  TEXT,
-      created_at        TIMESTAMP DEFAULT NOW()
-    )
-  `);
-}
-
-// Server-side "1 free estimate per IP per day" gate for anonymous-no-email
-// callers on POST /api/tools/estimate. Prevents unlimited Anthropic API burn.
-// IP is hashed (SHA-256) before storage — never store raw IPs per privacy rules.
-async function createEstimateFreeUsesTable() {
-  await db.execute(sql`
-    CREATE TABLE IF NOT EXISTS estimate_free_uses (
-      ip_hash       TEXT PRIMARY KEY,
-      last_used_at  TIMESTAMP NOT NULL,
-      count_today   INTEGER NOT NULL DEFAULT 0,
-      created_at    TIMESTAMP DEFAULT NOW()
-    )
-  `);
-}
-
-// ADMIN_FREE_EMAIL is imported from ./lib/rate-limiters (relocated so the shared
-// rate-limiters' skip() can use it without a circular import).
-
-async function seedAdminCredits() {
-  await db.execute(sql`
-    INSERT INTO estimate_credits (email, credits_remaining, credits_purchased, credits_used)
-    VALUES (${ADMIN_FREE_EMAIL}, 999999, 999999, 0)
-    ON CONFLICT (email) DO UPDATE
-      SET credits_remaining = GREATEST(estimate_credits.credits_remaining, 999999)
-  `);
-}
 
 // ── Capacity gating helpers ───────────────────────────────────────────────────
 
@@ -1408,75 +747,6 @@ function invalidateCapacityCache(tierSlug?: string) {
   } else {
     Object.keys(_capacityCache).forEach((k) => delete _capacityCache[k]);
   }
-}
-
-async function seedTierCapacityTable() {
-  try {
-    await db.execute(sql`
-      CREATE TABLE IF NOT EXISTS tier_capacity (
-        id          SERIAL PRIMARY KEY,
-        tier_slug   TEXT UNIQUE NOT NULL,
-        max_active  INTEGER NOT NULL,
-        force_open  BOOLEAN NOT NULL DEFAULT false,
-        updated_at  TIMESTAMP NOT NULL DEFAULT NOW()
-      )
-    `);
-    // Seed default capacities — ON CONFLICT DO NOTHING so admin overrides are preserved
-    for (const [slug, max] of [
-      ["standard", 500],
-      ["priority", 150],
-      ["express", 40],
-    ] as [string, number][]) {
-      await db.execute(sql`
-        INSERT INTO tier_capacity (tier_slug, max_active) VALUES (${slug}, ${max}) ON CONFLICT DO NOTHING
-      `);
-    }
-  } catch {}
-}
-
-async function createAiOverrideAuditTable() {
-  try {
-    await db.execute(sql`
-      CREATE TABLE IF NOT EXISTS ai_override_audit (
-        id SERIAL PRIMARY KEY,
-        cert_id INTEGER,
-        field_path TEXT NOT NULL,
-        ai_value JSONB,
-        override_value JSONB,
-        override_reason TEXT,
-        overridden_by TEXT NOT NULL,
-        overridden_at TIMESTAMPTZ DEFAULT NOW(),
-        session_id TEXT
-      )
-    `);
-    await db.execute(sql`CREATE INDEX IF NOT EXISTS idx_override_audit_cert ON ai_override_audit(cert_id)`);
-    await db.execute(sql`CREATE INDEX IF NOT EXISTS idx_override_audit_field ON ai_override_audit(field_path)`);
-    await db.execute(sql`CREATE INDEX IF NOT EXISTS idx_override_audit_time ON ai_override_audit(overridden_at DESC)`);
-    console.log("[v221-migrate] ai_override_audit table ensured");
-  } catch (e: any) {
-    console.error("[v221-migrate] ai_override_audit failed:", e.message);
-  }
-}
-
-async function createEbayPriceCacheTable() {
-  try {
-    await db.execute(sql`
-      CREATE TABLE IF NOT EXISTS ebay_price_cache (
-        id                  SERIAL PRIMARY KEY,
-        card_key            TEXT NOT NULL UNIQUE,
-        card_name           TEXT NOT NULL,
-        card_number         TEXT,
-        set_name            TEXT,
-        average_price_pence INTEGER,
-        listing_count       INTEGER NOT NULL DEFAULT 0,
-        listings_json       JSONB NOT NULL DEFAULT '[]',
-        last_updated_at     TIMESTAMP NOT NULL DEFAULT NOW()
-      )
-    `);
-    await db.execute(sql`
-      CREATE INDEX IF NOT EXISTS idx_ebay_cache_updated ON ebay_price_cache(last_updated_at)
-    `);
-  } catch {}
 }
 
 /**
@@ -1902,33 +1172,43 @@ export async function handleCertificateMetadataUpdate(req: any, res: any): Promi
       previousPath: string | null,
       sortOrder: number
     ) => {
-      const ext = path.extname(file.originalname).replace(".", "");
-      const r2Key = r2KeyForImage(existing.certId, side, ext || "jpg");
-      await uploadToR2(r2Key, file.buffer, file.mimetype);
-      // Delete the superseded object ONLY when it is genuinely a DIFFERENT
-      // key. Deleting unconditionally removed the object that had just been
-      // uploaded whenever the extension was unchanged — the overwhelmingly
-      // common case — destroying the image the operator had just supplied.
-      if (previousPath && previousPath !== r2Key) {
-        try {
-          await deleteFromR2(previousPath);
-        } catch {}
-      }
-      data[side === "front" ? "frontImagePath" : "backImagePath"] = r2Key;
-      await storage.addCertificateImage({
-        certificateId: id,
-        imageType: side,
-        url: r2Key,
-        sortOrder,
+      const sharp = (await import("sharp")).default;
+      const jpeg = await sharp(file.buffer)
+        .rotate()
+        .resize(3000, 3000, { fit: "inside", withoutEnlargement: true })
+        .jpeg({ quality: 85, progressive: true, mozjpeg: true })
+        .toBuffer();
+      const previousOriginal =
+        side === "front" ? (existing.gradingFrontOriginal ?? null) : (existing.gradingBackOriginal ?? null);
+      const { attachManualCertificateSideAndReprocess } = await import("./scan-ingest-service");
+      const attached = await attachManualCertificateSideAndReprocess({
+        certId: id,
+        certificateNumber: normalizeCertId(existing.certId),
+        side,
+        expectedPreviousKey: previousOriginal,
+        body: jpeg,
+        actor: req.session.adminEmail || "admin",
+        replaceExisting: previousOriginal != null || previousPath != null,
+        originalFilename: file.originalname,
+        mimeReceived: file.mimetype,
+        sizeInBytes: file.size,
+        idempotencyKey:
+          typeof req.headers["idempotency-key"] === "string"
+            ? `${req.headers["idempotency-key"]}:${side}`
+            : null,
+        recordImageHistory: true,
       });
+      if (attached.pipelineError) throw new Error(`image pipeline failed: ${attached.pipelineError}`);
+      const displayColumn = side === "front" ? "front_display" : "back_display";
+      const r2Key = attached.pipeline?.objectKeys[displayColumn] ?? attached.originalObjectKey;
       imageReplacements.push({
         side,
         r2Key,
         previousPath: previousPath ?? null,
         pathChanged: (previousPath ?? null) !== r2Key,
-        contentSha256: crypto.createHash("sha256").update(file.buffer).digest("hex"),
-        bytes: file.buffer.length,
-        contentType: file.mimetype,
+        contentSha256: crypto.createHash("sha256").update(jpeg).digest("hex"),
+        bytes: jpeg.length,
+        contentType: "image/jpeg",
         originalFilename: file.originalname,
       });
     };
@@ -2110,26 +1390,17 @@ export async function handleCertificateCreate(req: any, res: any): Promise<void>
       }
     }
 
-    const tempCertId = `MV-TEMP-${Date.now()}`;
-
-    let frontR2Key: string | null = null;
-    let backR2Key: string | null = null;
-
-    if (frontImage) {
-      const ext = path.extname(frontImage.originalname).replace(".", "");
-      frontR2Key = r2KeyForImage(tempCertId, "front", ext || "jpg");
-      await uploadToR2(frontR2Key, frontImage.buffer, frontImage.mimetype);
-    }
-    if (backImage) {
-      const ext = path.extname(backImage.originalname).replace(".", "");
-      backR2Key = r2KeyForImage(tempCertId, "back", ext || "jpg");
-      await uploadToR2(backR2Key, backImage.buffer, backImage.mimetype);
-    }
-
     let validatedItemId: number | null = null;
     if (req.body.submissionItemId) {
       validatedItemId = parseInt(req.body.submissionItemId, 10);
-      const checkResult = await db.execute(sql`
+      if (!Number.isSafeInteger(validatedItemId) || validatedItemId <= 0) {
+        return res.status(400).json({ error: "Submission item is invalid" });
+      }
+      // Image-bearing creates rehydrate durable intent before mutable domain
+      // preflight; the first successful attempt has already linked this item.
+      // The coordinator preparer performs the race-safe check for new intent.
+      if (!frontImage && !backImage) {
+        const checkResult = await db.execute(sql`
             SELECT si.id FROM submission_items si
             JOIN submissions s ON s.id = si.submission_id
             WHERE si.id = ${validatedItemId}
@@ -2137,8 +1408,9 @@ export async function handleCertificateCreate(req: any, res: any): Promise<void>
               AND s.status != 'draft'
               AND si.id NOT IN (SELECT submission_item_id FROM certificates WHERE submission_item_id IS NOT NULL)
           `);
-      if (checkResult.rows.length === 0) {
-        return res.status(400).json({ error: "Submission item not found, already linked, or submission not paid" });
+        if (checkResult.rows.length === 0) {
+          return res.status(400).json({ error: "Submission item not found, already linked, or submission not paid" });
+        }
       }
     }
 
@@ -2179,8 +1451,8 @@ export async function handleCertificateCreate(req: any, res: any): Promise<void>
       gradeCorners: null,
       gradeEdges: null,
       gradeSurface: null,
-      frontImagePath: frontR2Key,
-      backImagePath: backR2Key,
+      frontImagePath: null,
+      backImagePath: null,
       status: req.body.status || "draft",
       createdBy: req.session.adminEmail || "admin",
     };
@@ -2212,6 +1484,24 @@ export async function handleCertificateCreate(req: any, res: any): Promise<void>
       return res.status(400).json({ error: "Invalid rarity selection.", details: structuredCreate.errors });
     }
 
+    if (frontImage || backImage) {
+      const idempotencyKey = req.header("Idempotency-Key")?.trim() ?? "";
+      if (!idempotencyKey) {
+        return res.status(400).json({ error: "Idempotency-Key header required for certificate image creation" });
+      }
+      const { createCertificateWithImages } = await import("./lib/certificate-create-persistence");
+      const created = await createCertificateWithImages({
+        data,
+        actor: req.session.adminEmail || "admin",
+        idempotencyKey,
+        images: [
+          ...(frontImage ? [{ side: "front" as const, body: frontImage.buffer }] : []),
+          ...(backImage ? [{ side: "back" as const, body: backImage.buffer }] : []),
+        ],
+      });
+      return res.json({ ...created.certificate, certId: normalizeCertId(created.certificate.certId) });
+    }
+
     const cert = await storage.createCertificate(data, req.session.adminEmail || "admin");
 
     await storage.writeAuditLog("certificate", cert.certId, "create", req.session.adminEmail || "admin", {
@@ -2221,39 +1511,20 @@ export async function handleCertificateCreate(req: any, res: any): Promise<void>
       gradeOverall: data.gradeOverall,
     });
 
-    const realCertId = cert.certId;
-    if (frontR2Key) {
-      const ext = path.extname(frontImage!.originalname).replace(".", "");
-      const newKey = r2KeyForImage(realCertId, "front", ext || "jpg");
-      await uploadToR2(newKey, frontImage!.buffer, frontImage!.mimetype);
-      await deleteFromR2(frontR2Key);
-      await storage.updateCertificate(cert.id, { frontImagePath: newKey });
-      await storage.addCertificateImage({
-        certificateId: cert.id,
-        imageType: "front",
-        url: newKey,
-        sortOrder: 0,
-      });
-    }
-    if (backR2Key) {
-      const ext = path.extname(backImage!.originalname).replace(".", "");
-      const newKey = r2KeyForImage(realCertId, "back", ext || "jpg");
-      await uploadToR2(newKey, backImage!.buffer, backImage!.mimetype);
-      await deleteFromR2(backR2Key);
-      await storage.updateCertificate(cert.id, { backImagePath: newKey });
-      await storage.addCertificateImage({
-        certificateId: cert.id,
-        imageType: "back",
-        url: newKey,
-        sortOrder: 1,
-      });
-    }
-
-    const updated = await storage.getCertificate(cert.id);
-    res.json(updated ? { ...updated, certId: normalizeCertId(updated.certId) } : updated);
+    res.json({ ...cert, certId: normalizeCertId(cert.certId) });
   } catch (error: any) {
     console.error("Create cert error:", error.message, error.stack);
-    res.status(500).json({ error: "Failed to create certificate" });
+    const conflictCodes = new Set([
+      "OBJECT_WRITE_IDEMPOTENCY_CONFLICT",
+      "OBJECT_WRITE_IN_PROGRESS",
+      "OBJECT_WRITE_TERMINAL",
+      "OBJECT_WRITE_DOMAIN_ABANDONED",
+      "40001",
+      "23505",
+    ]);
+    res.status(conflictCodes.has(error?.code) ? 409 : 500).json({
+      error: conflictCodes.has(error?.code) ? error.message : "Failed to create certificate",
+    });
   }
 }
 
@@ -2656,9 +1927,7 @@ export async function handleCertificateGradeUpdate(req: any, res: any): Promise<
           -- that produced the grade itself. Preserve-on-omission is deliberate:
           -- a metadata-only autosave must not restamp a grade it did not compute.
           mvgs_rules_version  = ${
-            isNonNum || effOverallGrade == null
-              ? sql`mvgs_rules_version`
-              : sql`${authoritativeGrade.rulesVersion}`
+            isNonNum || effOverallGrade == null ? sql`mvgs_rules_version` : sql`${authoritativeGrade.rulesVersion}`
           },
           grade_strength_score = ${gradeChanged ? sql`NULL` : sql`grade_strength_score`},
           corner_values       = COALESCE(${jsn(b.corners)}::jsonb, corner_values),
@@ -2810,75 +2079,23 @@ function expectedReviewRevision(raw: unknown): number | null {
 }
 
 export async function registerRoutes(httpServer: Server, app: Express): Promise<Server> {
-  // v213 pricing migration + seed service tiers, estimate_credits, admin credits, column migrations
-  migrateServiceTiersV213().catch(() => {});
-  // cert_counter allocator table — created ONCE here at boot (awaited so the
-  // hot allocation path can assume it exists), replacing the per-scan
-  // CREATE TABLE IF NOT EXISTS that raced the catalogs under concurrent scans
-  // (SQLSTATE 23505 pg_type_typname_nsp_index / 42710). Idempotent + race-safe.
-  await storage.ensureCertCounterTable().catch((e: any) => console.error("[cert_counter-migrate] error:", e?.message));
-  // Scanner persistence is supplied by numbered migrations 0045–0047 before
-  // this application release is deployed. Do not issue scanner DDL at boot:
-  // a missing prerequisite must fail closed in the capture path rather than
-  // silently mutating a production schema after rollout.
-  recordLabelArtworkV424Audit().catch(() => {});
-  seedEstimateCreditsTable().catch(() => {});
-  seedAdminCredits().catch(() => {});
-  addRevealWrapColumn().catch(() => {});
-  createAiGradeCorrectionsTable().catch(() => {});
-  createAiOverrideAuditTable().catch(() => {});
-  createEstimateFreeUsesTable().catch(() => {});
-  createEbayPriceCacheTable().catch(() => {});
-  seedTierCapacityTable().catch(() => {});
-  migratePromotionsSchema().catch((e: any) => console.error("[promotions-migrate] error:", e.message));
-  migratePaymentIdempotencySchema().catch((e: any) => console.error("[payment-idempotency-migrate] error:", e.message));
-  migrateGraderSchema().catch((e: any) => console.error("[grader-migrate] error:", e.message));
-  migrateGraderCertSchema().catch((e: any) => console.error("[grader-cert-migrate] error:", e.message));
-  migratePerOperatorSchema().catch((e: any) => console.error("[per-operator-migrate] error:", e.message));
-  migrateStaffCapabilitiesSchema().catch((e: any) => console.error("[staff-caps-migrate] error:", e.message));
-  migrateScanSchema().catch((e: any) => console.error("[scan-migrate] error:", e.message));
-  // NOTE: the print-workflow schema (print_state, print_batches, print_events) is
-  // applied ONLY by the numbered migration migrations/0022_print_workflow_lifecycle.sql
-  // via the migration runner — deliberately NOT a boot-time ALTER, to avoid two
-  // competing schema-mutation paths for the same objects.
+  const requireHotFolderUploadAuth = createHotFolderUploadAuth(process.env, requireAdmin);
+  const estimateRateLimit = createSharedPublicRateLimit(pool, {
+    namespace: "credit_estimate",
+    windowMs: 60 * 60 * 1000,
+    max: 5,
+    message: "Too many estimate requests — you can request up to 5 estimates per hour.",
+  });
+  // Schema is supplied exclusively by the numbered migration runner. 0114 owns
+  // certificate identity; 0115 converges every legacy boot/request DDL surface;
+  // scanner persistence is owned by 0045–0047/0090–0094. Readiness fails closed
+  // when those contracts are absent, so application boot must never repair them.
+  //
+  // The print-workflow schema is likewise owned by 0022.
   // Release any print batches stranded in 'rendering' by a crash/restart mid-render
   // (age-guarded so it never races a live render on another machine). Best-effort;
   // no-op until 0022 is applied.
   reconcileStuckPrintBatches().catch((e: any) => console.error("[print-reconcile] error:", e?.message));
-  // Perf indexes run 20s after boot (CONCURRENTLY, no blocking lock) so the
-  // schema ALTER migrations above have settled first — avoids the boot-time lock
-  // contention that failed the earlier attempt. Fire-and-forget; non-fatal.
-  setTimeout(() => {
-    ensurePerfIndexes().catch((e: any) => console.error("[perf-indexes] error:", e?.message));
-  }, 20_000);
-  // Awaited (was fire-and-forget): auth/account routes registered below query
-  // the tables these create (email_verification_tokens, magic-link tokens,
-  // marketplace tables). Unawaited, a signup arriving during cold-start could
-  // 500 with "relation does not exist". DDL is IF NOT EXISTS — steady-state
-  // cost is a few no-op checks. Errors stay non-fatal (logged, boot continues)
-  // to preserve the old crash behaviour.
-  try {
-    await migrateAccountSchema();
-    await migrateMarketplaceSchema();
-  } catch (e: any) {
-    console.error("[startup-migration] error:", e.message);
-  }
-
-  // Reference number backfill — async, fire-and-forget, never blocks boot
-  if (process.env.SKIP_BACKFILL !== "true") {
-    import("./reference-number")
-      .then(({ backfillReferenceNumbers }) =>
-        backfillReferenceNumbers()
-          .then(() => console.log("[startup] reference number backfill complete"))
-          .catch((err) =>
-            console.error("[startup] reference number backfill failed — will retry on next boot:", err.message)
-          )
-      )
-      .catch(() => {});
-  } else {
-    console.log("[startup] SKIP_BACKFILL=true — skipping reference number backfill");
-  }
-
   // ── Domain route modules ───────────────────────────────────────────────────
   registerPublicRoutes(app);
   registerPublicPartnerPresenceRoutes(app); // Unauthenticated explicit public-safe Partner projection
@@ -2887,13 +2104,9 @@ export async function registerRoutes(httpServer: Server, app: Express): Promise<
   registerCorrectionModeRoutes(app);
   registerStaffRoutes(app);
   registerPrintWorkflowRoutes(app); // Approval → Printing → Printed lifecycle (requireAdmin; staff via can_print proxy)
-  // ORDERING INVARIANT — registerPartnerPublicRoutes MUST precede mountPartnerPortal.
-  // partnerApiRouter (server/partner/routes.ts) still defines its OWN /auth/login,
-  // /auth/password-reset/* and /invitations/accept handlers. Registering the public routes first is
-  // what keeps those duplicates permanently shadowed, so the hardened public implementations — the
-  // ones carrying the emergency-stop and portal_enabled gates, and the IP-keyed login limiter that
-  // binds in front of the per-account one — are the only ones that ever serve. Swapping these two
-  // lines silently changes which code handles partner login. Do not reorder.
+  // Public Partner auth/onboarding is registered before the authenticated portal
+  // router. The old duplicate portal handlers were removed; this order now makes
+  // the public/auth boundary explicit rather than relying on route shadowing.
   registerPartnerPublicRoutes(app); // Partner public auth/onboarding routes (login, reset, invite accept)
   mountPartnerPortal(app); // Authenticated Partner portal (session, submissions, customers, team, MFA)
   registerSubmissionRoutes(app);
@@ -2942,7 +2155,7 @@ export async function registerRoutes(httpServer: Server, app: Express): Promise<
   // Transfer dispute/cancel — same pattern as existing transferV2RateLimit
 
   // Rate limit for owner-triggered logbook reissue — belt-and-braces behind
-  // owner auth. Admin bypass via x-mv-admin-email header (for support cases).
+  // owner auth. Only an authenticated admin session bypasses the limit.
 
   // Public AI pre-grade — 3/hour per IP. Each call invokes Claude Haiku
   // (paid). Tight cap is deliberate; expect VPN abuse to bypass over
@@ -2980,7 +2193,7 @@ export async function registerRoutes(httpServer: Server, app: Express): Promise<
   app.post("/api/cookies/acknowledge", cookieAckRateLimit, async (req, res) => {
     try {
       const userAgent = ((req.headers["user-agent"] as string) || "").slice(0, 500);
-      const ipRaw = ((req.headers["x-forwarded-for"] as string) || req.ip || "").split(",")[0].trim();
+      const ipRaw = (req.ip || req.socket.remoteAddress || "").trim();
       const ipHash = ipRaw ? crypto.createHash("sha256").update(ipRaw).digest("hex").slice(0, 32) : null;
       await db.insert(auditLog).values({
         entityType: "cookie_consent",
@@ -3059,9 +2272,13 @@ export async function registerRoutes(httpServer: Server, app: Express): Promise<
     res.setHeader("Access-Control-Allow-Headers", "Content-Type");
 
     try {
-      const dbCert = await findCertByIdFlex(String(req.params.certId));
-      if (!dbCert) {
+      const dbCert = await findCertByNumberUngated(String(req.params.certId));
+      const validity = classifyPublicCertificate(dbCert);
+      if (!dbCert || validity === "hidden") {
         return res.status(404).json({ verified: false, error: "Certificate not found" });
+      }
+      if (validity === "voided") {
+        return res.json(buildVoidedVerificationResponse(dbCert));
       }
 
       const gradeType = dbCert.gradeType || "numeric";
@@ -3203,8 +2420,8 @@ export async function registerRoutes(httpServer: Server, app: Express): Promise<
       const kind = String(req.params.kind);
       if (!/^MV\d+$/.test(certNumber)) return res.status(404).end();
 
-      const cert = (await storage.getCertificateByCertId(certNumber)) as any;
-      if (!cert || cert.status !== "active" || cert.gradeOverall == null) return res.status(404).end();
+      const cert = (await findCertByIdFlex(certNumber)) as any;
+      if (!cert) return res.status(404).end();
 
       let key: string | null = null;
       if (kind === "front-label") {
@@ -3283,8 +2500,8 @@ export async function registerRoutes(httpServer: Server, app: Express): Promise<
   } | null> {
     const certNumber = normalizeCertId(String(rawCertNumber));
     if (!/^MV\d+$/.test(certNumber)) return null;
-    const row = (await storage.getCertificateByCertId(certNumber)) as any;
-    if (!row || row.status !== "active" || row.gradeOverall == null) return null;
+    const row = (await findCertByIdFlex(certNumber)) as any;
+    if (!row) return null;
     const grade = parseFloat(String(row.gradeOverall));
     if (!Number.isFinite(grade)) return null;
     const { mvgsTierName } = await import("@shared/mvgs-scoring");
@@ -3642,31 +2859,37 @@ export async function registerRoutes(httpServer: Server, app: Express): Promise<
     }
   });
 
-  app.post("/api/admin/community", requireAdmin, upload.single("imageFile"), async (req, res) => {
-    try {
-      if (!req.file) return res.status(400).json({ error: "imageFile is required" });
-      const uploadErr = await rejectInvalidUploads([req.file]);
-      if (uploadErr) return res.status(400).json({ error: uploadErr });
-      const gradeRaw = req.body.grade != null && req.body.grade !== "" ? parseFloat(String(req.body.grade)) : null;
-      const { createPostManual } = await import("./community");
-      const post = await createPostManual(
-        {
-          instagramHandle: req.body.instagramHandle?.trim() || null,
-          certNumber: req.body.certNumber ? normalizeCertId(String(req.body.certNumber)) : null,
-          cardName: req.body.cardName?.trim() || null,
-          grade: gradeRaw != null && Number.isFinite(gradeRaw) ? gradeRaw : null,
-          instagramPostUrl: req.body.instagramPostUrl?.trim() || null,
-        },
-        req.file.buffer,
-        req.file.mimetype || "image/jpeg",
-        req.session.adminEmail || "admin"
-      );
-      res.json({ post });
-    } catch (err: any) {
-      console.error("[community] create error:", err?.message || err);
-      res.status(500).json({ error: "Failed to create post" });
+  app.post(
+    "/api/admin/community",
+    requireAdmin,
+    uploadMemoryAdmission("admin_community", 128),
+    upload.single("imageFile"),
+    async (req, res) => {
+      try {
+        if (!req.file) return res.status(400).json({ error: "imageFile is required" });
+        const uploadErr = await rejectInvalidUploads([req.file]);
+        if (uploadErr) return res.status(400).json({ error: uploadErr });
+        const gradeRaw = req.body.grade != null && req.body.grade !== "" ? parseFloat(String(req.body.grade)) : null;
+        const { createPostManual } = await import("./community");
+        const post = await createPostManual(
+          {
+            instagramHandle: req.body.instagramHandle?.trim() || null,
+            certNumber: req.body.certNumber ? normalizeCertId(String(req.body.certNumber)) : null,
+            cardName: req.body.cardName?.trim() || null,
+            grade: gradeRaw != null && Number.isFinite(gradeRaw) ? gradeRaw : null,
+            instagramPostUrl: req.body.instagramPostUrl?.trim() || null,
+          },
+          req.file.buffer,
+          req.file.mimetype || "image/jpeg",
+          req.session.adminEmail || "admin"
+        );
+        res.json({ post });
+      } catch (err: any) {
+        console.error("[community] create error:", err?.message || err);
+        res.status(500).json({ error: "Failed to create post" });
+      }
     }
-  });
+  );
 
   app.patch("/api/admin/community/:id", requireAdmin, async (req, res) => {
     try {
@@ -3736,7 +2959,7 @@ export async function registerRoutes(httpServer: Server, app: Express): Promise<
         });
       }
     }
-    const results = dbResults.map((c) => {
+    const results = filterPublicCertificates(dbResults).map((c) => {
       const gradeType = c.gradeType || "numeric";
       const isNonNum = isNonNumericGrade(gradeType);
       const grade = isNonNum ? 0 : parseFloat(c.gradeOverall || "0");
@@ -4463,7 +3686,7 @@ export async function registerRoutes(httpServer: Server, app: Express): Promise<
   });
 
   // Owner-only PDF with Document Reference Number
-  app.get("/logbook/:certId/owner.pdf", async (req, res) => {
+  app.get("/logbook/:certId/owner.pdf", requireCustomer, async (req, res) => {
     try {
       const { generateLogbookPdf } = await import("./logbook-pdf");
       const { buildLogbookData } = await import("./logbook-service");
@@ -4525,7 +3748,7 @@ export async function registerRoutes(httpServer: Server, app: Express): Promise<
   });
 
   // Reissue logbook — generates new reference number, increments version (V5C replacement)
-  app.post("/api/logbook/:certId/reissue", reissueRateLimit, async (req, res) => {
+  app.post("/api/logbook/:certId/reissue", requireCustomer, reissueRateLimit, async (req, res) => {
     try {
       const { buildLogbookData } = await import("./logbook-service");
       const { generateReferenceNumber } = await import("./reference-number");
@@ -4817,31 +4040,6 @@ export async function registerRoutes(httpServer: Server, app: Express): Promise<
   });
 
   // ── Stolen card registry ─────────────────────────────────────────────────
-  // Startup: ensure stolen_reports table and stolen columns exist
-  try {
-    await db.execute(sql`
-      CREATE TABLE IF NOT EXISTS stolen_reports (
-        id            SERIAL PRIMARY KEY,
-        cert_id       TEXT NOT NULL,
-        reporter_name  TEXT NOT NULL,
-        reporter_email TEXT NOT NULL,
-        description   TEXT,
-        verify_token  TEXT NOT NULL UNIQUE,
-        verified_at   TIMESTAMP,
-        cleared_at    TIMESTAMP,
-        cleared_by    TEXT,
-        created_at    TIMESTAMP NOT NULL DEFAULT NOW()
-      )
-    `);
-    await db.execute(sql`
-      ALTER TABLE certificates
-        ADD COLUMN IF NOT EXISTS stolen_status TEXT,
-        ADD COLUMN IF NOT EXISTS stolen_reported_at TIMESTAMP
-    `);
-  } catch (e: any) {
-    console.error("[stolen] startup migration error:", e.message);
-  }
-
   // ── Capacity endpoint ─────────────────────────────────────────────────────
   // Returns current active vs max counts for each grading tier.
   // Cached in-memory for 30 s to avoid hammering the DB on every page load.
@@ -4893,143 +4091,6 @@ export async function registerRoutes(httpServer: Server, app: Express): Promise<
       return res.json(empty);
     }
   });
-
-  // Startup migration — AI grading columns + Build 1 image columns + new tables
-  (async () => {
-    try {
-      // AI grading columns (original set)
-      await db.execute(sql`ALTER TABLE certificates ADD COLUMN IF NOT EXISTS ai_analysis JSONB DEFAULT '{}'`);
-      await db.execute(sql`ALTER TABLE certificates ADD COLUMN IF NOT EXISTS ai_draft_grade DECIMAL(3,1)`);
-      await db.execute(sql`ALTER TABLE certificates ADD COLUMN IF NOT EXISTS centering_front_lr TEXT`);
-      await db.execute(sql`ALTER TABLE certificates ADD COLUMN IF NOT EXISTS centering_front_tb TEXT`);
-      await db.execute(sql`ALTER TABLE certificates ADD COLUMN IF NOT EXISTS centering_back_lr TEXT`);
-      await db.execute(sql`ALTER TABLE certificates ADD COLUMN IF NOT EXISTS centering_back_tb TEXT`);
-      await db.execute(sql`ALTER TABLE certificates ADD COLUMN IF NOT EXISTS defects JSONB DEFAULT '[]'`);
-      await db.execute(sql`ALTER TABLE certificates ADD COLUMN IF NOT EXISTS grade_approved_by TEXT`);
-      await db.execute(sql`ALTER TABLE certificates ADD COLUMN IF NOT EXISTS grade_approved_at TIMESTAMP`);
-
-      // Build 1 — grading image paths (original + auto-cropped + 4 variants per angle)
-      await db.execute(sql`ALTER TABLE certificates ADD COLUMN IF NOT EXISTS grading_front_original TEXT`);
-      await db.execute(sql`ALTER TABLE certificates ADD COLUMN IF NOT EXISTS grading_front_cropped TEXT`);
-      await db.execute(sql`ALTER TABLE certificates ADD COLUMN IF NOT EXISTS grading_front_greyscale TEXT`);
-      await db.execute(sql`ALTER TABLE certificates ADD COLUMN IF NOT EXISTS grading_front_highcontrast TEXT`);
-      await db.execute(sql`ALTER TABLE certificates ADD COLUMN IF NOT EXISTS grading_front_edgeenhanced TEXT`);
-      await db.execute(sql`ALTER TABLE certificates ADD COLUMN IF NOT EXISTS grading_front_inverted TEXT`);
-      await db.execute(sql`ALTER TABLE certificates ADD COLUMN IF NOT EXISTS grading_back_original TEXT`);
-      await db.execute(sql`ALTER TABLE certificates ADD COLUMN IF NOT EXISTS grading_back_cropped TEXT`);
-      await db.execute(sql`ALTER TABLE certificates ADD COLUMN IF NOT EXISTS grading_back_greyscale TEXT`);
-      await db.execute(sql`ALTER TABLE certificates ADD COLUMN IF NOT EXISTS grading_back_highcontrast TEXT`);
-      await db.execute(sql`ALTER TABLE certificates ADD COLUMN IF NOT EXISTS grading_back_edgeenhanced TEXT`);
-      await db.execute(sql`ALTER TABLE certificates ADD COLUMN IF NOT EXISTS grading_back_inverted TEXT`);
-      await db.execute(sql`ALTER TABLE certificates ADD COLUMN IF NOT EXISTS grading_angled_original TEXT`);
-      await db.execute(sql`ALTER TABLE certificates ADD COLUMN IF NOT EXISTS grading_angled_cropped TEXT`);
-      await db.execute(sql`ALTER TABLE certificates ADD COLUMN IF NOT EXISTS grading_closeup_original TEXT`);
-      await db.execute(sql`ALTER TABLE certificates ADD COLUMN IF NOT EXISTS grading_closeup_cropped TEXT`);
-      await db.execute(sql`ALTER TABLE certificates ADD COLUMN IF NOT EXISTS image_quality_checks JSONB DEFAULT '{}'`);
-      await db.execute(sql`ALTER TABLE certificates ADD COLUMN IF NOT EXISTS grading_card_id TEXT`);
-      await db.execute(sql`ALTER TABLE certificates ADD COLUMN IF NOT EXISTS grading_card_source TEXT`);
-
-      // Build 2 — detailed grading columns
-      await db.execute(sql`ALTER TABLE certificates ADD COLUMN IF NOT EXISTS corner_values JSONB`);
-      await db.execute(sql`ALTER TABLE certificates ADD COLUMN IF NOT EXISTS edge_values JSONB`);
-      await db.execute(sql`ALTER TABLE certificates ADD COLUMN IF NOT EXISTS surface_values JSONB`);
-      await db.execute(sql`ALTER TABLE certificates ADD COLUMN IF NOT EXISTS auth_status TEXT DEFAULT 'genuine'`);
-      await db.execute(sql`ALTER TABLE certificates ADD COLUMN IF NOT EXISTS auth_notes TEXT`);
-      await db.execute(sql`ALTER TABLE certificates ADD COLUMN IF NOT EXISTS grade_explanation TEXT`);
-      await db.execute(sql`ALTER TABLE certificates ADD COLUMN IF NOT EXISTS private_notes TEXT`);
-
-      // Build 1 — grading_sessions table
-      await db.execute(sql`
-        CREATE TABLE IF NOT EXISTS grading_sessions (
-          id            SERIAL PRIMARY KEY,
-          cert_id       TEXT NOT NULL,
-          started_at    TIMESTAMP NOT NULL DEFAULT NOW(),
-          completed_at  TIMESTAMP,
-          grader        TEXT,
-          model_version TEXT,
-          ai_response   JSONB,
-          final_grade   DECIMAL(3,1),
-          notes         TEXT
-        )
-      `);
-
-      // Build 1 — ai_accuracy_log table
-      await db.execute(sql`
-        CREATE TABLE IF NOT EXISTS ai_accuracy_log (
-          id              SERIAL PRIMARY KEY,
-          cert_id         TEXT NOT NULL,
-          ai_grade        DECIMAL(3,1),
-          human_grade     DECIMAL(3,1),
-          grade_delta     DECIMAL(3,1),
-          ai_centering    DECIMAL(3,1),
-          human_centering DECIMAL(3,1),
-          ai_corners      DECIMAL(3,1),
-          human_corners   DECIMAL(3,1),
-          ai_edges        DECIMAL(3,1),
-          human_edges     DECIMAL(3,1),
-          ai_surface      DECIMAL(3,1),
-          human_surface   DECIMAL(3,1),
-          logged_at       TIMESTAMP NOT NULL DEFAULT NOW()
-        )
-      `);
-      // Build 6 — grading timeline + market value columns
-      await db.execute(sql`
-        ALTER TABLE certificates
-          ADD COLUMN IF NOT EXISTS grading_status      TEXT NOT NULL DEFAULT 'submitted',
-          ADD COLUMN IF NOT EXISTS status_updated_at   TIMESTAMP,
-          ADD COLUMN IF NOT EXISTS cert_tracking_number TEXT,
-          ADD COLUMN IF NOT EXISTS estimated_value_low  DECIMAL(10,2),
-          ADD COLUMN IF NOT EXISTS estimated_value_high DECIMAL(10,2),
-          ADD COLUMN IF NOT EXISTS market_value_updated_at TIMESTAMP
-      `);
-
-      // Build 6 — extend grading_sessions with AI accuracy columns
-      await db.execute(sql`
-        ALTER TABLE grading_sessions
-          ADD COLUMN IF NOT EXISTS card_game               TEXT,
-          ADD COLUMN IF NOT EXISTS card_name               TEXT,
-          ADD COLUMN IF NOT EXISTS card_set                TEXT,
-          ADD COLUMN IF NOT EXISTS grading_duration_seconds INTEGER,
-          ADD COLUMN IF NOT EXISTS ai_draft_centering      DECIMAL(3,1),
-          ADD COLUMN IF NOT EXISTS ai_draft_corners        DECIMAL(3,1),
-          ADD COLUMN IF NOT EXISTS ai_draft_edges          DECIMAL(3,1),
-          ADD COLUMN IF NOT EXISTS ai_draft_surface        DECIMAL(3,1),
-          ADD COLUMN IF NOT EXISTS ai_draft_overall        DECIMAL(3,1),
-          ADD COLUMN IF NOT EXISTS human_centering         DECIMAL(3,1),
-          ADD COLUMN IF NOT EXISTS human_corners           DECIMAL(3,1),
-          ADD COLUMN IF NOT EXISTS human_edges             DECIMAL(3,1),
-          ADD COLUMN IF NOT EXISTS human_surface           DECIMAL(3,1),
-          ADD COLUMN IF NOT EXISTS human_overall           DECIMAL(3,1),
-          ADD COLUMN IF NOT EXISTS human_defects           JSONB,
-          ADD COLUMN IF NOT EXISTS ai_defects              JSONB,
-          ADD COLUMN IF NOT EXISTS centering_diff          DECIMAL(3,1),
-          ADD COLUMN IF NOT EXISTS corners_diff            DECIMAL(3,1),
-          ADD COLUMN IF NOT EXISTS edges_diff              DECIMAL(3,1),
-          ADD COLUMN IF NOT EXISTS surface_diff            DECIMAL(3,1),
-          ADD COLUMN IF NOT EXISTS overall_diff            DECIMAL(3,1),
-          ADD COLUMN IF NOT EXISTS correction_notes        TEXT,
-          ADD COLUMN IF NOT EXISTS is_holo                 BOOLEAN,
-          ADD COLUMN IF NOT EXISTS is_black_label          BOOLEAN
-      `);
-
-      // DIG Report — ai_defects and verified_defects columns
-      await db.execute(sql`ALTER TABLE certificates ADD COLUMN IF NOT EXISTS ai_defects JSONB DEFAULT '[]'`);
-      await db.execute(sql`ALTER TABLE certificates ADD COLUMN IF NOT EXISTS verified_defects JSONB DEFAULT '[]'`);
-
-      // DIG Report — migrate old cert IDs from MV-0000000042 format to MV42 format
-      await db.execute(sql`
-        UPDATE certificates
-        SET certificate_number = 'MV' || LTRIM(SPLIT_PART(certificate_number, '-', 2), '0')
-        WHERE certificate_number ~ '^MV-[0-9]+$'
-          AND certificate_number NOT LIKE 'MV%-%-%'
-      `);
-
-      // eBay cache — purge stale ungraded results so next load fetches graded-only data
-      await db.execute(sql`DELETE FROM ebay_price_cache WHERE last_updated_at < NOW() - INTERVAL '1 second'`);
-    } catch (err) {
-      console.error("[migration] startup migration error:", err);
-    }
-  })();
 
   app.get("/api/admin/certificates/export-csv", requireAdmin, async (_req, res) => {
     try {
@@ -5208,6 +4269,7 @@ export async function registerRoutes(httpServer: Server, app: Express): Promise<
   app.post(
     "/api/admin/certificates",
     requireAdmin,
+    uploadMemoryAdmission("admin_certificate_create", 256),
     upload.fields([
       { name: "frontImage", maxCount: 1 },
       { name: "backImage", maxCount: 1 },
@@ -5218,6 +4280,7 @@ export async function registerRoutes(httpServer: Server, app: Express): Promise<
   app.put(
     "/api/admin/certificates/:id",
     requireAdmin,
+    uploadMemoryAdmission("admin_certificate_update", 256),
     upload.fields([
       { name: "frontImage", maxCount: 1 },
       { name: "backImage", maxCount: 1 },
@@ -5415,25 +4478,25 @@ export async function registerRoutes(httpServer: Server, app: Express): Promise<
    *   refuses loudly, per cert, with a machine-readable code.
    */
   type PrintApprovalBlock = { certId: string; code: string; message: string };
-  const checkPrintApproval = (id: string, c: Record<string, unknown>): PrintApprovalBlock | null => {
+  const checkPrintApproval = (id: string, c: Record<string, unknown>): PrintApprovalBlock[] => {
     const graderStatus = String(c.graderStatus ?? "");
     if (graderStatus === "pending_review" || graderStatus === "assigned") {
-      return {
+      return [{
         certId: id,
         code: "grade_review_incomplete",
         message:
           graderStatus === "pending_review"
             ? `${id}: grading review is not complete (awaiting approval).`
             : `${id}: this card is back with the grader for correction.`,
-      };
+      }];
     }
     if (!c.gradeApprovedAt) {
-      return { certId: id, code: "not_approved", message: `${id}: grade has not been approved.` };
+      return [{ certId: id, code: "not_approved", message: `${id}: grade has not been approved.` }];
     }
     if (String(c.status ?? "") !== "active") {
-      return { certId: id, code: "cert_not_active", message: `${id}: certificate is not active (voided).` };
+      return [{ certId: id, code: "cert_not_active", message: `${id}: certificate is not active (voided).` }];
     }
-    return null;
+    return [];
   };
 
   // v525 — single-sheet print-and-cut batch. Up to 4 cards per A4 sheet,
@@ -5464,9 +4527,11 @@ export async function registerRoutes(httpServer: Server, app: Express): Promise<
       if (!Array.isArray(certIds) || certIds.length === 0) {
         return res.status(400).json({ error: "Provide certIds array with at least 1 entry" });
       }
+      const idempotencyKey = req.header("Idempotency-Key")?.trim() ?? "";
+      if (!idempotencyKey) return res.status(400).json({ error: "Idempotency-Key header required" });
       const {
         MAX_CERTS_PER_MULTI_BATCH,
-        CERTS_PER_PAGE,
+        printArtifactPlan,
         SHEET_LAYOUT_VERSION,
         generatePrintBatchPDF,
         generatePrintBatchCutSVG,
@@ -5485,6 +4550,79 @@ export async function registerRoutes(httpServer: Server, app: Express): Promise<
       // Normalize input IDs so "MV-0000000042" and "MV42" both resolve —
       // allCerts store certId in canonical form, and find() below is exact.
       const ids = certIds.map((c: unknown) => normalizeCertId(String(c)));
+
+      // Rolling-compatible adapter: this legacy URL now delegates to the
+      // canonical durable workflow. Cached clients still receive the envelope
+      // they understand, but no physical artifact bypasses PRINT_ARTIFACT.
+      const prior = await db.execute(sql`
+        SELECT certificate_number,print_state,ownership_status
+          FROM certificates
+         WHERE certificate_number IN (${sql.join(
+           ids.map((certId) => sql`${certId}`),
+           sql`, `
+         )})
+      `);
+      const requiringReprint = (
+        prior.rows as unknown as Array<{
+          certificate_number: string;
+          print_state: string;
+          ownership_status: string;
+        }>
+      )
+        .filter(
+          (row) =>
+            ["printed", "reprinted", "completed", "reprint_required"].includes(row.print_state) ||
+            row.ownership_status !== "unclaimed"
+        )
+        .map((row) => row.certificate_number);
+      if (requiringReprint.length > 0) {
+        return res.status(409).json({
+          error: "One or more certificates require an audited reprint reason.",
+          claimedCertIds: requiringReprint,
+          code: "CLAIMED_CERTS_PRESENT",
+        });
+      }
+      const durable = await createBatchAtomic({
+        certIds: ids,
+        identity: resolveActor(req),
+        idempotencyKey,
+      });
+      if (!durable.batchId || durable.applied.length === 0) {
+        const gradeFailureCodes = new Set([
+          "missing_numeric_grade",
+          "off_ladder_numeric_grade",
+          "kind_grade_contradiction",
+          "invalid_authentication_grade",
+        ]);
+        const responseCode = durable.rejected.some((entry) => gradeFailureCodes.has(entry.code ?? ""))
+          ? "UNPRINTABLE_GRADE"
+          : "NOT_APPROVED_FOR_PRINT";
+        return res.status(422).json({
+          error: durable.rejected[0]?.message ?? "No certificates were eligible for printing.",
+          code: responseCode,
+          blockedCertIds: durable.rejected.map((entry) => entry.certId),
+          blocked: durable.rejected,
+        });
+      }
+      return res.json({
+        pdfUrl: durable.pdfUrl,
+        ...(durable.pdfOnly
+          ? {}
+          : {
+              pngUrl: `/api/admin/print-batch/${durable.batchId}/png`,
+              printPngUrl: `/api/admin/print-batch/${durable.batchId}/print-png`,
+              cricutSvgUrl: `/api/admin/print-batch/${durable.batchId}/cricut-cut.svg`,
+            }),
+        batchId: durable.batchId,
+        certIds: durable.applied,
+        mintedFor: [],
+        generatedAt: new Date().toISOString(),
+        isRecentDuplicate: durable.isDuplicate,
+        isMultiSheet: durable.pdfOnly,
+        isPdfMultiPage: durable.isPdfMultiPage,
+        pageCount: durable.pageCount,
+        sheetLayoutVersion: SHEET_LAYOUT_VERSION,
+      });
 
       // Resolve each cert. Reject claimed certs at this endpoint (security
       // boundary kept intact — admins can still reprint claimed certs via
@@ -5525,8 +4663,7 @@ export async function registerRoutes(httpServer: Server, app: Express): Promise<
       for (const id of ids) {
         const c = allCerts.find((x: any) => x.certId === id);
         if (!c) continue; // handled as `missing` below
-        const block = checkPrintApproval(id, c as unknown as Record<string, unknown>);
-        if (block) unapproved.push(block);
+        unapproved.push(...checkPrintApproval(id, c as unknown as Record<string, unknown>));
       }
       if (unapproved.length) {
         return res.status(422).json({
@@ -5586,8 +4723,12 @@ export async function registerRoutes(httpServer: Server, app: Express): Promise<
       // Multi-sheet batches (> one page of certs) are guillotine-only: a
       // multi-page PDF, no Cricut PNG/SVG cut files. Single-sheet batches keep
       // the full artefact set (PDF + Cricut PNG + print PNG + cut SVG).
-      const isMultiSheet = items.length > CERTS_PER_PAGE;
-      const pageCount = Math.ceil(items.length / CERTS_PER_PAGE);
+      const artifactPlan = printArtifactPlan(items.length);
+      // Legacy response name retained for cached clients: it means "PDF only",
+      // not literally "more than one PDF page". The explicit field below
+      // carries the real page distinction.
+      const isMultiSheet = artifactPlan.pdfOnly;
+      const pageCount = artifactPlan.pageCount;
 
       // Idempotency check — same batchId from same admin within 5 minutes?
       let isRecentDuplicate = false;
@@ -5625,6 +4766,7 @@ export async function registerRoutes(httpServer: Server, app: Express): Promise<
             generatedAt,
             isRecentDuplicate: true,
             isMultiSheet: true,
+            isPdfMultiPage: artifactPlan.isPdfMultiPage,
             pageCount,
             sheetLayoutVersion: SHEET_LAYOUT_VERSION,
           });
@@ -5649,6 +4791,9 @@ export async function registerRoutes(httpServer: Server, app: Express): Promise<
             mintedFor,
             generatedAt,
             isRecentDuplicate: true,
+            isMultiSheet: false,
+            isPdfMultiPage: false,
+            pageCount,
             sheetLayoutVersion: SHEET_LAYOUT_VERSION,
           });
         }
@@ -5681,7 +4826,7 @@ export async function registerRoutes(httpServer: Server, app: Express): Promise<
         // Persist PDF + PNG (+ 400-DPI print PNG) to R2 so the client can retrieve
         // them via stable server URLs instead of expiring blob URLs. SVG inline.
         try {
-          await uploadPrintBatchArtifacts(batchId, pdfBuf, pngBuf, printPngBuf);
+          await uploadPrintBatchArtifacts(batchId, pdfBuf, pngBuf!, printPngBuf!);
         } catch (uploadErr: any) {
           console.error("[print-batch] R2 upload failed:", uploadErr.message);
           return res.status(500).json({ error: "Failed to store print batch artefacts" });
@@ -5710,6 +4855,8 @@ export async function registerRoutes(httpServer: Server, app: Express): Promise<
                 cert_count: items.length,
                 page_count: pageCount,
                 multi_sheet: isMultiSheet,
+                pdf_only: artifactPlan.pdfOnly,
+                pdf_multi_page: artifactPlan.isPdfMultiPage,
                 pdf_size_bytes: pdfBuf.length,
                 svg_size_bytes: Buffer.byteLength(svgStr, "utf8"),
                 png_size_bytes: pngBuf?.length ?? 0,
@@ -5770,6 +4917,7 @@ export async function registerRoutes(httpServer: Server, app: Express): Promise<
           generatedAt,
           isRecentDuplicate,
           isMultiSheet: true,
+          isPdfMultiPage: artifactPlan.isPdfMultiPage,
           pageCount,
           sheetLayoutVersion: SHEET_LAYOUT_VERSION,
         });
@@ -5786,6 +4934,7 @@ export async function registerRoutes(httpServer: Server, app: Express): Promise<
           generatedAt,
           isRecentDuplicate,
           isMultiSheet: false,
+          isPdfMultiPage: false,
           pageCount,
           sheetLayoutVersion: SHEET_LAYOUT_VERSION,
         });
@@ -5800,8 +4949,10 @@ export async function registerRoutes(httpServer: Server, app: Express): Promise<
     try {
       const { sheetRef } = req.body as { sheetRef: string };
       if (!sheetRef) return res.status(400).json({ error: "sheetRef required" });
-      await storage.markSheetPrinted(sheetRef);
-      res.json({ ok: true });
+      const batchId = String(sheetRef).replace(/^print_batch_/, "");
+      if (!/^[a-f0-9]{16}$/.test(batchId)) return res.status(400).json({ error: "Valid print batch required" });
+      const result = await markBatchPrinted(batchId, resolveActor(req));
+      res.json({ ok: result.applied.length > 0, ...result });
     } catch (err: any) {
       sendServerError(res, err);
     }
@@ -5833,14 +4984,18 @@ export async function registerRoutes(httpServer: Server, app: Express): Promise<
         });
       }
       const { certIds, reason } = parsed.data;
+      const idempotencyKey = req.header("Idempotency-Key")?.trim() ?? "";
+      if (!idempotencyKey) return res.status(400).json({ error: "Idempotency-Key header required" });
       const {
         MAX_CERTS_PER_BATCH,
         SHEET_LAYOUT_VERSION,
+        printArtifactPlan,
         generatePrintBatchPDF,
         generatePrintBatchCutSVG,
         generatePrintBatchPNG,
         deriveBatchId,
         uploadPrintBatchArtifacts,
+        uploadPrintBatchPDF,
       } = await import("./print-batch");
       if (certIds.length > MAX_CERTS_PER_BATCH) {
         return res.status(400).json({ error: `Maximum ${MAX_CERTS_PER_BATCH} certs per batch` });
@@ -5848,6 +5003,42 @@ export async function registerRoutes(httpServer: Server, app: Express): Promise<
       // Normalize input IDs so "MV-0000000042" and "MV42" both resolve —
       // allCerts store certId in canonical form, and find() below is exact.
       const ids = certIds.map((c: unknown) => normalizeCertId(String(c)));
+
+      const identity = resolveActor(req);
+      const durable = await createBatchAtomic({
+        certIds: ids,
+        identity,
+        reason,
+        reasonCategory: "legacy_unspecified",
+        idempotencyKey,
+        recordReprintRequest: true,
+      });
+      if (!durable.batchId || durable.applied.length === 0) {
+        return res.status(422).json({
+          error: durable.rejected[0]?.message ?? "No certificates were eligible for reprinting.",
+          code: durable.rejected[0]?.code ?? "PRINT_BATCH_REJECTED",
+          blockedCertIds: durable.rejected.map((entry) => entry.certId),
+          blocked: durable.rejected,
+        });
+      }
+      return res.json({
+        pdfUrl: durable.pdfUrl,
+        ...(durable.pdfOnly
+          ? {}
+          : {
+              pngUrl: `/api/admin/print-batch/${durable.batchId}/png`,
+              cricutSvgUrl: `/api/admin/print-batch/${durable.batchId}/cricut-cut.svg`,
+            }),
+        batchId: durable.batchId,
+        certIds: durable.applied,
+        mintedFor: [],
+        generatedAt: new Date().toISOString(),
+        sheetLayoutVersion: SHEET_LAYOUT_VERSION,
+        auditRows: durable.applied.map((certId) => ({ certId, ok: true })),
+        isMultiSheet: durable.pdfOnly,
+        isPdfMultiPage: durable.isPdfMultiPage,
+        pageCount: durable.pageCount,
+      });
 
       // Resolve certs. Skip the "unclaimed only" check — that's the whole
       // point of this endpoint. Still reject not-found / soft-deleted /
@@ -5887,8 +5078,7 @@ export async function registerRoutes(httpServer: Server, app: Express): Promise<
       for (const id of ids) {
         const c = allCerts.find((x: any) => x.certId === id);
         if (!c) continue;
-        const block = checkPrintApproval(id, c as unknown as Record<string, unknown>);
-        if (block) unapprovedRe.push(block);
+        unapprovedRe.push(...checkPrintApproval(id, c as unknown as Record<string, unknown>));
       }
       if (unapprovedRe.length) {
         return res.status(422).json({
@@ -5940,16 +5130,25 @@ export async function registerRoutes(httpServer: Server, app: Express): Promise<
       // We still derive batchId from inputs so the operator can match
       // filenames at the printer.
 
-      const [pdfBuf, svgStr, pngBuf] = await Promise.all([
-        generatePrintBatchPDF(items),
-        Promise.resolve(generatePrintBatchCutSVG(items.length)),
-        generatePrintBatchPNG(items),
-      ]);
+      const artifactPlan = printArtifactPlan(items.length);
+      let pdfBuf: Buffer;
+      let svgStr = "";
+      let pngBuf: Buffer | null = null;
+      if (artifactPlan.pdfOnly) {
+        pdfBuf = await generatePrintBatchPDF(items);
+      } else {
+        [pdfBuf, svgStr, pngBuf] = await Promise.all([
+          generatePrintBatchPDF(items),
+          Promise.resolve(generatePrintBatchCutSVG(items.length)),
+          generatePrintBatchPNG(items),
+        ]);
+      }
 
       // Persist PDF + PNG to R2 so the client can retrieve them via stable
       // server URLs instead of expiring blob URLs.
       try {
-        await uploadPrintBatchArtifacts(batchId, pdfBuf, pngBuf);
+        if (artifactPlan.pdfOnly) await uploadPrintBatchPDF(batchId, pdfBuf);
+        else await uploadPrintBatchArtifacts(batchId, pdfBuf, pngBuf!);
       } catch (uploadErr: any) {
         console.error("[reprint] R2 upload failed:", uploadErr.message);
         return res.status(500).json({ error: "Failed to store print batch artefacts" });
@@ -6004,10 +5203,10 @@ export async function registerRoutes(httpServer: Server, app: Express): Promise<
               cert_count: items.length,
               pdf_size_bytes: pdfBuf.length,
               svg_size_bytes: Buffer.byteLength(svgStr, "utf8"),
-              png_size_bytes: pngBuf.length,
+              png_size_bytes: pngBuf?.length ?? 0,
               auto_generated_codes_for: mintedFor,
               sheet_layout_version: SHEET_LAYOUT_VERSION,
-              layout: "front_plus_insert",
+              layout: artifactPlan.pdfOnly ? "pdf_only" : "front_plus_insert",
               source: "reprint",
               reason,
             })}::jsonb,
@@ -6025,12 +5224,19 @@ export async function registerRoutes(httpServer: Server, app: Express): Promise<
 
       res.json({
         pdfUrl: `/api/admin/print-batch/${batchId}/pdf`,
-        pngUrl: `/api/admin/print-batch/${batchId}/png`,
-        svg: Buffer.from(svgStr, "utf8").toString("base64"),
+        ...(artifactPlan.pdfOnly
+          ? {}
+          : {
+              pngUrl: `/api/admin/print-batch/${batchId}/png`,
+              svg: Buffer.from(svgStr, "utf8").toString("base64"),
+            }),
         batchId,
         certIds: ids,
         mintedFor,
         generatedAt,
+        isMultiSheet: artifactPlan.pdfOnly,
+        isPdfMultiPage: artifactPlan.isPdfMultiPage,
+        pageCount: artifactPlan.pageCount,
         sheetLayoutVersion: SHEET_LAYOUT_VERSION,
         auditRows,
       });
@@ -6139,7 +5345,9 @@ export async function registerRoutes(httpServer: Server, app: Express): Promise<
       const batchId = String(req.params.batchId);
       const download = req.query.download === "1";
       const { r2KeyForPrintBatch } = await import("./print-batch");
-      const key = r2KeyForPrintBatch(batchId, "pdf");
+      const durable = await resolveCommittedPrintArtifactKey(pool, batchId, "pdf");
+      const key = durable.operationExists ? durable.key : r2KeyForPrintBatch(batchId, "pdf");
+      if (!key) return res.status(404).json({ error: "Print batch PDF is not committed" });
       const head = await headR2(key);
       if (!head) return res.status(404).json({ error: "Print batch PDF not found" });
       const { GetObjectCommand } = await import("@aws-sdk/client-s3");
@@ -6173,7 +5381,9 @@ export async function registerRoutes(httpServer: Server, app: Express): Promise<
       }
       const batchId = String(req.params.batchId);
       const { r2KeyForPrintBatch } = await import("./print-batch");
-      const key = r2KeyForPrintBatch(batchId, "png");
+      const durable = await resolveCommittedPrintArtifactKey(pool, batchId, "cricut-png");
+      const key = durable.operationExists ? durable.key : r2KeyForPrintBatch(batchId, "png");
+      if (!key) return res.status(404).json({ error: "Print batch PNG is not committed" });
       const head = await headR2(key);
       if (!head) return res.status(404).json({ error: "Print batch PNG not found" });
       const { GetObjectCommand } = await import("@aws-sdk/client-s3");
@@ -6208,7 +5418,9 @@ export async function registerRoutes(httpServer: Server, app: Express): Promise<
       }
       const batchId = String(req.params.batchId);
       const { r2KeyForPrintBatch } = await import("./print-batch");
-      const key = r2KeyForPrintBatch(batchId, "print-png");
+      const durable = await resolveCommittedPrintArtifactKey(pool, batchId, "print-png");
+      const key = durable.operationExists ? durable.key : r2KeyForPrintBatch(batchId, "print-png");
+      if (!key) return res.status(404).json({ error: "Print batch print PNG is not committed" });
       const head = await headR2(key);
       if (!head) return res.status(404).json({ error: "Print batch print PNG not found" });
       const { GetObjectCommand } = await import("@aws-sdk/client-s3");
@@ -6243,7 +5455,9 @@ export async function registerRoutes(httpServer: Server, app: Express): Promise<
       }
       const batchId = String(req.params.batchId);
       const { r2KeyForCricutSvg } = await import("./print-batch");
-      const key = r2KeyForCricutSvg(batchId);
+      const durable = await resolveCommittedPrintArtifactKey(pool, batchId, "cricut-svg");
+      const key = durable.operationExists ? durable.key : r2KeyForCricutSvg(batchId);
+      if (!key) return res.status(404).json({ error: "Print batch cut SVG is not committed" });
       const head = await headR2(key);
       if (!head) return res.status(404).json({ error: "Print batch cut SVG not found" });
       const { GetObjectCommand } = await import("@aws-sdk/client-s3");
@@ -6358,7 +5572,11 @@ export async function registerRoutes(httpServer: Server, app: Express): Promise<
   app.post("/api/admin/certificates/:id/nfc", requireAdmin, async (req, res) => {
     try {
       const id = parseInt(String(req.params.id), 10);
-      const { uid, chipType, url, writtenBy } = req.body;
+      if (!Number.isInteger(id) || id <= 0) return res.status(400).json({ error: "Invalid certificate id" });
+      const uid = typeof req.body?.uid === "string" ? req.body.uid.trim() : "";
+      const url = typeof req.body?.url === "string" ? req.body.url.trim() : "";
+      const chipType = typeof req.body?.chipType === "string" ? req.body.chipType.trim() || undefined : undefined;
+      const overwrite = req.body?.overwrite === true;
       if (!uid || !url) return res.status(400).json({ error: "uid and url are required" });
 
       // Duplicate UID guard — one tag, one certificate only
@@ -6373,7 +5591,13 @@ export async function registerRoutes(httpServer: Server, app: Express): Promise<
       // Guard: cert already has a different UID unless overwrite is explicitly confirmed
       const target = await storage.getCertificate(id);
       if (!target) return res.status(404).json({ error: "Certificate not found" });
-      if (target.nfcUid && target.nfcUid !== uid && !req.body.overwrite) {
+      if (target.nfcLocked) {
+        return res.status(409).json({ error: "NFC binding is physically locked", code: "NFC_LOCKED" });
+      }
+      if (target.nfcLockPendingAt) {
+        return res.status(409).json({ error: "NFC physical-lock reconciliation is pending", code: "NFC_LOCK_PENDING" });
+      }
+      if (target.nfcUid && target.nfcUid.toLowerCase() !== uid.toLowerCase() && !overwrite) {
         return res.status(409).json({
           error: "Certificate already has an NFC tag",
           code: "ALREADY_ASSIGNED",
@@ -6402,15 +5626,20 @@ export async function registerRoutes(httpServer: Server, app: Express): Promise<
         });
       }
 
-      // Operator attribution. `writtenBy` arrived from the request body and NO client ever sent it,
-      // so `nfc_written_by` was always NULL and no NFC action had an author. The authenticated admin
-      // is the truthful answer and cannot be spoofed by the body.
-      const nfcActor = renderAdminUser(req) || (typeof writtenBy === "string" ? writtenBy : null);
-      const previousUid = target.nfcUid ?? null;
+      // Attribution comes only from the authenticated session. Body-supplied
+      // authorship is not evidence and is deliberately ignored.
+      const nfcActor = renderAdminUser(req);
 
-      let cert;
+      let mutation;
       try {
-        cert = await storage.saveNfcData(id, { uid, chipType, url, writtenBy: nfcActor ?? undefined });
+        mutation = await storage.saveNfcData(id, {
+          uid,
+          chipType,
+          url,
+          actor: nfcActor,
+          overwrite,
+          expectedUid: target.nfcUid ?? null,
+        });
       } catch (bindErr: any) {
         // 0088's partial unique index on lower(nfc_uid) is the REAL "one tag, one certificate"
         // authority — the read guard above races and two concurrent binds both pass it. Translate the
@@ -6421,16 +5650,21 @@ export async function registerRoutes(httpServer: Server, app: Express): Promise<
         }
         throw bindErr;
       }
+      if (mutation.outcome === "NOT_FOUND") return res.status(404).json({ error: "Certificate not found" });
+      if (mutation.outcome === "LOCKED") {
+        return res.status(409).json({ error: "NFC binding is physically locked", code: "NFC_LOCKED" });
+      }
+      if (mutation.outcome === "LOCK_PENDING") {
+        return res.status(409).json({ error: "NFC physical-lock reconciliation is pending", code: "NFC_LOCK_PENDING" });
+      }
+      if (mutation.outcome === "ALREADY_ASSIGNED") {
+        return res.status(409).json({ error: "Certificate already has an NFC tag", code: "ALREADY_ASSIGNED" });
+      }
+      if (mutation.outcome === "STALE_BINDING") {
+        return res.status(409).json({ error: "NFC binding changed concurrently", code: "NFC_BINDING_CHANGED" });
+      }
+      const cert = await storage.getCertificate(id);
       if (!cert) return res.status(404).json({ error: "Certificate not found" });
-
-      // NFC binding was entirely unlogged: no audit row on bind, overwrite, lock or clear. A
-      // tamper-evident chip whose binding cannot be reconstructed afterwards is not evidence.
-      await storage.writeAuditLog("certificate", String(id), "nfc_bound", nfcActor ?? "admin", {
-        uid,
-        chip_type: chipType ?? null,
-        previous_uid: previousUid,
-        overwrite: Boolean(req.body.overwrite),
-      });
       res.json(cert);
     } catch (err: any) {
       console.error("NFC save error:", err.message);
@@ -6438,15 +5672,138 @@ export async function registerRoutes(httpServer: Server, app: Express): Promise<
     }
   });
 
+  app.post("/api/admin/certificates/:id/nfc/lock/prepare", requireAdmin, async (req, res) => {
+    try {
+      const id = parseInt(String(req.params.id), 10);
+      if (!Number.isInteger(id) || id <= 0) return res.status(400).json({ error: "Invalid certificate id" });
+      const uid = typeof req.body?.uid === "string" ? req.body.uid.trim() : "";
+      if (!uid) return res.status(400).json({ error: "NFC UID is required", code: "NFC_UID_REQUIRED" });
+      if (req.body?.lockMethod !== NFC_PHYSICAL_LOCK_METHOD) {
+        return res.status(400).json({ error: "Unsupported NFC lock method", code: "NFC_LOCK_METHOD_UNSUPPORTED" });
+      }
+
+      const mutation = await storage.prepareNfcLock(id, {
+        uid,
+        lockMethod: NFC_PHYSICAL_LOCK_METHOD,
+        actor: renderAdminUser(req),
+      });
+      if (mutation.outcome === "NOT_FOUND") return res.status(404).json({ error: "Certificate not found" });
+      if (mutation.outcome === "UID_MISMATCH") {
+        return res.status(409).json({ error: "NFC UID does not match the stored binding", code: "NFC_UID_MISMATCH" });
+      }
+      if (mutation.outcome === "INCOMPLETE_BINDING") {
+        return res.status(409).json({ error: "NFC tag has not been fully written", code: "NFC_BINDING_INCOMPLETE" });
+      }
+      if (mutation.outcome === "LOCK_PENDING") {
+        return res
+          .status(409)
+          .json({ error: "NFC physical-lock reconciliation is already pending", code: "NFC_LOCK_PENDING" });
+      }
+      if (mutation.outcome === "INVALID_PROOF" || mutation.outcome === "UNSUPPORTED_METHOD") {
+        return res.status(400).json({ error: "Invalid NFC lock intent", code: "NFC_LOCK_EVIDENCE_INVALID" });
+      }
+      const cert = await storage.getCertificate(id);
+      if (!cert) return res.status(404).json({ error: "Certificate not found" });
+      res.json({ certificate: cert, attemptToken: mutation.attemptToken ?? null });
+    } catch (err: any) {
+      console.error("NFC lock prepare error:", err.message);
+      res.status(500).json({ error: "Failed to prepare NFC lock" });
+    }
+  });
+
   app.post("/api/admin/certificates/:id/nfc/lock", requireAdmin, async (req, res) => {
     try {
       const id = parseInt(String(req.params.id), 10);
-      const cert = await storage.lockNfc(id);
+      if (!Number.isInteger(id) || id <= 0) return res.status(400).json({ error: "Invalid certificate id" });
+      const uid = typeof req.body?.uid === "string" ? req.body.uid.trim() : "";
+      const lockMethod = req.body?.lockMethod;
+      if (!isSupportedNfcPhysicalLockMethod(lockMethod)) {
+        return res.status(400).json({ error: "Unsupported NFC lock method", code: "NFC_LOCK_METHOD_UNSUPPORTED" });
+      }
+      if (!uid) return res.status(400).json({ error: "NFC UID is required", code: "NFC_UID_REQUIRED" });
+      const isRecovery = lockMethod === NFC_PHYSICAL_LOCK_RECOVERY_METHOD;
+      const attemptToken = typeof req.body?.attemptToken === "string" ? req.body.attemptToken.trim() : "";
+      const reason = typeof req.body?.reason === "string" ? req.body.reason.trim().slice(0, 1000) : "";
+      if (!isRecovery && (req.body?.physicalLockConfirmed !== true || !attemptToken)) {
+        return res.status(400).json({
+          error: "Browser physical-lock confirmation and attempt token are required",
+          code: "NFC_PHYSICAL_LOCK_UNCONFIRMED",
+        });
+      }
+      if (isRecovery && (req.body?.operatorReadOnlyVerified !== true || !reason)) {
+        return res.status(400).json({
+          error: "Operator read-only verification and a reconciliation reason are required",
+          code: "NFC_RECOVERY_EVIDENCE_REQUIRED",
+        });
+      }
+
+      const mutation = await storage.lockNfc(id, {
+        uid,
+        physicalLockConfirmed: !isRecovery,
+        operatorReadOnlyVerified: isRecovery,
+        lockMethod,
+        attemptToken: attemptToken || undefined,
+        reason: reason || undefined,
+        actor: renderAdminUser(req),
+      });
+      if (mutation.outcome === "NOT_FOUND") return res.status(404).json({ error: "Certificate not found" });
+      if (mutation.outcome === "UID_MISMATCH") {
+        return res.status(409).json({ error: "NFC UID does not match the stored binding", code: "NFC_UID_MISMATCH" });
+      }
+      if (mutation.outcome === "INCOMPLETE_BINDING") {
+        return res.status(409).json({ error: "NFC tag has not been fully written", code: "NFC_BINDING_INCOMPLETE" });
+      }
+      if (mutation.outcome === "INTENT_MISMATCH" || mutation.outcome === "LOCK_PENDING") {
+        return res.status(409).json({ error: "NFC lock intent does not match", code: "NFC_LOCK_INTENT_MISMATCH" });
+      }
+      if (mutation.outcome === "INVALID_PROOF" || mutation.outcome === "UNSUPPORTED_METHOD") {
+        return res.status(400).json({ error: "Invalid NFC physical-lock evidence", code: "NFC_LOCK_EVIDENCE_INVALID" });
+      }
+      const cert = await storage.getCertificate(id);
       if (!cert) return res.status(404).json({ error: "Certificate not found" });
       res.json(cert);
     } catch (err: any) {
       console.error("NFC lock error:", err.message);
       res.status(500).json({ error: "Failed to lock NFC" });
+    }
+  });
+
+  app.post("/api/admin/certificates/:id/nfc/lock/cancel", requireAdmin, async (req, res) => {
+    try {
+      const id = parseInt(String(req.params.id), 10);
+      if (!Number.isInteger(id) || id <= 0) return res.status(400).json({ error: "Invalid certificate id" });
+      const uid = typeof req.body?.uid === "string" ? req.body.uid.trim() : "";
+      const attemptToken = typeof req.body?.attemptToken === "string" ? req.body.attemptToken.trim() : "";
+      const reason = typeof req.body?.reason === "string" ? req.body.reason.trim().slice(0, 1000) : "";
+      const verificationMethod = req.body?.verificationMethod;
+      if (!uid || !attemptToken || verificationMethod !== NFC_PHYSICAL_LOCK_CANCEL_METHOD || !reason) {
+        return res.status(400).json({ error: "UID, attempt token and verification reason are required" });
+      }
+      const mutation = await storage.cancelNfcLock(id, {
+        uid,
+        attemptToken,
+        verificationMethod,
+        actor: renderAdminUser(req),
+        reason,
+      });
+      if (mutation.outcome === "NOT_FOUND") return res.status(404).json({ error: "Certificate not found" });
+      if (mutation.outcome === "LOCKED") {
+        return res.status(409).json({ error: "NFC binding is physically locked", code: "NFC_LOCKED" });
+      }
+      if (mutation.outcome === "UID_MISMATCH" || mutation.outcome === "INTENT_MISMATCH") {
+        return res.status(409).json({ error: "NFC lock intent does not match", code: "NFC_LOCK_INTENT_MISMATCH" });
+      }
+      if (mutation.outcome === "INVALID_PROOF") {
+        return res
+          .status(400)
+          .json({ error: "Cancellation evidence is required", code: "NFC_CANCEL_EVIDENCE_REQUIRED" });
+      }
+      const cert = await storage.getCertificate(id);
+      if (!cert) return res.status(404).json({ error: "Certificate not found" });
+      res.json(cert);
+    } catch (err: any) {
+      console.error("NFC lock cancel error:", err.message);
+      res.status(500).json({ error: "Failed to cancel NFC lock intent" });
     }
   });
 
@@ -6463,17 +5820,20 @@ export async function registerRoutes(httpServer: Server, app: Express): Promise<
   app.delete("/api/admin/certificates/:id/nfc", requireAdmin, async (req, res) => {
     try {
       const id = parseInt(String(req.params.id), 10);
-      // Read the outgoing UID BEFORE clearing it: `clearNfc` nulls all twelve columns, so afterwards
-      // there is nothing left to say which tag was removed. A failed/replaced tag whose identity was
-      // destroyed with no record is exactly the history a replacement workflow needs.
-      const before = await storage.getCertificate(id);
-      const cert = await storage.clearNfc(id);
+      if (!Number.isInteger(id) || id <= 0) return res.status(400).json({ error: "Invalid certificate id" });
+      const reason = typeof req.body?.reason === "string" ? req.body.reason.slice(0, 1000) : null;
+      const mutation = await storage.clearNfc(id, { actor: renderAdminUser(req), reason });
+      if (mutation.outcome === "LOCKED") {
+        return res.status(409).json({ error: "NFC binding is physically locked", code: "NFC_LOCKED" });
+      }
+      if (mutation.outcome === "LOCK_PENDING") {
+        return res.status(409).json({ error: "NFC physical-lock reconciliation is pending", code: "NFC_LOCK_PENDING" });
+      }
+      if (mutation.outcome === "STALE_BINDING") {
+        return res.status(409).json({ error: "NFC binding changed concurrently", code: "NFC_BINDING_CHANGED" });
+      }
+      const cert = await storage.getCertificate(id);
       if (!cert) return res.status(404).json({ error: "Certificate not found" });
-      await storage.writeAuditLog("certificate", String(id), "nfc_cleared", renderAdminUser(req) || "admin", {
-        previous_uid: before?.nfcUid ?? null,
-        previous_scan_count: before?.nfcScanCount ?? null,
-        reason: typeof req.body?.reason === "string" ? req.body.reason.slice(0, 1000) : null,
-      });
       res.json(cert);
     } catch (err: any) {
       console.error("NFC clear error:", err.message);
@@ -6486,14 +5846,13 @@ export async function registerRoutes(httpServer: Server, app: Express): Promise<
   app.get("/api/nfc/:certId", async (req, res) => {
     try {
       const certId = req.params.certId.toUpperCase();
-      const cert = await storage.getCertificateByCertId(certId);
-      // Public-visibility gate: an unapproved/ungraded cert is not public, so a
-      // chip tap on one resolves to not-found (same as findCertByIdFlex).
-      if (!cert || (cert as { gradeApprovedAt?: unknown }).gradeApprovedAt == null) {
+      const cert = await findCertByIdFlex(certId);
+      // The canonical public resolver suppresses voided, unapproved, deleted,
+      // and otherwise hidden certificates before telemetry or redirect data.
+      if (!cert) {
         return res.status(404).json({ error: "Certificate not found" });
       }
-      const ip =
-        (req.headers["x-forwarded-for"] as string)?.split(",")[0]?.trim() || req.socket.remoteAddress || undefined;
+      const ip = req.ip || req.socket.remoteAddress || undefined;
       await storage.recordNfcScan(certId, ip);
       res.json({
         certId: cert.certId,
@@ -6904,7 +6263,7 @@ export async function registerRoutes(httpServer: Server, app: Express): Promise<
       if (email) {
         subs = await storage.getSubmissionsByEmail(email);
       }
-      res.json(subs);
+      res.json(await Promise.all(subs.map((sub) => decorateSubmissionReceiptPhotos(sub))));
     } catch (err) {
       console.error("[submissions/me] error:", err);
       res.status(500).json({ error: "Failed to load submissions." });
@@ -6941,9 +6300,14 @@ export async function registerRoutes(httpServer: Server, app: Express): Promise<
   app.post(
     "/api/admin/submissions/:id/mark-received",
     requireAdmin,
+    uploadMemoryAdmission("admin_receipt", 128),
     receiptUpload.array("photos", 6),
     async (req, res) => {
       try {
+        const idempotencyKey = req.header("Idempotency-Key")?.trim() ?? "";
+        if (!idempotencyKey) {
+          return res.status(400).json({ error: "Idempotency-Key header required" });
+        }
         const sub = await storage.getSubmissionBySubmissionId(String(req.params.id));
         if (!sub) return res.status(404).json({ error: "Submission not found" });
         const numId = typeof sub.id === "string" ? parseInt(sub.id, 10) : sub.id;
@@ -6956,31 +6320,22 @@ export async function registerRoutes(httpServer: Server, app: Express): Promise<
             return res.status(400).json({ error: `File "${f.originalname}" is not a valid image.` });
           }
         }
-        const photoUrls: string[] = [];
-        for (const file of files) {
-          const key = `receipt/${sub.submissionId}/${Date.now()}-${file.originalname}`;
-          await uploadToR2(key, file.buffer, file.mimetype);
-          const url = await getR2SignedUrl(key, 60 * 60 * 24 * 7); // 7-day URL (AWS SigV4 hard cap)
-          photoUrls.push(url);
-        }
         // Also accept pre-uploaded URLs from body (for admin typing in URLs)
         const bodyUrls: string[] = Array.isArray(req.body.photo_urls) ? req.body.photo_urls : [];
-        const allUrls = [...photoUrls, ...bodyUrls];
-
-        await storage.updateSubmissionStatus(numId, "received", {
-          onReceiptPhotoUrls: JSON.stringify(allUrls),
+        const persisted = await persistSubmissionReceipt({
+          submissionId: numId,
+          trackingNumber: sub.submissionId,
+          expectedStatus: sub.status,
+          expectedRevision: Number(sub.onReceiptPhotoRevision ?? sub.on_receipt_photo_revision ?? 0),
+          adminUser: req.session.adminEmail || "admin",
+          files,
+          externalUrls: bodyUrls,
+          requestIdempotencyKey: idempotencyKey,
         });
-
-        await storage.writeAuditLog(
-          "submission",
-          sub.submissionId,
-          "status_received",
-          req.session.adminEmail || "admin",
-          { photoCount: allUrls.length }
-        );
+        const allUrls = persisted.photoUrls;
 
         const email = sub.email || sub.customerEmail || "";
-        if (email) {
+        if (!persisted.replayed && email) {
           sendCardsReceived({
             email,
             firstName: sub.firstName || sub.customerFirstName || "Customer",
@@ -6993,6 +6348,13 @@ export async function registerRoutes(httpServer: Server, app: Express): Promise<
         res.json({ success: true, photoUrls: allUrls });
       } catch (err: any) {
         console.error("[mark-received] error:", err.message);
+        if (
+          err?.code === "OBJECT_WRITE_IDEMPOTENCY_CONFLICT" ||
+          err?.code === "OBJECT_WRITE_IN_PROGRESS" ||
+          err?.code === "OBJECT_WRITE_TERMINAL"
+        ) {
+          return res.status(409).json({ error: "Receipt photo upload is already in progress or conflicts with this retry" });
+        }
         res.status(500).json({ error: "Failed to mark received" });
       }
     }
@@ -7046,6 +6408,7 @@ export async function registerRoutes(httpServer: Server, app: Express): Promise<
   app.post(
     "/api/admin/certificates/:id/upload-images",
     requireAdmin,
+    uploadMemoryAdmission("admin_grading_images", 384),
     gradingUpload.fields([
       { name: "front", maxCount: 1 },
       { name: "back", maxCount: 1 },
@@ -7081,6 +6444,15 @@ export async function registerRoutes(httpServer: Server, app: Express): Promise<
         if (badUpload) return res.status(400).json({ error: badUpload });
 
         const certId = normalizeCertId(cert.certId);
+        const actor = (req.session as { adminEmail?: string })?.adminEmail || "admin";
+        const writeVersion = crypto.randomUUID();
+        const imageState = await pool.query<Record<string, unknown>>(
+          `SELECT ${IMAGE_UPLOAD_OWNED_COLUMNS.map((column) => `"${column}"`).join(",")}
+             FROM certificates WHERE id=$1`,
+          [id]
+        );
+        if (!imageState.rows[0]) return res.status(404).json({ error: "Certificate not found" });
+        const initialImageState = imageState.rows[0];
         const updates: Record<string, string> = {};
         const qualityResults: Record<string, any> = {};
         let frontCroppedBuf: Buffer | null = null;
@@ -7099,23 +6471,22 @@ export async function registerRoutes(httpServer: Server, app: Express): Promise<
         // column before this request. It drives compensation below: an orphan
         // from a failed transaction may be deleted, but an object that the last
         // committed state still points at must never be.
-        type UploadedObject = {
-          key: string;
-          column: string;
-          sha256: string;
-          bytes: number;
-          contentType: string;
-          preexisting: boolean;
-        };
-        const uploadedObjects: UploadedObject[] = [];
-        const recordUpload = (key: string, column: string, buf: Buffer, contentType: string) => {
-          uploadedObjects.push({
-            key,
-            column,
-            sha256: crypto.createHash("sha256").update(buf).digest("hex"),
-            bytes: buf.length,
+        const objectItems: ObjectWriteItemInput[] = [];
+        const recordUpload = (
+          key: string,
+          column: string,
+          buf: Buffer,
+          contentType: string,
+          objectClass: "CANONICAL" | "DERIVATIVE" = "DERIVATIVE"
+        ) => {
+          objectItems.push({
+            store: "R2",
+            logicalSlot: column,
+            objectKey: key,
+            priorObjectKey: typeof initialImageState[column] === "string" ? String(initialImageState[column]) : null,
+            body: buf,
             contentType,
-            preexisting: (cert as Record<string, unknown>)[COLUMN_TO_CERT_KEY[column] ?? ""] === key,
+            objectClass,
           });
         };
 
@@ -7132,10 +6503,9 @@ export async function registerRoutes(httpServer: Server, app: Express): Promise<
           const reencodedOriginal = await sharp(buffer)
             .jpeg({ quality: 85, progressive: true, mozjpeg: true })
             .toBuffer();
-          const origKey = `grading/${certId}/${angle}_original.${ext}`;
-          await uploadToR2(origKey, reencodedOriginal, "image/jpeg");
+          const origKey = `grading/${certId}/revisions/${writeVersion}/${angle}_original.${ext}`;
           updates[`grading_${angle}_original`] = origKey;
-          recordUpload(origKey, `grading_${angle}_original`, reencodedOriginal, "image/jpeg");
+          recordUpload(origKey, `grading_${angle}_original`, reencodedOriginal, "image/jpeg", "CANONICAL");
 
           // 2. Deskew (straighten slight rotation before cropping)
           const { buffer: deskewedBuf, angle: deskewAngle } = await deskewCard(buffer);
@@ -7178,8 +6548,7 @@ export async function registerRoutes(httpServer: Server, app: Express): Promise<
             .jpeg({ quality: 85, progressive: true, mozjpeg: true })
             .toBuffer();
           const ext2 = "jpg";
-          const cropKey = `grading/${certId}/${angle}_cropped.${ext2}`;
-          await uploadToR2(cropKey, croppedBuf, "image/jpeg");
+          const cropKey = `grading/${certId}/revisions/${writeVersion}/${angle}_cropped.${ext2}`;
           updates[`grading_${angle}_cropped`] = cropKey;
           recordUpload(cropKey, `grading_${angle}_cropped`, croppedBuf, "image/jpeg");
 
@@ -7192,15 +6561,13 @@ export async function registerRoutes(httpServer: Server, app: Express): Promise<
           // is the flattened JPEG buffer.
           if (angle === "front") {
             frontCroppedBuf = croppedBuf;
-            const displayKey = r2KeyForImage(certId, "front", "jpg");
+            const displayKey = `images/${certId}/revisions/${writeVersion}/front.jpg`;
             updates["front_image_path"] = displayKey;
-            await uploadToR2(displayKey, croppedBuf, "image/jpeg");
             recordUpload(displayKey, "front_image_path", croppedBuf, "image/jpeg");
           } else if (angle === "back") {
             backCroppedBuf = croppedBuf;
-            const displayKey = r2KeyForImage(certId, "back", "jpg");
+            const displayKey = `images/${certId}/revisions/${writeVersion}/back.jpg`;
             updates["back_image_path"] = displayKey;
-            await uploadToR2(displayKey, croppedBuf, "image/jpeg");
             recordUpload(displayKey, "back_image_path", croppedBuf, "image/jpeg");
           }
 
@@ -7209,8 +6576,7 @@ export async function registerRoutes(httpServer: Server, app: Express): Promise<
           if (angle === "front" || angle === "back") {
             const { makeDisplayDerivative } = await import("./image-processing");
             const displayDerivative = await makeDisplayDerivative(croppedBuf);
-            const derivKey = `grading/${certId}/${angle}_display.jpg`;
-            await uploadToR2(derivKey, displayDerivative, "image/jpeg");
+            const derivKey = `grading/${certId}/revisions/${writeVersion}/${angle}_display.jpg`;
             updates[`grading_${angle}_display`] = derivKey;
             recordUpload(derivKey, `grading_${angle}_display`, displayDerivative, "image/jpeg");
           }
@@ -7219,12 +6585,6 @@ export async function registerRoutes(httpServer: Server, app: Express): Promise<
           setImmediate(async () => {
             try {
               const { greyscale, highcontrast, edgeenhanced, inverted } = await generateVariants(croppedBuf);
-              await Promise.all([
-                uploadToR2(`grading/${certId}/${angle}_greyscale.jpg`, greyscale, "image/jpeg"),
-                uploadToR2(`grading/${certId}/${angle}_highcontrast.jpg`, highcontrast, "image/jpeg"),
-                uploadToR2(`grading/${certId}/${angle}_edgeenhanced.jpg`, edgeenhanced, "image/jpeg"),
-                uploadToR2(`grading/${certId}/${angle}_inverted.jpg`, inverted, "image/jpeg"),
-              ]);
               // M-2: the background variant pass writes real certificate
               // columns, so it goes through the SAME allowlist + transaction +
               // audit as the foreground upload rather than a bare UPDATE. It
@@ -7238,31 +6598,51 @@ export async function registerRoutes(httpServer: Server, app: Express): Promise<
                   ["edgeenhanced", edgeenhanced],
                   ["inverted", inverted],
                 ];
+                const variantVersion = crypto.randomUUID();
                 const variantUpdates: Record<string, string> = {};
-                const variantObjects = variantBufs.map(([name, buf]) => {
-                  const key = `grading/${certId}/${angle}_${name}.jpg`;
+                const variantObjects: ObjectWriteItemInput[] = variantBufs.map(([name, buf]) => {
+                  const key = `grading/${certId}/revisions/${variantVersion}/${angle}_${name}.jpg`;
                   const column = `grading_${angle}_${name}`;
                   variantUpdates[column] = key;
                   return {
-                    key,
-                    column,
-                    sha256: crypto.createHash("sha256").update(buf).digest("hex"),
-                    bytes: buf.length,
+                    store: "R2" as const,
+                    logicalSlot: column,
+                    objectKey: key,
+                    body: buf,
                     contentType: "image/jpeg",
-                    preexisting: false,
+                    objectClass: "DERIVATIVE" as const,
                   };
                 });
-                const variantResult = await persistImageUploadAudited({
-                  id,
-                  certId,
-                  updates: variantUpdates,
-                  uploadedObjects: variantObjects,
-                  actor: (req.session as { adminEmail?: string })?.adminEmail || "admin",
-                  action: IMAGE_VARIANTS_AUDIT_ACTION,
-                });
-                if (!variantResult.committed) {
-                  console.error(`[upload-images] variant persist failed for cert=${id} angle=${angle}`);
-                }
+                const variantState = await pool.query<Record<string, unknown>>(
+                  `SELECT ${Object.keys(variantUpdates)
+                    .map((column) => `"${column}"`)
+                    .join(",")} FROM certificates WHERE id=$1`,
+                  [id]
+                );
+                const variantCoordinator = new ObjectWriteCoordinator(
+                  createPoolTransactionRunner(pool),
+                  objectWriteStore,
+                  `admin-image-variant:${process.pid}`
+                );
+                await variantCoordinator.execute(
+                  {
+                    idempotencyKey: `certificate-variant:${id}:${variantVersion}`,
+                    operationKind: "CERTIFICATE_DERIVATIVE_SET",
+                    aggregateType: "certificate",
+                    aggregateId: String(id),
+                    actorId: actor,
+                    expectedState: variantState.rows[0] ?? {},
+                    intentPayload: {
+                      id,
+                      certId,
+                      actor,
+                      action: IMAGE_VARIANTS_AUDIT_ACTION,
+                      updates: variantUpdates,
+                    },
+                    items: variantObjects,
+                  },
+                  finalizeCertificateImageObjectWrite
+                );
               }
             } catch (varErr) {
               console.error(`[upload-images] variant generation failed for ${angle}:`, varErr);
@@ -7299,22 +6679,27 @@ export async function registerRoutes(httpServer: Server, app: Express): Promise<
           });
         }
 
-        const persistResult = await persistImageUploadAudited({
-          id,
-          certId,
-          updates,
-          uploadedObjects,
-          actor: (req.session as { adminEmail?: string })?.adminEmail || "admin",
-        });
-        if (!persistResult.committed) {
-          // Truthful failure: nothing committed, nothing audited as committed,
-          // last committed certificate state preserved.
-          return res.status(500).json({
-            error: "Image upload could not be saved",
-            committed: false,
-            orphanCleanupFailed: persistResult.orphanCleanupFailed.length || undefined,
-          });
-        }
+        const expectedState = Object.fromEntries(
+          Object.keys(updates).map((column) => [column, initialImageState[column]])
+        );
+        const coordinator = new ObjectWriteCoordinator(
+          createPoolTransactionRunner(pool),
+          objectWriteStore,
+          `admin-image-upload:${process.pid}`
+        );
+        await coordinator.execute(
+          {
+            idempotencyKey: `certificate-image:${id}:${writeVersion}`,
+            operationKind: "CERTIFICATE_IMAGE_REVISION",
+            aggregateType: "certificate",
+            aggregateId: String(id),
+            actorId: actor,
+            expectedState,
+            intentPayload: { id, certId, actor, updates },
+            items: objectItems,
+          },
+          finalizeCertificateImageObjectWrite
+        );
 
         // Generate signed URLs for response
         const responseUrls: Record<string, string | null> = {};
@@ -7373,6 +6758,7 @@ export async function registerRoutes(httpServer: Server, app: Express): Promise<
   app.put(
     "/api/admin/certificates/:id/attach-images",
     requireAdmin,
+    uploadMemoryAdmission("admin_attach_images", 384),
     attachImagesUpload.fields([
       { name: "front", maxCount: 1 },
       { name: "back", maxCount: 1 },
@@ -7431,100 +6817,23 @@ export async function registerRoutes(httpServer: Server, app: Express): Promise<
   // ── Reprocess images: re-run deskew + crop + variants on existing originals
   app.post("/api/admin/certificates/:id/reprocess-images", requireAdmin, async (req, res) => {
     try {
-      const {
-        deskewCard: dsk,
-        cropToYellowBorder: cyb,
-        autoCrop: ac,
-        generateVariants: gv,
-      } = await import("./image-processing");
-
       const id = parseInt(String(req.params.id), 10);
+      if (!Number.isSafeInteger(id) || id <= 0) return res.status(400).json({ error: "Invalid certificate id" });
       const cert = await storage.getCertificate(id);
       if (!cert) return res.status(404).json({ error: "Certificate not found" });
-
-      const c = cert as any;
-      const certIdStr = normalizeCertId(cert.certId);
-      const results: Record<string, any> = {};
-
-      for (const side of ["front", "back"] as const) {
-        // ALWAYS fetch from the ORIGINAL (pre-processed) image, never the cropped version
-        const origKey =
-          side === "front" ? c.gradingFrontOriginal || c.frontImagePath : c.gradingBackOriginal || c.backImagePath;
-        if (!origKey) {
-          console.log(`[reprocess] ${certIdStr} ${side}: no original image path found, skipping`);
-          continue;
-        }
-
-        let origBuf: Buffer;
-        try {
-          const url = await getR2SignedUrl(origKey, 300);
-          const resp = await fetch(url);
-          origBuf = Buffer.from(await resp.arrayBuffer());
-        } catch (err: any) {
-          console.error(`[reprocess] ${certIdStr} ${side}: failed to fetch original: ${err.message}`);
-          continue;
-        }
-
-        console.log(
-          `[reprocess] ${certIdStr} ${side}: fetched original ${(origBuf.length / 1024).toFixed(0)}KB from ${origKey}`
-        );
-
-        // Run pipeline: deskew → yellow crop → fallback autoCrop → save
-        const { buffer: deskewed, angle } = await dsk(origBuf);
-        const yellowResult = await cyb(deskewed);
-        const { buffer: cropped } = yellowResult || (await ac(deskewed));
-
-        const cropKey = `grading/${certIdStr}/${side}_cropped.jpg`;
-        await uploadToR2(cropKey, cropped, "image/jpeg");
-
-        // 1600px display derivative for the grading-panel viewer
-        const { makeDisplayDerivative: mdd } = await import("./image-processing");
-        const derivBuf = await mdd(cropped);
-        const derivKey = `grading/${certIdStr}/${side}_display.jpg`;
-        await uploadToR2(derivKey, derivBuf, "image/jpeg");
-
-        // Update display path
-        if (side === "front") {
-          const displayKey = r2KeyForImage(certIdStr, "front", "jpg");
-          await uploadToR2(displayKey, cropped, "image/jpeg");
-          await db.execute(
-            sql`UPDATE certificates SET front_image_path = ${displayKey}, grading_front_cropped = ${cropKey}, grading_front_display = ${derivKey}, updated_at = NOW() WHERE id = ${id}`
-          );
-        } else {
-          const displayKey = r2KeyForImage(certIdStr, "back", "jpg");
-          await uploadToR2(displayKey, cropped, "image/jpeg");
-          await db.execute(
-            sql`UPDATE certificates SET back_image_path = ${displayKey}, grading_back_cropped = ${cropKey}, grading_back_display = ${derivKey}, updated_at = NOW() WHERE id = ${id}`
-          );
-        }
-
-        // Regenerate variants sequentially
-        const variants = await gv(cropped);
-        for (const [vName, vBuf] of Object.entries(variants) as [string, Buffer][]) {
-          const vKey = `grading/${certIdStr}/${side}_${vName}.jpg`;
-          await uploadToR2(vKey, vBuf, "image/jpeg");
-          const col = `grading_${side}_${vName}`;
-          await db.execute(sql`UPDATE certificates SET updated_at = NOW() WHERE id = ${id}`);
-          // Update the specific variant column
-          if (vName === "greyscale")
-            await db.execute(sql.raw(`UPDATE certificates SET grading_${side}_greyscale = '${vKey}' WHERE id = ${id}`));
-          if (vName === "highcontrast")
-            await db.execute(
-              sql.raw(`UPDATE certificates SET grading_${side}_highcontrast = '${vKey}' WHERE id = ${id}`)
-            );
-          if (vName === "edgeenhanced")
-            await db.execute(
-              sql.raw(`UPDATE certificates SET grading_${side}_edgeenhanced = '${vKey}' WHERE id = ${id}`)
-            );
-          if (vName === "inverted")
-            await db.execute(sql.raw(`UPDATE certificates SET grading_${side}_inverted = '${vKey}' WHERE id = ${id}`));
-        }
-
-        results[side] = { angle, processed: true };
-        console.log(`[reprocess] ${certIdStr} ${side}: deskew=${angle.toFixed(2)}° variants=4`);
-      }
-
-      res.json({ success: true, results });
+      const { reprocessCurrentCertificateImages } = await import("./scan-ingest-service");
+      const result = await reprocessCurrentCertificateImages(id, {
+        actor: (req.session as any)?.adminEmail ?? ADMIN_EMAIL ?? "admin",
+        action: "reprocess_images",
+        auditMetadata: { source: "admin_certificate_reprocess" },
+      });
+      res.json({
+        success: true,
+        results: {
+          front: { processed: true },
+          ...(result.backVariants ? { back: { processed: true } } : {}),
+        },
+      });
     } catch (err: any) {
       console.error("[reprocess] error:", err.message);
       sendServerError(res, err);
@@ -7548,111 +6857,81 @@ export async function registerRoutes(httpServer: Server, app: Express): Promise<
         return res.status(400).json({ error: "Invalid crop coordinates" });
       }
 
-      const c = cert as any;
       const certIdStr = normalizeCertId(cert.certId);
-      const origKey =
-        side === "front" ? c.gradingFrontOriginal || c.frontImagePath : c.gradingBackOriginal || c.backImagePath;
-      if (!origKey) return res.status(400).json({ error: `No original ${side} image found` });
+      const { withCertificateImagePipelineLock } = await import("./scan-ingest-service");
+      const committed = await withCertificateImagePipelineLock(id, async () => {
+        const columns = IMAGE_UPLOAD_OWNED_COLUMNS.map((column) => `"${column}"`).join(",");
+        const currentResult = await pool.query<Record<string, unknown>>(
+          `SELECT certificate_number,deleted_at,${columns} FROM certificates WHERE id=$1`,
+          [id]
+        );
+        const current = currentResult.rows[0];
+        if (!current || current.deleted_at != null) throw new Error("Certificate is unavailable for recrop");
+        const originalColumn = side === "front" ? "grading_front_original" : "grading_back_original";
+        const displayColumn = side === "front" ? "front_image_path" : "back_image_path";
+        const origKey = (current[originalColumn] ?? current[displayColumn]) as string | null;
+        if (!origKey) throw new Error(`No original ${side} image found`);
+        const origBuf = await getR2Buffer(origKey);
+        if (!origBuf) throw new Error("Failed to fetch original");
 
-      let origBuf: Buffer;
-      try {
-        const url = await getR2SignedUrl(origKey, 300);
-        const resp = await fetch(url);
-        origBuf = Buffer.from(await resp.arrayBuffer());
-      } catch (err: any) {
-        return res.status(500).json({ error: "Failed to fetch original" });
-      }
+        let workBuf = origBuf;
+        if (typeof rotation_deg === "number" && Math.abs(rotation_deg) > 0.1) {
+          workBuf = await sharpFn(origBuf)
+            .rotate(rotation_deg, { background: { r: 255, g: 255, b: 255, alpha: 1 } })
+            .toBuffer();
+        }
+        const meta = await sharpFn(workBuf).metadata();
+        if (!meta.width || !meta.height) throw new Error("Cannot read image dimensions");
+        const left = Math.max(0, Math.round((meta.width * left_pct) / 100));
+        const top = Math.max(0, Math.round((meta.height * top_pct) / 100));
+        const width = Math.min(meta.width - left, Math.round((meta.width * width_pct) / 100));
+        const height = Math.min(meta.height - top, Math.round((meta.height * height_pct) / 100));
+        if (width < 50 || height < 50) throw new Error("Crop box too small");
 
-      // Apply rotation first if specified, then crop from rotated dimensions
-      let workBuf = origBuf;
-      if (typeof rotation_deg === "number" && Math.abs(rotation_deg) > 0.1) {
-        workBuf = await sharpFn(origBuf)
-          // Rotate-bounding-box wedges fill with white to match scanner mat
-          // (Epson V850 Pro, confirmed). Black previously baked black wedges
-          // into the JPEG when the extract overlapped them — see PR fixing
-          // recrop black-corners regression.
-          .rotate(rotation_deg, { background: { r: 255, g: 255, b: 255, alpha: 1 } })
+        const extracted = await sharpFn(workBuf)
+          .extract({ left, top, width, height })
+          .png()
           .toBuffer();
-        console.log(`[recrop] ${certIdStr} ${side}: rotated ${rotation_deg.toFixed(1)}°`);
-      }
-
-      const meta = await sharpFn(workBuf).metadata();
-      if (!meta.width || !meta.height) return res.status(500).json({ error: "Cannot read image dimensions" });
-
-      const left = Math.max(0, Math.round((meta.width * left_pct) / 100));
-      const top = Math.max(0, Math.round((meta.height * top_pct) / 100));
-      const w = Math.min(meta.width - left, Math.round((meta.width * width_pct) / 100));
-      const h = Math.min(meta.height - top, Math.round((meta.height * height_pct) / 100));
-      if (w < 50 || h < 50) return res.status(400).json({ error: "Crop box too small" });
-
-      console.log(`[recrop] ${certIdStr} ${side}: ${meta.width}x${meta.height} → extract(${left},${top},${w},${h})`);
-
-      // Extract the operator-chosen crop as a lossless PNG intermediate so
-      // the rounded-corner mask below operates on un-recompressed pixels
-      // (avoids a JPEG round-trip on the very corners the operator just
-      // dialled in via the 8-dot tool).
-      const extracted = await sharpFn(workBuf).extract({ left, top, width: w, height: h }).png().toBuffer();
-
-      // Round corners to match a real Pokémon card — same maskRoundedCorners
-      // the auto-pipeline applies to upload-images / pre-grade / backfill
-      // outputs (CARD_CORNER_RADIUS_PCT = 3% of min(w,h), calibrated against
-      // real scans). The mask sets alpha=0 in the corner triangles with
-      // RGB=white underneath; the flatten below renders them as clean white.
-      // Centering is computed from the dot coordinates by /manual-centering
-      // (shared/centering.ts) on a separate call — this purely cosmetic
-      // rounding does NOT affect the measurement.
-      const masked = await maskRoundedCorners(extracted);
-
-      // Final flatten + JPEG. Same q85 mozjpeg progressive as the auto-crop
-      // pipeline (routes.ts:8782-8784) so manual + auto outputs share an
-      // encoding spec. Flatten-to-white also belt-and-braces against the
-      // earlier black-corners regression: any residual alpha (including the
-      // rounded corner triangles we just masked) renders as white, not the
-      // JPEG-default black.
-      const cropped = await sharpFn(masked)
-        .flatten({ background: { r: 255, g: 255, b: 255 } })
-        .jpeg({ quality: 85, progressive: true, mozjpeg: true })
-        .toBuffer();
-
-      const cropKey = `grading/${certIdStr}/${side}_cropped.jpg`;
-      await uploadToR2(cropKey, cropped, "image/jpeg");
-      const displayKey = r2KeyForImage(certIdStr, side, "jpg");
-      await uploadToR2(displayKey, cropped, "image/jpeg");
-
-      // Refresh the 1600px viewer derivative so the recrop is visible in the
-      // grading panel (which prefers grading_{side}_display over cropped).
-      const { makeDisplayDerivative: makeDeriv } = await import("./image-processing");
-      const recropDerivBuf = await makeDeriv(cropped);
-      const recropDerivKey = `grading/${certIdStr}/${side}_display.jpg`;
-      await uploadToR2(recropDerivKey, recropDerivBuf, "image/jpeg");
-
-      if (side === "front") {
-        await db.execute(
-          sql`UPDATE certificates SET front_image_path = ${displayKey}, grading_front_cropped = ${cropKey}, grading_front_display = ${recropDerivKey}, updated_at = NOW() WHERE id = ${id}`
-        );
-      } else {
-        await db.execute(
-          sql`UPDATE certificates SET back_image_path = ${displayKey}, grading_back_cropped = ${cropKey}, grading_back_display = ${recropDerivKey}, updated_at = NOW() WHERE id = ${id}`
-        );
-      }
-
-      const variants = await gv(cropped);
-      for (const [vName, vBuf] of Object.entries(variants) as [string, Buffer][]) {
-        const vKey = `grading/${certIdStr}/${side}_${vName}.jpg`;
-        await uploadToR2(vKey, vBuf, "image/jpeg");
-        if (vName === "greyscale")
-          await db.execute(sql.raw(`UPDATE certificates SET grading_${side}_greyscale = '${vKey}' WHERE id = ${id}`));
-        if (vName === "highcontrast")
-          await db.execute(
-            sql.raw(`UPDATE certificates SET grading_${side}_highcontrast = '${vKey}' WHERE id = ${id}`)
-          );
-        if (vName === "edgeenhanced")
-          await db.execute(
-            sql.raw(`UPDATE certificates SET grading_${side}_edgeenhanced = '${vKey}' WHERE id = ${id}`)
-          );
-        if (vName === "inverted")
-          await db.execute(sql.raw(`UPDATE certificates SET grading_${side}_inverted = '${vKey}' WHERE id = ${id}`));
-      }
+        const masked = await maskRoundedCorners(extracted);
+        const cropped = await sharpFn(masked)
+          .flatten({ background: { r: 255, g: 255, b: 255 } })
+          .jpeg({ quality: 85, progressive: true, mozjpeg: true })
+          .toBuffer();
+        const { makeDisplayDerivative: makeDeriv } = await import("./image-processing");
+        const displayDerivative = await makeDeriv(cropped);
+        const variants = await gv(cropped);
+        const artifactSpecs = [
+          { column: displayColumn, filename: `${side}.jpg`, body: cropped },
+          { column: `grading_${side}_cropped`, filename: `${side}_cropped.jpg`, body: cropped },
+          { column: `grading_${side}_display`, filename: `${side}_display.jpg`, body: displayDerivative },
+          ...(["greyscale", "highcontrast", "edgeenhanced", "inverted"] as const).map((variant) => ({
+            column: `grading_${side}_${variant}`,
+            filename: `${side}_${variant}.jpg`,
+            body: (variants as any)[variant] as Buffer,
+          })),
+        ] as Array<{
+          column: (typeof IMAGE_UPLOAD_OWNED_COLUMNS)[number];
+          filename: string;
+          body: Buffer;
+        }>;
+        const expectedState = Object.fromEntries(artifactSpecs.map((artifact) => [artifact.column, current[artifact.column]]));
+        const { persistCertificateImageArtifactRevision } = await import("./lib/certificate-image-persistence");
+        const revision = await persistCertificateImageArtifactRevision({
+          id,
+          certId: certIdStr,
+          actor: (req.session as any)?.adminEmail ?? ADMIN_EMAIL ?? "admin",
+          action: "certificate_image_manual_recrop",
+          expectedState,
+          artifacts: artifactSpecs.map((artifact) => ({ ...artifact, contentType: "image/jpeg" })),
+          auditMetadata: {
+            side,
+            sourceObjectKey: origKey,
+            crop: { left_pct, top_pct, width_pct, height_pct, rotation_deg },
+            output: { width, height },
+          },
+        });
+        return { displayKey: revision.objectKeys[displayColumn], width, height };
+      });
 
       // Return a signed URL for the just-written display image so the Card
       // Tool can swap its <img src> directly into the defects phase without
@@ -7671,13 +6950,15 @@ export async function registerRoutes(httpServer: Server, app: Express): Promise<
       // :3392, :4053, :8665) all use this bare-signed-URL pattern.
       let displayUrl: string | undefined;
       try {
-        displayUrl = await getR2SignedUrl(displayKey, 300);
+        displayUrl = await getR2SignedUrl(committed.displayKey, 300);
       } catch {
         // Non-fatal — the crop is saved; the client just won't auto-advance.
       }
 
-      console.log(`[recrop] ${certIdStr} ${side}: manual crop applied, ${w}x${h}px, variants regenerated`);
-      res.json({ success: true, side, width: w, height: h, displayUrl });
+      console.log(
+        `[recrop] ${certIdStr} ${side}: manual crop applied, ${committed.width}x${committed.height}px, variants regenerated`
+      );
+      res.json({ success: true, side, width: committed.width, height: committed.height, displayUrl });
     } catch (err: any) {
       console.error("[recrop] error:", err.message);
       sendServerError(res, err);
@@ -8686,19 +7967,21 @@ Defects (admin-confirmed): ${defectLines}`;
                  cert.card_number_display AS card_number, cert.year_text AS year, cert.language, cert.variant,
                  cert.grader_status, cert.assigned_grader_id, cert.redo_count, cert.rejection_reason,
                  u.email AS grader_email, s.tracking_number AS submission_ref, s.service_tier, s.id AS submission_id,
-                 cert.origin_partner_id AS partner_id, partner.legal_name AS partner_name,
+                 cert.origin_partner_id AS partner_id,
                  ${hasImages} AS has_images
           FROM certificates cert
           LEFT JOIN cards c ON cert.card_id = c.id
           LEFT JOIN submissions s ON s.id = c.submission_id
           LEFT JOIN users u ON u.id = cert.assigned_grader_id
-          LEFT JOIN partner_organisations partner ON partner.id = cert.origin_partner_id
           WHERE ${where}
           ORDER BY cert.id ASC
           LIMIT ${CAP}
         `);
         const countRes = await db.execute(sql`SELECT COUNT(*)::int AS n FROM certificates cert WHERE ${where}`);
         const total = Number((countRes.rows[0] as any)?.n ?? 0);
+        const partnerNames = await readPartnerOrganisationNames(
+          (rows.rows as Array<{ partner_id?: string | null }>).map((row) => row.partner_id)
+        );
         const queue = (rows.rows as any[]).map((r) => ({
           certId: Number(r.cert_id),
           certIdStr: normalizeCertId(r.cert_id_str),
@@ -8718,7 +8001,7 @@ Defects (admin-confirmed): ${defectLines}`;
           submissionRef: r.submission_ref ?? null,
           submissionId: r.submission_id != null ? Number(r.submission_id) : null,
           partnerId: r.partner_id ?? null,
-          partnerName: r.partner_name ?? null,
+          partnerName: r.partner_id ? (partnerNames.get(String(r.partner_id)) ?? null) : null,
         }));
         return res.json({ queue, status: f, cap: CAP, total, capped: total > CAP });
       } catch (err: any) {
@@ -8843,130 +8126,66 @@ Defects (admin-confirmed): ${defectLines}`;
     phoneUploadAdmission.middleware,
     phoneUploadWithLimits,
     async (req, res) => {
-    try {
-      const { autoCrop, checkImageQuality } = await import("./image-processing");
-      const token = req.query.token as string;
-      if (!token) return res.status(401).json({ error: "Token required" });
+      try {
+        const { autoCrop, checkImageQuality } = await import("./image-processing");
+        const token = req.query.token as string;
+        if (!token) return res.status(401).json({ error: "Token required" });
 
-      const certId = String(req.params.certId);
-      const imageType = String(req.params.imageType);
-      // The target is inside the signed payload, so a token minted for one certificate/side cannot
-      // be replayed against another — the separate imageType equality check this replaces could only
-      // ever catch half of that, and never the certId. Verification is constant-time and works on
-      // EITHER Machine because nothing is stored server-side.
-      if (!verifyUploadToken(certId, imageType, token)) {
-        return res.status(401).json({ error: "Invalid or expired token" });
+        const certId = String(req.params.certId);
+        const imageType = String(req.params.imageType);
+        // The target is inside the signed payload, so a token minted for one certificate/side cannot
+        // be replayed against another — the separate imageType equality check this replaces could only
+        // ever catch half of that, and never the certId. Verification is constant-time and works on
+        // EITHER Machine because nothing is stored server-side.
+        if (!verifyUploadToken(certId, imageType, token)) {
+          return res.status(401).json({ error: "Invalid or expired token" });
+        }
+
+        const dbCert = await findCertByIdFlex(certId);
+        if (!dbCert) return res.status(404).json({ error: "Certificate not found" });
+
+        if (!req.file) return res.status(400).json({ error: "No image provided" });
+
+        const phoneUploadErr = await rejectInvalidUploads([req.file]);
+        if (phoneUploadErr) return res.status(400).json({ error: phoneUploadErr });
+
+        const { buffer: croppedBuf } = await autoCrop(req.file.buffer);
+        const key = `grading/${normalizeCertId(dbCert.certId)}/${imageType}_original.jpg`;
+        await uploadToR2(key, croppedBuf, "image/jpeg");
+
+        const colMap: Record<string, string> = {
+          angled: "grading_angled_original",
+          closeup: "grading_closeup_original",
+        };
+        const col = colMap[imageType];
+        if (col) {
+          await db.execute(sql`UPDATE certificates SET updated_at = NOW() WHERE id = ${dbCert.id}`);
+        }
+
+        const quality = await checkImageQuality(croppedBuf);
+        const signedUrl = await getR2SignedUrl(key, 3600);
+
+        res.json({ ok: true, imageUrl: signedUrl, quality });
+      } catch (err: any) {
+        sendServerError(res, err);
       }
-
-      const dbCert = await findCertByIdFlex(certId);
-      if (!dbCert) return res.status(404).json({ error: "Certificate not found" });
-
-      if (!req.file) return res.status(400).json({ error: "No image provided" });
-
-      const phoneUploadErr = await rejectInvalidUploads([req.file]);
-      if (phoneUploadErr) return res.status(400).json({ error: phoneUploadErr });
-
-      const { buffer: croppedBuf } = await autoCrop(req.file.buffer);
-      const key = `grading/${normalizeCertId(dbCert.certId)}/${imageType}_original.jpg`;
-      await uploadToR2(key, croppedBuf, "image/jpeg");
-
-      const colMap: Record<string, string> = {
-        angled: "grading_angled_original",
-        closeup: "grading_closeup_original",
-      };
-      const col = colMap[imageType];
-      if (col) {
-        await db.execute(sql`UPDATE certificates SET updated_at = NOW() WHERE id = ${dbCert.id}`);
-      }
-
-      const quality = await checkImageQuality(croppedBuf);
-      const signedUrl = await getR2SignedUrl(key, 3600);
-
-      res.json({ ok: true, imageUrl: signedUrl, quality });
-    } catch (err: any) {
-      sendServerError(res, err);
-    }
     }
   );
 
   // ── Build 4: Hot folder upload ─────────────────────────────────────────────
 
-  app.post("/api/admin/hot-folder-upload", hotFolderUpload.single("front"), async (req, res) => {
-    try {
-      // Auth: a valid Bearer token (scanner / hot-folder ingest) OR an active admin session.
-      const authHeader = req.headers.authorization || "";
-      const bearerToken = authHeader.replace(/^Bearer\s+/i, "").trim();
-      const validToken = process.env.MINTVAULT_ADMIN_TOKEN;
-
-      // H3 — use the REAL admin session flag. Was `adminAuthenticated`, which is
-      // never set anywhere, so a logged-in admin silently fell through to token-only.
-      const isSession = (req.session as any)?.isAdmin === true;
-      if (!isSession && (!validToken || bearerToken !== validToken)) {
-        return res.status(401).json({ error: "Unauthorized" });
-      }
-
-      // H3 — magic-byte validation: reject non-image payloads before the image
-      // pipeline touches them (the 50 MB size cap stays on the multer config above).
-      if (!req.file || !(await validateImageMagicBytes(req.file))) {
-        return res.status(400).json({ error: "Invalid or missing image file" });
-      }
-
-      const side = (req.body.side || "front") as "front" | "back";
-
-      // Determine target cert: explicit, else the current queue pointer.
-      //
-      // There is deliberately NO "first ungraded" fallback. It used to select
-      // `ORDER BY created_at ASC LIMIT 1` whenever the target could not be
-      // resolved, which silently bound this upload to an ARBITRARY, unrelated
-      // certificate — attaching one customer's card photo to another customer's
-      // record with a 200 response and no warning. That is reachable in normal
-      // operation because `_currentGradingCertId` is in-process state and
-      // production runs multiple Fly machines: the admin sets the pointer on one
-      // machine and the phone upload lands on another, where it is null.
-      //
-      // If the target is unknown the only safe answer is to refuse. The caller
-      // must pass an explicit certId.
-      const certId = req.body.certId || _currentGradingCertId;
-      let dbCert: any = null;
-      if (certId) {
-        dbCert = await findCertByIdFlex(String(certId));
-      }
-      if (!dbCert) {
-        return res.status(400).json({
-          error:
-            "No target certificate for this upload. Pass an explicit certId — the server will not guess which card an image belongs to.",
-        });
-      }
-
-      const { autoCrop } = await import("./image-processing");
-      const file = req.file || (req.files as any)?.[side]?.[0];
-      if (!file) return res.status(400).json({ error: "No image in request" });
-
-      const normId = normalizeCertId(dbCert.cert_id || dbCert.certId || "");
-      const { buffer: croppedBuf } = await autoCrop(file.buffer);
-
-      const origKey = r2KeyForImage(normId, side as "front" | "back", "jpg");
-      await uploadToR2(origKey, croppedBuf, "image/jpeg");
-
-      const col = side === "front" ? "front_image_path" : "back_image_path";
-      await db.execute(sql`UPDATE certificates SET updated_at = NOW() WHERE id = ${dbCert.id}`);
-      if (side === "front") {
-        await db.execute(
-          sql`UPDATE certificates SET front_image_path = ${origKey}, grading_front_original = ${origKey}, updated_at = NOW() WHERE id = ${dbCert.id}`
-        );
-      } else {
-        await db.execute(
-          sql`UPDATE certificates SET back_image_path = ${origKey}, grading_back_original = ${origKey}, updated_at = NOW() WHERE id = ${dbCert.id}`
-        );
-      }
-
-      const signedUrl = await getR2SignedUrl(origKey, 3600);
-      res.json({ ok: true, certId: normId, side, imageUrl: signedUrl });
-    } catch (err: any) {
-      console.error("[hot-folder] error:", err.message);
-      sendServerError(res, err);
-    }
-  });
+  app.post(
+    "/api/admin/hot-folder-upload",
+    requireHotFolderUploadAuth,
+    hotFolderUploadAdmission.middleware,
+    hotFolderUpload.single("front"),
+    (_req, res) =>
+      res.status(410).json({
+        error:
+          "Legacy hot-folder upload is retired. Arm a target-bound signed scanner capture session from the workstation.",
+        code: "HOT_FOLDER_RETIRED",
+      })
+  );
 
   // ── Build 5: AI Grading ────────────────────────────────────────────────────
 
@@ -9263,20 +8482,6 @@ Defects (admin-confirmed): ${defectLines}`;
       const innerCol = side === "front" ? "centering_inner_front" : "centering_inner_back";
       const lrCol = side === "front" ? "centering_front_lr" : "centering_back_lr";
       const tbCol = side === "front" ? "centering_front_tb" : "centering_back_tb";
-
-      // Add new columns if they don't exist yet
-      try {
-        await db.execute(sql`ALTER TABLE certificates ADD COLUMN IF NOT EXISTS centering_outer_front JSONB`);
-      } catch {}
-      try {
-        await db.execute(sql`ALTER TABLE certificates ADD COLUMN IF NOT EXISTS centering_inner_front JSONB`);
-      } catch {}
-      try {
-        await db.execute(sql`ALTER TABLE certificates ADD COLUMN IF NOT EXISTS centering_outer_back JSONB`);
-      } catch {}
-      try {
-        await db.execute(sql`ALTER TABLE certificates ADD COLUMN IF NOT EXISTS centering_inner_back JSONB`);
-      } catch {}
 
       // Parameterized — outer/inner/lr/tb/id are BOUND params (never interpolated
       // into SQL text); column names come from the fixed front/back allowlist via
@@ -9656,112 +8861,17 @@ Defects (admin-confirmed): ${defectLines}`;
       const cert = await storage.getCertificate(id);
       if (!cert) return res.status(404).json({ error: "Certificate not found" });
 
-      const c = cert as any;
-      const frontKey = c.gradingFrontOriginal || c.frontImagePath;
-      const backKey = c.gradingBackOriginal || c.backImagePath;
-      if (!frontKey) return res.status(400).json({ error: "No front image available for AI analysis" });
-
       console.log(`[ai/identify-and-analyze] starting for cert ${id}`);
+      const { reprocessCurrentCertificateImages } = await import("./scan-ingest-service");
+      const { frontVariants, backVariants } = await reprocessCurrentCertificateImages(id, {
+        actor: (req.session as any)?.adminEmail ?? ADMIN_EMAIL ?? "admin",
+        action: "identify_and_analyze_image_revision",
+        auditMetadata: { source: "identify-and-analyze" },
+      });
 
-      // Step 1: Fetch raw images from R2
-      const { default: sharpImport } = await import("sharp");
-      const fetchR2 = async (key: string | null): Promise<Buffer | null> => {
-        if (!key) return null;
-        try {
-          const url = await getR2SignedUrl(key, 300);
-          const resp = await fetch(url);
-          return Buffer.from(await resp.arrayBuffer());
-        } catch {
-          return null;
-        }
-      };
-
-      const frontRaw = await fetchR2(frontKey);
-      if (!frontRaw) return res.status(400).json({ error: "Could not fetch front image from storage" });
-      const backRaw = await fetchR2(backKey);
-
-      // Step 2: Generate 5 image variants for front (and back if available)
-      const frontVariants = await generateImageVariants(frontRaw);
-      const backVariants = backRaw ? await generateImageVariants(backRaw) : null;
-
-      // Step 3: Upload all variants to R2 — explicit allowlist (skips
-      // generateImageVariants's non-Buffer fields like cropGeometry/matRgb,
-      // which were added in commit 6b7ce9f and broke Object.entries()-based
-      // iteration with TypeError "Received an instance of Object")
-      const prefix = `images/grading/${id}`;
-      const uploadKeys: Record<string, string> = {};
-      const uploads: Promise<void>[] = [];
-      const jpgVariants = ["original", "cropped", "greyscale", "highcontrast", "edgeenhanced", "inverted"] as const;
-
-      for (const vName of jpgVariants) {
-        const buf = (frontVariants as any)[vName] as Buffer | undefined;
-        if (!Buffer.isBuffer(buf)) continue;
-        const k = `${prefix}/front_${vName}.jpg`;
-        uploadKeys[`front_${vName}`] = k;
-        uploads.push(uploadToR2(k, buf, "image/jpeg").then(() => {}));
-      }
-      if (backVariants) {
-        for (const vName of jpgVariants) {
-          const buf = (backVariants as any)[vName] as Buffer | undefined;
-          if (!Buffer.isBuffer(buf)) continue;
-          const k = `${prefix}/back_${vName}.jpg`;
-          uploadKeys[`back_${vName}`] = k;
-          uploads.push(uploadToR2(k, buf, "image/jpeg").then(() => {}));
-        }
-      }
-      // Steps 3+4 (upload variants, save keys) run in parallel with Step 5
-      // (identify) — identify only needs the in-memory cropped buffer, and was
-      // previously blocked behind 12 R2 uploads it never used.
-      const uploadAndSaveKeys = (async () => {
-        // Refresh the 1600px viewer derivatives alongside the regenerated
-        // crops, otherwise the grading panel keeps showing the stale derivative.
-        const { makeDisplayDerivative } = await import("./image-processing");
-        if (Buffer.isBuffer(frontVariants.cropped)) {
-          const k = `${prefix}/front_display.jpg`;
-          uploadKeys["front_display"] = k;
-          uploads.push(
-            makeDisplayDerivative(frontVariants.cropped)
-              .then((b) => uploadToR2(k, b, "image/jpeg"))
-              .then(() => {})
-          );
-        }
-        if (backVariants && Buffer.isBuffer(backVariants.cropped)) {
-          const k = `${prefix}/back_display.jpg`;
-          uploadKeys["back_display"] = k;
-          uploads.push(
-            makeDisplayDerivative(backVariants.cropped)
-              .then((b) => uploadToR2(k, b, "image/jpeg"))
-              .then(() => {})
-          );
-        }
-        await Promise.all(uploads);
-        console.log(`[ai/identify-and-analyze] uploaded ${uploads.length} image variants to R2`);
-        await db.execute(sql`
-          UPDATE certificates SET
-            grading_front_original = ${uploadKeys.front_original || null},
-            grading_front_cropped = ${uploadKeys.front_cropped || null},
-            grading_front_greyscale = ${uploadKeys.front_greyscale || null},
-            grading_front_highcontrast = ${uploadKeys.front_highcontrast || null},
-            grading_front_edgeenhanced = ${uploadKeys.front_edgeenhanced || null},
-            grading_front_inverted = ${uploadKeys.front_inverted || null},
-            grading_back_original = ${uploadKeys.back_original || null},
-            grading_back_cropped = ${uploadKeys.back_cropped || null},
-            grading_back_greyscale = ${uploadKeys.back_greyscale || null},
-            grading_back_highcontrast = ${uploadKeys.back_highcontrast || null},
-            grading_back_edgeenhanced = ${uploadKeys.back_edgeenhanced || null},
-            grading_back_inverted = ${uploadKeys.back_inverted || null},
-            grading_front_display = ${uploadKeys.front_display || null},
-            grading_back_display = ${uploadKeys.back_display || null},
-            updated_at = NOW()
-          WHERE id = ${id}
-        `);
-      })();
-
-      // Step 5: Identify the card (uses cropped front)
-      const [identification] = await Promise.all([
-        identifyCardFromBuffer(frontVariants.cropped, "image/jpeg"),
-        uploadAndSaveKeys,
-      ]);
+      // Step 5: Identify the card from the exact cropped bytes whose manifest
+      // and pointers were atomically committed above.
+      const identification = await identifyCardFromBuffer(frontVariants.cropped, "image/jpeg");
 
       // Step 7 kicked off early: the grade call only needs detected_game (for
       // the game-specific prompt module), not the TCG enrichment below — so it
@@ -9945,6 +9055,7 @@ Defects (admin-confirmed): ${defectLines}`;
   app.post(
     "/api/admin/certificates/grade-with-ai",
     requireAdmin,
+    uploadMemoryAdmission("admin_grade_with_ai", 512),
     gradeWithAiUpload.fields([
       { name: "front_image", maxCount: 1 },
       { name: "back_image", maxCount: 1 },
@@ -10063,38 +9174,34 @@ Defects (admin-confirmed): ${defectLines}`;
 
   // ── Build 6+: Identify card from uploaded image (no cert required) ─────────
 
-  app.post("/api/admin/identify-image", requireAdmin, identifyUpload.single("image"), async (req, res) => {
-    if (!req.file) return res.status(400).json({ error: "No image file provided" });
-    const uploadErr = await rejectInvalidUploads([req.file]);
-    if (uploadErr) return res.status(400).json({ error: uploadErr });
-    try {
-      const result = await identifyCardFromBuffer(req.file.buffer, req.file.mimetype || "image/jpeg");
-      res.json(result);
-    } catch (err: any) {
-      console.error("[ai/identify-image] error:", err.message);
-      sendServerError(res, err);
+  app.post(
+    "/api/admin/identify-image",
+    requireAdmin,
+    uploadMemoryAdmission("admin_identify_image", 256),
+    identifyUpload.single("image"),
+    async (req, res) => {
+      if (!req.file) return res.status(400).json({ error: "No image file provided" });
+      const uploadErr = await rejectInvalidUploads([req.file]);
+      if (uploadErr) return res.status(400).json({ error: uploadErr });
+      try {
+        const result = await identifyCardFromBuffer(req.file.buffer, req.file.mimetype || "image/jpeg");
+        res.json(result);
+      } catch (err: any) {
+        console.error("[ai/identify-image] error:", err.message);
+        sendServerError(res, err);
+      }
     }
-  });
+  );
 
   // ── Build 6: Public tools ──────────────────────────────────────────────────
 
-  // Admin bypass uses the `x-mv-admin-email` request header — body isn't parsed
-  // yet when `skip` runs (multer is downstream). Admins hitting the web UI form
-  // without the header will share the 5/hour bucket; power use should curl with
-  // the header set.
-
-  // GET /api/tools/estimate/credits?email=
-  // Owner-bound (PKG-3). An AUTHENTICATED caller always sees ONLY their own
-  // balance, derived from the session identity — a conflicting ?email= is ignored,
-  // so a logged-in user cannot enumerate another customer's balance. Anonymous
-  // callers keep the minimal legacy per-email lookup (rate-limited: a positive
-  // balance is the only oracle, and that must be shown to the tool's own user).
+  // GET /api/tools/estimate/credits
+  // Paid balances are account-private. Query/body email is never an ownership
+  // credential and anonymous callers cannot enumerate whether an address paid.
   app.get("/api/tools/estimate/credits", lookupRateLimit, async (req, res) => {
     try {
       const result = await getEstimateCreditBalance({
         sessionUserId: (req.session as any)?.userId,
-        sessionUserEmail: (req.session as any)?.userEmail,
-        queryEmail: (req.query.email as string) || null,
       });
       if (!result.ok) return res.status(result.status).json({ error: result.error });
       res.json({ credits: result.credits, email: result.email });
@@ -10104,26 +9211,33 @@ Defects (admin-confirmed): ${defectLines}`;
     }
   });
 
-  // POST /api/tools/estimate/checkout  { email, package: "5"|"15"|"100", return_path?: "/tools/centering" }
+  // POST /api/tools/estimate/checkout  { package: "5"|"15"|"100", return_path?: "/tools/centering" }
   app.post("/api/tools/estimate/checkout", async (req, res) => {
-    // Ownership is server-derived from the trusted session. For a logged-in buyer
-    // we stamp the authenticated user id into metadata so PKG-2 fulfilment binds
-    // the purchased credits to their account (users.ai_credits_user_balance). A
-    // browser-supplied user_id is never read. Email is retained for the receipt
-    // and the legacy anonymous fulfilment path; when authenticated we default it
-    // to the session's verified email so the receipt is correct.
     const sessionUserId = (req.session as any)?.userId || null;
-    const sessionUserEmail = ((req.session as any)?.userEmail || "").trim().toLowerCase();
-    const email = (req.body.email || "").trim().toLowerCase() || sessionUserEmail;
     const pkg = req.body.package as string;
-    const returnPath = (req.body.return_path as string) || "/tools/estimate";
-    if (!email) return res.status(400).json({ error: "Email required" });
+    if (!sessionUserId) return res.status(401).json({ error: "Sign in with a verified account to buy credits." });
     const pkgInfo = ESTIMATE_PACKAGES[pkg];
     if (!pkgInfo) return res.status(400).json({ error: "Invalid package" });
     try {
+      // The live account row, not request/session email text, proves receipt and
+      // legacy-credit ownership. An unverified email change cannot claim a pool.
+      const account = await db.execute(sql`
+        SELECT lower(email) AS email
+          FROM users
+         WHERE id = ${sessionUserId}
+           AND email_verified IS TRUE
+           AND deleted_at IS NULL
+         LIMIT 1
+      `);
+      const email = String((account.rows[0] as any)?.email || "");
+      if (!email) return res.status(403).json({ error: "Verify your account email before buying credits." });
+
       const stripe = await getUncachableStripeClient();
-      const origin = (req.headers.origin as string) || APP_BASE_URL;
       const metadata = buildEstimateCheckoutMetadata({ sessionUserId, email, credits: pkgInfo.credits });
+      const requestedReturnPath = String(req.body.return_path || "");
+      const returnPath = ["/tools/estimate", "/tools/centering"].includes(requestedReturnPath)
+        ? requestedReturnPath
+        : "/tools/estimate";
       const session = await stripe.checkout.sessions.create({
         payment_method_types: ["card"],
         mode: "payment",
@@ -10142,8 +9256,8 @@ Defects (admin-confirmed): ${defectLines}`;
           },
         ],
         metadata,
-        success_url: `${origin}${returnPath}?payment=success&email=${encodeURIComponent(email)}`,
-        cancel_url: `${origin}${returnPath}?payment=cancelled`,
+        success_url: `${APP_BASE_URL}${returnPath}?payment=success`,
+        cancel_url: `${APP_BASE_URL}${returnPath}?payment=cancelled`,
       });
       res.json({ url: session.url });
     } catch (err: any) {
@@ -10157,130 +9271,147 @@ Defects (admin-confirmed): ${defectLines}`;
   // immediately after processing to keep storage costs down. Images land in multer memory storage,
   // are resized in-memory with sharp, sent to Anthropic as base64, then garbage collected with
   // the request. Nothing is written to R2, Neon, or disk.
-  // No rate limit for paid users (email + credits > 0); free uses get the standard limit.
-  app.post("/api/tools/estimate", estimateRateLimit, toolsUpload.single("image"), async (req, res) => {
-    try {
-      const { getFeatureFlag } = await import("./config/feature-flags");
-      if (!(await getFeatureFlag("AI_PUBLIC_ESTIMATE_ENABLED"))) {
-        return res.status(503).json({ error: "AI Pre-Grade tool is temporarily paused. Please try again later." });
-      }
-      if (!req.file) return res.status(400).json({ error: "No image uploaded" });
-      const uploadErr = await rejectInvalidUploads([req.file]);
-      if (uploadErr) return res.status(400).json({ error: uploadErr });
-      const apiKey = process.env.ANTHROPIC_API_KEY;
-      console.log("[tools/estimate] ANTHROPIC_API_KEY present:", !!apiKey, "| length:", apiKey?.length ?? 0);
-      if (!apiKey) {
-        console.error(
-          "[tools/estimate] CRITICAL: ANTHROPIC_API_KEY secret missing. Run: flyctl secrets set ANTHROPIC_API_KEY=sk-ant-... -a <app-name>"
-        );
-        return res.status(503).json({ error: "AI service is temporarily unavailable. Please try again shortly." });
-      }
-
-      const email = (req.body.email || "").trim().toLowerCase();
-      const isAdminFree = email === ADMIN_FREE_EMAIL;
-
-      // PKG-3 — owner-bound, atomic credit consumption. The paid Anthropic call
-      // below runs ONLY when this resolves to ok, i.e. the database has proven
-      // exactly one credit was consumed against the correct owner. Authenticated
-      // authority comes solely from the session; a caller-supplied req.body.email
-      // never grants a logged-in caller spending authority over another pool.
-      // IP is hashed (SHA-256) before storage for the anonymous free tier — never
-      // store a raw IP, per privacy rules.
-      const ipRaw =
-        (req.headers["x-forwarded-for"] as string)?.split(",")[0]?.trim() || req.socket.remoteAddress || "unknown";
-      const ipHash = crypto.createHash("sha256").update(ipRaw).digest("hex");
-      const today = new Date().toISOString().split("T")[0]; // YYYY-MM-DD UTC
-
-      const consume = await consumeEstimateCredit({
-        sessionUserId: (req.session as any)?.userId,
-        sessionUserEmail: (req.session as any)?.userEmail,
-        bodyEmail: email,
-        isAdminFree,
-        ipHash,
-        today,
-      });
-      if (!consume.ok) {
-        return res.status(consume.status).json({ error: consume.error, ...(consume.extra || {}) });
-      }
-
-      const { PRE_GRADE_PROMPT } = await import("./grading-prompt");
-
-      // Resize large images before sending to Anthropic (phone photos can be 6-8MB)
-      const sharp = (await import("sharp")).default;
-      const resizedBuffer = await sharp(req.file.buffer)
-        .resize({ width: 1500, height: 1500, fit: "inside", withoutEnlargement: true })
-        .jpeg({ quality: 80 })
-        .toBuffer();
-      console.log(`[tools/estimate] image resized: ${req.file.size} bytes → ${resizedBuffer.length} bytes`);
-
-      const base64 = resizedBuffer.toString("base64");
-      const mt = "image/jpeg";
-
-      let response;
+  // Fleet-wide request quota plus process-wide admission run before the 20 MiB
+  // memory parser. Credit ownership remains the paid-call authority below.
+  app.post(
+    "/api/tools/estimate",
+    estimateRateLimit,
+    publicImageProcessingAdmission.middleware,
+    toolsUpload.single("image"),
+    async (req, res) => {
+      let creditReservationId: string | null = null;
       try {
-        response = await anthropicFetch(
-          {
-            model: "claude-haiku-4-5-20251001",
-            max_tokens: 2048,
-            messages: [
-              {
-                role: "user",
-                content: [
-                  { type: "image", source: { type: "base64", media_type: mt, data: base64 } },
-                  { type: "text", text: PRE_GRADE_PROMPT },
-                ],
-              },
-            ],
-          },
-          { apiKey, timeoutMs: 30_000 }
-        );
-      } catch (err: any) {
-        if (err?.name === "AbortError") {
-          return res.status(504).json({ error: "AI service timed out. Please try again." });
+        const { getFeatureFlag } = await import("./config/feature-flags");
+        if (!(await getFeatureFlag("AI_PUBLIC_ESTIMATE_ENABLED"))) {
+          return res.status(503).json({ error: "AI Pre-Grade tool is temporarily paused. Please try again later." });
         }
-        throw err;
+        if (!req.file) return res.status(400).json({ error: "No image uploaded" });
+        const uploadErr = await rejectInvalidUploads([req.file]);
+        if (uploadErr) return res.status(400).json({ error: uploadErr });
+        const apiKey = process.env.ANTHROPIC_API_KEY;
+        if (!apiKey) {
+          console.error(
+            "[tools/estimate] CRITICAL: ANTHROPIC_API_KEY secret missing. Run: flyctl secrets set ANTHROPIC_API_KEY=sk-ant-... -a <app-name>"
+          );
+          return res.status(503).json({ error: "AI service is temporarily unavailable. Please try again shortly." });
+        }
+
+        // PKG-3 — owner-bound, atomic credit consumption. The paid Anthropic call
+        // below runs ONLY when this resolves to ok, i.e. the database has proven
+        // exactly one credit was consumed against the correct owner. Authenticated
+        // authority comes solely from the session; caller-supplied email text never
+        // grants any caller spending authority over a paid pool.
+        // IP is hashed (SHA-256) before storage for the anonymous free tier — never
+        // store a raw IP, per privacy rules.
+        const ipHash = estimateAnonymousIpHash(req);
+        const today = new Date().toISOString().split("T")[0]; // YYYY-MM-DD UTC
+
+        const consume = await consumeEstimateCredit({
+          sessionUserId: (req.session as any)?.userId,
+          isAuthenticatedAdmin: (req.session as any)?.isAdmin === true && Boolean((req.session as any)?.adminEmail),
+          ipHash,
+          today,
+        });
+        if (!consume.ok) {
+          return res.status(consume.status).json({ error: consume.error, ...(consume.extra || {}) });
+        }
+        creditReservationId = consume.reservationId;
+
+        const { PRE_GRADE_PROMPT } = await import("./grading-prompt");
+
+        // Resize large images before sending to Anthropic (phone photos can be 6-8MB)
+        const sharp = (await import("sharp")).default;
+        const resizedBuffer = await sharp(req.file.buffer)
+          .resize({ width: 1500, height: 1500, fit: "inside", withoutEnlargement: true })
+          .jpeg({ quality: 80 })
+          .toBuffer();
+        console.log(`[tools/estimate] image resized: ${req.file.size} bytes → ${resizedBuffer.length} bytes`);
+
+        const base64 = resizedBuffer.toString("base64");
+        const mt = "image/jpeg";
+
+        let response;
+        try {
+          response = await anthropicFetch(
+            {
+              model: "claude-haiku-4-5-20251001",
+              max_tokens: 2048,
+              messages: [
+                {
+                  role: "user",
+                  content: [
+                    { type: "image", source: { type: "base64", media_type: mt, data: base64 } },
+                    { type: "text", text: PRE_GRADE_PROMPT },
+                  ],
+                },
+              ],
+            },
+            { apiKey, timeoutMs: 30_000 }
+          );
+        } catch (err: any) {
+          if (err?.name === "AbortError") {
+            if (creditReservationId) {
+              await settleEstimateCreditReservation(creditReservationId, "refund");
+              creditReservationId = null;
+            }
+            return res.status(504).json({ error: "AI service timed out. Please try again." });
+          }
+          throw err;
+        }
+
+        if (!response.ok) {
+          const errBody = await response.text().catch(() => "");
+          console.error("[tools/estimate] Anthropic API error", response.status, errBody.slice(0, 300));
+          throw new Error(`AI API error ${response.status}: ${errBody.slice(0, 200)}`);
+        }
+        const aiData = (await response.json()) as { content: { text: string }[] };
+        const text = aiData.content?.[0]?.text || "";
+        const cleaned = text.replace(/```json|```/g, "").trim();
+        const estimate = JSON.parse(cleaned);
+
+        // Backwards-compatible fields for existing client UI
+        const sub = estimate.subgrades || {};
+        const overall = estimate.overall_grade_estimate || {};
+        const compat = {
+          estimated_grade_low: overall.low ?? estimate.estimated_grade_low ?? 5,
+          estimated_grade_high: overall.high ?? estimate.estimated_grade_high ?? 5,
+          grade_label_low: overall.label ?? estimate.grade_label_low ?? "",
+          grade_label_high: overall.label ?? estimate.grade_label_high ?? "",
+          centering_notes: sub.centering?.note ?? estimate.centering_notes ?? "",
+          corners_notes: sub.corners?.note ?? estimate.corners_notes ?? "",
+          edges_notes: sub.edges?.note ?? estimate.edges_notes ?? "",
+          surface_notes: sub.surface?.note ?? estimate.surface_notes ?? "",
+          potential_issues: Array.isArray(estimate.potential_issues)
+            ? estimate.potential_issues.map((p: any) => (typeof p === "string" ? p : p.description || ""))
+            : [],
+          recommendation: estimate.recommendation ?? "",
+          confidence: sub.surface?.confidence ?? estimate.confidence ?? "medium",
+        };
+
+        // Return remaining credits with response. The atomic decrement already
+        // reported the post-spend balance (null for admin-free / anonymous-free
+        // paths, which don't track a per-caller balance).
+        const creditsLeft: number | undefined = consume.remaining ?? undefined;
+        if (creditReservationId) {
+          const committed = await settleEstimateCreditReservation(creditReservationId, "commit");
+          if (!committed) throw new Error("AI estimate credit reservation could not be committed");
+          creditReservationId = null;
+        }
+        // Merge: new structured fields + compat fields + credits
+        res.json({ ...estimate, ...compat, credits_remaining: creditsLeft });
+      } catch (err: any) {
+        if (creditReservationId) {
+          try {
+            await settleEstimateCreditReservation(creditReservationId, "refund");
+          } catch (refundError: any) {
+            console.error("[tools/estimate] credit refund failed:", refundError.message);
+          }
+        }
+        console.error("[tools/estimate] error:", err.message);
+        sendServerError(res, err);
       }
-
-      if (!response.ok) {
-        const errBody = await response.text().catch(() => "");
-        console.error("[tools/estimate] Anthropic API error", response.status, errBody.slice(0, 300));
-        throw new Error(`AI API error ${response.status}: ${errBody.slice(0, 200)}`);
-      }
-      const aiData = (await response.json()) as { content: { text: string }[] };
-      const text = aiData.content?.[0]?.text || "";
-      const cleaned = text.replace(/```json|```/g, "").trim();
-      const estimate = JSON.parse(cleaned);
-
-      // Backwards-compatible fields for existing client UI
-      const sub = estimate.subgrades || {};
-      const overall = estimate.overall_grade_estimate || {};
-      const compat = {
-        estimated_grade_low: overall.low ?? estimate.estimated_grade_low ?? 5,
-        estimated_grade_high: overall.high ?? estimate.estimated_grade_high ?? 5,
-        grade_label_low: overall.label ?? estimate.grade_label_low ?? "",
-        grade_label_high: overall.label ?? estimate.grade_label_high ?? "",
-        centering_notes: sub.centering?.note ?? estimate.centering_notes ?? "",
-        corners_notes: sub.corners?.note ?? estimate.corners_notes ?? "",
-        edges_notes: sub.edges?.note ?? estimate.edges_notes ?? "",
-        surface_notes: sub.surface?.note ?? estimate.surface_notes ?? "",
-        potential_issues: Array.isArray(estimate.potential_issues)
-          ? estimate.potential_issues.map((p: any) => (typeof p === "string" ? p : p.description || ""))
-          : [],
-        recommendation: estimate.recommendation ?? "",
-        confidence: sub.surface?.confidence ?? estimate.confidence ?? "medium",
-      };
-
-      // Return remaining credits with response. The atomic decrement already
-      // reported the post-spend balance (null for admin-free / anonymous-free
-      // paths, which don't track a per-caller balance).
-      const creditsLeft: number | undefined = consume.remaining ?? undefined;
-      // Merge: new structured fields + compat fields + credits
-      res.json({ ...estimate, ...compat, credits_remaining: creditsLeft });
-    } catch (err: any) {
-      console.error("[tools/estimate] error:", err.message);
-      sendServerError(res, err);
     }
-  });
+  );
 
   // ── Target-bound scanner capture sessions ──────────────────────────────────
   // The workstation creates one of these BEFORE the scanner receives a capture
@@ -10546,6 +9677,7 @@ Defects (admin-confirmed): ${defectLines}`;
           buffer: stagedTiff,
           mimeType: "image/tiff",
           provenanceInput: prepared.staging.provenance,
+          stagingId,
           trusted: {
             stationId: req.scannerStation?.id ?? null,
             tenantId: req.scannerStation?.tenantId ?? null,
@@ -10619,130 +9751,33 @@ Defects (admin-confirmed): ${defectLines}`;
     async (req, res) => {
       const sessionId = String(req.params.sessionId);
       try {
-        const { beginScannerCapture, finishScannerCapture, isScannerCaptureCardRegistered } =
-          await import("./scanner-capture-service");
-        const { parseLide400CaptureProvenance, assertLide400Evidence } = await import("./lib/lide400-profile");
-        const { inspectScannerEvidence, uploadRawScannerSide, markRawUploaded, setScanStatus } =
-          await import("./scan-ingest-service");
+        const { beginScannerCapture } = await import("./scanner-capture-service");
+        const { finaliseScannerEvidence, reconcileAcceptedScannerEvidence } =
+          await import("./scanner-evidence-finalisation");
         const deviceId = req.scannerStation?.code ?? req.body?.device_id;
         const session = await beginScannerCapture(sessionId, deviceId);
         const file = req.file;
         if (!file) throw new Error("TIFF image is required");
-        const inspection = await inspectScannerEvidence(file.buffer);
-        const provenance = parseLide400CaptureProvenance(JSON.parse(String(req.body?.capture_provenance || "")));
-        assertLide400Evidence(inspection, provenance);
-        const { assessLide400CardFrame } = await import("./lib/lide400-card-frame");
-        /*
-         * SERVER-OWNED GEOMETRY, exactly as in `finaliseScannerEvidence`. The acquisition rectangle
-         * is the one snapshotted onto this session when the side was armed, from the station's
-         * current VALID calibration — never the station's own declaration in the upload, which is
-         * only required to agree with it. Both evidence paths must derive it the same way or the
-         * weaker one becomes the way in.
-         */
-        const { authoritativeRegionForSession, assertDeclaredRegionMatchesAuthority } =
-          await import("./lib/lide400-capture-authority");
-        const authoritativeRegion = authoritativeRegionForSession(session);
-        assertDeclaredRegionMatchesAuthority(provenance.scanAreaMm, authoritativeRegion);
-        // Same commit-time pairing check as the staged path — see scanner-evidence-finalisation.ts.
-        const { assertCommittedSidesShareOneRectangle } = await import("./scanner-capture-service");
-        await assertCommittedSidesShareOneRectangle(session.certificateId, session.side, authoritativeRegion);
-        const frameAssessment = await assessLide400CardFrame(file.buffer, inspection, authoritativeRegion);
-        if (!frameAssessment.accepted) {
-          throw new Error(frameAssessment.reason || "Card-boundary safety check rejected this acquired TIFF");
-        }
-        if (
-          provenance.profileVersion !== session.scannerProfileVersion ||
-          provenance.workstationId !== session.workstationId
-        ) {
-          throw new Error("Capture provenance does not match the armed workstation/profile");
-        }
-        if (req.scannerStation && session.stationId !== req.scannerStation.id) {
-          throw new Error("Capture session is not bound to this authenticated station");
-        }
-        // Fail before writing any immutable back evidence. A back-only master
-        // would be an incomplete target capture, not a recoverable partial
-        // upload, and must not alter the current evidence selection.
-        if (session.side === "back") {
-          const front = await db.execute(sql`
-            SELECT 1 FROM certificate_image_evidence
-            WHERE certificate_id = ${session.certificateId} AND side = 'front' AND is_current = true
-            LIMIT 1`);
-          if (!front.rows.length) throw new Error("Back capture refused until an immutable front master exists");
-        }
-        await uploadRawScannerSide(
-          session.certificateId,
-          session.side,
-          { buffer: file.buffer, mimeType: file.mimetype, ext: "tif", inspection },
-          {
-            allowRecapture: session.recapture,
-            captureMetadata: {
-              captureSessionId: session.id,
-              cardId: session.cardId,
-              submissionItemId: session.submissionItemId,
-              submissionId: session.submissionId,
-              cardFrameAssessment: frameAssessment,
-              ...provenance,
-              // The SERVER's rectangle, not the station's declaration — see the equivalent note in
-              // scanner-evidence-finalisation.ts. Written after the spread so it wins.
-              declaredScanAreaMm: provenance.scanAreaMm,
-              scanAreaMm: authoritativeRegion,
-              // These values are never trusted from multipart provenance.
-              // They resolve only from the armed session and station/operator
-              // principals authenticated by the server.
-              stationId: req.scannerStation?.id ?? session.stationId,
-              tenantId: req.scannerStation?.tenantId ?? null,
-              locationId: req.scannerStation?.locationId ?? null,
-              actorId: req.scannerOperator?.userId ?? session.actorId,
-            },
-          }
-        );
-        await markRawUploaded(session.certificateId);
-        await setScanStatus(session.certificateId, "processing");
-        const { enqueueScannerProcessing } = await import("./scanner-processing-queue");
-        await enqueueScannerProcessing(session.certificateId, session.stationId);
-        await finishScannerCapture(sessionId, true);
-        const cardRegistered = await isScannerCaptureCardRegistered(session.certificateId);
-        await storage.writeAuditLog(
-          "certificate",
-          String(session.certificateId),
-          "scanner_capture_accepted",
-          "scanner",
-          {
-            capture_session_id: session.id,
-            side: session.side,
-            card_id: session.cardId,
-            submission_item_id: session.submissionItemId,
-            submission_id: session.submissionId,
-            workstation_id: session.workstationId,
-            station_id: req.scannerStation?.id ?? session.stationId,
-            tenant_id: req.scannerStation?.tenantId ?? null,
-            location_id: req.scannerStation?.locationId ?? null,
-            actor_id: req.scannerOperator?.userId ?? session.actorId,
-            scanner_device_id: provenance.scannerDeviceId,
-            scanner_model: provenance.scannerModel,
-            scanner_profile_version: provenance.profileVersion,
-            sha256: inspection.sha256,
-            recapture: session.recapture,
-          }
-        );
-        /*
-         * ADVANCE THE PARTNER CARD JOB — the same bridge the R2 staging path gets inside
-         * recordAcceptedScannerEvidence().
-         *
-         * This legacy multipart route does NOT call recordAcceptedScannerEvidence: it inlines its own
-         * audit write. So hooking only the shared helper would have left this transport unable to
-         * promote a Card Job to READY_TO_GRADE — a card captured through the compatibility body would
-         * silently stay ungradeable, which is precisely the defect being closed. A no-op for HQ and
-         * connector-imported certificates, which have no Card Job.
-         */
-        const { advanceCardJobAfterCaptureSafely } = await import("./partner/card-job-lifecycle");
-        await advanceCardJobAfterCaptureSafely(session.certificateId);
+        const trusted = {
+          stationId: req.scannerStation?.id ?? null,
+          tenantId: req.scannerStation?.tenantId ?? null,
+          locationId: req.scannerStation?.locationId ?? null,
+          actorId: req.scannerOperator?.userId ?? session.actorId,
+        };
+        const evidence = await finaliseScannerEvidence({
+          session,
+          buffer: file.buffer,
+          mimeType: file.mimetype,
+          provenanceInput: JSON.parse(String(req.body?.capture_provenance || "")),
+          trusted,
+        });
+        const reconciled = await reconcileAcceptedScannerEvidence({ session, evidence, trusted });
         return res.status(201).json({
           ok: true,
           certId: session.certificateNumber,
           side: session.side,
           raw_uploaded: true,
-          card_registered: cardRegistered,
+          card_registered: reconciled.cardRegistered,
         });
       } catch (error: any) {
         const reason = error?.message || "scanner capture rejected";
@@ -10767,215 +9802,10 @@ Defects (admin-confirmed): ${defectLines}`;
     }
   );
 
-  // ── Admin scan-ingest: scanner → cert → AI pipeline in one call ────────────
-
-  app.post(
-    "/api/admin/scan-ingest",
-    requireScannerOrAdmin,
-    // Timing marker captured BEFORE multer, so we can log body-receive (multer)
-    // duration separately from handler/processing time.
-    (req, _res, next) => {
-      (req as any)._ingestT0 = process.hrtime.bigint();
-      next();
-    },
-    scanUpload.fields([
-      { name: "front", maxCount: 1 },
-      { name: "back", maxCount: 1 },
-    ]),
-    async (req, res) => {
-      // A physical scanner may no longer mint an unbound certificate. The
-      // target-bound session endpoint above uses the same evidence/pipeline
-      // service after it proves certificate/card/submission/side ownership.
-      // Keep this route as an explicit failure rather than leaving the old
-      // allocation behaviour reachable to a leaked/stale scanner token.
-      const unboundIngestDisabled = () => true;
-      if (unboundIngestDisabled()) {
-        return res.status(410).json({
-          error: "Unbound scanner ingest is retired. Arm a certificate-side capture session before scanning.",
-        });
-      }
-      /* c8 ignore next -- historical handler below is unreachable during the
-         cutover window and retained only to make rollback diffable. */
-      const {
-        createCertForScan,
-        resolveScanOperatorId,
-        uploadRawScansToR2,
-        processScanInBackground,
-        markRawUploaded,
-        pgErrorDetail,
-        inspectScannerEvidence,
-        assertCompatibleEvidencePair,
-      } = await import("./scan-ingest-service");
-      const { getSetting } = await import("./lib/pipeline-settings");
-      const elapsedMs = (start: bigint) => Number(process.hrtime.bigint() - start) / 1e6;
-      const tHandler = process.hrtime.bigint();
-      const multerMs = (req as any)._ingestT0 ? elapsedMs((req as any)._ingestT0 as bigint) : null;
-      let certInfo: { id: number; certId: string } | null = null;
-
-      try {
-        const files = req.files as Record<string, Express.Multer.File[]>;
-        if (!files?.front?.[0]) return res.status(400).json({ error: "Front image is required" });
-
-        const frontFile = files.front[0];
-        const backFile = files.back?.[0] || null;
-        // Phase 2 — magic-byte content-type validation (mirrors the H3 hot-folder
-        // fix): reject anything that isn't a real image before it enters the pipeline.
-        if (!(await validateImageMagicBytes(frontFile))) {
-          return res.status(400).json({ error: "Front image failed content-type validation (not a valid image)" });
-        }
-        if (backFile && !(await validateImageMagicBytes(backFile))) {
-          return res.status(400).json({ error: "Back image failed content-type validation (not a valid image)" });
-        }
-        // Decode metadata with a bounded TIFF decoder before allocating a cert.
-        // This verifies signature/content agreement and prevents a malformed or
-        // decompression-bomb TIFF from entering the asynchronous R2 path.
-        let frontEvidence: any;
-        let backEvidence: any = null;
-        try {
-          frontEvidence = await inspectScannerEvidence(frontFile.buffer);
-          backEvidence = backFile ? await inspectScannerEvidence(backFile.buffer) : null;
-          assertCompatibleEvidencePair(frontEvidence, backEvidence);
-          if (frontEvidence.evidenceClass !== "NEW_IMMUTABLE_MASTER") {
-            return res.status(400).json({ error: "New scanner ingestion requires an original TIFF master" });
-          }
-        } catch (e: any) {
-          return res.status(400).json({ error: `Scanner evidence rejected: ${e?.message ?? "invalid image"}` });
-        }
-        const frontBuf = frontFile.buffer;
-        const backBuf = backFile?.buffer || null;
-        const notes = (req.body?.notes || "").trim();
-        const clientSource = (req.body?.client_source || "admin_ui").trim();
-
-        // Pull a usable file extension from the multipart filename so the
-        // raw R2 key keeps the original format (.tif / .tiff / .png / .jpg).
-        const extFromName = (name?: string) => {
-          if (!name) return "bin";
-          const m = String(name)
-            .toLowerCase()
-            .match(/\.([a-z0-9]{1,5})$/);
-          return m ? m[1] : "bin";
-        };
-        const frontExt = extFromName(frontFile.originalname);
-        const backExt = backFile ? extFromName(backFile.originalname) : "bin";
-
-        // Content-derived idempotency key (front+back SHA), stable across the
-        // scanner's retries + restarts. The UNIQUE-index gate in createCertForScan
-        // makes a re-driven / raced ingest resolve to the SAME cert — no duplicate.
-        const idempotencyKey =
-          (req.headers["x-idempotency-key"] as string | undefined)?.trim() ||
-          (req.body?.idempotency_key ? String(req.body.idempotency_key).trim() : "") ||
-          null;
-
-        console.log(
-          `[scan-ingest] starting: front=${(frontBuf.length / 1024).toFixed(0)}KB back=${backBuf ? (backBuf.length / 1024).toFixed(0) + "KB" : "none"} source=${clientSource} multer=${multerMs != null ? multerMs.toFixed(0) + "ms" : "?"} key=${idempotencyKey ? idempotencyKey.slice(0, 12) + "…" : "none"}`
-        );
-
-        // Phase 1: resolve the scanning operator from the X-Scanner-Operator header
-        // (operator email, validated server-side → user id, or NULL for a legacy
-        // shared-token scan). Never fails the scan; an unknown/absent operator → NULL.
-        const scannedBy = await resolveScanOperatorId(req.header("x-scanner-operator"));
-
-        // Step 1 (sync): idempotent cert allocation — same key → same cert.
-        const ci = await createCertForScan(idempotencyKey, scannedBy);
-        certInfo = { id: ci.id, certId: ci.certId };
-
-        // Idempotent replay of an already-COMPLETE cert (raw confirmed in R2):
-        // nothing to redo — reply so the watcher sees raw_uploaded=true and moves
-        // the inbox file. This is the crash-between-move-and-removePending path.
-        if (ci.reused && ci.rawUploaded) {
-          console.log(`[scan-ingest] ${ci.certId}: idempotent replay of complete cert — no reprocess`);
-          return res.json({
-            certId: ci.certId,
-            dbId: ci.id,
-            raw_uploaded: true,
-            scan_status: ci.scanStatus,
-            reused: true,
-            status: ci.scanStatus ?? "ready",
-            workstationUrl: `/admin#grading-${ci.id}`,
-            message: `Certificate ${ci.certId} already ingested.`,
-          });
-        }
-
-        if (notes) {
-          await db.execute(sql`UPDATE certificates SET notes = ${notes} WHERE id = ${ci.id}`);
-        }
-
-        // Step 2 (async — Fix A): background the RAW R2 upload + the heavy
-        // pipeline, and respond IMMEDIATELY — the server no longer holds the
-        // request open for the raw PUT, which closes the client's 60s no-progress
-        // window. The CORE INVARIANT still holds: raw_uploaded flips true ONLY
-        // after the raw PUT confirms, and the scanner keeps the inbox file until
-        // it polls raw_uploaded=true. Crash before that → file retained → re-drive
-        // (same key → same cert) + deterministic R2 keys make it idempotent.
-        const autoAiOn = await getSetting("ai_auto_ingest_enabled", true);
-        setImmediate(() => {
-          void (async () => {
-            const tBg = process.hrtime.bigint();
-            try {
-              await uploadRawScansToR2(
-                ci.id,
-                { buffer: frontBuf, mimeType: frontFile.mimetype, ext: frontExt, inspection: frontEvidence },
-                backBuf && backFile
-                  ? { buffer: backBuf, mimeType: backFile.mimetype, ext: backExt, inspection: backEvidence }
-                  : null
-              );
-              await markRawUploaded(ci.id);
-              console.log(
-                `[scan-ingest] ${ci.certId}: raw confirmed in R2 (raw_uploaded=true) rawPut=${elapsedMs(tBg).toFixed(0)}ms`
-              );
-            } catch (rawErr: any) {
-              // Raw PUT failed → raw_uploaded stays false. The scanner retains the
-              // inbox file; the reconciler / next re-drive retries. Do NOT process.
-              console.error(
-                `[scan-ingest] ${ci.certId}: raw R2 upload FAILED (raw_uploaded stays false): ${rawErr?.message ?? rawErr}${pgErrorDetail(rawErr)}`
-              );
-              return;
-            }
-            // Heavy CPU work (sharp variants + AI) is SERIALIZED through the scan
-            // job queue (default 1 at a time) so a burst of scans can't saturate
-            // the single shared vCPU. Raw is already confirmed above (fast
-            // file-move); only the heavy pipeline queues.
-            // skipAi: ALWAYS defer the AI pre-grade off the scan path so the queue
-            // slot frees right after sharp+r2 (~10s sooner — the AI step is API-wait
-            // that used to block the slot). The pre-grade is computed lazily when a
-            // grader opens the cert (ensureAiDraft). The ai_auto_ingest_enabled
-            // master switch still gates that lazy/manual AI compute.
-            //
-            // NOTE: an at-scan auto-identify trigger (PR #122) was REVERTED here — it
-            // fired ensureAiDraft DETACHED, outside this serialized queue, once per
-            // scan, which reintroduced the exact unbounded CPU + DB-pool saturation
-            // the queue exists to prevent (stuck-'processing' empty certs + downstream
-            // front/back mis-pairing, MV291+, v932). Names still auto-fill on
-            // grader-open via the on-open ensureAiDraft. Any future at-scan identify
-            // MUST run INSIDE this serialized job (or a concurrency-capped lane).
-            enqueueScanJob(() => processScanInBackground(ci, frontBuf, backBuf, { skipAi: true }), ci.certId);
-          })();
-        });
-
-        // Step 3 (sync return): immediate — cert exists; raw + processing async.
-        console.log(
-          `[scan-ingest] ${ci.certId}: responded in ${elapsedMs(tHandler).toFixed(0)}ms (raw+processing backgrounded)`
-        );
-        res.json({
-          certId: ci.certId,
-          dbId: ci.id,
-          raw_uploaded: false,
-          scan_status: "processing",
-          reused: ci.reused,
-          workstationUrl: `/admin#grading-${ci.id}`,
-          status: "processing",
-          aiStatus: autoAiOn ? "deferred" : "skipped",
-          message: `Certificate ${ci.certId} created. Raw upload + processing in background.`,
-        });
-      } catch (err: any) {
-        console.error(
-          `[scan-ingest] error${certInfo ? ` (cert=${certInfo.certId})` : ""}: ${err.message}${pgErrorDetail(err)}`
-        );
-        res.status(500).json({ error: "Scan ingest failed", certId: certInfo?.certId || null });
-      }
-    }
-  );
-
+  // ── Retired unbound scanner ingest ───────────────────────────────────────
+  // Refuse before authentication or multipart parsing. The target-bound
+  // capture-session endpoint is the sole scanner ingestion authority.
+  app.post("/api/admin/scan-ingest", refuseRetiredScanIngest);
   // ── Scan-status poll — the scanner holds the inbox file until raw_uploaded=true
   // here, then moves it (the core-invariant completion signal). Also the reconcile
   // probe used by requeuePending after a crash. Lightweight: two columns only. ──
@@ -11436,21 +10266,13 @@ Defects (admin-confirmed): ${defectLines}`;
         });
       }
 
-      const fetchR2Buf = async (key: string): Promise<Buffer> => {
-        const url = await getR2SignedUrl(key, 300);
-        const resp = await fetch(url);
-        if (!resp.ok) throw new Error(`fetch ${key} failed: ${resp.status}`);
-        return Buffer.from(await resp.arrayBuffer());
-      };
-
-      const frontBuf = await fetchR2Buf(frontKey);
-      const backBuf = backKey ? await fetchR2Buf(backKey) : null;
-      console.log(
-        `[reprocess-images] cert=${certId} dbId=${dbId} front=${(frontBuf.length / 1024).toFixed(0)}KB back=${backBuf ? `${(backBuf.length / 1024).toFixed(0)}KB` : "—"}`
-      );
-
-      const { uploadImagesToCert } = await import("./scan-ingest-service");
-      await uploadImagesToCert(dbId, frontBuf, backBuf);
+      const adminUser = (req.session as any)?.adminUser ?? ADMIN_EMAIL ?? "admin";
+      const { reprocessCurrentCertificateImages } = await import("./scan-ingest-service");
+      await reprocessCurrentCertificateImages(dbId, {
+        actor: adminUser,
+        action: "reprocess_images",
+        auditMetadata: { reason: "manual", source: "admin_certs_reprocess" },
+      });
 
       // Read back the post-reprocess display image paths and sign them
       // for the response so the frontend can swap the viewer image src
@@ -11474,12 +10296,6 @@ Defects (admin-confirmed): ${defectLines}`;
       };
       const front_url = await signIfPresent(after.front_image_path ?? null);
       const back_url = await signIfPresent(after.back_image_path ?? null);
-
-      const adminUser = (req.session as any)?.adminUser ?? ADMIN_EMAIL ?? "admin";
-      await db.execute(sql`
-        INSERT INTO audit_log (entity_type, entity_id, action, admin_user, details, created_at)
-        VALUES ('certificate', ${String(dbId)}, 'reprocess_images', ${adminUser}, ${JSON.stringify({ reason: "manual" })}::jsonb, NOW())
-      `);
 
       res.json({ success: true, front_url, back_url });
     } catch (err: any) {
@@ -11545,20 +10361,13 @@ Defects (admin-confirmed): ${defectLines}`;
 
       console.log(`[bulk-reprocess] starting: ${worklist.length} certs (all=${all})`);
 
-      const { uploadImagesToCert } = await import("./scan-ingest-service");
+      const { reprocessCurrentCertificateImages } = await import("./scan-ingest-service");
       const adminUser = (req.session as any)?.adminUser ?? ADMIN_EMAIL ?? "admin";
 
       const errors: Array<{ cert_id: string; error: string }> = [];
       let processed = 0;
       let failed = 0;
       const BATCH = 10;
-
-      const fetchR2Buf = async (key: string): Promise<Buffer> => {
-        const url = await getR2SignedUrl(key, 300);
-        const resp = await fetch(url);
-        if (!resp.ok) throw new Error(`R2 fetch ${key} failed: ${resp.status}`);
-        return Buffer.from(await resp.arrayBuffer());
-      };
 
       const processOne = async (item: { id: number; certNumber: string }) => {
         try {
@@ -11592,15 +10401,11 @@ Defects (admin-confirmed): ${defectLines}`;
             }
           }
 
-          const frontBuf = await fetchR2Buf(frontKey);
-          const backBuf = backKey ? await fetchR2Buf(backKey) : null;
-
-          await uploadImagesToCert(item.id, frontBuf, backBuf);
-
-          await db.execute(sql`
-            INSERT INTO audit_log (entity_type, entity_id, action, admin_user, details, created_at)
-            VALUES ('certificate', ${String(item.id)}, 'reprocess_images', ${adminUser}, ${JSON.stringify({ reason: "bulk", source: "bulk-reprocess" })}::jsonb, NOW())
-          `);
+          await reprocessCurrentCertificateImages(item.id, {
+            actor: adminUser,
+            action: "reprocess_images",
+            auditMetadata: { reason: "bulk", source: "bulk-reprocess" },
+          });
 
           processed++;
           console.log(`[bulk-reprocess] ✓ ${item.certNumber} (id=${item.id}) ${processed}/${worklist.length}`);
@@ -11636,189 +10441,155 @@ Defects (admin-confirmed): ${defectLines}`;
   // re-encodes to JPEG (handles .tif, .tiff, .png, .webp, .jpg/.jpeg input).
   // R2 key follows the existing scan-ingest convention so /reprocess-images
   // and the dashboard image fetcher both find it without changes.
-  app.post("/api/admin/certs/:certId/image", requireScannerOrAdmin, certImgUpload.single("image"), async (req, res) => {
-    try {
-      const certIdRaw = String(req.params.certId);
-      const certId = normalizeCertId(certIdRaw);
-      const side = String(req.body?.side || "").toLowerCase();
-      const replaceExisting = String(req.body?.replace_existing || "false") === "true";
+  app.post(
+    "/api/admin/certs/:certId/image",
+    requireScannerOrAdmin,
+    uploadMemoryAdmission("admin_cert_image", 256),
+    certImgUpload.single("image"),
+    async (req, res) => {
+      try {
+        const certIdRaw = String(req.params.certId);
+        const certId = normalizeCertId(certIdRaw);
+        const side = String(req.body?.side || "").toLowerCase();
+        const replaceExisting = String(req.body?.replace_existing || "false") === "true";
 
-      if (side !== "front" && side !== "back") {
-        return res.status(400).json({ error: "side must be 'front' or 'back'" });
-      }
-      const file = req.file;
-      if (!file) return res.status(400).json({ error: "image file required (multipart 'image')" });
-      const uploadErr = await rejectInvalidUploads([file]);
-      if (uploadErr) return res.status(400).json({ error: uploadErr });
-      // Phase 58A: this legacy single-side endpoint re-encodes every input to
-      // q85 JPEG. Refuse TIFF rather than silently destroying a scanner master;
-      // V850/SilverFast TIFFs must use /api/admin/scan-ingest, which writes the
-      // immutable master ledger and native working derivative.
-      if (/^image\/(tiff|x-tiff)$/i.test(file.mimetype) || /\.tiff?$/i.test(file.originalname)) {
-        return res.status(409).json({
-          error:
-            "TIFF scanner masters must be uploaded through /api/admin/scan-ingest; this legacy image endpoint would re-encode the evidence",
-        });
-      }
+        if (side !== "front" && side !== "back") {
+          return res.status(400).json({ error: "side must be 'front' or 'back'" });
+        }
+        const file = req.file;
+        if (!file) return res.status(400).json({ error: "image file required (multipart 'image')" });
+        const uploadErr = await rejectInvalidUploads([file]);
+        if (uploadErr) return res.status(400).json({ error: uploadErr });
+        // Phase 58A: this legacy single-side endpoint re-encodes every input to
+        // q85 JPEG. Refuse TIFF rather than silently destroying a scanner master;
+        // V850/SilverFast TIFFs must use /api/admin/scan-ingest, which writes the
+        // immutable master ledger and native working derivative.
+        if (/^image\/(tiff|x-tiff)$/i.test(file.mimetype) || /\.tiff?$/i.test(file.originalname)) {
+          return res.status(409).json({
+            error:
+              "TIFF scanner masters must be uploaded through /api/admin/scan-ingest; this legacy image endpoint would re-encode the evidence",
+          });
+        }
 
-      const certRow = await db.execute(sql`
+        const certRow = await db.execute(sql`
           SELECT id, certificate_number, grading_front_original, grading_back_original, deleted_at
           FROM certificates
           WHERE certificate_number = ${certId}
           LIMIT 1
         `);
-      const cert = certRow.rows[0] as any;
-      if (!cert) return res.status(404).json({ error: "cert not found", certId });
-      if (cert.deleted_at)
-        return res.status(410).json({ error: "cert is soft-deleted; restore before attaching images" });
+        const cert = certRow.rows[0] as any;
+        if (!cert) return res.status(404).json({ error: "cert not found", certId });
+        if (cert.deleted_at)
+          return res.status(410).json({ error: "cert is soft-deleted; restore before attaching images" });
 
-      const sideCol = side === "front" ? "grading_front_original" : "grading_back_original";
-      const previousKey: string | null = cert[sideCol] || null;
+        const sideCol = side === "front" ? "grading_front_original" : "grading_back_original";
+        const previousKey: string | null = cert[sideCol] || null;
 
-      if (previousKey && !replaceExisting) {
-        let currentSignedUrl: string | null = null;
-        try {
-          currentSignedUrl = await getR2SignedUrl(previousKey, 600);
-        } catch {}
-        return res.status(409).json({
-          error: `${side} already attached to ${certId}`,
-          current_key: previousKey,
-          current_signed_url: currentSignedUrl,
-        });
-      }
-
-      // sharp → JPEG. .rotate() applies EXIF orientation; resize cap mirrors
-      // scan-ingest-service.uploadImagesToCert (3000×3000 fit:inside).
-      const sharp = (await import("sharp")).default;
-      let jpegBuf: Buffer;
-      try {
-        jpegBuf = await sharp(file.buffer)
-          .rotate()
-          .resize(3000, 3000, { fit: "inside", withoutEnlargement: true })
-          .jpeg({ quality: 85, progressive: true, mozjpeg: true })
-          .toBuffer();
-      } catch (err: any) {
-        return res.status(400).json({ error: "image decode failed" });
-      }
-
-      // Unique key per upload (two-scanner safety): with the old deterministic
-      // key, two devices racing the same cert/side wrote the SAME R2 object —
-      // last write silently won and the losing card's image was lost while the
-      // DB looked correct. Each upload now writes its own object; the atomic
-      // CAS below decides the single winner. Downstream always reads the
-      // column, never reconstructs this path by convention.
-      const newKey = `images/grading/${cert.id}/${side}_original_${Date.now().toString(36)}.jpg`;
-      await uploadToR2(newKey, jpegBuf, "image/jpeg");
-
-      // Atomic claim-the-slot: only update if the cert is still live AND the
-      // side still holds exactly what we read above (IS NOT DISTINCT FROM
-      // handles NULL). A concurrent device that attached in between makes this
-      // match 0 rows → we clean up our orphan object and 409 instead of
-      // silently cross-wiring two different physical cards.
-      const sideColSql = side === "front" ? sql`grading_front_original` : sql`grading_back_original`;
-      const claimed = await db.execute(sql`
-        UPDATE certificates
-        SET ${sideColSql} = ${newKey}, updated_at = NOW()
-        WHERE id = ${cert.id}
-          AND deleted_at IS NULL
-          AND (${replaceExisting} OR ${sideColSql} IS NOT DISTINCT FROM ${previousKey})
-        RETURNING id
-      `);
-      if (claimed.rows.length === 0) {
-        try {
-          await deleteFromR2(newKey);
-        } catch {}
-        return res.status(409).json({
-          error: `${side} image for ${certId} changed under this upload (another scanner attached it, or the cert was deleted) — refresh and retry`,
-        });
-      }
-
-      const adminUser =
-        (req.session as any)?.adminEmail || (req.headers["x-scanner-token"] ? "scanner-watcher" : "admin");
-      await storage.writeAuditLog("certificate", certId, "image_attached_manual", adminUser, {
-        side,
-        replace_existing: replaceExisting,
-        previous_key: previousKey,
-        new_key: newKey,
-        original_filename: file.originalname || null,
-        mime_received: file.mimetype || null,
-        size_in_bytes: file.size,
-      });
-
-      // ── Post-save: run the same crop + AI pipeline scan-ingest uses ──
-      // Without this, the cert has the raw original in R2 but no display
-      // PNG, no AI variants, and AI grading is never queued — so the
-      // workstation viewer is blank and the grade stays at "—". Mirrors
-      // PUT /attach-images, which calls uploadImagesToCert + AI for new
-      // certs that get image attachments from the admin UI.
-      //
-      // uploadImagesToCert requires the FRONT original (back-only certs
-      // can't go through the pipeline). When the operator uploads back
-      // first, we skip with pipeline_status='skipped-no-front' — the
-      // operator's subsequent front upload will trigger the full pipeline
-      // for both sides.
-      let pipelineStatus: "ok" | "skipped-no-front" | "failed" = "skipped-no-front";
-      let pipelineError: string | null = null;
-      let aiTriggered = false;
-
-      const frontKeyAfter = side === "front" ? newKey : (cert.grading_front_original as string | null);
-      const backKeyAfter = side === "back" ? newKey : (cert.grading_back_original as string | null);
-
-      if (frontKeyAfter) {
-        try {
-          // Fetch buffers — the just-uploaded side is already in memory
-          // as jpegBuf; the other side comes from R2.
-          const fetchR2Buf = async (key: string): Promise<Buffer> => {
-            const url = await getR2SignedUrl(key, 300);
-            const resp = await fetch(url);
-            if (!resp.ok) throw new Error(`fetch ${key} failed: ${resp.status}`);
-            return Buffer.from(await resp.arrayBuffer());
-          };
-          const frontBuf: Buffer = side === "front" ? jpegBuf : await fetchR2Buf(frontKeyAfter);
-          const backBuf: Buffer | null = !backKeyAfter
-            ? null
-            : side === "back"
-              ? jpegBuf
-              : await fetchR2Buf(backKeyAfter);
-
-          const { uploadImagesToCert, runAiOnCertIfIdle } = await import("./scan-ingest-service");
-          const { frontVariants, backVariants } = await uploadImagesToCert(cert.id, frontBuf, backBuf);
-          pipelineStatus = "ok";
-          console.log(`[cert-image-attach] pipeline ok for cert ${cert.id} (${certId}) side=${side}`);
-
-          const aiPromise = runAiOnCertIfIdle(cert.id, frontVariants.cropped, backVariants?.cropped || null);
-          if (aiPromise) {
-            aiTriggered = true;
-            aiPromise
-              .then((r) => console.log(`[cert-image-attach] AI done for cert ${cert.id}: grade=${r?.grade}`))
-              .catch((e) => console.warn(`[cert-image-attach] AI failed for cert ${cert.id}:`, e?.message || e));
-          }
-        } catch (err: any) {
-          // Original is saved on R2 + the column is updated — pipeline
-          // failure doesn't undo that. Return 200 with the failure flagged
-          // so the caller can decide (e.g. re-run /reprocess-images).
-          pipelineStatus = "failed";
-          pipelineError = err?.message || String(err);
-          console.error(`[cert-image-attach] pipeline failed for cert ${cert.id}:`, pipelineError);
+        if (previousKey && !replaceExisting) {
+          let currentSignedUrl: string | null = null;
+          try {
+            currentSignedUrl = await getR2SignedUrl(previousKey, 600);
+          } catch {}
+          return res.status(409).json({
+            error: `${side} already attached to ${certId}`,
+            current_key: previousKey,
+            current_signed_url: currentSignedUrl,
+          });
         }
-      }
 
-      res.json({
-        ok: true,
-        cert_id: certId,
-        side,
-        new_key: newKey,
-        previous_key: previousKey,
-        replaced: !!previousKey,
-        pipeline_status: pipelineStatus,
-        pipeline_error: pipelineError,
-        ai_triggered: aiTriggered,
-      });
-    } catch (err: any) {
-      console.error("[cert-image-attach] failed:", err);
-      sendServerError(res, err);
+        // sharp → JPEG. .rotate() applies EXIF orientation; resize cap mirrors
+        // scan-ingest-service.uploadImagesToCert (3000×3000 fit:inside).
+        const sharp = (await import("sharp")).default;
+        let jpegBuf: Buffer;
+        try {
+          jpegBuf = await sharp(file.buffer)
+            .rotate()
+            .resize(3000, 3000, { fit: "inside", withoutEnlargement: true })
+            .jpeg({ quality: 85, progressive: true, mozjpeg: true })
+            .toBuffer();
+        } catch (err: any) {
+          return res.status(400).json({ error: "image decode failed" });
+        }
+
+        const adminUser =
+          (req.session as any)?.adminEmail || (req.headers["x-scanner-token"] ? "scanner-watcher" : "admin");
+        // The original and derivative pass share one per-certificate advisory
+        // lock. A concurrent scanner cannot publish stale caller-held bytes
+        // after a newer original has committed.
+        let attached: Awaited<
+          ReturnType<typeof import("./scan-ingest-service").attachManualCertificateSideAndReprocess>
+        >;
+        try {
+          const { attachManualCertificateSideAndReprocess } = await import("./scan-ingest-service");
+          attached = await attachManualCertificateSideAndReprocess({
+            certId: Number(cert.id),
+            certificateNumber: certId,
+            side,
+            expectedPreviousKey: previousKey,
+            body: jpegBuf,
+            actor: adminUser,
+            replaceExisting,
+            originalFilename: file.originalname || null,
+            mimeReceived: file.mimetype || null,
+            sizeInBytes: file.size,
+            idempotencyKey:
+              typeof req.headers["idempotency-key"] === "string" ? req.headers["idempotency-key"] : null,
+          });
+        } catch (error) {
+          if (error instanceof ObjectWriteAbandonError || error instanceof ObjectWriteConflictError) {
+            return res.status(409).json({
+              error: `${side} image for ${certId} changed under this upload (another scanner attached it, or the cert was deleted) — refresh and retry`,
+            });
+          }
+          throw error;
+        }
+
+        const newKey = attached.originalObjectKey;
+        let pipelineStatus: "ok" | "skipped-no-front" | "failed" = attached.pipeline
+          ? "ok"
+          : attached.pipelineError
+            ? "failed"
+            : "skipped-no-front";
+        const pipelineError = attached.pipelineError;
+        let aiTriggered = false;
+
+        if (attached.pipeline) {
+          try {
+            const { runAiOnCertIfIdle } = await import("./scan-ingest-service");
+            const { frontVariants, backVariants } = attached.pipeline;
+            console.log(`[cert-image-attach] pipeline ok for cert ${cert.id} (${certId}) side=${side}`);
+
+            const aiPromise = runAiOnCertIfIdle(cert.id, frontVariants.cropped, backVariants?.cropped || null);
+            if (aiPromise) {
+              aiTriggered = true;
+              aiPromise
+                .then((r) => console.log(`[cert-image-attach] AI done for cert ${cert.id}: grade=${r?.grade}`))
+                .catch((e) => console.warn(`[cert-image-attach] AI failed for cert ${cert.id}:`, e?.message || e));
+            }
+          } catch (err: any) {
+            // AI is intentionally downstream of the committed image revision.
+            pipelineStatus = "failed";
+            console.error(`[cert-image-attach] AI trigger failed for cert ${cert.id}:`, err?.message || String(err));
+          }
+        }
+
+        res.json({
+          ok: true,
+          cert_id: certId,
+          side,
+          new_key: newKey,
+          previous_key: previousKey,
+          replaced: !!previousKey,
+          pipeline_status: pipelineStatus,
+          pipeline_error: pipelineError,
+          ai_triggered: aiTriggered,
+        });
+      } catch (err: any) {
+        console.error("[cert-image-attach] failed:", err);
+        sendServerError(res, err);
+      }
     }
-  });
+  );
 
   // DELETE — soft-delete only (sets deleted_at). Hard-delete is intentionally
   // not exposed; project rule "no hard deletes on business tables" applies.
@@ -12141,16 +10912,6 @@ Defects (admin-confirmed): ${defectLines}`;
   });
 
   // ── Account auth (/api/auth/*) ────────────────────────────────────────────
-
-  function getClientIpForAuth(req: any): string {
-    const fwd = req.headers["x-forwarded-for"];
-    if (fwd) return (Array.isArray(fwd) ? fwd[0] : fwd.split(",")[0]).trim();
-    return req.ip || req.socket?.remoteAddress || "unknown";
-  }
-
-  function getAppBaseUrl(req: any): string {
-    return process.env.APP_URL || `${req.protocol}://${req.get("host")}`;
-  }
 
   // ── Tier capacity management ──────────────────────────────────────────────
 
@@ -13376,6 +12137,7 @@ Defects (admin-confirmed): ${defectLines}`;
   app.post(
     "/api/admin/weekly-reel/upload-intro",
     requireAdmin,
+    uploadMemoryAdmission("admin_reel_intro", 128),
     reelAssetUpload.single("file"),
     makeAssetUploadHandler({
       r2Key: "weekly-reel/intro.mp4",
@@ -13387,6 +12149,7 @@ Defects (admin-confirmed): ${defectLines}`;
   app.post(
     "/api/admin/weekly-reel/upload-outro",
     requireAdmin,
+    uploadMemoryAdmission("admin_reel_outro", 128),
     reelAssetUpload.single("file"),
     makeAssetUploadHandler({
       r2Key: "weekly-reel/outro.mp4",
@@ -13398,6 +12161,7 @@ Defects (admin-confirmed): ${defectLines}`;
   app.post(
     "/api/admin/weekly-reel/upload-music",
     requireAdmin,
+    uploadMemoryAdmission("admin_reel_music", 128),
     reelAssetUpload.single("file"),
     makeAssetUploadHandler({
       r2Key: "weekly-reel/music.mp3",
@@ -13616,66 +12380,72 @@ Defects (admin-confirmed): ${defectLines}`;
   // posts — uniform output format means the publish path doesn't have to
   // branch by source type. R2 object is always .jpg with image/jpeg
   // content-type regardless of what the admin uploaded.
-  app.post("/api/admin/ig/queue/:id/replace-image", requireAdmin, igImageUpload.single("image"), async (req, res) => {
-    try {
-      const id = parseInt(String(req.params.id), 10);
-      if (!Number.isFinite(id)) return res.status(400).json({ error: "Invalid id" });
-      if (!req.file) return res.status(400).json({ error: "No file provided (form field 'image')" });
-      const uploadErr = await rejectInvalidUploads([req.file]);
-      if (uploadErr) return res.status(400).json({ error: uploadErr });
-      const adminEmail = (req.session as any)?.adminEmail ?? null;
-
-      const { igPostQueue } = await import("@shared/schema");
-      const { eq } = await import("drizzle-orm");
-      const rows = await db.select().from(igPostQueue).where(eq(igPostQueue.id, id)).limit(1);
-      const row = rows[0];
-      if (!row) return res.status(404).json({ error: "Queue row not found" });
-
-      const sharp = (await import("sharp")).default;
-      // Read metadata from the original buffer (sharp understands all 4
-      // input formats). Reused for the squareWarning + the converted JPEG.
-      let dimensions: { width?: number; height?: number; squareWarning?: boolean } = {};
+  app.post(
+    "/api/admin/ig/queue/:id/replace-image",
+    requireAdmin,
+    uploadMemoryAdmission("admin_ig_image", 256),
+    igImageUpload.single("image"),
+    async (req, res) => {
       try {
-        const meta = await sharp(req.file.buffer).metadata();
-        dimensions = {
-          width: meta.width,
-          height: meta.height,
-          squareWarning: meta.width !== meta.height,
-        };
-      } catch {
-        /* metadata extraction is best-effort */
+        const id = parseInt(String(req.params.id), 10);
+        if (!Number.isFinite(id)) return res.status(400).json({ error: "Invalid id" });
+        if (!req.file) return res.status(400).json({ error: "No file provided (form field 'image')" });
+        const uploadErr = await rejectInvalidUploads([req.file]);
+        if (uploadErr) return res.status(400).json({ error: uploadErr });
+        const adminEmail = (req.session as any)?.adminEmail ?? null;
+
+        const { igPostQueue } = await import("@shared/schema");
+        const { eq } = await import("drizzle-orm");
+        const rows = await db.select().from(igPostQueue).where(eq(igPostQueue.id, id)).limit(1);
+        const row = rows[0];
+        if (!row) return res.status(404).json({ error: "Queue row not found" });
+
+        const sharp = (await import("sharp")).default;
+        // Read metadata from the original buffer (sharp understands all 4
+        // input formats). Reused for the squareWarning + the converted JPEG.
+        let dimensions: { width?: number; height?: number; squareWarning?: boolean } = {};
+        try {
+          const meta = await sharp(req.file.buffer).metadata();
+          dimensions = {
+            width: meta.width,
+            height: meta.height,
+            squareWarning: meta.width !== meta.height,
+          };
+        } catch {
+          /* metadata extraction is best-effort */
+        }
+
+        // Always convert to JPEG @ q=92. Meta Graph API only accepts JPEG
+        // for IG posts, so doing it here means the publish path stays format-
+        // agnostic. JPEG @ 92 is a sensible quality/size trade-off — file
+        // bytes drop ~70% vs PNG/TIFF for the same visual fidelity.
+        const jpegBuffer = await sharp(req.file.buffer).jpeg({ quality: 92 }).toBuffer();
+
+        const newKey = `ig/manual-upload/${id}-${Date.now()}.jpg`;
+        const { uploadToR2 } = await import("./r2");
+        await uploadToR2(newKey, jpegBuffer, "image/jpeg");
+
+        await db.update(igPostQueue).set({ imageR2Key: newKey }).where(eq(igPostQueue.id, id));
+
+        try {
+          await storage.writeAuditLog("ig_post", String(id), "manual_image_upload", adminEmail, {
+            old_key: row.imageR2Key,
+            new_key: newKey,
+            uploaded_mime: req.file.mimetype,
+            uploaded_size: req.file.size,
+            stored_mime: "image/jpeg",
+            stored_size: jpegBuffer.length,
+            converted: req.file.mimetype !== "image/jpeg",
+            ...dimensions,
+          });
+        } catch {}
+        res.json({ ok: true, r2Key: newKey, ...dimensions, converted: req.file.mimetype !== "image/jpeg" });
+      } catch (err: any) {
+        // Multer errors land here (file too big, unsupported format)
+        res.status(400).json({ error: err.message });
       }
-
-      // Always convert to JPEG @ q=92. Meta Graph API only accepts JPEG
-      // for IG posts, so doing it here means the publish path stays format-
-      // agnostic. JPEG @ 92 is a sensible quality/size trade-off — file
-      // bytes drop ~70% vs PNG/TIFF for the same visual fidelity.
-      const jpegBuffer = await sharp(req.file.buffer).jpeg({ quality: 92 }).toBuffer();
-
-      const newKey = `ig/manual-upload/${id}-${Date.now()}.jpg`;
-      const { uploadToR2 } = await import("./r2");
-      await uploadToR2(newKey, jpegBuffer, "image/jpeg");
-
-      await db.update(igPostQueue).set({ imageR2Key: newKey }).where(eq(igPostQueue.id, id));
-
-      try {
-        await storage.writeAuditLog("ig_post", String(id), "manual_image_upload", adminEmail, {
-          old_key: row.imageR2Key,
-          new_key: newKey,
-          uploaded_mime: req.file.mimetype,
-          uploaded_size: req.file.size,
-          stored_mime: "image/jpeg",
-          stored_size: jpegBuffer.length,
-          converted: req.file.mimetype !== "image/jpeg",
-          ...dimensions,
-        });
-      } catch {}
-      res.json({ ok: true, r2Key: newKey, ...dimensions, converted: req.file.mimetype !== "image/jpeg" });
-    } catch (err: any) {
-      // Multer errors land here (file too big, unsupported format)
-      res.status(400).json({ error: err.message });
     }
-  });
+  );
 
   // ── Regenerate caption — re-run the Anthropic call (or fallback) with the
   // same data the queue row was originally built from. For card_reveal /

@@ -10,7 +10,7 @@
  * Mounts on both admin (/api/admin) and staff (/api/staff/print) via PrintWfBase,
  * mirroring admin-printing.tsx's PrintApiBase pattern.
  */
-import { createContext, useContext, useMemo, useState, useCallback } from "react";
+import { createContext, useContext, useMemo, useState, useCallback, useRef } from "react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import {
   Printer,
@@ -80,6 +80,7 @@ function PrintQueuePanel() {
   const [lastBatchId, setLastBatchId] = useState<string | null>(null);
   const [reprintOpen, setReprintOpen] = useState(false);
   const [auditCertId, setAuditCertId] = useState<string | null>(null);
+  const printAttempt = useRef<{ fingerprint: string; key: string } | null>(null);
 
   const queueKey = useMemo(() => [`${base}/printing/workflow/queue`], [base]);
   const { data, isLoading, refetch } = useQuery<{ rows: PrintQueueRow[] }>({
@@ -192,8 +193,17 @@ function PrintQueuePanel() {
       }
       setBusy(true);
       try {
+        const fingerprint = [...ids].sort().join(",");
+        if (!printAttempt.current || printAttempt.current.fingerprint !== fingerprint) {
+          printAttempt.current = { fingerprint, key: crypto.randomUUID() };
+        }
         // ONE server-authoritative call: reserve → render → finalise (atomic).
-        const res = await apiRequest("POST", `${base}/printing/workflow/batch`, { certIds: ids });
+        const res = await apiRequest(
+          "POST",
+          `${base}/printing/workflow/batch`,
+          { certIds: ids },
+          { headers: { "Idempotency-Key": printAttempt.current.key } }
+        );
         const result = (await res.json()) as {
           batchId: string | null;
           pdfUrl: string | null;
@@ -214,6 +224,7 @@ function PrintQueuePanel() {
           variant: result.applied.length ? undefined : "destructive",
         });
         clearSelection();
+        printAttempt.current = null;
         invalidate();
       } catch (err: any) {
         toast({ title: "Batch failed", description: err?.message || "Could not create batch.", variant: "destructive" });

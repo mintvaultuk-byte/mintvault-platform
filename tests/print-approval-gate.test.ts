@@ -26,8 +26,31 @@ import { describe, it, expect, beforeAll, afterAll, vi } from "vitest";
 import http from "node:http";
 import type { AddressInfo } from "node:net";
 import pg from "pg";
+import { createHash } from "node:crypto";
 import { getTableConfig } from "drizzle-orm/pg-core";
+import { applyMigrations, listMigrationFiles } from "../scripts/db/migrate";
 import { startPostgres17, type DisposablePostgres17 } from "./helpers/postgres17-cluster";
+
+const r2Objects = new Map<string, Buffer>();
+vi.mock("../server/r2", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("../server/r2")>();
+  return {
+    ...actual,
+    inspectR2ObjectIntegrity: vi.fn(async (key: string) => {
+      const body = r2Objects.get(key);
+      return body
+        ? { exists: true, byteLength: body.length, sha256: createHash("sha256").update(body).digest("hex") }
+        : { exists: false };
+    }),
+    uploadCreateOnlyToR2: vi.fn(async (key: string, body: Buffer) => {
+      if (r2Objects.has(key)) throw new Error("conditional create collision");
+      r2Objects.set(key, Buffer.from(body));
+    }),
+    deleteFromR2: vi.fn(async (key: string) => {
+      r2Objects.delete(key);
+    }),
+  };
+});
 
 // Stub only the expensive artefact/upload surface. deriveBatchId, the layout constants and
 // the pure cut-SVG generator stay REAL so the handler's real control flow is exercised.
@@ -107,7 +130,11 @@ async function seedCert(o: SeedOpts) {
 async function printBatch(certIds: string[]): Promise<{ status: number; body: any }> {
   const res = await fetch(`${base}/api/admin/print-batch`, {
     method: "POST",
-    headers: { "content-type": "application/json", cookie },
+    headers: {
+      "content-type": "application/json",
+      cookie,
+      "Idempotency-Key": `approval-gate:${certIds.join(",")}`,
+    },
     body: JSON.stringify({ certIds }),
   });
   return { status: res.status, body: await res.json().catch(() => ({})) };
@@ -139,9 +166,31 @@ beforeAll(async () => {
   await client.query(ddlFromSchema(schema.users));
   await client.query(ddlFromSchema(schema.auditLog));
   await client.query(ddlFromSchema(schema.labelPrints));
+  await client.query(ddlFromSchema(schema.labelOverrides));
+  await client.query(`
+    CREATE TABLE submissions(
+      id serial PRIMARY KEY,tracking_number text NOT NULL UNIQUE,status text NOT NULL,
+      status_history jsonb NOT NULL DEFAULT '[]'::jsonb,on_receipt_photo_urls text,
+      received_at timestamptz,deleted_at timestamptz,updated_at timestamptz NOT NULL DEFAULT now()
+    )
+  `);
+  await client.query(`
+    CREATE ROLE partner_runtime NOLOGIN NOSUPERUSER NOBYPASSRLS;
+    CREATE TABLE partner_organisations(id uuid PRIMARY KEY);
+    CREATE OR REPLACE FUNCTION partner_current_tenant()
+    RETURNS uuid LANGUAGE sql STABLE SET search_path=pg_catalog AS $fn$
+      SELECT NULLIF(current_setting('app.tenant_id',true),'')::uuid
+    $fn$;
+  `);
   await client.query(`CREATE UNIQUE INDEX IF NOT EXISTS ux_certificates_certno ON certificates (certificate_number)`);
   // label_prints.cert_id is UNIQUE in production — the batch dual-write upserts on it.
   await client.query(`CREATE UNIQUE INDEX IF NOT EXISTS ux_label_prints_cert ON label_prints (cert_id)`);
+  const migration = (filename: string) => listMigrationFiles().find((entry) => entry.filename === filename)!;
+  await applyMigrations(client, [
+    migration("0022_print_workflow_lifecycle.sql"),
+    migration("0121_main_runtime_role_authority.sql"),
+    migration("0122_object_write_intent_reconciliation.sql"),
+  ]);
 
   const authMod = await import("../server/auth");
   ADMIN_EMAIL = authMod.ADMIN_EMAIL;

@@ -422,6 +422,7 @@ export default function CertificateForm({
   // the auto-saving path for an unapproved cert, or the explicit form submit
   // (published cert / create flow) — which is the path that bypassed the warning.
   const formElRef = useRef<HTMLFormElement | null>(null);
+  const createImageAttempt = useRef<{ fingerprint: string; key: string } | null>(null);
 
   // Label-freshness signal for the Review certificate preview. Compares ONLY the
   // fields that affect the printed label against the last SAVED snapshot (server
@@ -1252,11 +1253,27 @@ export default function CertificateForm({
       const formData = buildCertFormData(isEdit && !!certificate?.gradeApprovedAt);
       const url = isEdit ? `/api/admin/certificates/${certificate.id}` : "/api/admin/certificates";
       const method = isEdit ? "PUT" : "POST";
+      let headers: Record<string, string> | undefined;
+      if (!isEdit && (frontImage || backImage)) {
+        const fingerprint = JSON.stringify(
+          [...formData.entries()].map(([key, value]) => [
+            key,
+            value instanceof File
+              ? { name: value.name, size: value.size, type: value.type, lastModified: value.lastModified }
+              : value,
+          ])
+        );
+        if (!createImageAttempt.current || createImageAttempt.current.fingerprint !== fingerprint) {
+          createImageAttempt.current = { fingerprint, key: crypto.randomUUID() };
+        }
+        headers = { "Idempotency-Key": createImageAttempt.current.key };
+      }
 
       const res = await fetch(url, {
         method,
         body: formData,
         credentials: "include",
+        headers,
       });
 
       if (!res.ok) {
@@ -1276,6 +1293,7 @@ export default function CertificateForm({
       // re-submits/re-uploads the same File object once it's already persisted.
       setFrontImage(null);
       setBackImage(null);
+      createImageAttempt.current = null;
       setRarityOverrideTransition(null);
       // Session/feedback UI (display only — save behaviour is unchanged above).
       setSavedToast(true);

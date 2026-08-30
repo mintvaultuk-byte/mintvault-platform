@@ -17,7 +17,7 @@
 import type { Request } from "express";
 import { checkPrintableGrade } from "@shared/printable-grade";
 import { randomUUID } from "node:crypto";
-import { db } from "./db";
+import { db, pool } from "./db";
 import { sql } from "drizzle-orm";
 import { storage } from "./storage";
 import { getPartnerPrintEligibilityBlocks } from "./partner/print-eligibility";
@@ -32,6 +32,25 @@ import {
   type BatchKind,
 } from "@shared/print-lifecycle";
 import type { PrintQueueRow, PrintBatchSummary, PrintEvent } from "@shared/schema";
+import {
+  ObjectWriteConflictError,
+  ObjectWriteCoordinator,
+  canonicalJson,
+  createPoolTransactionRunner,
+  readObjectWriteSnapshot,
+  sha256Hex,
+  type ObjectWriteExecutionResult,
+  type ObjectWriteInput,
+} from "./lib/object-write-coordinator";
+import { objectWriteStore } from "./lib/object-write-store";
+import {
+  abandonPrintArtifactObjectWrite,
+  finalizePrintArtifactObjectWrite,
+  loadPrintRenderInputs,
+  preparePrintArtifactReservation,
+  PrintReservationConflictError,
+  type PrintArtifactIntent,
+} from "./lib/print-artifact-persistence";
 
 // The print-workflow schema (certificates.print_state, print_batches,
 // print_events) is created ONLY by migrations/0022_print_workflow_lifecycle.sql
@@ -290,6 +309,41 @@ function pgTextArray(ids: string[]): string {
   return `{${ids.map((s) => `"${String(s).replace(/\\/g, "\\\\").replace(/"/g, '\\"')}"`).join(",")}}`;
 }
 
+function currentPrintApprovalBlock(
+  certId: string,
+  row: {
+    grade_type?: string | null;
+    grade?: string | null;
+    grade_approved_at?: Date | string | null;
+    grader_status?: string | null;
+    status?: string | null;
+  }
+): { certId: string; code: string; message: string } | null {
+  const printable = checkPrintableGrade({ gradeType: row.grade_type ?? null, gradeOverall: row.grade ?? null });
+  if (!printable.printable) {
+    return {
+      certId,
+      code: printable.reason ?? "unprintable_grade",
+      message: `${certId}: ${printable.message ?? "grade is not printable."}`,
+    };
+  }
+  if (row.grader_status === "pending_review" || row.grader_status === "assigned") {
+    return {
+      certId,
+      code: "grade_review_incomplete",
+      message:
+        row.grader_status === "pending_review"
+          ? `${certId}: grading review is not complete (awaiting approval).`
+          : `${certId}: this card is back with the grader for correction.`,
+    };
+  }
+  if (!row.grade_approved_at) return { certId, code: "not_approved", message: `${certId}: grade has not been approved.` };
+  if (row.status !== "active") {
+    return { certId, code: "cert_not_active", message: `${certId}: certificate is not active (voided).` };
+  }
+  return null;
+}
+
 async function loadEffectiveStates(certIds: string[]): Promise<Map<string, PrintState>> {
   if (certIds.length === 0) return new Map();
   const result = await db.execute(sql`
@@ -323,6 +377,8 @@ export interface CreateBatchResult extends WorkflowResult {
   kind: BatchKind | null;
   pdfUrl: string | null;
   isDuplicate: boolean;
+  pdfOnly: boolean;
+  isPdfMultiPage: boolean;
   multiSheet: boolean;
   pageCount: number;
 }
@@ -349,6 +405,369 @@ export interface CreateBatchResult extends WorkflowResult {
 export async function createBatchAtomic(params: {
   certIds: string[];
   identity: ActorIdentity;
+  idempotencyKey?: string | null;
+  reason?: string | null;
+  reasonCategory?: string | null;
+  notes?: string | null;
+  recordReprintRequest?: boolean;
+}): Promise<CreateBatchResult> {
+  const requested = [...new Set(params.certIds)];
+  if (requested.length === 0 || requested.length > 48) {
+    return {
+      applied: [],
+      rejected: requested.map((certId) => ({ certId, code: "invalid_batch_size", message: "Invalid batch size." })),
+      batchId: null,
+      kind: null,
+      pdfUrl: null,
+      isDuplicate: false,
+      pdfOnly: false,
+      isPdfMultiPage: false,
+      multiSheet: false,
+      pageCount: 0,
+    };
+  }
+  const suppliedKey = params.idempotencyKey?.trim() || randomUUID();
+  if (suppliedKey.length > 200) throw new Error("Print idempotency key is too long");
+  const batchId = sha256Hex(canonicalJson({ actor: params.identity.actor, idempotencyKey: suppliedKey })).slice(0, 16);
+  const ledgerKey = `print-artifact:${batchId}`;
+  const existenceStates = await loadEffectiveStates(requested);
+  const missing = requested.filter((certId) => !existenceStates.has(certId));
+  if (missing.length > 0) {
+    return {
+      applied: [],
+      rejected: missing.map((certId) => ({ certId, code: "not_found", message: "Certificate not found." })),
+      batchId: null,
+      kind: null,
+      pdfUrl: null,
+      isDuplicate: false,
+      pdfOnly: false,
+      isPdfMultiPage: false,
+      multiSheet: false,
+      pageCount: 0,
+    };
+  }
+  const runner = createPoolTransactionRunner(pool);
+  const existing = await runner.transaction((client) => readObjectWriteSnapshot(client, null, ledgerKey));
+  if (existing) {
+    const payload = existing.intentPayload as unknown as Partial<PrintArtifactIntent>;
+    if (
+      existing.operationKind !== "PRINT_ARTIFACT" ||
+      existing.aggregateType !== "print_batch" ||
+      existing.aggregateId !== batchId ||
+      existing.actorId !== params.identity.actor ||
+      payload.actor !== params.identity.actor ||
+      canonicalJson(payload.certIds) !== canonicalJson(requested) ||
+      Boolean(payload.reprintRequest) !== Boolean(params.recordReprintRequest) ||
+      (params.recordReprintRequest && payload.reprintRequest?.reason !== params.reason?.trim())
+    ) {
+      throw new ObjectWriteConflictError("Print idempotency key is already bound to another batch");
+    }
+    const blocks = await getPartnerPrintEligibilityBlocks(requested);
+    if (blocks.length > 0) {
+      return {
+        applied: [],
+        rejected: blocks,
+        batchId: null,
+        kind: null,
+        pdfUrl: null,
+        isDuplicate: false,
+        pdfOnly: false,
+        isPdfMultiPage: false,
+        multiSheet: false,
+        pageCount: 0,
+      };
+    }
+    if (existing.state === "COMMITTED" && existing.resultPayload) {
+      return { ...(existing.resultPayload as unknown as CreateBatchResult), isDuplicate: true };
+    }
+  }
+
+  let intent: PrintArtifactIntent;
+  if (existing) {
+    intent = existing.intentPayload as unknown as PrintArtifactIntent;
+  } else {
+    const partnerBlocks = await getPartnerPrintEligibilityBlocks(requested);
+    if (partnerBlocks.length > 0) {
+      return {
+        applied: [],
+        rejected: partnerBlocks,
+        batchId: null,
+        kind: null,
+        pdfUrl: null,
+        isDuplicate: false,
+        pdfOnly: false,
+        isPdfMultiPage: false,
+        multiSheet: false,
+        pageCount: 0,
+      };
+    }
+    const states = existenceStates;
+    const rejected: WorkflowResult["rejected"] = [];
+    const fromStates: Record<string, PrintState> = {};
+    const reprintOriginalStates: Record<string, PrintState> = {};
+    const reprintReason = params.reason?.trim() ?? "";
+    if (params.recordReprintRequest && !isValidReprintReason(reprintReason)) {
+      return {
+        applied: [],
+        rejected: requested.map((certId) => ({
+          certId,
+          code: "reason_required",
+          message: "A reprint reason (10–500 chars) is required.",
+        })),
+        batchId: null,
+        kind: null,
+        pdfUrl: null,
+        isDuplicate: false,
+        pdfOnly: false,
+        isPdfMultiPage: false,
+        multiSheet: false,
+        pageCount: 0,
+      };
+    }
+    for (const certId of requested) {
+      const from = states.get(certId);
+      if (!from) {
+        rejected.push({ certId, code: "not_found", message: "Certificate not found." });
+        continue;
+      }
+      const transition = params.recordReprintRequest
+        ? nextState(from, "reprint", { hasReason: true })
+        : nextState(from, "create_batch");
+      if (!transition.ok) {
+        rejected.push({ certId, code: transition.code, message: transition.message });
+        continue;
+      }
+      if (params.recordReprintRequest) {
+        reprintOriginalStates[certId] = from;
+        fromStates[certId] = "reprint_required";
+      } else {
+        fromStates[certId] = from;
+      }
+    }
+    if (rejected.length > 0) {
+      return {
+        applied: [],
+        rejected,
+        batchId: null,
+        kind: null,
+        pdfUrl: null,
+        isDuplicate: false,
+        pdfOnly: false,
+        isPdfMultiPage: false,
+        multiSheet: false,
+        pageCount: 0,
+      };
+    }
+    const reprintCount = Object.values(fromStates).filter((state) => state === "reprint_required").length;
+    if (reprintCount > 0 && reprintCount !== requested.length) {
+      return {
+        applied: [],
+        rejected: requested.map((certId) => ({
+          certId,
+          code: "mixed_batch",
+          message: "Select reprints and fresh prints in separate batches.",
+        })),
+        batchId: null,
+        kind: null,
+        pdfUrl: null,
+        isDuplicate: false,
+        pdfOnly: false,
+        isPdfMultiPage: false,
+        multiSheet: false,
+        pageCount: 0,
+      };
+    }
+    const gradeRows = await db.execute(sql`
+      SELECT certificate_number,grade_type,grade::text AS grade,grade_approved_at,grader_status,status,ownership_status
+        FROM certificates
+       WHERE certificate_number IN (${sql.join(
+         requested.map((certId) => sql`${certId}`),
+         sql`, `
+       )})
+    `);
+    const gradeById = new Map(
+      (
+        gradeRows.rows as unknown as Array<{
+          certificate_number: string;
+          grade_type: string | null;
+          grade: string | null;
+          grade_approved_at: Date | string | null;
+          grader_status: string | null;
+          status: string;
+          ownership_status: string;
+        }>
+      ).map((row) => [row.certificate_number, row])
+    );
+    for (const certId of requested) {
+      const row = gradeById.get(certId);
+      const block = row ? currentPrintApprovalBlock(certId, row) : { certId, code: "not_found", message: "Certificate not found." };
+      if (block) rejected.push(block);
+      if (reprintCount === 0 && row?.ownership_status !== "unclaimed") {
+        rejected.push({ certId, code: "claimed", message: `${certId}: use the audited reprint workflow.` });
+      }
+    }
+    if (rejected.length > 0) {
+      return {
+        applied: [],
+        rejected,
+        batchId: null,
+        kind: null,
+        pdfUrl: null,
+        isDuplicate: false,
+        pdfOnly: false,
+        isPdfMultiPage: false,
+        multiSheet: false,
+        pageCount: 0,
+      };
+    }
+    // Claim-code minting is database-local and happens before any object-store
+    // side effect. The immutable render fingerprint below binds only its hash.
+    for (const certId of requested) await storage.getOrGenerateClaimCode(certId);
+    const loaded = await runner.transaction((client) => loadPrintRenderInputs(client, requested));
+    const { SHEET_LAYOUT_VERSION, printArtifactPlan, r2KeyForCricutSvg, r2KeyForPrintBatch } = await import(
+      "./print-batch"
+    );
+    const plan = printArtifactPlan(requested.length);
+    const artifactKeys: Record<string, string> = { pdf: r2KeyForPrintBatch(batchId, "pdf") };
+    if (!plan.pdfOnly) {
+      artifactKeys["cricut-png"] = r2KeyForPrintBatch(batchId, "png");
+      artifactKeys["print-png"] = r2KeyForPrintBatch(batchId, "print-png");
+      artifactKeys["cricut-svg"] = r2KeyForCricutSvg(batchId);
+    }
+    intent = {
+      batchId,
+      certIds: requested,
+      kind: reprintCount > 0 ? "reprint" : "batch",
+      actor: params.identity.actor,
+      actorRole: params.identity.role,
+      reason: params.reason ?? null,
+      reasonCategory: params.reasonCategory ?? null,
+      notes: params.notes ?? null,
+      layoutVersion: SHEET_LAYOUT_VERSION,
+      renderInputSha256: loaded.renderInputSha256,
+      fromStates,
+      artifactKeys,
+      ...(params.recordReprintRequest
+        ? {
+            reprintRequest: {
+              originalStates: reprintOriginalStates,
+              reason: reprintReason,
+              reasonCategory: isReprintReasonCategory(params.reasonCategory ?? "") ? params.reasonCategory! : null,
+            },
+          }
+        : {}),
+    };
+  }
+
+  const loaded = await runner.transaction((client) => loadPrintRenderInputs(client, intent.certIds));
+  if (loaded.renderInputSha256 !== intent.renderInputSha256) {
+    throw new ObjectWriteConflictError("Print render inputs changed before the durable operation could resume");
+  }
+  const {
+    generateCricutSVG,
+    generatePrintBatchPDF,
+    generatePrintBatchPNG,
+    generatePrintBatchPrintPNG,
+    printArtifactPlan,
+  } = await import("./print-batch");
+  const plan = printArtifactPlan(intent.certIds.length);
+  const pdf = await generatePrintBatchPDF(loaded.items);
+  const bodies = new Map<string, { body: Buffer; contentType: string }>([
+    ["pdf", { body: pdf, contentType: "application/pdf" }],
+  ]);
+  if (!plan.pdfOnly) {
+    const [png, printPng] = await Promise.all([
+      generatePrintBatchPNG(loaded.items),
+      generatePrintBatchPrintPNG(loaded.items),
+    ]);
+    bodies.set("cricut-png", { body: png, contentType: "image/png" });
+    bodies.set("print-png", { body: printPng, contentType: "image/png" });
+    bodies.set("cricut-svg", {
+      body: Buffer.from(generateCricutSVG(loaded.items), "utf8"),
+      contentType: "image/svg+xml",
+    });
+  }
+  const objectItems = existing
+    ? existing.items.map((item) => {
+        const body = bodies.get(item.logicalSlot);
+        if (!body) throw new ObjectWriteConflictError(`Missing runtime body for ${item.logicalSlot}`);
+        return {
+          store: item.store,
+          logicalSlot: item.logicalSlot,
+          objectKey: item.objectKey,
+          priorObjectKey: item.priorObjectKey,
+          body: body.body,
+          contentType: item.contentType,
+          objectClass: item.objectClass,
+          required: item.required,
+          retentionDays: item.retentionDays ?? undefined,
+        };
+      })
+    : [...bodies].map(([logicalSlot, body]) => ({
+        store: "R2" as const,
+        logicalSlot,
+        objectKey: intent.artifactKeys[logicalSlot],
+        priorObjectKey: null,
+        body: body.body,
+        contentType: body.contentType,
+        objectClass: "PRINT" as const,
+      }));
+  const writeInput: ObjectWriteInput = {
+    idempotencyKey: ledgerKey,
+    operationKind: "PRINT_ARTIFACT",
+    aggregateType: "print_batch",
+    aggregateId: batchId,
+    actorId: intent.actor,
+    expectedState: existing?.expectedState ?? {
+      renderInputSha256: intent.renderInputSha256,
+      fromStates: intent.fromStates,
+    },
+    intentPayload: existing?.intentPayload ?? (intent as unknown as Record<string, unknown>),
+    items: objectItems,
+  };
+  const coordinator = new ObjectWriteCoordinator(runner, objectWriteStore, `print-artifact:${intent.actor}`);
+  let executed: ObjectWriteExecutionResult<Record<string, unknown>>;
+  try {
+    executed = await coordinator.execute(
+      writeInput,
+      finalizePrintArtifactObjectWrite,
+      (client, operationId) => preparePrintArtifactReservation(client, operationId, intent),
+      abandonPrintArtifactObjectWrite
+    );
+  } catch (error) {
+    if (error instanceof PrintReservationConflictError) {
+      return {
+        applied: [],
+        rejected: intent.certIds.map((certId) => ({
+          certId,
+          code: certId === error.certId ? "already_reserved" : "batch_reservation_rolled_back",
+          message:
+            certId === error.certId
+              ? "Already being printed by another batch."
+              : "The batch reservation was rolled back because another certificate was already reserved.",
+        })),
+        batchId: null,
+        kind: intent.kind,
+        pdfUrl: null,
+        isDuplicate: false,
+        pdfOnly: false,
+        isPdfMultiPage: false,
+        multiSheet: false,
+        pageCount: 0,
+      };
+    }
+    throw error;
+  }
+  if (!executed.replayed) {
+    const { advanceCardJobsForOutputSafely } = await import("./partner/card-job-lifecycle");
+    await advanceCardJobsForOutputSafely(intent.certIds, "printable", intent.actor);
+  }
+  return { ...(executed.result as unknown as CreateBatchResult), isDuplicate: executed.replayed };
+}
+
+async function createBatchAtomicLegacy(params: {
+  certIds: string[];
+  identity: ActorIdentity;
   reason?: string | null;
   reasonCategory?: string | null;
   notes?: string | null;
@@ -367,13 +786,15 @@ export async function createBatchAtomic(params: {
       kind: null,
       pdfUrl: null,
       isDuplicate: false,
+      pdfOnly: false,
+      isPdfMultiPage: false,
       multiSheet: false,
       pageCount: 0,
     };
   }
   const states = await loadEffectiveStates(requested);
 
-  const { deriveBatchId, CERTS_PER_PAGE, SHEET_LAYOUT_VERSION } = await import("./print-batch");
+  const { deriveBatchId, printArtifactPlan, SHEET_LAYOUT_VERSION } = await import("./print-batch");
 
   // ── Idempotency pre-check — a retry of an IN-FLIGHT batch (double-click /
   // network retry). Fires ONLY when every requested cert is currently 'printing':
@@ -424,11 +845,14 @@ export async function createBatchAtomic(params: {
           kind: null,
           pdfUrl: null,
           isDuplicate: false,
+          pdfOnly: false,
+          isPdfMultiPage: false,
           multiSheet: false,
           pageCount: 0,
         };
       }
     }
+    const artifactPlan = printArtifactPlan(ids.length);
     return {
       applied: ids,
       rejected: [],
@@ -436,8 +860,10 @@ export async function createBatchAtomic(params: {
       kind: row.kind,
       pdfUrl: `/api/admin/print-batch/${row.batch_id}/pdf`,
       isDuplicate: true,
-      multiSheet: ids.length > CERTS_PER_PAGE,
-      pageCount: Math.max(1, Math.ceil(ids.length / CERTS_PER_PAGE)),
+      pdfOnly: artifactPlan.pdfOnly,
+      isPdfMultiPage: artifactPlan.isPdfMultiPage,
+      multiSheet: artifactPlan.pdfOnly,
+      pageCount: artifactPlan.pageCount,
     };
   }
 
@@ -462,6 +888,8 @@ export async function createBatchAtomic(params: {
       kind: null,
       pdfUrl: null,
       isDuplicate: false,
+      pdfOnly: false,
+      isPdfMultiPage: false,
       multiSheet: false,
       pageCount: 0,
     };
@@ -515,6 +943,8 @@ export async function createBatchAtomic(params: {
       kind: null,
       pdfUrl: null,
       isDuplicate: false,
+      pdfOnly: false,
+      isPdfMultiPage: false,
       multiSheet: false,
       pageCount: 0,
     };
@@ -537,6 +967,8 @@ export async function createBatchAtomic(params: {
       kind: null,
       pdfUrl: null,
       isDuplicate: false,
+      pdfOnly: false,
+      isPdfMultiPage: false,
       multiSheet: false,
       pageCount: 0,
     };
@@ -597,6 +1029,8 @@ export async function createBatchAtomic(params: {
       kind,
       pdfUrl: null,
       isDuplicate: false,
+      pdfOnly: false,
+      isPdfMultiPage: false,
       multiSheet: false,
       pageCount: 0,
     };
@@ -653,7 +1087,7 @@ export async function createBatchAtomic(params: {
   const { advanceCardJobsForOutputSafely } = await import("./partner/card-job-lifecycle");
   await advanceCardJobsForOutputSafely(reserved, "printable", identity.actor);
 
-  const multiSheet = reserved.length > CERTS_PER_PAGE;
+  const artifactPlan = printArtifactPlan(reserved.length);
   return {
     applied: reserved,
     rejected,
@@ -661,8 +1095,10 @@ export async function createBatchAtomic(params: {
     kind,
     pdfUrl,
     isDuplicate: false,
-    multiSheet,
-    pageCount: Math.max(1, Math.ceil(reserved.length / CERTS_PER_PAGE)),
+    pdfOnly: artifactPlan.pdfOnly,
+    isPdfMultiPage: artifactPlan.isPdfMultiPage,
+    multiSheet: artifactPlan.pdfOnly,
+    pageCount: artifactPlan.pageCount,
   };
 }
 
@@ -679,6 +1115,13 @@ export async function reconcileStuckPrintBatches(olderThanMinutes = 15): Promise
   const stuck = await db.execute(sql`
     SELECT batch_id, kind, cert_ids FROM print_batches
     WHERE status = 'rendering' AND created_at < NOW() - make_interval(mins => ${olderThanMinutes})
+      AND NOT EXISTS (
+        SELECT 1 FROM object_write_operations operation
+         WHERE operation.tenant_id IS NULL
+           AND operation.idempotency_key = 'print-artifact:' || print_batches.batch_id
+           AND operation.operation_kind = 'PRINT_ARTIFACT'
+           AND operation.state <> 'ABANDONED'
+      )
   `);
   let released = 0;
   for (const raw of stuck.rows as unknown as { batch_id: string; kind: BatchKind; cert_ids?: string[] }[]) {
@@ -721,7 +1164,7 @@ async function renderAndUploadBatch(batchId: string, certIds: string[], kind: Ba
     uploadPrintBatchArtifacts,
     uploadPrintBatchPDF,
     uploadCricutSvg,
-    CERTS_PER_PAGE,
+    printArtifactPlan,
   } = await import("./print-batch");
 
   const allCerts = await storage.listCertificates();
@@ -738,7 +1181,7 @@ async function renderAndUploadBatch(batchId: string, certIds: string[], kind: Ba
 
   // The upload helpers derive the R2 object keys from batchId internally, so the
   // existing /api/admin/print-batch/:batchId/pdf endpoint serves them unchanged.
-  if (items.length > CERTS_PER_PAGE) {
+  if (printArtifactPlan(items.length).pdfOnly) {
     const pdf = await generatePrintBatchPDF(items as never);
     await uploadPrintBatchPDF(batchId, pdf);
   } else {

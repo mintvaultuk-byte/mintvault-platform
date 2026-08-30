@@ -19,6 +19,7 @@ import { sendServerError } from "../lib/error-response";
 import type { Express, Request, Response } from "express";
 import rateLimit from "express-rate-limit";
 import multer from "multer";
+import { uploadMemoryAdmission } from "../lib/upload-memory-admission";
 import { requireAdmin } from "../auth";
 import { storage } from "../storage";
 import { db } from "../db";
@@ -38,7 +39,6 @@ import {
   unassignScanSubmissions,
   getScanQueue,
   authorizeScanCert,
-  recordScanUpload,
 } from "../staff";
 import { stripGraderPii, getGraderAnalytics } from "../grader";
 import {
@@ -352,64 +352,16 @@ export function registerStaffRoutes(app: Express): void {
     "/api/staff/scan/certificates/:id/upload",
     requireCapability("scan"),
     staffScanUploadLimit,
+    uploadMemoryAdmission("staff_scan", 128),
     scanUpload.fields([
       { name: "front", maxCount: 1 },
       { name: "back", maxCount: 1 },
     ]),
-    async (req: Request, res: Response) => {
-      try {
-        const certId = parseInt(String(req.params.id), 10);
-        const staffId = (req.session as any).staffId as string;
-        const staffEmail = (req.session as any).staffEmail as string;
-        const sid = await authorizeScanCert(staffId, certId);
-        if (!sid) return res.status(403).json({ error: "This card is not in your scan queue" });
-        const cr = await db.execute(sql`SELECT cert_id FROM certificates WHERE id = ${certId} LIMIT 1`);
-        const certIdStr = (cr.rows[0] as any)?.cert_id;
-        if (!certIdStr) return res.status(404).json({ error: "Not found" });
-        const files = req.files as Record<string, Express.Multer.File[]> | undefined;
-        if (!files?.front?.[0] && !files?.back?.[0]) return res.status(400).json({ error: "No front/back image" });
-        let scanned = false;
-        if (files?.front?.[0]) {
-          ({ submissionScanned: scanned } = await recordScanUpload(
-            certId,
-            certIdStr,
-            "front",
-            files.front[0].buffer,
-            sid,
-            staffEmail
-          ));
-        }
-        if (files?.back?.[0]) {
-          // FRONT ALWAYS FIRST. A BACK upload is admitted only when this same
-          // request also carries the front, or the card already has one. This
-          // legacy route writes the display image columns directly rather than
-          // going through the evidence path, so the FRONT-before-BACK guard at
-          // the immutable-master boundary does not cover it — without this check
-          // an operator could put a card's back on record with no front.
-          if (!files?.front?.[0]) {
-            const existingFront = await db.execute(sql`
-              SELECT 1 FROM certificates
-              WHERE id = ${certId} AND front_image_path IS NOT NULL AND front_image_path <> ''
-              LIMIT 1`);
-            if (!existingFront.rows.length) {
-              return res.status(409).json({ error: "Scan the front of this card before the back" });
-            }
-          }
-          ({ submissionScanned: scanned } = await recordScanUpload(
-            certId,
-            certIdStr,
-            "back",
-            files.back[0].buffer,
-            sid,
-            staffEmail
-          ));
-        }
-        return res.json({ ok: true, submissionScanned: scanned });
-      } catch (e: any) {
-        console.error("[staff] scan upload error:", e.message);
-        return sendServerError(res, e);
-      }
-    }
+    (_req: Request, res: Response) =>
+      res.status(410).json({
+        error: "Legacy staff multipart scan upload is retired; use a target-bound signed scanner capture session.",
+        code: "STAFF_SCAN_UPLOAD_RETIRED",
+      })
   );
 
   // ── Printer (can_print) — re-dispatch proxy to admin SLAB paths ONLY ────────
