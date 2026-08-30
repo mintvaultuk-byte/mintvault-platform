@@ -151,11 +151,12 @@ describe("GET /api/partner/session keeps BOTH sides of the conflict", () => {
 
   it("keeps origin/main's current-factor requirement on recovery-code regeneration", () => {
     const code = dropCommentLines(routes);
-    expect(code).toContain('r.post("/mfa/recovery-codes/regenerate"');
+    expect(code).toMatch(/r\.post\(\s*"\/mfa\/recovery-codes\/regenerate"/);
     // The control is not the route's existence — it is the current-factor proof passed to
     // mfaRegenerateRecovery. Deleting that argument silently lets an enrolled user remint their
     // recovery set with a password alone, so assert the argument and its denial code.
-    const handler = code.slice(code.indexOf('r.post("/mfa/recovery-codes/regenerate"'));
+    const routeStart = code.search(/r\.post\(\s*"\/mfa\/recovery-codes\/regenerate"/);
+    const handler = code.slice(routeStart);
     // Bound the window to the call itself. A fixed-size slice spills into the NEXT handler once
     // the argument is deleted, which is precisely how an earlier version of this test let the
     // mutation survive.

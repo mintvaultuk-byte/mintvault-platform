@@ -1,8 +1,8 @@
 /**
  * Shared PostgreSQL rate-limit store (invariant I19).
  *
- * Replaces the per-process MemoryRateLimitStore that server/partner/rate-limit.ts shipped as its
- * LOCAL-ONLY default. Production runs a minimum of two Fly Machines against one database, so a
+ * Replaces the unavailable fail-closed boot store in server/partner/rate-limit.ts.
+ * Production runs a minimum of two Fly Machines against one database, so a
  * per-process counter made every published partner limit silently double and reset on every rolling
  * deploy. These are the only credential-attack controls on the partner portal.
  *
@@ -21,8 +21,15 @@
  * store error. Swallowing the error here would silently convert every sensitive limiter into
  * fail-open, which is strictly worse than the in-memory store it replaces.
  */
-import type { RateLimitStore } from "./rate-limit";
+import {
+  installSharedPostgresPartnerRateLimitStore,
+  markSharedPostgresPartnerRateLimitStoreUnavailable,
+  partnerSharedRateLimitStoreInstalled,
+  type RateLimitStore,
+} from "./rate-limit";
 import { partnerRuntimeQuery } from "./db";
+import { getPartnerRuntimeCapability, type PartnerCapabilityResult } from "./admin-capability";
+import type pg from "pg";
 
 /** Expired rows are pruned opportunistically rather than by a scheduled job. */
 const SWEEP_INTERVAL_MS = 5 * 60_000;
@@ -84,16 +91,35 @@ export class PostgresRateLimitStore implements RateLimitStore {
 /**
  * Probe for the backing table and install the shared store when it is present.
  *
- * Returns whether the shared store was installed. Called once at partner-portal mount; a database
- * that has not yet received migration 0078 keeps the in-memory default rather than failing to boot,
- * which is what makes the migration safe to apply either side of the deploy (expand → migrate →
- * deploy). The outcome is logged either way — an operator must be able to see which store is live,
- * because the difference is a doubling of every partner rate limit.
+ * Returns whether the shared store was installed. Until it succeeds, sensitive
+ * partner limiters remain unavailable/fail-closed; there is no per-Machine
+ * fallback and therefore no doubled attack budget during boot or schema drift.
  */
-export async function installSharedPartnerRateLimitStore(): Promise<boolean> {
-  const { setPartnerRateLimitStore } = await import("./rate-limit");
+type QueryFn = <T extends pg.QueryResultRow = pg.QueryResultRow>(
+  sql: string,
+  params?: unknown[]
+) => Promise<pg.QueryResult<T>>;
+
+interface InstallSharedPartnerRateLimitStoreDeps {
+  capabilityProbe?: () => Promise<PartnerCapabilityResult>;
+  query?: QueryFn;
+}
+
+export async function installSharedPartnerRateLimitStore(
+  deps: InstallSharedPartnerRateLimitStoreDeps = {}
+): Promise<boolean> {
+  markSharedPostgresPartnerRateLimitStoreUnavailable();
   try {
-    const { rows } = await partnerRuntimeQuery<{ present: boolean }>(
+    const capability = await (deps.capabilityProbe ?? getPartnerRuntimeCapability)();
+    if (!capability.ok) {
+      // Failure codes are deliberately name-safe: never log the URL, role name or credentials.
+      // eslint-disable-next-line no-console
+      console.error(`[partner] shared rate-limit store credential rejected: ${capability.code}`);
+      return false;
+    }
+
+    const query = deps.query ?? partnerRuntimeQuery;
+    const { rows } = await query<{ present: boolean }>(
       `SELECT EXISTS (
          SELECT 1 FROM information_schema.tables
           WHERE table_schema='public' AND table_name='partner_rate_limit_buckets'
@@ -102,21 +128,38 @@ export async function installSharedPartnerRateLimitStore(): Promise<boolean> {
     if (rows[0]?.present !== true) {
       // eslint-disable-next-line no-console
       console.warn(
-        "[partner] partner_rate_limit_buckets is absent — partner rate limits remain PER-MACHINE " +
-          "(apply migrations/0089_partner_shared_rate_limit_buckets.sql to make them fleet-wide)."
+        "[partner] partner_rate_limit_buckets is absent — sensitive partner routes remain fail-closed " +
+          "(apply migrations/0089_partner_shared_rate_limit_buckets.sql)."
       );
       return false;
     }
-    setPartnerRateLimitStore(new PostgresRateLimitStore());
+    installSharedPostgresPartnerRateLimitStore(new PostgresRateLimitStore());
     // eslint-disable-next-line no-console
     console.log("[partner] shared PostgreSQL rate-limit store installed (limits are fleet-wide).");
     return true;
   } catch (err) {
     // eslint-disable-next-line no-console
     console.error(
-      "[partner] could not install the shared rate-limit store; falling back to the per-machine " +
-        `in-memory store: ${(err as Error).message}`
+      "[partner] could not install the shared rate-limit store; sensitive partner routes remain fail-closed: " +
+        (err as Error).message
     );
     return false;
   }
+}
+
+/**
+ * Start the one process-lifetime boot probe and return the same promise to every caller.
+ *
+ * Public routes are registered before the authenticated mount, so fire-and-forget installation in
+ * mount.ts left a real race: the first login/invitation/reset request could hit the deliberately
+ * unavailable boot store and receive 503 even though the database was healthy. Callers that serve
+ * those routes await this promise before entering the limiter chain. A failed probe still leaves
+ * the store unavailable and therefore fail-closed; this barrier changes timing, not policy.
+ */
+let sharedStoreBootInstall: Promise<boolean> | null = null;
+
+export function startSharedPartnerRateLimitStoreInstall(): Promise<boolean> {
+  if (partnerSharedRateLimitStoreInstalled()) return Promise.resolve(true);
+  if (!sharedStoreBootInstall) sharedStoreBootInstall = installSharedPartnerRateLimitStore();
+  return sharedStoreBootInstall;
 }

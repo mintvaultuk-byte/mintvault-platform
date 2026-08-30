@@ -43,9 +43,19 @@ function localTestPort(variable, fallback) {
 
 export const CLUSTERS = {
   /** PostgreSQL 16 + pgvector — the MintVault-compatible shared cluster. */
-  pg16: { host: "127.0.0.1", port: localTestPort("MINTVAULT_TEST_PG16_PORT", "55432"), user: "postgres", password: "postgres" },
+  pg16: {
+    host: "127.0.0.1",
+    port: localTestPort("MINTVAULT_TEST_PG16_PORT", "55432"),
+    user: "postgres",
+    password: "postgres",
+  },
   /** PostgreSQL 17.10 — Partner accounting, RBAC, connector and migration suites. */
-  pg17: { host: "127.0.0.1", port: localTestPort("MINTVAULT_TEST_PG17_PORT", "55433"), user: "postgres", password: "postgres" },
+  pg17: {
+    host: "127.0.0.1",
+    port: localTestPort("MINTVAULT_TEST_PG17_PORT", "55433"),
+    user: "postgres",
+    password: "postgres",
+  },
 };
 
 /** Build a connection URL for a database on a named cluster. */
@@ -942,13 +952,14 @@ export const SUITES = [
   // scanner-production-migration additionally required port 5432 exactly, which no disposable
   // cluster in this repository uses, so it could not have run even if the variable were set.
   //
-  // Both keep their own disposability guards (loopback host + a mintvault_dgn_* database name), so
+  // Both keep their own disposability guards (loopback host + a mintvault_scanner_*_test database
+  // name), so
   // neither can be aimed at staging or production regardless of what is passed here.
   {
     file: "tests/scanner-production-migration.test.ts",
     topology: TOPOLOGY.ADMIN,
     cluster: "pg17",
-    database: "mintvault_dgn_release_scanner",
+    database: "mintvault_scanner_release_test",
     adminVars: ["SCANNER_MIGRATION_TEST_DATABASE_URL"],
     critical: true,
     isolate: true,
@@ -958,7 +969,7 @@ export const SUITES = [
     file: "tests/scanner-evidence-staging-service.integration.test.ts",
     topology: TOPOLOGY.ADMIN,
     cluster: "pg16",
-    database: "mintvault_dgn_evidence",
+    database: "mintvault_scanner_evidence_test",
     adminVars: ["SCANNER_STAGING_TEST_DATABASE_URL"],
     critical: true,
     isolate: true,

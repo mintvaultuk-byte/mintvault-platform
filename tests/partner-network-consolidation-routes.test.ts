@@ -84,7 +84,9 @@ describe("Partner Network P7 route contract", () => {
   it("extends the existing guarded queue with Partner provenance and an optional UUID filter", () => {
     expect(routes).toContain('app.get("/api/admin/grading-queue", requireAdmin');
     expect(routes).toContain("cert.origin_partner_id AS partner_id");
-    expect(routes).toContain("partner.legal_name AS partner_name");
+    expect(routes).toContain("readPartnerOrganisationNames(");
+    expect(routes).toContain("partnerName: r.partner_id ? (partnerNames.get(String(r.partner_id)) ?? null) : null");
+    expect(routes).not.toMatch(/JOIN\s+(?:public\.)?partner_organisations/i);
     expect(routes).toContain("partnerId must be a Partner UUID");
     expect(routes).toContain("cert.id = ${Number(certIdParam)}");
     expect(staff).toContain('params.set("certId", String(requestedCertId))');

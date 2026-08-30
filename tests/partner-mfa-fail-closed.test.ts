@@ -64,17 +64,13 @@ describe("partner login fails CLOSED when the MFA projection is missing", () => 
     }
   });
 
-  it("BOTH login routes surface it as a deployment fault (503), never as bad credentials", () => {
+  it("the one canonical public login route returns 503 and the authenticated router cannot shadow it", () => {
     // A legitimate user must never be told their password is wrong because of a
-    // schema problem, and the 503 is indistinguishable from the other closed gates.
-    for (const [name, src] of Object.entries({ PUBLIC_ROUTES, PORTAL_ROUTES })) {
-      expect(src, `${name} must map mfa_state_unavailable to 503`).toContain(
-        'if (result.reason === "mfa_state_unavailable")'
-      );
-      expect(src, `${name} must not leak the reason`).toContain(
-        'res.status(503).json({ error: "partner login unavailable" })'
-      );
-    }
+    // schema problem. Login now has one authority; the authenticated portal
+    // router deliberately carries no duplicate route whose ordering could drift.
+    expect(PUBLIC_ROUTES).toContain('if (result.reason === "mfa_state_unavailable")');
+    expect(PUBLIC_ROUTES).toContain('res.status(503).json({ error: "partner login unavailable" })');
+    expect(PORTAL_ROUTES).not.toContain('"/auth/login"');
   });
 
   it("the projection the guard depends on is exactly what 0046 installs", () => {

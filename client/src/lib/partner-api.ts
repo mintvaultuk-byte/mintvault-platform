@@ -659,12 +659,19 @@ export const partnerCards = {
       `/api/partner/submissions/${submissionId}/cards/${cardId}`,
       reason ? { reason } : undefined
     ),
-  uploadImage: async (submissionId: string, cardId: string, side: "front" | "back", file: File) => {
+  uploadImage: async (
+    submissionId: string,
+    cardId: string,
+    side: "front" | "back",
+    file: File,
+    idempotencyKey: string
+  ) => {
     const form = new FormData();
     form.append("image", file);
     const res = await fetch(`/api/partner/submissions/${submissionId}/cards/${cardId}/images/${side}`, {
       method: "POST",
       credentials: "include",
+      headers: { "Idempotency-Key": idempotencyKey },
       body: form,
     });
     if (!res.ok) {

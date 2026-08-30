@@ -394,8 +394,15 @@ async function bothSidesCaptured(client: PoolClient, job: CardJobRow): Promise<b
 export interface CaptureAdvanceResult {
   cardJobId: string;
   status: CardJobStatus;
+  /** True when this call performed either capture-state transition. */
+  changed: boolean;
   /** True when this call moved the job to READY_TO_GRADE. */
   readyToGrade: boolean;
+}
+
+export interface CaptureAdvanceOptions {
+  /** Set only by the scheduled convergence pass so repair transitions are distinguishable in audit. */
+  reconciliationActor?: string;
 }
 
 /**
@@ -424,7 +431,10 @@ export interface CaptureAdvanceResult {
  * already been written and acknowledged to the station by the time this runs; a lifecycle hiccup must
  * not turn an accepted capture into an error the operator has to re-shoot.
  */
-export async function advanceCardJobAfterCapture(certificateId: number): Promise<CaptureAdvanceResult | null> {
+export async function advanceCardJobAfterCapture(
+  certificateId: number,
+  options: CaptureAdvanceOptions = {}
+): Promise<CaptureAdvanceResult | null> {
   if (!Number.isSafeInteger(certificateId) || certificateId <= 0) return null;
   return withPartnerAdminTransaction(async (client) => {
     /*
@@ -454,10 +464,11 @@ export async function advanceCardJobAfterCapture(certificateId: number): Promise
       CARD_JOB_STATUS.FIX_REQUIRED,
     ];
     if (!CAPTURE_STATES.includes(job.status)) {
-      return { cardJobId: job.id, status: job.status, readyToGrade: false };
+      return { cardJobId: job.id, status: job.status, changed: false, readyToGrade: false };
     }
 
     let status = job.status;
+    let changed = false;
     if (status === CARD_JOB_STATUS.NEEDS_SCAN || status === CARD_JOB_STATUS.FIX_REQUIRED) {
       const moved = await transitionCardJob(client, {
         tenantId: job.tenantId,
@@ -466,10 +477,16 @@ export async function advanceCardJobAfterCapture(certificateId: number): Promise
         to: CARD_JOB_STATUS.CAPTURING,
         idempotent: true,
         actorUserId: job.createdBy,
-        action: "partner_card_job_capturing",
-        reason: "A scanner capture was accepted for this card.",
+        action: options.reconciliationActor
+          ? "partner_card_job_capturing_redrive"
+          : "partner_card_job_capturing",
+        reason: options.reconciliationActor
+          ? "Reconciliation redrive: accepted scanner evidence exists but the capture transition did not land."
+          : "A scanner capture was accepted for this card.",
+        audit: options.reconciliationActor ? { reconciledBy: options.reconciliationActor } : undefined,
       });
       status = moved.job.status;
+      changed = changed || moved.changed;
     }
 
     if (status === CARD_JOB_STATUS.CAPTURING && (await bothSidesCaptured(client, job))) {
@@ -480,14 +497,27 @@ export async function advanceCardJobAfterCapture(certificateId: number): Promise
         to: CARD_JOB_STATUS.READY_TO_GRADE,
         idempotent: true,
         actorUserId: job.createdBy,
-        action: "partner_card_job_ready_to_grade",
-        reason: "Front and back masters are accepted on an approved station.",
-        audit: { certificateId: job.certificateId, mvNumber: job.mvNumber },
+        action: options.reconciliationActor
+          ? "partner_card_job_ready_to_grade_redrive"
+          : "partner_card_job_ready_to_grade",
+        reason: options.reconciliationActor
+          ? "Reconciliation redrive: both accepted scanner masters exist but the ready transition did not land."
+          : "Front and back masters are accepted on an approved station.",
+        audit: {
+          certificateId: job.certificateId,
+          mvNumber: job.mvNumber,
+          ...(options.reconciliationActor ? { reconciledBy: options.reconciliationActor } : {}),
+        },
       });
-      return { cardJobId: job.id, status: ready.job.status, readyToGrade: ready.changed };
+      return {
+        cardJobId: job.id,
+        status: ready.job.status,
+        changed: changed || ready.changed,
+        readyToGrade: ready.changed,
+      };
     }
 
-    return { cardJobId: job.id, status, readyToGrade: false };
+    return { cardJobId: job.id, status, changed, readyToGrade: false };
   });
 }
 

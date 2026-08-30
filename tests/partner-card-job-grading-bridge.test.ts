@@ -340,6 +340,14 @@ async function makeTenant(label: string): Promise<Fixture> {
   };
 }
 
+async function stationCode(stationId: string): Promise<string> {
+  const result = await admin.query<{ station_code: string }>("SELECT station_code FROM partner_stations WHERE id=$1", [
+    stationId,
+  ]);
+  if (!result.rows[0]) throw new Error("station fixture missing");
+  return result.rows[0].station_code;
+}
+
 function principal(
   f: Fixture,
   userId: string,
@@ -781,12 +789,19 @@ async function runDraftWriteGuard(p: PartnerPrincipal, certificateId: number): P
   if (!auth) return -1;
   const { sql } = await import("drizzle-orm");
   const guard = grading.partnerDraftWriteGuard(p, auth);
-  const result = await drizzle.db.execute(sql`
-    UPDATE certificates SET card_name = 'GUARD-WROTE', updated_at = NOW()
-     WHERE id = ${certificateId} AND grade_approved_at IS NULL ${guard}
-    RETURNING id
-  `);
-  return result.rows.length;
+  try {
+    return await grading.withLivePartnerWriteAuthority(p, auth, async () => {
+      const result = await drizzle.db.execute(sql`
+        UPDATE certificates SET card_name = 'GUARD-WROTE', updated_at = NOW()
+         WHERE id = ${certificateId} AND grade_approved_at IS NULL ${guard}
+        RETURNING id
+      `);
+      return result.rows.length;
+    });
+  } catch (error) {
+    if (error instanceof Error && /write authority changed/.test(error.message)) return 0;
+    throw error;
+  }
 }
 
 let shopA: Fixture;
@@ -929,7 +944,7 @@ describe("Card Job → canonical grading bridge (real PostgreSQL)", () => {
     const session = await captures.createScannerCaptureSession({
       certificateId: card.certificateId,
       side: "front",
-      workstationId: "MV-STN-B1CTESTAA22",
+      workstationId: await stationCode(shopA.stationA),
       stationId: shopA.stationA,
       actorId: shopA.graderOne,
       recapture: false,
@@ -951,7 +966,7 @@ describe("Card Job → canonical grading bridge (real PostgreSQL)", () => {
       captures.createScannerCaptureSession({
         certificateId: card.certificateId,
         side: "front",
-        workstationId: "MV-STN-B1CTESTAA22",
+        workstationId: await stationCode(shopA.stationB),
         stationId: shopA.stationB,
         actorId: shopA.graderOne,
         recapture: false,
@@ -997,11 +1012,12 @@ describe("Card Job → canonical grading bridge (real PostgreSQL)", () => {
       WHERE station_id IS NOT NULL AND physical_released = false AND state IN ('armed', 'claimed', 'capturing')`);
     const captures = await import("../server/scanner-capture-service");
     const card = await scannerNew(shopA);
+    const workstationId = await stationCode(shopA.stationA);
     const arm = (certificateId: number) =>
       captures.createScannerCaptureSession({
         certificateId,
         side: "front",
-        workstationId: "MV-STN-B1DTESTAA22",
+        workstationId,
         stationId: shopA.stationA,
         actorId: shopA.graderOne,
         recapture: false,
@@ -1055,7 +1071,7 @@ describe("Card Job → canonical grading bridge (real PostgreSQL)", () => {
     const front = await captures.createScannerCaptureSession({
       certificateId: card.certificateId,
       side: "front",
-      workstationId: "MV-STN-SFAP015AA22",
+      workstationId: await stationCode(shopA.stationA),
       stationId: shopA.stationA,
       actorId: shopA.graderOne,
       recapture: false,
@@ -1093,7 +1109,7 @@ describe("Card Job → canonical grading bridge (real PostgreSQL)", () => {
       captures.createScannerCaptureSession({
         certificateId: card.certificateId,
         side: "back",
-        workstationId: "MV-STN-SFAP015BB22",
+        workstationId: await stationCode(shopA.stationB),
         stationId: shopA.stationB,
         actorId: shopA.graderOne,
         recapture: false,
@@ -1114,7 +1130,7 @@ describe("Card Job → canonical grading bridge (real PostgreSQL)", () => {
     const back = await captures.createScannerCaptureSession({
       certificateId: card.certificateId,
       side: next.side,
-      workstationId: "MV-STN-SFAP015AA22",
+      workstationId: await stationCode(shopA.stationA),
       stationId: shopA.stationA,
       actorId: shopA.graderOne,
       recapture: false,
@@ -1128,7 +1144,7 @@ describe("Card Job → canonical grading bridge (real PostgreSQL)", () => {
       captures.createScannerCaptureSession({
         certificateId: other.certificateId,
         side: "front",
-        workstationId: "MV-STN-SFAP015AA22",
+        workstationId: await stationCode(shopA.stationA),
         stationId: shopA.stationA,
         actorId: shopA.graderOne,
         recapture: false,
@@ -1171,7 +1187,7 @@ describe("Card Job → canonical grading bridge (real PostgreSQL)", () => {
       captures.createScannerCaptureSession({
         certificateId: card.certificateId,
         side: "back",
-        workstationId: "MV-STN-SFAP015IMMBB22",
+        workstationId: await stationCode(shopA.stationB),
         stationId: shopA.stationB,
         actorId: shopA.graderOne,
         recapture: false,
@@ -1190,7 +1206,7 @@ describe("Card Job → canonical grading bridge (real PostgreSQL)", () => {
     const back = await captures.createScannerCaptureSession({
       certificateId: card.certificateId,
       side: next.side,
-      workstationId: "MV-STN-SFAP015IMMAA22",
+      workstationId: await stationCode(shopA.stationA),
       stationId: shopA.stationA,
       actorId: shopA.graderOne,
       recapture: false,
@@ -1205,7 +1221,7 @@ describe("Card Job → canonical grading bridge (real PostgreSQL)", () => {
       captures.createScannerCaptureSession({
         certificateId: card.certificateId,
         side: "back",
-        workstationId: "MV-STN-SFAP015RECAPBB22",
+        workstationId: await stationCode(shopA.stationB),
         stationId: shopA.stationB,
         actorId: shopA.graderOne,
         recapture: true,
@@ -1245,7 +1261,7 @@ describe("Card Job → canonical grading bridge (real PostgreSQL)", () => {
       captures.createScannerCaptureSession({
         certificateId: card.certificateId,
         side: "front",
-        workstationId: "MV-STN-SFAP015FIXBB22",
+        workstationId: await stationCode(shopA.stationB),
         stationId: shopA.stationB,
         actorId: shopA.graderOne,
         recapture: false,
@@ -1264,7 +1280,7 @@ describe("Card Job → canonical grading bridge (real PostgreSQL)", () => {
     const front = await captures.createScannerCaptureSession({
       certificateId: card.certificateId,
       side: next.side,
-      workstationId: "MV-STN-SFAP015FIXAA22",
+      workstationId: await stationCode(shopA.stationA),
       stationId: shopA.stationA,
       actorId: shopA.graderOne,
       recapture: false,
@@ -1282,7 +1298,7 @@ describe("Card Job → canonical grading bridge (real PostgreSQL)", () => {
     const session = await captures.createScannerCaptureSession({
       certificateId: card.certificateId,
       side: "front",
-      workstationId: "MV-STN-SFAP015FAILAA22",
+      workstationId: await stationCode(shopA.stationA),
       stationId: shopA.stationA,
       actorId: shopA.graderOne,
       recapture: false,
@@ -1380,11 +1396,12 @@ describe("Card Job → canonical grading bridge (real PostgreSQL)", () => {
       WHERE station_id IS NOT NULL AND physical_released = false AND state IN ('armed', 'claimed', 'capturing')`);
     const captures = await import("../server/scanner-capture-service");
     const card = await scannerNew(shopA);
+    const workstationId = await stationCode(shopA.stationA);
     const armBack = () =>
       captures.createScannerCaptureSession({
         certificateId: card.certificateId,
         side: "back",
-        workstationId: "MV-STN-B1ETESTAA22",
+        workstationId,
         stationId: shopA.stationA,
         actorId: shopA.graderOne,
         recapture: false,

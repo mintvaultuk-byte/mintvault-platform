@@ -16,6 +16,7 @@
 import { AsyncLocalStorage } from "node:async_hooks";
 import pg from "pg";
 import { assertMintVaultDatabaseEnvironmentSafety } from "../lib/database-environment-guard";
+import { securePostgresPoolConnection } from "../lib/postgres-transport-security";
 
 let pool: pg.Pool | null = null;
 
@@ -95,16 +96,11 @@ function getPool(): pg.Pool {
   // Same environment-isolation gate as MINTVAULT_DATABASE_URL (server/config.ts). Without it a
   // non-production runtime could be repointed at an isolated DB for the main pool while this pool
   // still opened the production/shared identity — defeating isolation on 4 of the 5 connections.
-  assertMintVaultDatabaseEnvironmentSafety(
-    process.env.PARTNER_DATABASE_URL,
-    process.env,
-    "PARTNER_DATABASE_URL"
-  );
+  assertMintVaultDatabaseEnvironmentSafety(process.env.PARTNER_DATABASE_URL, process.env, "PARTNER_DATABASE_URL");
   if (!pool) {
     pool = new pg.Pool({
-      connectionString: process.env.PARTNER_DATABASE_URL,
+      ...securePostgresPoolConnection(process.env.PARTNER_DATABASE_URL, "PARTNER_DATABASE_URL"),
       max: Number(process.env.PARTNER_DB_POOL_MAX ?? 8),
-      // no SSL for local/disposable; real infra provides its own sslmode in the URL.
     });
   }
   return pool;
@@ -180,24 +176,34 @@ export async function partnerRuntimeQuery<T extends pg.QueryResultRow = pg.Query
 let adminPool: pg.Pool | null = null;
 const partnerAdminReadContext = new AsyncLocalStorage<pg.PoolClient>();
 
+export function resolvePartnerAdminDatabaseUrl(env: NodeJS.ProcessEnv = process.env): string {
+  if (env.PARTNER_ADMIN_DATABASE_URL) return env.PARTNER_ADMIN_DATABASE_URL;
+  if ((env.NODE_ENV ?? "").trim().toLowerCase() === "production") {
+    throw new Error("PARTNER_ADMIN_DATABASE_URL is required for production Partner admin authority.");
+  }
+  if (env.MINTVAULT_DATABASE_URL) return env.MINTVAULT_DATABASE_URL;
+  throw new Error("No admin DB URL configured for partner control shell.");
+}
+
 function getAdminPool(): pg.Pool {
   assertPartnerAccountingDatabaseTopology();
-  const url = process.env.PARTNER_ADMIN_DATABASE_URL || process.env.MINTVAULT_DATABASE_URL;
-  if (!url) throw new Error("No admin DB URL configured for partner control shell.");
+  const url = resolvePartnerAdminDatabaseUrl();
   assertMintVaultDatabaseEnvironmentSafety(
     url,
     process.env,
     process.env.PARTNER_ADMIN_DATABASE_URL ? "PARTNER_ADMIN_DATABASE_URL" : "MINTVAULT_DATABASE_URL"
   );
   if (!adminPool) {
-    adminPool = new pg.Pool({ connectionString: url, max: 4 });
+    adminPool = new pg.Pool({ ...securePostgresPoolConnection(url, "PARTNER_ADMIN_DATABASE_URL"), max: 4 });
     adminPool.on("error", (err) => console.error("[partner-admin-pool] idle client error (evicted):", err.message));
   }
   return adminPool;
 }
 
 export function partnerAdminDbConfigured(): boolean {
-  return !!(process.env.PARTNER_ADMIN_DATABASE_URL || process.env.MINTVAULT_DATABASE_URL);
+  return (process.env.NODE_ENV ?? "").trim().toLowerCase() === "production"
+    ? Boolean(process.env.PARTNER_ADMIN_DATABASE_URL)
+    : Boolean(process.env.PARTNER_ADMIN_DATABASE_URL || process.env.MINTVAULT_DATABASE_URL);
 }
 export async function partnerAdminQuery<T extends pg.QueryResultRow = pg.QueryResultRow>(
   sql: string,
@@ -300,11 +306,10 @@ export async function withPartnerAdminTransaction<T>(fn: (client: pg.PoolClient)
 let accountingAuditPool: pg.Pool | null = null;
 export async function withPartnerAccountingAuditTransaction<T>(fn: (client: pg.PoolClient) => Promise<T>): Promise<T> {
   assertPartnerAccountingDatabaseTopology();
-  const url = process.env.PARTNER_ADMIN_DATABASE_URL || process.env.MINTVAULT_DATABASE_URL;
-  if (!url) throw new Error("No admin DB URL configured for partner accounting audit.");
+  const url = resolvePartnerAdminDatabaseUrl();
   if (!accountingAuditPool) {
     accountingAuditPool = new pg.Pool({
-      connectionString: url,
+      ...securePostgresPoolConnection(url, "PARTNER_ADMIN_DATABASE_URL"),
       max: Number(process.env.PARTNER_ACCOUNTING_AUDIT_POOL_MAX ?? 2),
       connectionTimeoutMillis: Number(process.env.PARTNER_ACCOUNTING_AUDIT_CONNECT_TIMEOUT_MS ?? 1_000),
       query_timeout: Number(process.env.PARTNER_ACCOUNTING_AUDIT_QUERY_TIMEOUT_MS ?? 2_000),

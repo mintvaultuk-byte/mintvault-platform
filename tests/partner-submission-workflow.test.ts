@@ -159,6 +159,7 @@ async function seedMintVaultTables(): Promise<void> {
     await admin.query(
       `INSERT INTO partner_feature_flags (tenant_id, flag, enabled) VALUES
          (NULL,'partner_portal_enabled',true),
+         (NULL,'partner_login_enabled',true),
          (NULL,'partner_submission_intake_enabled',true)`
     );
     // Global service-tier defaults are seeded out-of-band (superuser/ops), never by the migration

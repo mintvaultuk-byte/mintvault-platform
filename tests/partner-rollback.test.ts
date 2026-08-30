@@ -20,7 +20,7 @@ import { readFileSync } from "node:fs";
 import { join } from "node:path";
 import { execFileSync } from "node:child_process";
 import { Client } from "pg";
-import { provisionRealisticRoles, migratorUrlFrom } from "./helpers/partner-realistic-db";
+import { partnerScopeOnly, provisionRealisticRoles, migratorUrlFrom } from "./helpers/partner-realistic-db";
 import { startPostgres17, type DisposablePostgres17 } from "./helpers/postgres17-cluster";
 import { applyMigrations, listMigrationFiles } from "../scripts/db/migrate";
 import { CERTIFICATES_PROTECTED_COLUMNS_SQL } from "./helpers/certificates-protected-columns";
@@ -99,7 +99,7 @@ async function applyAllRealistic(): Promise<void> {
      * lineages are reconciled, and it aborted beforeAll — which vitest reports as SKIPPED tests, so
      * the suite that proves rollback safety would have gone silently green.
      */
-    const all = listMigrationFiles().filter((migration) => !["0075", "0076", "0081"].includes(migration.number));
+    const all = partnerScopeOnly(listMigrationFiles());
     const throughG6D = all.filter((f) => Number(f.number) <= 41);
     await applyMigrations(migrator, throughG6D); // populates schema_migrations journal
     // The owner-approved repair, executed by the migrator itself via its ADMIN option — exactly

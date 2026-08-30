@@ -31,6 +31,11 @@ export const PARTNER_MIGRATIONS = [
   // Runtime authentication now requires the provenance projection this migration
   // adds. Keep the baseline harness aligned with the deployed login contract.
   "0077_partner_credential_lifecycle_hardening",
+  // Every sensitive pre-authentication route now uses the shared PostgreSQL limiter.
+  // Keep even the smallest realistic runtime fixture aligned with that fail-closed
+  // dependency; omitting it turns otherwise-valid login/reset/MFA proofs into a
+  // cascade of synthetic `rate limiter unavailable` responses.
+  "0089_partner_shared_rate_limit_buckets",
 ] as const;
 
 /**
@@ -319,6 +324,18 @@ export const APPLICATION_SCOPE_MIGRATIONS = [
   // Forward-only convergence for the two-lineage 0111 collision. Touches core `certificates`,
   // exactly like 0111 itself, so it is APPLICATION scope for the same reason.
   "0113_lineage_convergence_mvgs_rules_version",
+  // Remediation migrations 0114-0122 all require core MintVault relations,
+  // security/session authority, or the main-runtime role contract. A
+  // Partner-only fixture must never journal them as successfully exercised.
+  "0114_certificate_identity_authority",
+  "0115_runtime_schema_convergence",
+  "0116_nfc_physical_lock_integrity",
+  "0117_grading_payment_fulfilment_outbox",
+  "0118_nfc_lock_intent_reconciliation",
+  "0119_session_store_authority",
+  "0120_customer_notification_outbox",
+  "0121_main_runtime_role_authority",
+  "0122_object_write_intent_reconciliation",
 ] as const;
 
 /**

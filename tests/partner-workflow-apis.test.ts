@@ -19,6 +19,7 @@
 import { describe, it, expect, beforeAll, beforeEach, afterAll, vi } from "vitest";
 import http from "node:http";
 import type { AddressInfo } from "node:net";
+import { createHash } from "node:crypto";
 import { Client } from "pg";
 import bcrypt from "bcryptjs";
 import {
@@ -27,12 +28,34 @@ import {
   PARTNER_MIGRATIONS_WITH_G6D,
   provisionRealisticRoles,
 } from "./helpers/partner-realistic-db";
+import { applyMigrations, listMigrationFiles } from "../scripts/db/migrate";
 
 const objectStore = vi.hoisted(() => new Map<string, { bytes: Buffer; mime: string }>());
 vi.mock("../server/r2", () => ({
   uploadToR2: vi.fn(async (key: string, bytes: Buffer, mime: string) => {
     if (objectStore.has(key)) throw new Error(`immutable test object collision: ${key}`);
     objectStore.set(key, { bytes, mime });
+  }),
+  uploadCreateOnlyToR2: vi.fn(async (key: string, bytes: Buffer, mime: string, expectedSha256: string) => {
+    if (objectStore.has(key)) throw new Error(`immutable test object collision: ${key}`);
+    const actualSha256 = createHash("sha256").update(bytes).digest("hex");
+    if (actualSha256 !== expectedSha256) throw new Error(`test object hash mismatch: ${key}`);
+    objectStore.set(key, { bytes: Buffer.from(bytes), mime });
+    return key;
+  }),
+  inspectR2ObjectIntegrity: vi.fn(async (key: string) => {
+    const object = objectStore.get(key);
+    return object
+      ? {
+          exists: true,
+          byteLength: object.bytes.length,
+          sha256: createHash("sha256").update(object.bytes).digest("hex"),
+          contentType: object.mime,
+        }
+      : { exists: false };
+  }),
+  deleteFromR2: vi.fn(async (key: string) => {
+    objectStore.delete(key);
   }),
   getR2SignedUrl: vi.fn(async (key: string) => `local-r2://${key}`),
 }));
@@ -55,6 +78,7 @@ const OWNER_B = "22222222-2000-0000-0000-0000000000b1";
 let server: http.Server;
 let base: string;
 let admin: Client;
+let multipartSequence = 0;
 
 (isLocal ? describe : describe.skip)(
   "Partner Phase 2 completion — new workflow APIs (disposable DB, real HTTP)",
@@ -86,14 +110,23 @@ let admin: Client;
       await admin.query(
         "CREATE TABLE IF NOT EXISTS submission_items (id serial primary key, submission_id integer not null)"
       );
+      await admin.query("CREATE TABLE IF NOT EXISTS certificates (id serial primary key)");
       await admin.query(`CREATE TABLE IF NOT EXISTS audit_log (
         id serial primary key, entity_type text not null, entity_id text not null, action text not null,
         admin_user text, details jsonb, created_at timestamptz not null default now()
       )`);
-      for (const t of ["users", "submissions", "submission_items", "audit_log"]) {
+      for (const t of ["users", "submissions", "submission_items", "certificates", "audit_log"]) {
         await admin.query(`ALTER TABLE ${t} OWNER TO pn_migrator`);
       }
       await applyMigrationsRealistic(admin, ADMIN!, PARTNER_MIGRATIONS_WITH_G6D);
+      await applyMigrations(
+        admin,
+        listMigrationFiles().filter((file) =>
+          ["0121_main_runtime_role_authority.sql", "0122_object_write_intent_reconciliation.sql"].includes(
+            file.filename
+          )
+        )
+      );
       await admin.query("DROP ROLE IF EXISTS partner_app_test_rt").catch(() => {});
       await admin.query("CREATE ROLE partner_app_test_rt LOGIN PASSWORD 'synthetic'");
       await admin.query("GRANT partner_runtime TO partner_app_test_rt");
@@ -170,6 +203,7 @@ let admin: Client;
       await admin.query(
         `INSERT INTO partner_feature_flags (tenant_id, flag, enabled) VALUES
            (NULL,'partner_portal_enabled',true),
+           (NULL,'partner_login_enabled',true),
            -- B2: submitting reserves credits and is now gated by partner_submission_intake_enabled
            -- (default OFF everywhere). This suite proves the submit mechanics, so it opts in.
            (NULL,'partner_submission_intake_enabled',true)`
@@ -239,7 +273,11 @@ let admin: Client;
     const multipart = async (path: string, cookie: string, file: Blob | null = png(), filename = "card.png") => {
       const body = new FormData();
       if (file) body.append("image", file, filename);
-      const res = await fetch(`${base}${path}`, { method: "POST", headers: { cookie }, body });
+      const res = await fetch(`${base}${path}`, {
+        method: "POST",
+        headers: { cookie, "Idempotency-Key": `workflow-api-upload-${++multipartSequence}` },
+        body,
+      });
       return { status: res.status, body: await res.json().catch(() => ({})) };
     };
     async function draftId(cookie: string, locationId = L1): Promise<string> {
@@ -802,7 +840,9 @@ let admin: Client;
         const afterFront = await bindings(c1.body.id);
         expect(afterFront.front_image_key).toBe(front.body.key);
         expect(afterFront.back_image_key).toBeNull();
-        expect(front.body.key).toMatch(new RegExp(`^partner-submissions/${A}/${submissionId}/${c1.body.id}/front-`));
+        expect(front.body.key).toMatch(
+          new RegExp(`^partner-submissions/${A}/${submissionId}/${c1.body.id}/revisions/[0-9a-f]{32}/front\\.png$`)
+        );
         expect(objectStore.has(front.body.key)).toBe(true);
         expect(await bindings(c2.body.id)).toEqual({ front_image_key: null, back_image_key: null });
 
@@ -812,7 +852,9 @@ let admin: Client;
         );
         expect(back.status).toBe(200);
         expect((await bindings(c1.body.id)).back_image_key).toBe(back.body.key);
-        expect(back.body.key).toMatch(new RegExp(`^partner-submissions/${A}/${submissionId}/${c1.body.id}/back-`));
+        expect(back.body.key).toMatch(
+          new RegExp(`^partner-submissions/${A}/${submissionId}/${c1.body.id}/revisions/[0-9a-f]{32}/back\\.png$`)
+        );
         expect(await uploadEvents(submissionId)).toBe(2);
       });
 

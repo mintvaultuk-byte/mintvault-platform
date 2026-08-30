@@ -4,40 +4,27 @@
  */
 import { Router } from "express";
 import rateLimit from "express-rate-limit";
-import {
-  partnerLogin,
-  partnerLogout,
-  revokeAllSessions,
-  markSessionMfaPassed,
-  createPasswordResetToken,
-  consumePasswordResetToken,
-} from "./auth";
+import { partnerLogout, revokeAllSessions, markSessionMfaPassed } from "./auth";
 import {
   requirePartnerAuth,
   requirePartnerCapability,
-  setPartnerCookie,
   clearPartnerCookie,
   PARTNER_COOKIE,
   requireNotViewOnly,
   requireNotSensitiveFrozen,
 } from "./session";
 import {
-  partnerLoginIpLimiter,
-  partnerLoginLimiter,
   partnerMfaLimiter,
   partnerMfaAccountLimiter,
-  partnerResetLimiter,
   partnerLocationSwitchLimiter,
   partnerInviteLimiter,
   partnerTeamMutationLimiter,
 } from "./rate-limit";
-import { withTenant, partnerRuntimeQuery } from "./db";
+import { withTenant } from "./db";
 import { auditInOwnTxn, writePartnerSecurity } from "./audit";
 import { recoveryHash, mfaEncryptionConfigured } from "./mfa";
-import { resetDeliveryConfigured, deliverResetToken } from "./delivery";
 import { switchLocation } from "./location";
 import {
-  acceptPartnerInvitation,
   getFirstShopOnboarding,
   updateFirstShopDeliveryAddress,
   upsertFirstShopOperationsContact,
@@ -134,7 +121,9 @@ export async function currentPartnerOwnerActor(req: import("express").Request) {
     if (!roles.includes("PARTNER_OWNER")) {
       throw new G5RequestError("FORBIDDEN", "Only the Partner Owner can confirm first-shop setup.");
     }
-    const user = await client.query<{ email: string }>("SELECT email FROM partner_users WHERE id=$1", [principal.userId]);
+    const user = await client.query<{ email: string }>("SELECT email FROM partner_users WHERE id=$1", [
+      principal.userId,
+    ]);
     if (!user.rows[0]?.email) throw new G5RequestError("UNAUTHENTICATED", "Partner account details are unavailable.");
     return {
       actorUserId: principal.userId,
@@ -202,7 +191,9 @@ function sendPublicPublicationError(res: import("express").Response, err: unknow
     return;
   }
   console.error("[partner-publication] request failed:", (err as Error)?.message ?? "unknown");
-  res.status(503).json({ error: { code: "PUBLIC_PROFILE_UNAVAILABLE", message: "Public profiles are temporarily unavailable." } });
+  res
+    .status(503)
+    .json({ error: { code: "PUBLIC_PROFILE_UNAVAILABLE", message: "Public profiles are temporarily unavailable." } });
 }
 
 // The actor-bound Partner limiter below is the primary control because OAuth
@@ -324,45 +315,7 @@ export function partnerApiRouter(): Router {
     next();
   });
 
-  // ---- auth ----
-  // SHADOWED DUPLICATE — the served implementation is server/partner/public-routes.ts, kept ahead of
-  // this router by the registration-order invariant at server/routes.ts:2798. It carries the SAME
-  // limiter pair anyway, in the SAME order, so the protection does not depend on that invariant
-  // holding: partnerLoginIpLimiter (IP-only, always applied) must bind BEFORE partnerLoginLimiter,
-  // whose key includes the caller-supplied `email` and on its own hands one source IP a fresh
-  // budget per address it tries. If this route ever stops being shadowed it is still bounded.
-  //
-  // GATE DIFFERENCE, stated exactly: this router is NOT ungated. partnerPortalRouter
-  // (server/partner/mount.ts) composes it behind requirePartnerRuntimeConfig, requireDefinerModel,
-  // requireNoEmergencyStop and requirePortalEnabled, so the emergency stop and partner_portal_enabled
-  // both apply here too. The ONE gate this handler lacks is the per-route partner_login_enabled
-  // check that public-routes.ts performs before authenticating.
-  r.post("/auth/login", partnerLoginIpLimiter, partnerLoginLimiter, async (req, res) => {
-    const { email, password } = req.body ?? {};
-    if (typeof email !== "string" || typeof password !== "string") {
-      res.status(400).json({ error: "invalid request" });
-      return;
-    }
-    const result = await partnerLogin(email, password, req.ip);
-    if (!result.ok) {
-      // Parity with public-routes.ts: a missing MFA projection is a deployment fault
-      // (503), not a credential fault.
-      if (result.reason === "mfa_state_unavailable") {
-        res.status(503).json({ error: "partner login unavailable" });
-        return;
-      }
-      // generic — never disclose which of unknown/invalid/locked/suspended (except a soft MFA hint)
-      res.status(401).json({ error: "invalid credentials" });
-      return;
-    }
-    setPartnerCookie(res, result.sessionToken!);
-    // RESPONSE SHAPE IS DELIBERATELY UNCHANGED. Whether the outstanding second step is enrolment or
-    // a code challenge is reported by GET /session (`mfaEnrolmentRequired`), which the client calls
-    // immediately after login anyway. Keeping that bit off this response avoids widening the
-    // login contract that tests/partner-login-rate-limit-integration.test.ts asserts exactly.
-    res.json({ ok: true, mfaRequired: !!result.mfaPending });
-  });
-
+  // ---- authenticated session actions ----
   r.post("/auth/mfa", partnerMfaLimiter, partnerMfaAccountLimiter, async (req, res) => {
     if (!req.partner) {
       res.status(401).json({ error: "authentication required" });
@@ -402,7 +355,10 @@ export function partnerApiRouter(): Router {
           tenantId: req.partner!.tenantId,
           severity: "medium",
           kind: "partner_mfa_failed",
-          detail: { userId: req.partner!.userId, method: typeof recoveryCode === "string" && recoveryCode ? "recovery_code" : "totp" },
+          detail: {
+            userId: req.partner!.userId,
+            method: typeof recoveryCode === "string" && recoveryCode ? "recovery_code" : "totp",
+          },
         })
       ).catch(() => {});
       res.status(401).json({ error: "invalid code" });
@@ -425,62 +381,6 @@ export function partnerApiRouter(): Router {
     const n = await revokeAllSessions(req.partner!.tenantId, req.partner!.userId);
     clearPartnerCookie(res);
     res.json({ ok: true, revoked: n });
-  });
-
-  r.post("/auth/password-reset/request", partnerResetLimiter, async (req, res) => {
-    const { email } = req.body ?? {};
-    // Always generic (never reveal account existence). If the email resolves to a single active
-    // user, mint a single-use token, delivered OUT-OF-BAND (email) — never returned in the response.
-    if (typeof email === "string" && email) {
-      try {
-        const { rows } = await partnerRuntimeQuery<{
-          user_id: string;
-          tenant_id: string;
-          user_status: string;
-          org_status: string;
-        }>("SELECT user_id, tenant_id, user_status, org_status FROM partner_auth_lookup($1)", [email]);
-        if (
-          rows.length === 1 &&
-          rows[0].user_status === "ACTIVE" &&
-          rows[0].org_status === "ACTIVE" &&
-          resetDeliveryConfigured()
-        ) {
-          const token = await createPasswordResetToken(rows[0].tenant_id, rows[0].user_id);
-          // NULL means a fresh link already exists and was preserved (denial-of-recovery guard).
-          if (token !== null) {
-            await deliverResetToken(email, token); // out-of-band; token never returned in the response
-          }
-        }
-      } catch {
-        /* swallow — response stays generic regardless */
-      }
-    }
-    res.json({ ok: true });
-  });
-
-  r.post("/auth/password-reset/consume", partnerResetLimiter, async (req, res) => {
-    const { token, newPassword } = req.body ?? {};
-    if (typeof token !== "string" || typeof newPassword !== "string" || newPassword.length < 10) {
-      res.status(400).json({ error: "invalid request" });
-      return;
-    }
-    // tenant is derived from the token server-side (L6) — no client tenantId.
-    const ok = await consumePasswordResetToken(token, newPassword);
-    res.status(ok ? 200 : 400).json({ ok });
-  });
-
-  r.post("/invitations/accept", partnerResetLimiter, async (req, res) => {
-    const { token, password } = req.body ?? {};
-    if (typeof token !== "string" || typeof password !== "string") {
-      res.status(400).json({ error: "invalid invitation" });
-      return;
-    }
-    const result = await acceptPartnerInvitation(token, password);
-    if (!result.ok) {
-      res.status(400).json({ error: "invalid invitation" });
-      return;
-    }
-    res.json({ ok: true });
   });
 
   // ---- session ----
@@ -837,7 +737,8 @@ export function partnerApiRouter(): Router {
       try {
         const actor = await currentPartnerOwnerActor(req);
         const snapshot = await getFirstShopOnboarding(req.partner!.tenantId);
-        if (!snapshot.mainLocation) throw new G5RequestError("PARTNER_NOT_FOUND", "No active Main location is available.");
+        if (!snapshot.mainLocation)
+          throw new G5RequestError("PARTNER_NOT_FOUND", "No active Main location is available.");
         const result = await updateFirstShopDeliveryAddress(
           actor,
           req.partner!.tenantId,
@@ -1082,8 +983,10 @@ export function partnerApiRouter(): Router {
       noStore(res);
       try {
         if (
-          !Number.isInteger(req.body?.expectedProfileVersion) || req.body.expectedProfileVersion < 0 ||
-          !Number.isInteger(req.body?.expectedLocationVersion) || req.body.expectedLocationVersion < 0
+          !Number.isInteger(req.body?.expectedProfileVersion) ||
+          req.body.expectedProfileVersion < 0 ||
+          !Number.isInteger(req.body?.expectedLocationVersion) ||
+          req.body.expectedLocationVersion < 0
         ) {
           res.status(400).json({ error: "The exact profile and location versions are required before saving." });
           return;
@@ -1122,7 +1025,9 @@ export function partnerApiRouter(): Router {
     async (req, res) => {
       const capability = await getGooglePresenceCapability();
       if (!capability.available) {
-        res.status(503).json({ error: { code: capability.reason, message: "Google Business connection is unavailable." } });
+        res
+          .status(503)
+          .json({ error: { code: capability.reason, message: "Google Business connection is unavailable." } });
         return;
       }
       if (typeof req.body?.locationId !== "string") {
@@ -1182,7 +1087,9 @@ export function partnerApiRouter(): Router {
     async (req, res) => {
       const capability = await getGooglePresenceCapability();
       if (!capability.available) {
-        res.status(503).json({ error: { code: capability.reason, message: "Google Business connection is unavailable." } });
+        res
+          .status(503)
+          .json({ error: { code: capability.reason, message: "Google Business connection is unavailable." } });
         return;
       }
       if (typeof req.body?.locationId !== "string" || typeof req.body?.candidateHandle !== "string") {
@@ -1212,7 +1119,9 @@ export function partnerApiRouter(): Router {
     async (req, res) => {
       const capability = await getGooglePresenceCapability();
       if (!capability.available) {
-        res.status(503).json({ error: { code: capability.reason, message: "Google Business connection is unavailable." } });
+        res
+          .status(503)
+          .json({ error: { code: capability.reason, message: "Google Business connection is unavailable." } });
         return;
       }
       try {
@@ -1234,7 +1143,9 @@ export function partnerApiRouter(): Router {
     async (req, res) => {
       const capability = await getGooglePresenceCapability();
       if (!capability.available) {
-        res.status(503).json({ error: { code: capability.reason, message: "Google Business connection is unavailable." } });
+        res
+          .status(503)
+          .json({ error: { code: capability.reason, message: "Google Business connection is unavailable." } });
         return;
       }
       try {
@@ -1468,36 +1379,42 @@ export function partnerApiRouter(): Router {
     res.json({ ok: true, recoveryCodes: out.recoveryCodes }); // shown once
   });
 
-  r.post("/mfa/recovery-codes/regenerate", requirePartnerAuth, partnerMfaLimiter, partnerMfaAccountLimiter, async (req, res) => {
-    const { password, code, recoveryCode } = req.body ?? {};
-    if (typeof password !== "string") {
-      res.status(400).json({ error: "elevated verification required" });
-      return;
-    }
-    const out = await mfaRegenerateRecovery(
-      {
-        tenantId: req.partner!.tenantId,
-        userId: req.partner!.userId,
-        sessionMfaPassed: req.partner!.mfaPassed,
-      },
-      password,
-      // C: only consulted when an ACTIVE authenticator already exists. Minting a fresh recovery set
-      // for an enrolled user is a credential-class change and now demands the same current-factor
-      // proof as replacing the authenticator. Bootstrap (no active method) is unaffected.
-      {
-        code: typeof code === "string" ? code : undefined,
-        recoveryCode: typeof recoveryCode === "string" ? recoveryCode : undefined,
+  r.post(
+    "/mfa/recovery-codes/regenerate",
+    requirePartnerAuth,
+    partnerMfaLimiter,
+    partnerMfaAccountLimiter,
+    async (req, res) => {
+      const { password, code, recoveryCode } = req.body ?? {};
+      if (typeof password !== "string") {
+        res.status(400).json({ error: "elevated verification required" });
+        return;
       }
-    );
-    if (!out.ok) {
-      res
-        .status(out.reason === "requires_current_factor" || out.reason === "second_factor_required" ? 403 : 401)
-        .json({ error: out.reason });
-      return;
+      const out = await mfaRegenerateRecovery(
+        {
+          tenantId: req.partner!.tenantId,
+          userId: req.partner!.userId,
+          sessionMfaPassed: req.partner!.mfaPassed,
+        },
+        password,
+        // C: only consulted when an ACTIVE authenticator already exists. Minting a fresh recovery set
+        // for an enrolled user is a credential-class change and now demands the same current-factor
+        // proof as replacing the authenticator. Bootstrap (no active method) is unaffected.
+        {
+          code: typeof code === "string" ? code : undefined,
+          recoveryCode: typeof recoveryCode === "string" ? recoveryCode : undefined,
+        }
+      );
+      if (!out.ok) {
+        res
+          .status(out.reason === "requires_current_factor" || out.reason === "second_factor_required" ? 403 : 401)
+          .json({ error: out.reason });
+        return;
+      }
+      noStore(res);
+      res.json({ ok: true, recoveryCodes: out.recoveryCodes }); // shown once; never logged
     }
-    noStore(res);
-    res.json({ ok: true, recoveryCodes: out.recoveryCodes }); // shown once; never logged
-  });
+  );
 
   // A Partner cannot remove their own second factor. Recovery is deliberately a distinct,
   // audited Super Admin action protected by fresh step-up authentication; allowing a self-service

@@ -67,8 +67,11 @@ describe("partner card image upload uses existing storage and audits front/back 
   });
 
   it("stores images under a partner-specific R2 namespace and writes event plus audit rows", () => {
-    expect(SUBMISSION_SERVICE).toContain("uploadToR2");
+    expect(SUBMISSION_SERVICE).toContain("ObjectWriteCoordinator");
+    expect(SUBMISSION_SERVICE).toContain('operationKind: "PARTNER_CARD_IMAGE"');
+    expect(SUBMISSION_SERVICE).toContain("finalizePartnerCardImageObjectWrite");
     expect(SUBMISSION_SERVICE).toContain("partner-submissions/");
+    expect(SUBMISSION_SERVICE).toContain("/revisions/");
     expect(SUBMISSION_SERVICE).toContain('"card_image_uploaded"');
     expect(SUBMISSION_SERVICE).toContain('"submission.card_image_uploaded"');
     expect(SUBMISSION_SERVICE).toContain("front_image_key");
@@ -84,7 +87,14 @@ describe("partner card image upload uses existing storage and audits front/back 
 
   it("the client can retry/replace each side without exposing admin image upload APIs", () => {
     expect(API).toContain("uploadImage");
+    expect(API).toContain('headers: { "Idempotency-Key": idempotencyKey }');
+    expect(SUBMISSION_ROUTES).toContain('req.header("Idempotency-Key")');
+    expect(SUBMISSION_ROUTES).toContain("An Idempotency-Key header is required for image uploads.");
+    expect(SUBMISSION_SERVICE).toContain("readObjectWriteSnapshot");
+    expect(SUBMISSION_SERVICE).toContain("partner-card-image:${sha256Hex(suppliedKey)}");
     expect(WIZARD).toContain("CardImageUploadButton");
+    expect(WIZARD).toContain("retry.current");
+    expect(WIZARD).toContain("crypto.randomUUID()");
     expect(WIZARD).toContain('accept="image/jpeg,image/png,image/webp,image/tiff"');
     expect(WIZARD).not.toContain("/api/admin/certificates");
   });

@@ -63,7 +63,8 @@ async function checkDefinerModelOnce(): Promise<boolean> {
     // the group role is still NOBYPASSRLS, so every check below passes while RLS is off for the
     // actual connection, and each tenant's queries return every tenant's rows.
     //
-    // getPartnerRuntimeCapability() is exactly this check — it reads current_user's rolbypassrls
+    // getPartnerRuntimeCapability() is exactly this check — it reads current_user's rolsuper and
+    // rolbypassrls
     // over the runtime pool — but until now nothing in production called it. Wiring it here, on
     // the gate that already fails closed and already runs on the runtime pool, is what makes the
     // "restricted runtime credential" requirement enforced rather than merely documented.
@@ -227,19 +228,18 @@ export function partnerPortalRouter(): Router {
 /**
  * Mount the authenticated partner portal into an Express application at /api/partner.
  *
- * In the main application this MUST be called after `registerPartnerPublicRoutes(app)`: the public
- * router owns /auth/login, /auth/password-reset/* and /invitations/accept, and anything it does not
- * match falls through to the gates here.
+ * Public authentication/onboarding routes are owned exclusively by
+ * public-routes.ts. This authenticated router deliberately does not duplicate
+ * them, so its correctness no longer depends on Express registration order.
  */
 export function mountPartnerPortal(app: Express): void {
   app.use(PARTNER_PORTAL_BASE, partnerPortalRouter());
 
-  // Swap the per-machine in-memory rate-limit store for the shared PostgreSQL one (invariant I19).
-  // Fire-and-forget so a slow or unavailable database cannot delay mounting: until it resolves, the
-  // in-memory default remains in place, which is the previous behaviour rather than a regression.
-  // Errors are handled and logged inside; the catch here only guarantees no unhandled rejection.
+  // Install the shared PostgreSQL rate-limit store (invariant I19). Until this
+  // resolves, and if it fails, sensitive limiters use the unavailable default
+  // and return 503. No request ever receives a per-Machine fallback budget.
   void import("./rate-limit-store-pg")
-    .then((m) => m.installSharedPartnerRateLimitStore())
+    .then((m) => m.startSharedPartnerRateLimitStoreInstall())
     .catch(() => {
       /* already logged */
     });

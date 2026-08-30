@@ -190,7 +190,7 @@ let ADMIN_USER_ID: string;
       [A, UA_OWNER, LA1, LA2]
     );
     await admin.query(
-      "INSERT INTO partner_feature_flags (tenant_id, flag, enabled) VALUES (NULL,'partner_portal_enabled',true)"
+      "INSERT INTO partner_feature_flags (tenant_id, flag, enabled) VALUES (NULL,'partner_portal_enabled',true),(NULL,'partner_login_enabled',true)"
     );
 
     // ── main-app composition: real requireAdmin + real super-admin router + TEST-ONLY admin login ──
@@ -514,18 +514,24 @@ let ADMIN_USER_ID: string;
     expect((await apost(url, { enabled: true, reason: body.reason }, ac)).status).toBe(400);
     const notReady = await apost(url, { ...body, enabled: true }, ac);
     expect(notReady.status).toBe(409);
-    await admin.query(`
+    await admin.query(
+      `
       INSERT INTO partner_public_profiles
         (tenant_id,public_display_name,version,consented_by,consented_at,listed)
       VALUES ($1,'A Public Trading',1,$2,now(),false)
-    `, [A, UA_OWNER]);
-    await admin.query(`
+    `,
+      [A, UA_OWNER]
+    );
+    await admin.query(
+      `
       INSERT INTO partner_location_publications
         (tenant_id,location_id,privacy_state,public_location_name,public_street_address,maps_enabled,
          consented_fields,version,consented_by,consented_at,listed)
       VALUES ($1,$2,'PUBLIC_STOREFRONT','A Public Shop','1 Public Street, Canterbury',true,
               ARRAY['public_location_name','public_street_address','maps_enabled'],1,$3,now(),false)
-    `, [A, LA1, UA_OWNER]);
+    `,
+      [A, LA1, UA_OWNER]
+    );
     expect((await apost(url, { ...body, enabled: true }, ac)).status).toBe(200);
     const stored = await admin.query<{ listed: boolean; approved_version: number }>(
       "SELECT listed,approved_version FROM partner_location_publications WHERE tenant_id=$1 AND location_id=$2",
