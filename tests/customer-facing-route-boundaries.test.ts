@@ -12,23 +12,21 @@ function between(start: string, end: string): string {
 }
 
 describe("customer-facing route boundary wiring", () => {
-  it("authenticates and admits hot-folder work before multer can buffer it", () => {
+  it("authenticates and admits the retired hot-folder route before multer can buffer it", () => {
     const block = between('app.post(\n    "/api/admin/hot-folder-upload"', "// ── Build 5: AI Grading");
     const auth = block.indexOf("requireHotFolderUploadAuth");
     const admission = block.indexOf("hotFolderUploadAdmission.middleware");
     const multer = block.indexOf('hotFolderUpload.single("front")');
-    const handler = block.indexOf("async (req, res)");
+    const refusal = block.indexOf('code: "HOT_FOLDER_RETIRED"');
 
     expect(auth).toBeGreaterThanOrEqual(0);
     expect(admission).toBeGreaterThan(auth);
     expect(multer).toBeGreaterThan(admission);
-    expect(handler).toBeGreaterThan(multer);
+    expect(refusal).toBeGreaterThan(multer);
     expect(block).not.toMatch(/bearerToken|validToken|headers\.authorization/);
     expect(routes).toContain("createHotFolderUploadAuth(process.env, requireAdmin)");
-    expect(block.indexOf("parseHotFolderUploadSide(req.body.side)")).toBeLessThan(
-      block.indexOf("validateImageMagicBytes")
-    );
-    expect(block.indexOf("if (!side)")).toBeLessThan(block.indexOf("uploadToR2"));
+    expect(block).not.toContain("parseHotFolderUploadSide");
+    expect(block).not.toContain("uploadToR2");
   });
 
   it("mounts retired scan-ingest as a sole pre-body 410 refusal", () => {

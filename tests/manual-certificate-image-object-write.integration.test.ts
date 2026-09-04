@@ -258,11 +258,17 @@ describe("manual certificate-image durable publication", () => {
 
   it("is the publication authority wired by the real manual-image HTTP route", () => {
     const routeSource = readFileSync("server/routes.ts", "utf8");
+    const serviceSource = readFileSync("server/scan-ingest-service.ts", "utf8");
     const route = routeSource.slice(
       routeSource.indexOf('"/api/admin/certs/:certId/image"'),
       routeSource.indexOf('// DELETE — soft-delete only', routeSource.indexOf('"/api/admin/certs/:certId/image"'))
     );
-    expect(route).toContain("persistManualCertificateImageObjectWrite");
+    expect(route).toContain("attachManualCertificateSideAndReprocess");
     expect(route).not.toContain("uploadToR2(");
+    const attachment = serviceSource.slice(
+      serviceSource.indexOf("export async function attachManualCertificateSideAndReprocess"),
+      serviceSource.indexOf("async function uploadImagesToCertUnlocked")
+    );
+    expect(attachment).toContain("persistManualCertificateImageObjectWrite");
   });
 });

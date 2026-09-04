@@ -605,6 +605,27 @@ jobs:
       - name: MVGS v1.4 freeze verification
         run: npx tsx scripts/mvgs/verify-freeze.ts
 
+      - name: Architecture authority drift gate
+        run: npm run architecture:check
+
+      - name: Migration reference authority
+        run: npm run migration:references:check
+
+      - name: Test TypeScript diagnostic ratchet
+        run: npm run check:tests
+
+      - name: Script TypeScript diagnostic ratchet
+        run: npm run check:scripts
+
+      - name: Unreachable production-code ratchet
+        run: npm run check:unreachable
+
+      - name: JavaScript script syntax
+        run: npm run check:script-syntax
+
+      - name: CI topology self-check
+        run: npm run ci:topology
+
       - name: Lint
         run: npm run lint
 
@@ -652,11 +673,31 @@ jobs:
         if: always()
         run: node scripts/ci/assert-partner-auth-suites-executed.mjs vitest-report.json
 
+      # Each critical Partner file runs in its own Vitest process with its own
+      # disposable database topology. The flattened run above cannot provide
+      # this isolation because several suites intentionally mutate process env,
+      # roles, schema ownership, and database identity.
+      - name: Isolated Partner critical matrix
+        run: npm run test:partner:critical
+
       - name: Build
         run: npm run build
 
       - name: Audit (high severity)
         run: npm audit --audit-level=high
+
+      # Run Scanner only after every server/client proof is complete. It has a
+      # separate nested lockfile and requires Node >=22.12, whereas the shipped
+      # server remains tested and built on exact Node 20.20.2 above.
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0 (Node 24)
+        with:
+          node-version: 22.12.0
+          cache: npm
+          cache-dependency-path: scripts/scanner-app/package-lock.json
+      - name: Install Scanner test dependencies from its nested lockfile
+        run: npm ci --prefix scripts/scanner-app --ignore-scripts
+      - name: Run every Scanner suite independently with TAP non-vacuity floors
+        run: npm run test:scanner:critical
 
   # ── Security scanning (forward-ported from security/remediation-release) ──
   # Additive to the check job above; these run independently and surface SAST /

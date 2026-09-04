@@ -1,0 +1,93 @@
+{
+  "schemaVersion": 2,
+  "snapshot": "scripts/architecture/generated/architecture-authority.json",
+  "legacyAuthority": "scripts/architecture/legacy-authority.json",
+  "componentIndex": "config/components/index.ts",
+  "applicationRoots": [
+    { "file": "server/index.ts", "context": "<module>", "receiver": "app" },
+    { "file": "server/partner/app.ts", "context": "createPartnerApp", "receiver": "app" }
+  ],
+  "componentAuthorities": [
+    {
+      "id": "commerce",
+      "owner": "commerce-platform",
+      "sourceRoots": ["server/vault-club.ts", "server/routes/submissions.ts", "server/stripeClient.ts"]
+    },
+    {
+      "id": "core-runtime",
+      "owner": "core-platform",
+      "sourceRoots": ["server/index.ts", "server/routes.ts"]
+    },
+    {
+      "id": "customer-notifications",
+      "owner": "customer-platform",
+      "sourceRoots": ["server/customer-notification-outbox.ts", "server/email.ts"]
+    },
+    {
+      "id": "identity-session",
+      "owner": "identity-platform",
+      "sourceRoots": ["server/auth.ts", "server/routes/auth.ts"]
+    },
+    {
+      "id": "object-write",
+      "owner": "object-durability-platform",
+      "sourceRoots": ["server/r2.ts", "server/b2.ts", "server/lib/object-write-coordinator.ts"]
+    },
+    {
+      "id": "partner-operations",
+      "owner": "partner-platform",
+      "sourceRoots": ["server/partner/", "client/src/pages/partner/", "client/src/components/partner/"]
+    },
+    {
+      "id": "scanner-ingest",
+      "owner": "scanner-platform",
+      "sourceRoots": [
+        "scripts/scanner-app/",
+        "server/scan-ingest-service.ts",
+        "server/lib/scanner-evidence-persistence.ts"
+      ]
+    }
+  ],
+  "scanRoots": ["server", "client/src", "shared", "scripts", "migrations", "migrations-vq", "config/components"],
+  "ownerRules": [
+    { "prefix": "server/partner/", "owner": "partner-platform" },
+    { "prefix": "client/src/components/partner/", "owner": "partner-platform" },
+    { "prefix": "client/src/pages/partner/", "owner": "partner-platform" },
+    { "prefix": "server/vault-quest/", "owner": "vault-quest-platform" },
+    { "prefix": "client/src/vault-quest/", "owner": "vault-quest-platform" },
+    { "prefix": "client/src/pages/vault-reports/", "owner": "vault-quest-platform" },
+    { "prefix": "server/command-centre/", "owner": "command-centre-platform" },
+    { "prefix": "server/project-control/", "owner": "project-control-platform" },
+    { "prefix": "server/jobs/", "owner": "runtime-jobs-platform" },
+    { "prefix": "server/workers/", "owner": "runtime-jobs-platform" },
+    { "prefix": "scripts/scanner-app/", "owner": "scanner-platform" },
+    { "prefix": "scripts/scanner-watcher/", "owner": "scanner-platform" },
+    { "prefix": "migrations-vq/", "disposition": "owner-decision-required", "finding": "OWNER-VQ-SCHEMA" },
+    { "prefix": "migrations/", "owner": "main-migration-platform" },
+    { "prefix": "config/components/", "owner": "component-readiness-platform" }
+  ],
+  "forbiddenRuntimeImports": [
+    { "fromPrefix": "shared/", "toPrefix": "server/" },
+    { "fromPrefix": "shared/", "toPrefix": "client/src/" },
+    { "fromPrefix": "client/src/", "toPrefix": "server/" },
+    { "fromPrefix": "server/partner/", "toPrefix": "server/vault-quest/" },
+    { "fromPrefix": "server/vault-quest/", "toPrefix": "server/partner/" },
+    { "fromPrefix": "server/routes/", "toExact": "server/routes" }
+  ],
+  "runtimeImportExceptions": [
+    {
+      "source": "server/routes/transfers.ts",
+      "target": "server/routes",
+      "kind": "import",
+      "finding": "ARCH-CYCLE-001"
+    },
+    { "source": "server/routes/stolen.ts", "target": "server/routes", "kind": "import", "finding": "ARCH-CYCLE-001" },
+    {
+      "source": "server/routes/embedding.ts",
+      "target": "server/routes",
+      "kind": "import",
+      "finding": "ARCH-CYCLE-001"
+    },
+    { "source": "server/routes/pre-grade.ts", "target": "server/routes", "kind": "import", "finding": "ARCH-CYCLE-001" }
+  ]
+}

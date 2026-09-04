@@ -12,90 +12,16 @@ import { partnerSharedRateLimitStoreInstalled } from "./partner/rate-limit";
 import { getPartnerAdminCapability } from "./partner/admin-capability";
 import { partnerOperationalReadAuthorityReady } from "./partner/operational-authority";
 import { objectWriteRuntimeInstalled } from "./lib/object-write-runtime-state";
+import { COMPONENT_READINESS_REGISTRY } from "./lib/component-readiness-registry";
 
-export const REQUIRED_RELEASE_MIGRATIONS = [
-  "0077_partner_credential_lifecycle_hardening.sql",
-  "0088_nfc_binding_integrity.sql",
-  "0089_partner_shared_rate_limit_buckets.sql",
-  "0090_lineage_convergence_scanner.sql",
-  "0114_certificate_identity_authority.sql",
-  "0115_runtime_schema_convergence.sql",
-  "0116_nfc_physical_lock_integrity.sql",
-  "0117_grading_payment_fulfilment_outbox.sql",
-  "0118_nfc_lock_intent_reconciliation.sql",
-  "0119_session_store_authority.sql",
-  "0120_customer_notification_outbox.sql",
-  "0121_main_runtime_role_authority.sql",
-  "0122_object_write_intent_reconciliation.sql",
-] as const;
+export const REQUIRED_RELEASE_MIGRATIONS = COMPONENT_READINESS_REGISTRY.requiredMigrations;
+export const REQUIRED_RELEASE_RELATIONS = COMPONENT_READINESS_REGISTRY.requiredRelations;
+export const REQUIRED_RELEASE_TRIGGERS = COMPONENT_READINESS_REGISTRY.requiredTriggers;
 
-export const REQUIRED_RELEASE_RELATIONS = [
-  "public.schema_migrations",
-  "public.certificates",
-  "public.cert_counter",
-  "public.submissions",
-  "public.partner_organisations",
-  "public.scanner_processing_jobs",
-  "public.certificate_image_evidence",
-  "public.scanner_capture_sessions",
-  "public.scanner_evidence_staging",
-  "public.partner_rate_limit_buckets",
-  "public.public_rate_limit_buckets",
-  "public.estimate_credit_reservations",
-  "public.grading_payment_fulfilments",
-  "public.session",
-  "public.customer_notification_outbox",
-  "public.object_write_operations",
-  "public.object_write_items",
-] as const;
+/** PostgreSQL permits the same trigger name on different relations. */
+export const REQUIRED_RELEASE_TRIGGER_RELATIONS = COMPONENT_READINESS_REGISTRY.requiredTriggerRelations;
 
-export const REQUIRED_RELEASE_TRIGGERS = [
-  "trg_certificate_number_immutable",
-  "trg_cert_counter_identity_guard",
-  "trg_cert_counter_refuse_truncate",
-  "trg_nfc_locked_binding_immutable",
-  "trg_nfc_lock_intent_guards_binding",
-  "trg_object_write_operation_guard",
-  "trg_object_write_item_guard",
-] as const;
-
-/**
- * A trigger name alone is not an integrity contract: PostgreSQL permits the
- * same name on a different table. Keep the expected owning relation in
- * lockstep so a stray/dummy trigger cannot make readiness false-green while
- * the certificate or NFC guard is absent from the protected table.
- */
-export const REQUIRED_RELEASE_TRIGGER_RELATIONS = [
-  "public.certificates",
-  "public.cert_counter",
-  "public.cert_counter",
-  "public.certificates",
-  "public.certificates",
-  "public.object_write_operations",
-  "public.object_write_items",
-] as const;
-
-export const REQUIRED_PRODUCTION_ENVIRONMENT = [
-  "STRIPE_ENV",
-  "STRIPE_SECRET_KEY",
-  "STRIPE_PUBLISHABLE_KEY",
-  "STRIPE_WEBHOOK_SECRET",
-  "SESSION_SECRET",
-  "SIGNED_URL_SECRET",
-  "APP_URL",
-  "R2_ENDPOINT",
-  "R2_ACCESS_KEY_ID",
-  "R2_SECRET_ACCESS_KEY",
-  "R2_BUCKET_NAME",
-  "B2_ENDPOINT",
-  "B2_KEY_ID",
-  "B2_APPLICATION_KEY",
-  "B2_BUCKET",
-  "RESEND_API_KEY",
-  "RESEND_DOMAIN_VERIFIED",
-  "CUSTOMER_NOTIFICATION_ENC_KEY_VERSION",
-  "PARTNER_ADMIN_DATABASE_URL",
-] as const;
+export const REQUIRED_PRODUCTION_ENVIRONMENT = COMPONENT_READINESS_REGISTRY.requiredEnvironment;
 
 export type ReadinessEnvironment = Readonly<Record<string, string | undefined>>;
 
@@ -250,8 +176,12 @@ export function checkReleaseRuntime(
   if ((env.NODE_ENV ?? "").trim().toLowerCase() !== "production") {
     return { ok: true, unavailable: [] };
   }
-  const unavailable = probes.partnerSharedRateLimitStoreInstalled() ? [] : ["partner_shared_rate_limit_store"];
-  if (probes.objectWriteRuntimeInstalled?.() !== true) unavailable.push("object_write_reconciliation_runtime");
+  const unavailable = probes.partnerSharedRateLimitStoreInstalled()
+    ? []
+    : [COMPONENT_READINESS_REGISTRY.runtimeSignals.partner_shared_rate_limit_store];
+  if (probes.objectWriteRuntimeInstalled?.() !== true) {
+    unavailable.push(COMPONENT_READINESS_REGISTRY.runtimeSignals.object_write_reconciliation_runtime);
+  }
   return { ok: unavailable.length === 0, unavailable };
 }
 
@@ -790,7 +720,9 @@ export async function checkReleaseReadiness(
       partnerAdminReady = false;
     }
   }
-  const partnerAdminUnavailable = partnerAdminReady ? [] : ["partner_admin_database_authority"];
+  const partnerAdminUnavailable = partnerAdminReady
+    ? []
+    : [COMPONENT_READINESS_REGISTRY.runtimeSignals.partner_admin_database_authority];
   try {
     const result = await queryable.query(RELEASE_READINESS_SQL, [
       [...REQUIRED_RELEASE_RELATIONS],
@@ -821,7 +753,9 @@ export async function checkReleaseReadiness(
       invalidConfiguration: configuration.invalid,
       unavailableRuntime: [
         ...runtime.unavailable,
-        ...(row.runtime_authority_ready === false ? ["main_database_runtime_authority"] : []),
+        ...(row.runtime_authority_ready === false
+          ? [COMPONENT_READINESS_REGISTRY.runtimeSignals.main_database_runtime_authority]
+          : []),
         ...partnerAdminUnavailable,
       ],
       queryFailed: false,

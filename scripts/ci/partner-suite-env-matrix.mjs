@@ -1016,3 +1016,25 @@ export function findSuite(file) {
 }
 
 export const CRITICAL_SUITES = SUITES.filter((s) => s.critical);
+
+/** Database variables the isolated runner must scrub before applying one suite's contract. */
+export const MANAGED_DATABASE_ENVIRONMENT_KEYS = Object.freeze(
+  [
+    ...new Set([
+      "TEST_DATABASE_URL",
+      "MINTVAULT_DATABASE_URL",
+      "PARTNER_ADMIN_DATABASE_URL",
+      "PARTNER_CONNECTOR_DATABASE_URL",
+      "PARTNER_DATABASE_URL",
+      ...SUITES.flatMap((suite) => [...(suite.adminVars ?? []), ...(suite.runtimeVars ?? [])]),
+    ]),
+  ].sort()
+);
+
+/** Build one child-process environment with no database state inherited from another topology. */
+export function isolatedSuiteEnvironment(baseEnvironment, suite) {
+  const environment = { ...baseEnvironment, LC_ALL: "C", LANG: "C" };
+  for (const key of MANAGED_DATABASE_ENVIRONMENT_KEYS) delete environment[key];
+  Object.assign(environment, envForSuite(suite));
+  return environment;
+}

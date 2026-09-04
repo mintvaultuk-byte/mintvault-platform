@@ -57,12 +57,21 @@ describe("§23 FRONT-before-BACK is enforced server-side", () => {
     expect(guard).toBeLessThan(decode);
   });
 
-  it("the legacy staff upload route refuses a BACK-only request", () => {
+  it("the legacy staff upload route is retired after bounded pre-body gates", () => {
     const src = read("server/routes/staff.ts");
-    // This route writes the display image columns directly and never reaches the
-    // immutable-master guard, so it needs its own front-first precondition.
-    expect(src).toMatch(/front_image_path IS NOT NULL/);
-    expect(src).toMatch(/Scan the front of this card before the back/);
+    const route = src.slice(
+      src.indexOf('"/api/staff/scan/certificates/:id/upload"'),
+      src.indexOf("// ── Printer", src.indexOf('"/api/staff/scan/certificates/:id/upload"'))
+    );
+    const capability = route.indexOf('requireCapability("scan")');
+    const admission = route.indexOf('uploadMemoryAdmission("staff_scan", 128)');
+    const multer = route.indexOf("scanUpload.fields");
+    const refusal = route.indexOf('code: "STAFF_SCAN_UPLOAD_RETIRED"');
+    expect(capability).toBeGreaterThanOrEqual(0);
+    expect(admission).toBeGreaterThan(capability);
+    expect(multer).toBeGreaterThan(admission);
+    expect(refusal).toBeGreaterThan(multer);
+    expect(route).not.toMatch(/UPDATE\s+certificates|uploadToR2|finaliseScannerEvidence/);
   });
 });
 

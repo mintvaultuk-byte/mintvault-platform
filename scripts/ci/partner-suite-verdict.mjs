@@ -61,3 +61,36 @@ export function classifyReport(report, file, status) {
 
 /** The verdicts that are allowed to keep the gate green. Exactly one. */
 export const GREEN_VERDICTS = Object.freeze(["passed"]);
+
+/**
+ * Conservative bootstrap floor already enforced by the five flattened-run
+ * sentinels (268 + 24 + 88 + 68 + 25). The isolated matrix normally observes
+ * far more; this floor prevents a heavily truncated assertion body from being
+ * accepted before an exact per-suite candidate baseline is recorded.
+ */
+export const MINIMUM_PARTNER_CRITICAL_ASSERTIONS = 473;
+
+export function meetsPartnerAggregateFloor(observed) {
+  return Number.isSafeInteger(observed) && observed >= MINIMUM_PARTNER_CRITICAL_ASSERTIONS;
+}
+
+export function validatePartnerSuiteFloors(results, floors) {
+  const errors = [];
+  const expected = Object.keys(floors).sort();
+  const observedFiles = results.map((result) => result.file);
+  if (new Set(observedFiles).size !== observedFiles.length) errors.push("duplicate Partner suite result");
+  for (const file of expected) {
+    const result = results.find((candidate) => candidate.file === file);
+    if (!result) errors.push(`missing Partner suite result: ${file}`);
+    else if (!Number.isSafeInteger(floors[file]) || floors[file] < 1)
+      errors.push(`invalid Partner suite floor: ${file}`);
+    else if (result.passed < floors[file])
+      errors.push(`${file}: per-suite floor not met: ${result.passed} < ${floors[file]}`);
+  }
+  for (const file of observedFiles)
+    if (!Object.hasOwn(floors, file)) errors.push(`unexpected Partner suite result: ${file}`);
+  const minimum = Object.values(floors).reduce((sum, count) => sum + count, 0);
+  const observed = results.reduce((sum, result) => sum + result.passed, 0);
+  if (observed < minimum) errors.push(`Partner matrix floor not met: ${observed} < ${minimum}`);
+  return { ok: errors.length === 0, minimum, observed, errors };
+}

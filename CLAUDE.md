@@ -566,6 +566,7 @@ down in `.claude/hooks/HOOK-UPGRADE-ROADMAP.md`. Everything from 1.0 still
 applies unchanged.
 
 <!-- cornelius-engineering-os:begin id=claude-project v=1 -->
+
 ## Cornelius Engineering OS (managed)
 
 This managed block defines HOW work is performed. The rest of this file defines WHAT this product is; on any conflict the project rules and protected areas win.
@@ -588,3 +589,11 @@ Graphify is never authority for MVGS, authentication, tenant isolation,
 payments, credits, migrations, certificates, or security. Its local-only,
 code/AST-first privacy boundary and safe commands are in
 [`docs/engineering/GRAPHIFY.md`](docs/engineering/GRAPHIFY.md).
+
+## Executable architecture authority
+
+Before changing routes, tables, object writers, provider adapters, recurring jobs,
+migrations, or component-readiness declarations, read
+[`docs/engineering/ARCHITECTURE_AUTHORITY.md`](docs/engineering/ARCHITECTURE_AUTHORITY.md).
+`npm run architecture:check` is the topology drift gate. A generated-snapshot update is
+an authority review action, not an automatic way to clear a failing check.

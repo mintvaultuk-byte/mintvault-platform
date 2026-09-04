@@ -1,0 +1,28 @@
+import { COMMERCE_COMPONENT } from "./commerce";
+import { CORE_RUNTIME_COMPONENT } from "./core-runtime";
+import { CUSTOMER_NOTIFICATIONS_COMPONENT } from "./customer-notifications";
+import { IDENTITY_SESSION_COMPONENT } from "./identity-session";
+import { OBJECT_WRITE_COMPONENT } from "./object-write";
+import { PARTNER_OPERATIONS_COMPONENT } from "./partner-operations";
+import { SCANNER_INGEST_COMPONENT } from "./scanner-ingest";
+
+export {
+  COMMERCE_COMPONENT,
+  CORE_RUNTIME_COMPONENT,
+  CUSTOMER_NOTIFICATIONS_COMPONENT,
+  IDENTITY_SESSION_COMPONENT,
+  OBJECT_WRITE_COMPONENT,
+  PARTNER_OPERATIONS_COMPONENT,
+  SCANNER_INGEST_COMPONENT,
+};
+
+/** Canonical build-time index. The architecture gate proves it equals every manifest file on disk. */
+export const COMPONENT_READINESS_MANIFESTS = Object.freeze([
+  COMMERCE_COMPONENT,
+  CORE_RUNTIME_COMPONENT,
+  CUSTOMER_NOTIFICATIONS_COMPONENT,
+  IDENTITY_SESSION_COMPONENT,
+  OBJECT_WRITE_COMPONENT,
+  PARTNER_OPERATIONS_COMPONENT,
+  SCANNER_INGEST_COMPONENT,
+]);

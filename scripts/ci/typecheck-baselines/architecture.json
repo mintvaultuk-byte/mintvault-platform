@@ -1,0 +1,30 @@
+{
+  "schemaVersion": 2,
+  "config": "tsconfig.architecture.json",
+  "contract": {
+    "compilerVersion": "5.6.3",
+    "configSha256": "07731a08e9e7bae444103835038ea9852ffef04e8688244e33fcaabbaa10ad7a",
+    "trackedFileCount": 814,
+    "trackedFilesSha256": "ad837df507013ef6af3b2bf555107f85f225c5ad7da546eb68091559de32533b",
+    "noCheckFileCount": 5,
+    "noCheckFiles": [
+      "client/src/pages/home-v2-integrated.tsx",
+      "client/src/pages/home-v3.tsx",
+      "client/src/pages/home-v4.tsx",
+      "client/src/pages/how-it-works-v2.tsx",
+      "client/src/pages/pricing-v2.tsx"
+    ],
+    "noCheckFilesSha256": "02696f4860361d93c662e89a01f6d8e1aabab6fc6faebf7147aaade50cc0ba6a"
+  },
+  "diagnosticCount": 5,
+  "fingerprints": [
+    {
+      "fingerprint": "client/src/pages/admin-capture-health.tsx|TS7027|Unreachable code detected.",
+      "count": 1
+    },
+    {
+      "fingerprint": "server/routes.ts|TS7027|Unreachable code detected.",
+      "count": 4
+    }
+  ]
+}

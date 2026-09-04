@@ -1,0 +1,18 @@
+{
+  "extends": "./tsconfig.json",
+  "include": ["script/**/*.ts", "scripts/**/*.ts"],
+  "exclude": [
+    "node_modules",
+    "build",
+    "dist",
+    "scripts/scanner-app/dist",
+    "scripts/scanner-app/node_modules",
+    "scripts/scanner-watcher/node_modules"
+  ],
+  "compilerOptions": {
+    "incremental": false,
+    "allowJs": true,
+    "checkJs": false,
+    "types": ["node"]
+  }
+}

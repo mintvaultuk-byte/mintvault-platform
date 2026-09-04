@@ -50,6 +50,30 @@ let mod: typeof import("../server/estimate-credit-consumption");
 
 /** The paid provider stand-in. Reset before each test. */
 const provider = vi.fn(async () => ({ estimated_grade: 8 }));
+const TODAY = new Date().toISOString().slice(0, 10);
+
+async function openSessionWhoseLocalDateDiffersFromUtc(): Promise<{
+  client: pg.Client;
+  exec: ReturnType<typeof drizzle>;
+  utcDay: string;
+  sessionDay: string;
+}> {
+  const client = new pg.Client({ connectionString: cluster.url });
+  await client.connect();
+  const utcHour = new Date().getUTCHours();
+  const zone = utcHour < 10 ? "Pacific/Honolulu" : "Pacific/Kiritimati";
+  await client.query(`SET TIME ZONE '${zone}'`);
+  const clock = await client.query<{ utc_day: string; session_day: string }>(`
+    SELECT (CURRENT_TIMESTAMP AT TIME ZONE 'UTC')::date::text AS utc_day,
+           CURRENT_DATE::text AS session_day
+  `);
+  return {
+    client,
+    exec: drizzle(client),
+    utcDay: clock.rows[0].utc_day,
+    sessionDay: clock.rows[0].session_day,
+  };
+}
 
 /** Mirror the route gate: reserve, call provider, then commit or exactly-once refund. */
 async function estimateWithGate(input: Parameters<typeof mod.consumeEstimateCredit>[0]) {
@@ -161,7 +185,7 @@ describe("PKG-3 estimate-credit consumption owner binding (PostgreSQL 17.10)", (
         created_at TIMESTAMP NOT NULL DEFAULT NOW()
       )`);
 
-    pool = new pg.Pool({ connectionString: cluster.url, max: 8 });
+    pool = new pg.Pool({ connectionString: cluster.url, max: 8, options: "-c timezone=UTC" });
     testDb = drizzle(pool);
 
     process.env.MINTVAULT_DATABASE_URL = cluster.url;
@@ -259,7 +283,7 @@ describe("PKG-3 estimate-credit consumption owner binding (PostgreSQL 17.10)", (
     const res = await estimateWithGate({
       bodyEmail: "guest@example.test",
       ipHash: "anon-email-is-not-authority",
-      today: "2026-08-30",
+      today: TODAY,
     } as any);
     expect(res.ok).toBe(true);
     if (res.ok) {
@@ -273,9 +297,9 @@ describe("PKG-3 estimate-credit consumption owner binding (PostgreSQL 17.10)", (
 
   // 5 — The second anonymous call from an IP/day is refused before the provider.
   it("(5) anonymous free-tier exhaustion never calls the provider again", async () => {
-    await estimateWithGate({ ipHash: "bounded-anon", today: "2026-08-30" });
+    await estimateWithGate({ ipHash: "bounded-anon", today: TODAY });
     provider.mockClear();
-    const res = await estimateWithGate({ ipHash: "bounded-anon", today: "2026-08-30" });
+    const res = await estimateWithGate({ ipHash: "bounded-anon", today: TODAY });
     expect(res.ok).toBe(false);
     if (!res.ok) expect(res.status).toBe(402);
     expect(provider).not.toHaveBeenCalled();
@@ -284,12 +308,62 @@ describe("PKG-3 estimate-credit consumption owner binding (PostgreSQL 17.10)", (
   // 6a — Concurrency (anonymous free tier): two racers → one bounded call.
   it("(6a) two concurrent anonymous requests from one IP/day admit exactly one", async () => {
     const [a, b] = await Promise.all([
-      estimateWithGate({ ipHash: "race", today: "2026-08-30" }),
-      estimateWithGate({ ipHash: "race", today: "2026-08-30" }),
+      estimateWithGate({ ipHash: "race", today: TODAY }),
+      estimateWithGate({ ipHash: "race", today: TODAY }),
     ]);
     const okCount = [a, b].filter((r) => r.ok).length;
     expect(okCount).toBe(1);
     expect(provider).toHaveBeenCalledTimes(1);
+  });
+
+  it("keeps the anonymous daily limit on UTC when the database session date differs", async () => {
+    const isolated = await openSessionWhoseLocalDateDiffersFromUtc();
+    try {
+      expect(isolated.sessionDay).not.toBe(isolated.utcDay);
+      const first = await mod.consumeEstimateCredit(
+        { ipHash: "non-utc-daily-limit", today: isolated.utcDay },
+        { exec: isolated.exec as any }
+      );
+      expect(first).toMatchObject({ ok: true, path: "anon_free" });
+      if (first.ok && first.reservationId) {
+        await mod.settleEstimateCreditReservation(first.reservationId, "commit", {
+          exec: isolated.exec as any,
+        });
+      }
+
+      const second = await mod.consumeEstimateCredit(
+        { ipHash: "non-utc-daily-limit", today: isolated.utcDay },
+        { exec: isolated.exec as any }
+      );
+      expect(second).toMatchObject({ ok: false, status: 402 });
+    } finally {
+      await isolated.client.end();
+    }
+  });
+
+  it("refunds an anonymous UTC-day reservation when the database session date differs", async () => {
+    const isolated = await openSessionWhoseLocalDateDiffersFromUtc();
+    try {
+      expect(isolated.sessionDay).not.toBe(isolated.utcDay);
+      const reservation = await mod.consumeEstimateCredit(
+        { ipHash: "non-utc-refund", today: isolated.utcDay },
+        { exec: isolated.exec as any }
+      );
+      expect(reservation).toMatchObject({ ok: true, path: "anon_free" });
+      if (!reservation.ok || !reservation.reservationId) throw new Error("anonymous reservation was not created");
+
+      await expect(
+        mod.settleEstimateCreditReservation(reservation.reservationId, "refund", {
+          exec: isolated.exec as any,
+        })
+      ).resolves.toBe(true);
+      const usage = await isolated.client.query<{ count_today: number }>(
+        `SELECT count_today FROM estimate_free_uses WHERE ip_hash = 'non-utc-refund'`
+      );
+      expect(usage.rows[0].count_today).toBe(0);
+    } finally {
+      await isolated.client.end();
+    }
   });
 
   // 6b — Concurrency (authenticated owner-bound estimate row): FOR UPDATE SKIP LOCKED
@@ -417,13 +491,13 @@ describe("PKG-3 estimate-credit consumption owner binding (PostgreSQL 17.10)", (
 
   it("refunds a failed anonymous inference so the same /56 bucket can retry", async () => {
     provider.mockRejectedValueOnce(new Error("provider 503"));
-    await expect(estimateWithGate({ ipHash: "anon-refund", today: "2026-08-30" })).rejects.toThrow(/503/);
+    await expect(estimateWithGate({ ipHash: "anon-refund", today: TODAY })).rejects.toThrow(/503/);
     const afterFailure = await pool.query<{ count_today: number }>(
       `SELECT count_today FROM estimate_free_uses WHERE ip_hash='anon-refund'`
     );
     expect(afterFailure.rows[0].count_today).toBe(0);
 
-    const retry = await estimateWithGate({ ipHash: "anon-refund", today: "2026-08-30" });
+    const retry = await estimateWithGate({ ipHash: "anon-refund", today: TODAY });
     expect(retry).toMatchObject({ ok: true, path: "anon_free" });
   });
 
@@ -485,7 +559,7 @@ describe("PKG-3 estimate-credit consumption owner binding (PostgreSQL 17.10)", (
     const ownedA = await mod.consumeEstimateCredit({ sessionUserId: user.id }, { exec: testDb as any });
     const ownedB = await mod.consumeEstimateCredit({ sessionUserId: user.id }, { exec: testDb as any });
     const anonymous = await mod.consumeEstimateCredit(
-      { ipHash: "crash-anonymous", today: "2026-08-30" },
+      { ipHash: "crash-anonymous", today: TODAY },
       { exec: testDb as any }
     );
     expect([ownedA, ownedB, anonymous].every((reservation) => reservation.ok)).toBe(true);

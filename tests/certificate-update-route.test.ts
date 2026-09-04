@@ -72,6 +72,7 @@ vi.mock("../server/r2", () => ({
       ? { exists: true, byteLength: body.length, sha256: createHash("sha256").update(body).digest("hex") }
       : { exists: false };
   }),
+  getR2Buffer: vi.fn(async (key: string) => r2Calls.objects.get(key) ?? null),
   getR2SignedUrl: vi.fn(async () => "https://example.invalid/signed"),
   // The REAL key builder — the deterministic-key behaviour is the whole point
   // of M-3, so it must not be stubbed.
@@ -130,6 +131,14 @@ async function createSchema(p: pg.Pool): Promise<void> {
   // here so the fail-closed rejection is exercised against a column that really
   // exists, rather than against a hypothetical one.
   await p.query(`ALTER TABLE "certificates" ADD COLUMN "grade_manual_override" boolean DEFAULT false`);
+  // The durable 0122 image finalizer reads its complete allowlisted projection
+  // under one row lock. These columns are present in production but predate the
+  // reduced Drizzle-derived fixture used by this route suite.
+  await p.query(`ALTER TABLE "certificates" ADD COLUMN "grading_angled_original" text`);
+  await p.query(`ALTER TABLE "certificates" ADD COLUMN "grading_angled_cropped" text`);
+  await p.query(`ALTER TABLE "certificates" ADD COLUMN "grading_closeup_original" text`);
+  await p.query(`ALTER TABLE "certificates" ADD COLUMN "grading_closeup_cropped" text`);
+  await p.query(`ALTER TABLE "certificates" ADD COLUMN "image_quality_checks" jsonb`);
 
   // H-1 · paid-submission linkage. The create route validates
   // submissionItemId against these two tables, so the real guard runs.
@@ -160,6 +169,32 @@ async function createSchema(p: pg.Pool): Promise<void> {
       url text NOT NULL,
       sort_order integer NOT NULL DEFAULT 0,
       created_at timestamp NOT NULL DEFAULT NOW()
+    )`);
+  await p.query(`CREATE TABLE certificate_image_evidence (
+      id SERIAL PRIMARY KEY,
+      certificate_id integer NOT NULL REFERENCES certificates(id) ON DELETE RESTRICT,
+      side varchar(5) NOT NULL CHECK (side IN ('front', 'back')),
+      evidence_class varchar(32) NOT NULL,
+      evidence_version varchar(32) NOT NULL DEFAULT 'v1',
+      object_key text NOT NULL UNIQUE,
+      sha256 varchar(64) NOT NULL,
+      byte_length bigint NOT NULL,
+      pixel_width integer NOT NULL,
+      pixel_height integer NOT NULL,
+      bit_depth integer,
+      dpi integer,
+      format varchar(16) NOT NULL,
+      capture_metadata jsonb NOT NULL DEFAULT '{}'::jsonb,
+      working_object_key text,
+      working_sha256 varchar(64),
+      working_width integer,
+      working_height integer,
+      working_format varchar(16),
+      working_settings jsonb,
+      is_current boolean NOT NULL DEFAULT true,
+      superseded_at timestamptz,
+      superseded_by_id integer,
+      created_at timestamptz NOT NULL DEFAULT now()
     )`);
   await p.query(`
     CREATE ROLE mintvault_app NOLOGIN NOSUPERUSER NOBYPASSRLS;
@@ -407,6 +442,8 @@ beforeEach(async () => {
   r2Calls.uploads.length = 0;
   r2Calls.deletes.length = 0;
   r2Calls.objects.clear();
+  r2Calls.objects.set("images/MV1/front.png", await pngBuffer(10, 10, 10));
+  r2Calls.objects.set("images/MV1/back.png", await pngBuffer(20, 20, 20));
 });
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -1832,7 +1869,7 @@ describe("M-3: a same-path image replacement is auditable", () => {
     );
   });
 
-  it("MANDATORY 14: replacing the FRONT at the same key produces exactly one truthful audit", async () => {
+  it("MANDATORY 14: replacing the FRONT binds its audit hash to the named immutable object", async () => {
     const id = await certId();
     const buf = await pngBuffer(10, 20, 30);
     const { status } = await putMultipart(id, {}, [
@@ -1850,15 +1887,18 @@ describe("M-3: a same-path image replacement is auditable", () => {
     expect(d.imageReplacements).toHaveLength(1);
     const rep = d.imageReplacements[0];
     expect(rep.side).toBe("front");
-    expect(rep.r2Key).toBe("images/MV1/front.png");
+    expect(rep.r2Key).toMatch(/^images\/MV1\/revisions\/[0-9a-f-]{36}\/front\.png$/);
     expect(rep.previousPath).toBe("images/MV1/front.png");
-    // TRUTHFUL: it says the path did NOT change, and proves the content did.
-    expect(rep.pathChanged).toBe(false);
-    expect(rep.contentSha256).toBe((await import("node:crypto")).createHash("sha256").update(buf).digest("hex"));
-    expect(rep.bytes).toBe(buf.length);
-    expect(rep.contentType).toBe("image/png");
-    // The stored path is unchanged and NOT fabricated as a change.
-    expect((await readCert()).frontImagePath).toBe("images/MV1/front.png");
+    expect(rep.pathChanged).toBe(true);
+    expect(rep.contentSha256).toMatch(/^[0-9a-f]{64}$/);
+    expect(rep.bytes).toBeGreaterThan(0);
+    expect(rep.contentType).toBe("image/jpeg");
+    const namedObject = r2Calls.objects.get(rep.r2Key);
+    expect(namedObject, "the audit must name an object that was actually committed").toBeDefined();
+    expect(rep.contentSha256, "the audit hash must describe the object identified by r2Key").toBe(
+      createHash("sha256").update(namedObject!).digest("hex")
+    );
+    expect((await readCert()).frontImagePath).toBe(rep.r2Key);
   });
 
   it("replacing the BACK is covered by the same guarantee", async () => {
@@ -1886,18 +1926,20 @@ describe("M-3: a same-path image replacement is auditable", () => {
     expect(sides).toEqual(["back", "front"]);
   });
 
-  it("a same-key replacement does NOT delete the object it just uploaded", async () => {
+  it("an immutable replacement does not delete either the new or prior object during the request", async () => {
     const id = await certId();
     await putMultipart(id, {}, [
       { field: "frontImage", filename: "front.png", type: "image/png", buffer: await pngBuffer(9, 9, 9) },
     ]);
-    expect(r2Calls.uploads.map((u) => u.key)).toContain("images/MV1/front.png");
-    // The old code deleted `existing.frontImagePath` unconditionally, which for
-    // an unchanged extension is the key just written — destroying the new image.
+    const current = (await readCert()).frontImagePath;
+    expect(current).toMatch(/^images\/MV1\/revisions\/[0-9a-f-]{36}\/front\.png$/);
+    expect(r2Calls.objects.has(current)).toBe(true);
+    expect(r2Calls.objects.has("images/MV1/front.png")).toBe(true);
+    expect(r2Calls.deletes).not.toContain(current);
     expect(r2Calls.deletes).not.toContain("images/MV1/front.png");
   });
 
-  it("a DIFFERENT extension changes the path, deletes the old object, and audits the update", async () => {
+  it("normalizes a different source extension into a new immutable display revision", async () => {
     const id = await certId();
     const sharp = (await import("sharp")).default;
     const jpg = await sharp({ create: { width: 8, height: 8, channels: 3, background: { r: 5, g: 5, b: 5 } } })
@@ -1907,15 +1949,15 @@ describe("M-3: a same-path image replacement is auditable", () => {
       { field: "frontImage", filename: "front.jpg", type: "image/jpeg", buffer: jpg },
     ]);
     expect(status).toBe(200);
-    expect((await readCert()).frontImagePath).toBe("images/MV1/front.jpg");
-    expect(r2Calls.deletes).toContain("images/MV1/front.png");
+    expect((await readCert()).frontImagePath).toMatch(
+      /^images\/MV1\/revisions\/[0-9a-f-]{36}\/front\.png$/
+    );
+    expect(r2Calls.deletes).not.toContain("images/MV1/front.png");
 
     const audits = await readAudits();
-    const update = audits.find((a: any) => a.action === "update");
-    expect(update).toBeTruthy();
-    const d = update.details as any;
-    expect(d.changedFields).toContain("frontImagePath");
-    // content identity travels with the ordinary update audit too
+    const replacement = audits.find((a: any) => a.action === "certificate_image_replaced");
+    expect(replacement).toBeTruthy();
+    const d = replacement.details as any;
     expect(d.imageReplacements[0].pathChanged).toBe(true);
     expect(d.imageReplacements[0].previousPath).toBe("images/MV1/front.png");
   });
@@ -1931,7 +1973,7 @@ describe("M-3: a same-path image replacement is auditable", () => {
     expect(audits.filter((a: any) => a.action === "certificate_image_replaced")).toHaveLength(0);
     const d = audits.find((a: any) => a.action === "update").details as any;
     expect(d.changedFields).toContain("cardName");
-    expect(d.imageReplacements[0].pathChanged).toBe(false);
+    expect(d.imageReplacements[0].pathChanged).toBe(true);
   });
 
   it("MANDATORY 15: a true metadata no-op with NO image creates no audit at all", async () => {

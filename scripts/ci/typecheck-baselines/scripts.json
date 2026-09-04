@@ -1,0 +1,40 @@
+{
+  "schemaVersion": 2,
+  "config": "tsconfig.scripts.json",
+  "contract": {
+    "compilerVersion": "5.6.3",
+    "configSha256": "ca79b882707d394988cb82b72321072dc150931bb6996fe63b93558764433d45",
+    "trackedFileCount": 51,
+    "trackedFilesSha256": "4cc908d3edd95cefa0252145396bc6a322e2272bdc9869df2625af27597433a1",
+    "noCheckFileCount": 0,
+    "noCheckFiles": [],
+    "noCheckFilesSha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+  },
+  "diagnosticCount": 11,
+  "fingerprints": [
+    {
+      "fingerprint": "scripts/db/schema-registry.ts|TS2345|Argument of type 'Record<string, string> | 1 | readonly [\"new\", \"received\", \"in_grading\", \"ready_to_return\", \"shipped\", \"completed\"] | { id: string; name: string; description: string; }[] | BulkDiscountTier[] | ... 128 more ... | ((pricePerCard: number, quantity: number, totalDeclaredValue?: number) => { ...; })' is not assignable to parameter of type 'Table<TableConfig<Column<any, object, object>>>'.",
+      "count": 1
+    },
+    {
+      "fingerprint": "scripts/db/schema-registry.ts|TS2677|A type predicate's type must be assignable to its parameter's type.",
+      "count": 1
+    },
+    {
+      "fingerprint": "scripts/phase8/verify-schema.ts|TS2339|Property 'cause' does not exist on type 'never'.",
+      "count": 1
+    },
+    {
+      "fingerprint": "scripts/phase8/verify-schema.ts|TS2339|Property 'code' does not exist on type 'never'.",
+      "count": 2
+    },
+    {
+      "fingerprint": "scripts/phase8/verify-schema.ts|TS2339|Property 'message' does not exist on type 'never'.",
+      "count": 2
+    },
+    {
+      "fingerprint": "server/lib/auth-security.ts|TS2339|Property 'session' does not exist on type 'Request<ParamsDictionary, any, any, ParsedQs, Record<string, any>>'.",
+      "count": 4
+    }
+  ]
+}
