@@ -1,6 +1,6 @@
 import { useState, useEffect } from "react";
 import { useQuery } from "@tanstack/react-query";
-import { queryClient } from "@/lib/queryClient";
+import { adminFetch, queryClient } from "@/lib/queryClient";
 import { Play, ChevronLeft, ChevronRight, Clock, SquareStack, CheckCircle2 } from "lucide-react";
 import { useToast } from "@/hooks/use-toast";
 import SessionSummary from "./session-summary";
@@ -48,7 +48,7 @@ export default function GradingQueue({ onSelectCert, currentCertId, onGradeAppro
   const { data: queue = [], isLoading } = useQuery<QueueItem[]>({
     queryKey: ["/api/admin/grading-queue"],
     queryFn: async () => {
-      const res = await fetch("/api/admin/grading-queue", { credentials: "include" });
+      const res = await adminFetch("/api/admin/grading-queue", { credentials: "include" });
       if (!res.ok) return [];
       return res.json();
     },

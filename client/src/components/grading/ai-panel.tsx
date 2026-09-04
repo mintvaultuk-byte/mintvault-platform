@@ -1,3 +1,4 @@
+import { adminFetch } from "@/lib/queryClient";
 import { useState, useEffect, useRef } from "react";
 import {
   Bot,
@@ -304,7 +305,7 @@ export default function AiPanel({
     setPanelTcgLoading(true);
     panelTcgDebounce.current = setTimeout(async () => {
       try {
-        const res = await fetch(
+        const res = await adminFetch(
           `/api/admin/card-lookup?game=${encodeURIComponent(gameSlug)}&query=${encodeURIComponent(query.trim())}&mode=wildcard`,
           { credentials: "include" }
         );
@@ -438,7 +439,7 @@ export default function AiPanel({
     setCenteringStatus("loading");
     setCenteringError("");
     try {
-      const r = await fetch(`/api/admin/certificates/${certId}/measure-centering`, {
+      const r = await adminFetch(`/api/admin/certificates/${certId}/measure-centering`, {
         method: "POST",
         credentials: "include",
       });
@@ -474,7 +475,7 @@ export default function AiPanel({
     setDefectsStatus("loading");
     setDefectsError("");
     try {
-      const r = await fetch(`/api/admin/certificates/${certId}/detect-defects`, {
+      const r = await adminFetch(`/api/admin/certificates/${certId}/detect-defects`, {
         method: "POST",
         credentials: "include",
       });
@@ -507,7 +508,7 @@ export default function AiPanel({
   }
 
   async function callGradeEndpoint() {
-    const r = await fetch(`/api/admin/certificates/${certId}/grade-card`, { method: "POST", credentials: "include" });
+    const r = await adminFetch(`/api/admin/certificates/${certId}/grade-card`, { method: "POST", credentials: "include" });
     const d = await r.json();
     if (!r.ok) throw new Error(d.error);
     setGradeResult(d.grade);
@@ -653,7 +654,7 @@ export default function AiPanel({
     }, 4000);
 
     try {
-      const res = await fetch(`/api/admin/certificates/${certId}/identify-and-analyze`, {
+      const res = await adminFetch(`/api/admin/certificates/${certId}/identify-and-analyze`, {
         method: "POST",
         credentials: "include",
         headers: { "Content-Type": "application/json" },

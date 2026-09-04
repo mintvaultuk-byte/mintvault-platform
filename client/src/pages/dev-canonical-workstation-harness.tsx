@@ -1,3 +1,4 @@
+import { adminFetch } from "@/lib/queryClient";
 import { useEffect, useMemo, useState } from "react";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { GradingWorkstation, type GradingWorkstationMode } from "@/components/grading-workflow/GradingWorkstation";
@@ -541,7 +542,7 @@ export default function DevCanonicalWorkstationHarness() {
             staleTime: Infinity,
             gcTime: Infinity,
             queryFn: async ({ queryKey }) => {
-              const response = await fetch(String(queryKey[0]), { credentials: "include" });
+              const response = await adminFetch(String(queryKey[0]), { credentials: "include" });
               if (!response.ok) throw new Error((await response.json().catch(() => ({}))).error ?? response.statusText);
               return response.json();
             },

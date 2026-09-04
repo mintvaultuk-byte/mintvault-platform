@@ -1,5 +1,6 @@
 import { useEffect, useMemo, useState } from "react";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
+import { AdminSessionProvider } from "@/lib/admin-session";
 import GrowthCommandPage from "@/pages/admin/growth";
 
 /**
@@ -188,7 +189,6 @@ function createGrowthVisualFetchFixture() {
     const request = new Request(input, init);
     const url = new URL(request.url, window.location.origin);
     if (url.origin !== window.location.origin || !url.pathname.startsWith("/api/")) return fetch(input, init);
-    if (url.pathname === "/api/admin/session") return localResponse({ authenticated: true, isSuperAdmin: true });
     if (url.pathname === "/api/admin/db-info") return localResponse({ env: "development", neon_host: "local-fixture", db_name: "visual-only", card_master_active_count: 0, card_sets_active_count: 0, certificates_count: 0, command_centre_available: false });
     if (url.pathname === "/api/super-admin/growth/intelligence") return localResponse(intelligence(url.searchParams.get("period") ?? "30d"));
     if (url.pathname === "/api/super-admin/growth/scoreboard/targets" && request.method === "PUT") return localResponse({ update: { changed: false, changedMetrics: [] }, scoreboard: intelligence("30d").scoreboard });
@@ -242,10 +242,12 @@ export default function DevGrowthCommandVisualHarness() {
   if (!ready) return null;
   return (
     <QueryClientProvider client={queryClient}>
-      <p className="border-b border-amber-300/35 bg-black/90 px-2 py-1 text-center text-[10px] font-semibold uppercase tracking-[0.12em] text-amber-200">
-        DEV only · synthetic local fixture · API egress blocked
-      </p>
-      <GrowthCommandPage />
+      <AdminSessionProvider>
+        <p className="border-b border-amber-300/35 bg-black/90 px-2 py-1 text-center text-[10px] font-semibold uppercase tracking-[0.12em] text-amber-200">
+          DEV only · synthetic local fixture · API egress blocked
+        </p>
+        <GrowthCommandPage />
+      </AdminSessionProvider>
     </QueryClientProvider>
   );
 }

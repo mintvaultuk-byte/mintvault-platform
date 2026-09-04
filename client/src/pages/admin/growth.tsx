@@ -5,6 +5,7 @@ import { useMutation, useQuery } from "@tanstack/react-query";
 import { ArrowUpRight, Copy, ExternalLink, RefreshCw } from "lucide-react";
 import { AdminButton, AdminShell, Badge, Panel, adminButtonClass } from "@/components/admin";
 import { apiRequest, queryClient } from "@/lib/queryClient";
+import { useAdminSession } from "@/lib/admin-session";
 
 const BASE = "/api/super-admin/growth";
 const PERIODS = ["today", "7d", "30d", "90d", "all"] as const;
@@ -347,7 +348,6 @@ type Intelligence = {
   freshness: "CURRENT" | "STALE";
   generatedAt: string;
 };
-type AdminSession = { authenticated: boolean; isSuperAdmin?: boolean };
 type GrowthReviewSummary = {
   period: Period;
   configuration: { state: "READY" | "NOT_CONFIGURED" | "INVALID"; reason?: string };
@@ -1958,6 +1958,7 @@ function GrowthOverview({ data, summary, period }: { data: Intelligence; summary
 
 export default function GrowthCommandPage() {
   const [, navigate] = useLocation();
+  const { principal } = useAdminSession();
   const searchLocation = useSearch();
   const [period, setPeriod] = useState<Period>("30d");
   const tab = growthTabFromSearch(searchLocation);
@@ -1972,26 +1973,16 @@ export default function GrowthCommandPage() {
     campaign: "medway_cataclysm",
     content: "",
   });
-  const session = useQuery<AdminSession>({
-    queryKey: ["/api/admin/session"],
-    queryFn: async () => {
-      const response = await fetch("/api/admin/session", { credentials: "include" });
-      return response.ok ? ((await response.json()) as AdminSession) : { authenticated: false };
-    },
-    retry: false,
-  });
-  const allowed = session.data?.authenticated === true && session.data.isSuperAdmin === true;
+  const localVisualFixture =
+    import.meta.env.DEV && typeof window !== "undefined" && window.location.pathname === "/dev/growth-command-visual";
+  const allowed = principal?.isSuperAdmin === true || localVisualFixture;
   useEffect(() => {
-    if (session.data && !session.data.authenticated) navigate("/admin/login?next=/admin/growth", { replace: true });
-    if (session.data?.authenticated && !session.data.isSuperAdmin) navigate("/admin", { replace: true });
-  }, [navigate, session.data]);
+    if (principal && !principal.isSuperAdmin) navigate("/admin", { replace: true });
+  }, [navigate, principal]);
   const command = useQuery<Intelligence>({
     queryKey: [BASE, "intelligence", period],
     queryFn: async () => {
-      const response = await fetch(growthIntelligenceUrl(period, consumeManualGrowthRefresh(manualRefresh)), {
-        credentials: "include",
-      });
-      if (!response.ok) throw new Error();
+      const response = await apiRequest("GET", growthIntelligenceUrl(period, consumeManualGrowthRefresh(manualRefresh)));
       return response.json() as Promise<Intelligence>;
     },
     enabled: allowed,
@@ -2000,8 +1991,7 @@ export default function GrowthCommandPage() {
   const leads = useQuery<{ leads: Lead[] }>({
     queryKey: [BASE, "leads"],
     queryFn: async () => {
-      const response = await fetch(`${BASE}/leads`, { credentials: "include" });
-      if (!response.ok) throw new Error();
+      const response = await apiRequest("GET", `${BASE}/leads`);
       return response.json() as Promise<{ leads: Lead[] }>;
     },
     enabled: allowed && tab === "partners",
@@ -2009,8 +1999,7 @@ export default function GrowthCommandPage() {
   const detail = useQuery<{ lead: LeadDetail }>({
     queryKey: [BASE, "lead", leadId],
     queryFn: async () => {
-      const response = await fetch(`${BASE}/leads/${leadId}`, { credentials: "include" });
-      if (!response.ok) throw new Error();
+      const response = await apiRequest("GET", `${BASE}/leads/${leadId}`);
       return response.json() as Promise<{ lead: LeadDetail }>;
     },
     enabled: allowed && tab === "partners" && !!leadId,
@@ -2018,8 +2007,7 @@ export default function GrowthCommandPage() {
   const options = useQuery<LinkOptions>({
     queryKey: [BASE, "link-options"],
     queryFn: async () => {
-      const response = await fetch(`${BASE}/link-options`, { credentials: "include" });
-      if (!response.ok) throw new Error();
+      const response = await apiRequest("GET", `${BASE}/link-options`);
       return response.json() as Promise<LinkOptions>;
     },
     enabled: allowed && tab === "campaigns",
@@ -2027,8 +2015,7 @@ export default function GrowthCommandPage() {
   const reviews = useQuery<GrowthReviewSummary>({
     queryKey: [BASE, "reviews", period],
     queryFn: async () => {
-      const response = await fetch(`${BASE}/reviews?period=${period}`, { credentials: "include" });
-      if (!response.ok) throw new Error();
+      const response = await apiRequest("GET", `${BASE}/reviews?period=${period}`);
       return response.json() as Promise<GrowthReviewSummary>;
     },
     enabled: allowed && tab === "reviews",
@@ -2081,7 +2068,6 @@ export default function GrowthCommandPage() {
     setCopyState("idle");
     link.reset();
   };
-  if (session.isLoading || !session.data) return <div className="min-h-screen bg-[#10110f]" />;
   if (!allowed) return null;
   return (
     <AdminShell
@@ -2095,7 +2081,6 @@ export default function GrowthCommandPage() {
               : `/admin?tab=${encodeURIComponent(next)}`
         )
       }
-      onLogout={() => window.location.assign("/api/admin/logout")}
       title="Growth Command"
       crumb="MINTVAULT · INSIGHT"
     >

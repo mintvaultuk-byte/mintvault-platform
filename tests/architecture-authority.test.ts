@@ -107,6 +107,7 @@ describe("component readiness authority", () => {
       "0120_customer_notification_outbox.sql",
       "0121_main_runtime_role_authority.sql",
       "0122_object_write_intent_reconciliation.sql",
+      "0022_print_workflow_lifecycle.sql",
     ]);
     expect([...REQUIRED_RELEASE_RELATIONS]).toEqual([
       "public.schema_migrations",
@@ -126,6 +127,12 @@ describe("component readiness authority", () => {
       "public.customer_notification_outbox",
       "public.object_write_operations",
       "public.object_write_items",
+      "public.print_batches",
+      "public.print_events",
+      "public.label_prints",
+      "public.label_overrides",
+      "public.reprint_log",
+      "public.audit_log",
     ]);
     expect(REQUIRED_RELEASE_TRIGGERS.map((name, index) => [name, REQUIRED_RELEASE_TRIGGER_RELATIONS[index]])).toEqual([
       ["trg_certificate_number_immutable", "public.certificates"],
@@ -242,6 +249,17 @@ describe("architecture topology authority", () => {
           component: "PartnerGradingPage",
           wrappers: expect.arrayContaining(["PartnerRouteGuard"]),
           requiredPermissions: ["partner.cards.assess"],
+          componentGuardChains: expect.arrayContaining([
+            expect.objectContaining({
+              component: "PartnerGradingPage",
+              guards: expect.arrayContaining([
+                expect.objectContaining({
+                  component: "PartnerRouteGuard",
+                  importTarget: "client/src/components/partner/partner-route-guard.tsx",
+                }),
+              ]),
+            }),
+          ]),
         }),
         expect.objectContaining({
           category: "server-route",
@@ -297,6 +315,18 @@ describe("architecture topology authority", () => {
           principalBinding: "principal-not-declared-in-key",
         }),
         expect.objectContaining({
+          category: "pricing-authority",
+          pricingKind: "currency-bearing-jsx-expression",
+          expression: "tier.max_value_gbp.toLocaleString()",
+          source: expect.stringContaining("client/src/pages/admin-pricing.tsx:"),
+        }),
+        expect.objectContaining({
+          category: "pricing-authority",
+          pricingKind: "currency-bearing-jsx-expression",
+          expression: expect.stringContaining("tier.price_per_card"),
+          source: expect.stringContaining("client/src/pages/admin-pricing.tsx:"),
+        }),
+        expect.objectContaining({
           category: "server-route",
           id: "PUT /api/admin/certificates/:id/attach-images",
           delegatedCommands: expect.arrayContaining([
@@ -312,6 +342,11 @@ describe("architecture topology authority", () => {
             "server/scan-ingest-service.ts#reprocessCurrentCertificateImages",
           ]),
           providerEffects: expect.arrayContaining(["object-writer:ObjectWriteCoordinator"]),
+        }),
+        expect.objectContaining({
+          category: "server-route",
+          id: "GET /api/staff/tcgdex-lookup",
+          delegatedCommands: expect.arrayContaining(["server/services/tcgdex.ts#lookupCard"]),
         }),
       ])
     );
@@ -346,6 +381,25 @@ describe("architecture topology authority", () => {
           record.actor === "super-admin" && record.capabilities.includes("requireSuperAdmin")
       )
     ).toBe(true);
+    const attachImages = snapshot.records.find(
+      (record: { category: string; id: string }) =>
+        record.category === "server-route" && record.id === "PUT /api/admin/certificates/:id/attach-images"
+    );
+    expect(attachImages).toBeTruthy();
+    const attachMiddleware = (attachImages as { routeLocalMiddleware: string[] }).routeLocalMiddleware;
+    expect(attachMiddleware.indexOf("requireAdmin")).toBeLessThan(
+      attachMiddleware.findIndex((item) => item.includes("attachImagesUpload"))
+    );
+    expect(snapshot.records).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          category: "provider-adapter",
+          id: "fetch:https://graph.facebook.com",
+          source: expect.stringContaining("server/lib/meta-publisher.ts:"),
+          urlAuthority: expect.stringContaining("https://graph.facebook.com/v19.0"),
+        }),
+      ])
+    );
   }, 30_000);
 
   it("flattens ordinary registrar calls from the real root and rejects uncalled registrars", async () => {
@@ -412,6 +466,58 @@ describe("architecture topology authority", () => {
     expect(propagated.records).toEqual(
       expect.arrayContaining([expect.objectContaining({ category: "server-route", id: "GET /hidden" })])
     );
+  });
+
+  it("binds protected client leaves to dominating guards and exact guard imports", async () => {
+    const { buildArchitectureSnapshot, compareSnapshot } = await architectureModule();
+    const root = goldenWorkspace();
+    write(root, "client/src/secure.tsx", "export function PartnerRouteGuard(p){return p.children;}\n");
+    write(root, "client/src/noop.tsx", "export function PartnerRouteGuard(p){return p.children;}\n");
+    write(root, "client/src/Page.tsx", "export default function Page(){return null;}\n");
+    write(
+      root,
+      "client/src/App.tsx",
+      'import {PartnerRouteGuard} from "./secure"; import Page from "./Page"; const app=<Route path="/partner/secure"><PartnerRouteGuard requiredPermission="partner.cards.assess"><Page/></PartnerRouteGuard></Route>;\n'
+    );
+    const baseline = buildArchitectureSnapshot(root, miniaturePolicy);
+    expect(baseline.violations).toEqual([]);
+    expect(baseline.records).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          category: "client-route",
+          id: "/partner/secure",
+          componentGuardChains: [
+            expect.objectContaining({
+              component: "Page",
+              guards: [
+                expect.objectContaining({
+                  component: "PartnerRouteGuard",
+                  importTarget: "client/src/secure.tsx",
+                }),
+              ],
+            }),
+          ],
+        }),
+      ])
+    );
+
+    write(
+      root,
+      "client/src/App.tsx",
+      'import {PartnerRouteGuard} from "./secure"; import Page from "./Page"; const app=<Route path="/partner/secure"><div><PartnerRouteGuard><span/></PartnerRouteGuard><Page/></div></Route>;\n'
+    );
+    expect(buildArchitectureSnapshot(root, miniaturePolicy).violations).toEqual(
+      expect.arrayContaining([expect.objectContaining({ code: "UNGUARDED_PARTNER_CLIENT_ROUTE" })])
+    );
+
+    write(
+      root,
+      "client/src/App.tsx",
+      'import {PartnerRouteGuard} from "./noop"; import Page from "./Page"; const app=<Route path="/partner/secure"><PartnerRouteGuard requiredPermission="partner.cards.assess"><Page/></PartnerRouteGuard></Route>;\n'
+    );
+    const rewired = buildArchitectureSnapshot(root, miniaturePolicy);
+    expect(rewired.violations).toEqual([]);
+    expect(compareSnapshot(baseline, rewired).ok).toBe(false);
   });
 
   it("resolves bounded templates and composes reachable router mounts", async () => {
@@ -484,6 +590,46 @@ describe("architecture topology authority", () => {
       'import express from "express"; const app=express(); const gated=[requireAdmin,readLimit] as const; app.get("/guarded",...gated,handler);\n'
     );
     expect(compareSnapshot(spreadGuarded, buildArchitectureSnapshot(root, miniaturePolicy)).ok).toBe(false);
+
+    write(
+      root,
+      "server/routes.ts",
+      'import express from "express"; const app=express(); app.post("/upload",requireAdmin,upload.single("file"),handler);\n'
+    );
+    const authBeforeUpload = buildArchitectureSnapshot(root, miniaturePolicy);
+    expect(authBeforeUpload.records).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          category: "server-route",
+          id: "POST /upload",
+          routeLocalMiddleware: ["requireAdmin", 'upload.single("file")', "handler"],
+        }),
+      ])
+    );
+    write(
+      root,
+      "server/routes.ts",
+      'import express from "express"; const app=express(); app.post("/upload",upload.single("file"),requireAdmin,handler);\n'
+    );
+    expect(compareSnapshot(authBeforeUpload, buildArchitectureSnapshot(root, miniaturePolicy)).ok).toBe(false);
+  });
+
+  it("resolves root, router, and parameter receiver aliases instead of hiding routes", async () => {
+    const { buildArchitectureSnapshot } = await architectureModule();
+    const root = goldenWorkspace();
+    write(root, "server/child.ts", "export const child=true;\n");
+    write(
+      root,
+      "server/routes.ts",
+      'import express from "express"; const app=express(); const api=app; const v1=api; v1.post("/hidden",requireAdmin,handler);\n'
+    );
+    const snapshot = buildArchitectureSnapshot(root, miniaturePolicy);
+    expect(snapshot.violations).toEqual([]);
+    expect(snapshot.records).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({ category: "server-route", id: "POST /hidden", actor: "admin" }),
+      ])
+    );
   });
 
   it("rejects every newly unowned executable surface even if a snapshot is refreshed", async () => {
@@ -903,6 +1049,35 @@ describe("architecture topology authority", () => {
     expect(compareSnapshot(thisBaseline, thisCandidate).ok).toBe(false);
   });
 
+  it("keeps same-name dynamic import bindings scoped to their lexical handlers", async () => {
+    const { buildArchitectureSnapshot, compareSnapshot } = await architectureModule();
+    const root = goldenWorkspace();
+    const policy = structuredClone(miniaturePolicy);
+    policy.ownerRules.push(
+      { prefix: "server/a.ts", owner: "provider-owner" },
+      { prefix: "server/b.ts", owner: "provider-owner" }
+    );
+    write(root, "server/child.ts", "export const child=true;\n");
+    write(root, "server/a.ts", "export async function run(){return true;}\n");
+    write(root, "server/b.ts", "export async function run(){await stripe.accounts.create({});}\n");
+    const baselineSource =
+      'import express from "express"; const app=express(); app.get("/a",async()=>{const {run}=await import("./a"); await run();}); app.get("/b",async()=>{const {run}=await import("./b"); await run();});\n';
+    write(root, "server/routes.ts", baselineSource);
+    const baseline = buildArchitectureSnapshot(root, policy);
+    expect(baseline.violations).toEqual([]);
+    const route = (id: string) =>
+      baseline.records.find(
+        (record: { category: string; id: string }) => record.category === "server-route" && record.id === id
+      );
+    expect(route("GET /a")?.delegatedCommands).toEqual(["server/a.ts#run"]);
+    expect(route("GET /a")?.providerEffects).toEqual(["delegated-or-none"]);
+    expect(route("GET /b")?.delegatedCommands).toEqual(["server/b.ts#run"]);
+    expect(route("GET /b")?.providerEffects.join(" ")).toMatch(/stripe\.accounts\.create/);
+
+    write(root, "server/routes.ts", baselineSource.replace('import("./a")', 'import("./b")'));
+    expect(compareSnapshot(baseline, buildArchitectureSnapshot(root, policy)).ok).toBe(false);
+  });
+
   it("binds HTTP provider records to method, timeout signal, idempotency, and options authority", async () => {
     const { buildArchitectureSnapshot, compareSnapshot } = await architectureModule();
     const root = goldenWorkspace();
@@ -1032,6 +1207,39 @@ describe("architecture topology authority", () => {
     expect(buildArchitectureSnapshot(root, miniaturePolicy).violations).toEqual([]);
     write(root, "server/leaf/new.ts", 'export { type Helper } from "../routes";\n');
     expect(buildArchitectureSnapshot(root, miniaturePolicy).violations).toEqual([]);
+  });
+
+  it("binds HTTP helper origins and request semantics to each reachable callsite", async () => {
+    const { buildArchitectureSnapshot, compareSnapshot } = await architectureModule();
+    const root = goldenWorkspace();
+    const source = (origin: string, method: string) =>
+      `import {Router} from "express"; const API_BASE="${origin}"; async function send(path,init){const url=\`${"${API_BASE}${path}"}\`; await fetch(url,init);} export function childRouter(){const r=Router(); r.post("/publish",async()=>send("/v2/publish",{method:"${method}",signal:controller.signal,headers:{"Idempotency-Key":key}})); return r;}\n`;
+    write(root, "server/child.ts", source("https://provider.example", "POST"));
+    const baseline = buildArchitectureSnapshot(root, miniaturePolicy);
+    expect(baseline.violations).toEqual([]);
+    expect(baseline.records).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          category: "provider-adapter",
+          id: "fetch:https://provider.example",
+          urlAuthority: "https://provider.example<dynamic:path>",
+          callsiteAuthorities: expect.arrayContaining([
+            expect.objectContaining({
+              urlAuthority: "https://provider.example/v2/publish",
+              httpMethod: "POST",
+              timeoutSignal: "controller.signal",
+              idempotencyEvidence: "declared-header",
+            }),
+          ]),
+        }),
+      ])
+    );
+
+    write(root, "server/child.ts", source("https://evil.example", "POST"));
+    expect(compareSnapshot(baseline, buildArchitectureSnapshot(root, miniaturePolicy)).ok).toBe(false);
+
+    write(root, "server/child.ts", source("https://provider.example", "GET"));
+    expect(compareSnapshot(baseline, buildArchitectureSnapshot(root, miniaturePolicy)).ok).toBe(false);
   });
 
   it("checks migration checksums, duplicate numeric identity, and required shipped authority", async () => {
@@ -1237,11 +1445,9 @@ describe("architecture topology authority", () => {
   it("inventories role, principal-cache, and pricing authorities as structural drift", async () => {
     const { buildArchitectureSnapshot, compareSnapshot } = await architectureModule();
     const root = goldenWorkspace();
-    write(
-      root,
-      "client/src/App.tsx",
-      'const PARTNER_ROLES=["OWNER"]; const role="customer"; const guide="From £19"; const unitPrice=1; const query={queryKey:["/api/cards"]}; const bound={queryKey:["/api/cards",userId]}; const staticUrl={queryKey:["/api/cards?tenantId=global"]}; const staticName={queryKey:["/api/cards","userId"]}; const nested={queryKey:["/api/cards",session.user.id]}; const interpolated={queryKey:[`/api/cards/${tenantId}`]}; const Cards=lazy(()=>import("./Cards")); const app=<Route path="/cards" component={Cards}/>;\n'
-    );
+    const authoritySource =
+      'const PARTNER_ROLES=["OWNER"]; const role="customer"; const guide="From £19"; const unitPrice=1; const query={queryKey:["/api/cards"]}; const bound={queryKey:["/api/cards",userId]}; const staticUrl={queryKey:["/api/cards?tenantId=global"]}; const staticName={queryKey:["/api/cards","userId"]}; const staticObject={queryKey:["/api/cards",{userId:"global"}]}; const nested={queryKey:["/api/cards",session.user.id]}; const interpolated={queryKey:[`/api/cards/${tenantId}`]}; function View(){const scopedKey=["/api/cards",userId]; const local={queryKey:scopedKey}; return <span>£{tier.price_per_card}</span>;} const Cards=lazy(()=>import("./Cards")); const app=<Route path="/cards" component={Cards}/>;\n';
+    write(root, "client/src/App.tsx", authoritySource);
     write(root, "server/child.ts", 'export interface SetLibraryActor { role: "admin" | "staff" }\n');
     const baseline = buildArchitectureSnapshot(root, miniaturePolicy);
     expect(baseline.violations).toEqual([]);
@@ -1255,6 +1461,10 @@ describe("architecture topology authority", () => {
         expect.objectContaining({ category: "session-principal", principalBinding: "declared-in-key" }),
         expect.objectContaining({ category: "pricing-authority", id: "value:unitPrice" }),
         expect.objectContaining({ category: "pricing-authority", id: "literal:£19" }),
+        expect.objectContaining({
+          category: "pricing-authority",
+          id: "projection:£:tier.price_per_card",
+        }),
       ])
     );
     const cacheRecords = baseline.records.filter(
@@ -1278,21 +1488,141 @@ describe("architecture topology authority", () => {
           id: "cache-key:[`/api/cards/${tenantId}`]",
           principalBinding: "declared-in-key",
         }),
+        expect.objectContaining({
+          id: 'cache-key:["/api/cards",{userId:"global"}]',
+          principalBinding: "principal-not-declared-in-key",
+        }),
+        expect.objectContaining({
+          id: "cache-key:scopedKey",
+          keyAuthority: '["/api/cards",userId]',
+          principalBinding: "declared-in-key",
+        }),
       ])
     );
     write(
       root,
       "client/src/App.tsx",
-      readFileSync(join(root, "client/src/App.tsx"), "utf8")
-        .replace('role="customer"', 'role="admin"')
-        .replace("£19", "£45")
+      authoritySource.replace('["/api/cards",userId]; const local', '["/api/cards"]; const local')
     );
+    expect(compareSnapshot(baseline, buildArchitectureSnapshot(root, miniaturePolicy))).toMatchObject({
+      ok: false,
+      reason: "topology-drift",
+    });
+    write(root, "client/src/App.tsx", authoritySource.replace("tier.price_per_card", "tier.max_value_gbp"));
+    expect(compareSnapshot(baseline, buildArchitectureSnapshot(root, miniaturePolicy))).toMatchObject({
+      ok: false,
+      reason: "topology-drift",
+    });
+    write(root, "client/src/App.tsx", authoritySource.replace('role="customer"', 'role="admin"').replace("£19", "£45"));
     expect(compareSnapshot(baseline, buildArchitectureSnapshot(root, miniaturePolicy))).toMatchObject({
       ok: false,
       reason: "topology-drift",
     });
     write(root, "server/child.ts", 'export interface SetLibraryActor { role: "owner" | "grader" }\n');
     expect(compareSnapshot(baseline, buildArchitectureSnapshot(root, miniaturePolicy))).toMatchObject({
+      ok: false,
+      reason: "topology-drift",
+    });
+  });
+
+  it("binds Admin cache records to the public classifier and role-aware principal hash", async () => {
+    const { buildArchitectureSnapshot, compareSnapshot } = await architectureModule();
+    const root = goldenWorkspace();
+    const policy = {
+      ...structuredClone(miniaturePolicy),
+      adminCacheAuthority: {
+        file: "client/src/lib/queryClient.ts",
+        classifier: "isAdminProtectedQueryKey",
+        hash: "scopedQueryHash",
+        publicKeySet: "PUBLIC_ADMIN_VIEW_QUERY_KEYS",
+        principalFields: ["email", "isSuperAdmin"],
+      },
+    };
+    const cacheAuthority = `const ADMIN_QUERY_HASH_PREFIX="admin-principal:";
+const PUBLIC_ADMIN_VIEW_QUERY_KEYS=new Set(["/api/public"]);
+const activeAdminPrincipal={email:"a",isSuperAdmin:true};
+export function isAdminProtectedQueryKey(queryKey){
+  const first=queryKey[0];
+  if(first === "public") return false;
+  if(typeof first === "string" && PUBLIC_ADMIN_VIEW_QUERY_KEYS.has(first)) return false;
+  return true;
+}
+export function scopedQueryHash(queryKey){
+  const queryHash=hashKey(queryKey);
+  if(activeAdminPrincipal === null || !isAdminProtectedQueryKey(queryKey)) return queryHash;
+  return \`${"${ADMIN_QUERY_HASH_PREFIX}"}${"${hashKey([activeAdminPrincipal.email, activeAdminPrincipal.isSuperAdmin])}"}:${"${queryHash}"}\`;
+}
+`;
+    write(root, "client/src/lib/queryClient.ts", cacheAuthority);
+    write(
+      root,
+      "client/src/App.tsx",
+      'const publicQuery={queryKey:["/api/public"]}; const protectedQuery={queryKey:["/api/admin/private"]}; const prefixed={queryKey:["public","projection"]};\n'
+    );
+
+    const baseline = buildArchitectureSnapshot(root, policy);
+    expect(baseline.violations).toEqual([]);
+    expect(baseline.records).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          id: 'cache-key:["/api/public"]',
+          adminCacheScope: "explicit-public-shared",
+          runtimePrincipalBinding: "none-public-shared",
+          cacheClassificationAuthority:
+            "client/src/lib/queryClient.ts#isAdminProtectedQueryKey",
+          cacheHashAuthority: "client/src/lib/queryClient.ts#scopedQueryHash",
+        }),
+        expect.objectContaining({
+          id: 'cache-key:["/api/admin/private"]',
+          adminCacheScope: "principal-partitioned-when-admin-active",
+          runtimePrincipalBinding: "email+isSuperAdmin",
+        }),
+        expect.objectContaining({
+          id: 'cache-key:["public","projection"]',
+          adminCacheScope: "explicit-public-shared",
+        }),
+      ])
+    );
+
+    write(
+      root,
+      "client/src/lib/queryClient.ts",
+      cacheAuthority.replace(", activeAdminPrincipal.isSuperAdmin", "")
+    );
+    expect(buildArchitectureSnapshot(root, policy).violations).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          code: "ADMIN_CACHE_AUTHORITY_DRIFT",
+          target: expect.stringContaining("hash the complete Admin scope"),
+        }),
+      ])
+    );
+
+    write(
+      root,
+      "client/src/lib/queryClient.ts",
+      cacheAuthority.replace('if(first === "public") return false;', 'first === "public";')
+    );
+    expect(buildArchitectureSnapshot(root, policy).violations).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          code: "ADMIN_CACHE_AUTHORITY_DRIFT",
+          target: expect.stringContaining("control both public exceptions"),
+        }),
+      ])
+    );
+
+    write(
+      root,
+      "client/src/lib/queryClient.ts",
+      cacheAuthority.replace('if(first === "public") return false;', 'if(first === "public") return true;')
+    );
+    expect(buildArchitectureSnapshot(root, policy).violations).toEqual(
+      expect.arrayContaining([expect.objectContaining({ code: "ADMIN_CACHE_AUTHORITY_DRIFT" })])
+    );
+
+    write(root, "client/src/lib/queryClient.ts", cacheAuthority.replace('"/api/public"', '"/api/other"'));
+    expect(compareSnapshot(baseline, buildArchitectureSnapshot(root, policy))).toMatchObject({
       ok: false,
       reason: "topology-drift",
     });

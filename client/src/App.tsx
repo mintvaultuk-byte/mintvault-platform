@@ -1,6 +1,7 @@
 import { Switch, Route, useLocation } from "wouter";
 import { useEffect, lazy, Suspense } from "react";
 import { queryClient } from "./lib/queryClient";
+import { AdminSessionProvider } from "./lib/admin-session";
 import { QueryClientProvider } from "@tanstack/react-query";
 import { Toaster } from "@/components/ui/toaster";
 import { AdminStepUpHost } from "@/components/admin/admin-step-up";
@@ -814,22 +815,24 @@ function App() {
   return (
     <ErrorBoundary>
       <QueryClientProvider client={queryClient}>
-        <FeatureFlagsProvider>
-          <TooltipProvider>
-            <GoldBurstEffect />
-            <Toaster />
-            {/*
-              Super Admin step-up prompt. Mounted ONCE, at the root, because the high-risk admin
-              mutations are declared inside the page components themselves — a context provider would
-              have to sit above each page and force those pages to be restructured. It renders
-              nothing until the server issues a challenge.
-            */}
-            <AdminStepUpHost />
-            <SubmitAttributionContinuity />
-            <Router />
-            <CookieBanner />
-          </TooltipProvider>
-        </FeatureFlagsProvider>
+        <AdminSessionProvider>
+          <FeatureFlagsProvider>
+            <TooltipProvider>
+              <GoldBurstEffect />
+              <Toaster />
+              {/*
+                Super Admin step-up prompt. Mounted ONCE, at the root, because the high-risk admin
+                mutations are declared inside the page components themselves — a context provider would
+                have to sit above each page and force those pages to be restructured. It renders
+                nothing until the server issues a challenge.
+              */}
+              <AdminStepUpHost />
+              <SubmitAttributionContinuity />
+              <Router />
+              <CookieBanner />
+            </TooltipProvider>
+          </FeatureFlagsProvider>
+        </AdminSessionProvider>
       </QueryClientProvider>
     </ErrorBoundary>
   );

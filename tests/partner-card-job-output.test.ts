@@ -617,6 +617,7 @@ describe("P11 Card Job output: certificate, label, print, NFC (real PostgreSQL)"
       reason: "Label damaged during slab assembly",
       reasonCategory: "damaged_print",
       identity: QA,
+      idempotencyKey: `partner-reprint-${card.mvNumber}`,
     });
     expect(reprint.applied).toEqual([card.mvNumber]);
 

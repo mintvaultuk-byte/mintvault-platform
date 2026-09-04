@@ -35,30 +35,11 @@ const SEVERITY_VARIANT: Record<AttentionSeverity, AdminBadgeVariant> = {
 };
 
 export default function PartnerNetworkOverviewPage() {
-  const [pathname, navigate] = useLocation();
-  const [authed, setAuthed] = useState<boolean | null>(null);
-  useEffect(() => {
-    let live = true;
-    fetch("/api/admin/session", { credentials: "include" })
-      .then((r) => (r.ok ? r.json() : null))
-      .then((d) => live && setAuthed(d?.authenticated === true))
-      .catch(() => live && setAuthed(false));
-    return () => {
-      live = false;
-    };
-  }, []);
-  useEffect(() => {
-    if (authed === false)
-      navigate(
-        `/admin/login?next=${encodeURIComponent(`${pathname}${window.location.search}${window.location.hash}`)}`,
-        { replace: true }
-      );
-  }, [authed, navigate, pathname]);
+  const [, navigate] = useLocation();
 
   const network = useQuery<{ overview: PartnerNetworkOverview }>({
     queryKey: [BASE],
     queryFn: () => apiRequest("GET", BASE).then((r) => r.json()),
-    enabled: authed === true,
     refetchInterval: 60_000,
   });
   const overview = network.data?.overview;
@@ -69,14 +50,13 @@ export default function PartnerNetworkOverviewPage() {
     [overview]
   );
 
-  if (authed === null || network.isLoading)
+  if (network.isLoading)
     return <div className="admin-root grid min-h-[60vh] place-items-center">Loading Partner Network…</div>;
 
   return (
     <AdminShell
       activeTab="dashboard"
       onTabChange={() => navigate("/admin")}
-      onLogout={() => navigate("/admin")}
       title="Partner Network"
       crumb="Overview"
     >

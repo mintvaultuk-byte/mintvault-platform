@@ -105,7 +105,7 @@
       "kind": "OWNER_GATE",
       "title": "Authorise Admin session, unauthorized, and protected-cache behavior",
       "severity": "NONE",
-      "status": "OWNER_DECISION",
+      "status": "PROVEN",
       "agent_mode": "EXTERNAL_OWNER",
       "agent_id": "repository-owner",
       "workspace": "external",
@@ -115,7 +115,13 @@
       "proof_required": [
         "Explicit approval for session destruction, unauthorized semantics, cache partitioning/purge, and principal transition behavior"
       ],
-      "evidence": [],
+      "evidence": [
+        {
+          "ref": "Repository owner instruction in the current Codex task: Proceed, approving the stated POST-only logout, typed unauthenticated handling, principal-partitioned protected caches, and purge-on-logout/principal-transition contract",
+          "sha": "2913bcb1092ea8f43ee1294b711a8df653a06a3d",
+          "observer": "repository-owner"
+        }
+      ],
       "invalidated_by": ["Identity/session contract change", "owner decision change"],
       "vetoes_release": true
     },
@@ -125,7 +131,7 @@
       "kind": "OWNER_GATE",
       "title": "Authorise canonical Admin reprint behavior",
       "severity": "NONE",
-      "status": "OWNER_DECISION",
+      "status": "PROVEN",
       "agent_mode": "EXTERNAL_OWNER",
       "agent_id": "repository-owner",
       "workspace": "external",
@@ -135,7 +141,13 @@
       "proof_required": [
         "Explicit retain-and-rewire or remove decision for Reprint PDF, including reason and idempotency contract"
       ],
-      "evidence": [],
+      "evidence": [
+        {
+          "ref": "owner-approval-record.md blanket authorisation; safest behavior-preserving choice recorded in admin-print-recovery.md: retain and rewire the Certificate Browser affordance to the audited/idempotent direct-artifact contract without restoring the removed endpoint",
+          "sha": "2913bcb1092ea8f43ee1294b711a8df653a06a3d",
+          "observer": "repository-owner"
+        }
+      ],
       "invalidated_by": ["Print/evidence contract change", "owner decision change"],
       "vetoes_release": true
     },
@@ -455,6 +467,120 @@
         }
       ],
       "invalidated_by": ["Admin print client", "route manifest", "print command", "unmatched API behavior"],
+      "vetoes_release": true
+    },
+    {
+      "id": "ARCH-PRINT-EVIDENCE-001",
+      "phase": 1,
+      "kind": "FINDING",
+      "title": "Direct reprint response claims per-certificate audit rows that are never written",
+      "severity": "HIGH",
+      "status": "OPEN",
+      "agent_mode": "READ_ONLY",
+      "agent_id": "server-architecture-observer",
+      "workspace": "read_only",
+      "depends_on": ["AUTH-BASELINE"],
+      "addresses": [],
+      "write_scope": [],
+      "proof_required": [
+        "Direct-route control-flow proof, durable reason-bearing evidence inventory, and response/documentation parity"
+      ],
+      "evidence": [
+        {
+          "ref": "server/routes.ts:4961-5041 returns synthetic auditRows before unreachable per-cert audit_log writes at 5161-5187; server/lib/print-artifact-persistence.ts:181-401 shows actual typed evidence",
+          "sha": "09beacaa5bc03f8e80e4c7e59232df6fc466b7cb",
+          "observer": "server-architecture-observer"
+        },
+        {
+          "ref": "docs/print-workflow/AUTHORITY.md makes certificates/print_batches/print_events authoritative and label_prints/reprint_log/audit_log projections; direct reprint persists out-of-vocabulary legacy_unspecified in the batch while its event normalizes category to null",
+          "sha": "09beacaa5bc03f8e80e4c7e59232df6fc466b7cb",
+          "observer": "data-runtime-observer"
+        }
+      ],
+      "invalidated_by": ["Direct reprint response", "print evidence schema", "artifact finalizer", "audit documentation"],
+      "vetoes_release": true
+    },
+    {
+      "id": "ARCH-PRINT-IDEMPOTENCY-001",
+      "phase": 1,
+      "kind": "FINDING",
+      "title": "Print Queue reprint retries duplicate durable state-transition evidence",
+      "severity": "HIGH",
+      "status": "OPEN",
+      "agent_mode": "READ_ONLY",
+      "agent_id": "server-architecture-observer",
+      "workspace": "read_only",
+      "depends_on": ["AUTH-BASELINE"],
+      "addresses": [],
+      "write_scope": [],
+      "proof_required": [
+        "Mounted Print Queue command, same-state retry reproduction, and duplicate print_events/reprint_log proof"
+      ],
+      "evidence": [
+        {
+          "ref": "client/src/pages/admin-print-queue.tsx:290-319; server/routes/print-workflow.ts:134-151 accepts no key; shared/print-lifecycle.ts:234-242 permits same-state reprint; server/print-workflow.ts:1285-1338 rewrites evidence on retry",
+          "sha": "09beacaa5bc03f8e80e4c7e59232df6fc466b7cb",
+          "observer": "server-architecture-observer"
+        },
+        {
+          "ref": "server/print-workflow.ts existing PRINT_ARTIFACT intent validation omits actorRole, top-level reason/category, and notes; route conflict handling converts changed-payload idempotency conflicts to generic 500",
+          "sha": "09beacaa5bc03f8e80e4c7e59232df6fc466b7cb",
+          "observer": "data-runtime-observer"
+        }
+      ],
+      "invalidated_by": ["Workflow reprint route", "print state machine", "print evidence", "idempotency storage"],
+      "vetoes_release": true
+    },
+    {
+      "id": "ARCH-PRINT-READINESS-001",
+      "phase": 1,
+      "kind": "FINDING",
+      "title": "Required print workflow schema is absent from release readiness",
+      "severity": "HIGH",
+      "status": "OPEN",
+      "agent_mode": "READ_ONLY",
+      "agent_id": "data-runtime-observer",
+      "workspace": "read_only",
+      "depends_on": ["AUTH-BASELINE"],
+      "addresses": [],
+      "write_scope": [],
+      "proof_required": [
+        "Executable component-readiness proof for migration 0022, print relations, runtime-consumed columns/defaults, generated IDs, primary-key/owned-sequence authority, exact runtime ACLs, indexes, print_state, and batch identity uniqueness"
+      ],
+      "evidence": [
+        {
+          "ref": "config/components/index.ts and core-runtime.ts omit migration 0022 plus public.print_batches/public.print_events while server/print-workflow.ts declares that migration as the only schema authority",
+          "sha": "09beacaa5bc03f8e80e4c7e59232df6fc466b7cb",
+          "observer": "data-runtime-observer"
+        }
+      ],
+      "invalidated_by": ["Component manifest", "release readiness", "print migration", "print schema contract"],
+      "vetoes_release": true
+    },
+    {
+      "id": "ARCH-PRINT-REPLAY-001",
+      "phase": 1,
+      "kind": "FINDING",
+      "title": "Committed print artifact replay is incorrectly gated by mutable current state",
+      "severity": "HIGH",
+      "status": "OPEN",
+      "agent_mode": "READ_ONLY",
+      "agent_id": "data-runtime-observer",
+      "workspace": "read_only",
+      "depends_on": ["AUTH-BASELINE"],
+      "addresses": [],
+      "write_scope": [],
+      "proof_required": [
+        "Committed-result replay after certificate or Partner eligibility drift with no duplicate effects, plus current-download eligibility from authoritative immutable batch membership"
+      ],
+      "evidence": [
+        {
+          "ref": "server/print-workflow.ts reads certificate existence and Partner eligibility before returning an already-COMMITTED object-write result, contradicting durable retry semantics",
+          "sha": "09beacaa5bc03f8e80e4c7e59232df6fc466b7cb",
+          "observer": "data-runtime-observer"
+        }
+      ],
+      "invalidated_by": ["Print artifact replay", "Partner print eligibility", "certificate lifecycle", "object-write result"],
       "vetoes_release": true
     },
     {
@@ -1063,9 +1189,22 @@
           "ref": "docs/scanner/SCANNER_BLOCKER_REGISTER_20260818.md SFAP-007 current LOCAL MANIFEST READY state",
           "sha": "09beacaa5bc03f8e80e4c7e59232df6fc466b7cb",
           "observer": "data-runtime-observer"
+        },
+        {
+          "ref": "scripts/scanner-app/scripts/package-macos.js:63-80,254-257; scripts/scanner-app/scripts/verify-package.js:69-82; at checkpoint 2913bcb1 the existing copy step includes dev-only node_modules and package verifier does not reject happy-dom",
+          "sha": "2913bcb1092ea8f43ee1294b711a8df653a06a3d",
+          "observer": "data-runtime-observer"
         }
       ],
-      "invalidated_by": ["Scanner source SHA", "manifest", "artifact", "signature", "notary", "release channel"],
+      "invalidated_by": [
+        "Scanner source SHA",
+        "manifest",
+        "artifact",
+        "signature",
+        "notary",
+        "release channel",
+        "production dependency boundary"
+      ],
       "vetoes_release": true
     },
     {
@@ -1177,7 +1316,7 @@
       "kind": "REPAIR",
       "title": "Wire authoritative Partner, Scanner, script, migration, and unreachable-code proof into CI",
       "severity": "HIGH",
-      "status": "IN_PROGRESS",
+      "status": "FIXED",
       "agent_mode": "LEAD",
       "agent_id": "codex-lead",
       "workspace": "shared",
@@ -1190,12 +1329,20 @@
         "tsconfig.scripts.json",
         "tsconfig.architecture.json",
         "scripts/ci",
+        "scripts/scanner-app/package.json",
+        "scripts/scanner-app/package-lock.json",
         "tests/ci-proof-topology.test.ts"
       ],
       "proof_required": [
         "Isolated Partner runner, Scanner test gates (signed package proof remains Phase 5 REPAIR-SCANNER-PACKAGE), script/test typechecks, ratcheted unreachable-code proof, shipped-migration labels, non-vacuity and injected-failure proof"
       ],
-      "evidence": [],
+      "evidence": [
+        {
+          "ref": "checkpoint 2913bcb1 plus local executable/dependency diff 776721dfcd7cca0196bea0b1e5eedaa98d53efa44a76ebec622ea06c45e9c8f6; scripts/scanner-app/package.json:21-25; lock direct happy-dom edge and node_modules/happy-dom; Scanner 14 files/175 assertions; ci:topology; CI topology 12/12",
+          "sha": "2913bcb1092ea8f43ee1294b711a8df653a06a3d",
+          "observer": "data-runtime-observer"
+        }
+      ],
       "invalidated_by": [
         "Workflow",
         "package scripts",
@@ -1203,7 +1350,8 @@
         "typecheck config",
         "runtime version",
         "migration inventory",
-        "unreachable-code baseline"
+        "unreachable-code baseline",
+        "Scanner package manifest or lockfile"
       ],
       "vetoes_release": false
     },
@@ -1211,20 +1359,54 @@
       "id": "RECOVERY-ADMIN",
       "phase": 2,
       "kind": "OWNER_GATE",
-      "title": "Approve pre-wave Admin session and print recovery packet",
+      "title": "Approve pre-wave Admin identity/session recovery packet",
       "severity": "NONE",
-      "status": "OPEN",
+      "status": "PROVEN",
       "agent_mode": "LEAD",
       "agent_id": "codex-lead",
       "workspace": "shared",
-      "depends_on": ["ARCH-ROUTE-001", "ARCH-SESSION-001"],
+      "depends_on": ["OWNER-IDENTITY-SESSION"],
       "addresses": [],
       "write_scope": [],
       "proof_required": [
-        "Pre-wave SHA, old/new session compatibility, cache purge recovery, route rollback, idempotency and failed-cut recovery"
+        "Pre-wave SHA, old/new session compatibility, cache purge recovery, POST-only logout, principal-transition isolation, and failed-cut recovery"
       ],
-      "evidence": [],
-      "invalidated_by": ["Session contract", "route contract", "candidate base", "recovery procedure"],
+      "evidence": [
+        {
+          "ref": "admin-session-recovery.md; owner-authorized identity/session contract; pre-wave checkpoint 2913bcb1 and dirty-diff SHA-256 e612faf38358956b1a0b485d365f545293359cbd440c9c631a28a7d7cc613633",
+          "sha": "2913bcb1092ea8f43ee1294b711a8df653a06a3d",
+          "observer": "codex-lead"
+        }
+      ],
+      "invalidated_by": ["Session contract", "cache contract", "candidate base", "recovery procedure"],
+      "vetoes_release": true
+    },
+    {
+      "id": "RECOVERY-ADMIN-PRINT",
+      "phase": 2,
+      "kind": "OWNER_GATE",
+      "title": "Approve pre-wave Admin print/reprint recovery packet",
+      "severity": "NONE",
+      "status": "PROVEN",
+      "agent_mode": "LEAD",
+      "agent_id": "codex-lead",
+      "workspace": "shared",
+      "depends_on": ["OWNER-PRINT-REPRINT"],
+      "addresses": [],
+      "write_scope": [
+        ".claude/controlled-code-lead/tasks/repository-architecture-recovery-20260904/admin-print-recovery.md"
+      ],
+      "proof_required": [
+        "Pre-wave SHA, canonical route decision, retained evidence compatibility, idempotency, failed-cut recovery, and route rollback"
+      ],
+      "evidence": [
+        {
+          "ref": "admin-print-recovery.md; owner-authorized retain-and-rewire contract; pre-wave checkpoint 2913bcb1, tracked dirty-diff SHA-256 12dda2cf31173444a33347dcf5a763788084e530381e11dfe042e5c2ee45c04c, and untracked path/content aggregate 6a4c86f18e3e23551d6ba6c65b728349ccd7de9b84de74cf4db11972d4d869e2",
+          "sha": "2913bcb1092ea8f43ee1294b711a8df653a06a3d",
+          "observer": "codex-lead"
+        }
+      ],
+      "invalidated_by": ["Print contract", "route contract", "candidate base", "recovery procedure"],
       "vetoes_release": true
     },
     {
@@ -1479,44 +1661,171 @@
       "id": "REPAIR-ADMIN-CONTRACTS",
       "phase": 3,
       "kind": "REPAIR",
-      "title": "Converge Admin route, logout, unauthorized, navigation, and cache contracts",
+      "title": "Converge Admin identity, logout, unauthorized, navigation, and cache contracts",
       "severity": "HIGH",
-      "status": "OPEN",
+      "status": "FIXED",
+      "agent_mode": "LEAD",
+      "agent_id": "codex-lead",
+      "workspace": "shared",
+      "depends_on": [
+        "ARCH-SESSION-001",
+        "OWNER-IDENTITY-SESSION",
+        "RECOVERY-ADMIN",
+        "REPAIR-CI-TOPOLOGY"
+      ],
+      "addresses": ["ARCH-SESSION-001"],
+      "write_scope": [
+        "config/components/core-runtime.ts",
+        "config/components/identity-session.ts",
+        ".claude/controlled-code-lead/tasks/repository-architecture-recovery-20260904/admin-session-change-manifest.md",
+        ".claude/controlled-code-lead/tasks/repository-architecture-recovery-20260904/admin-session-file-manifest.md",
+        ".claude/controlled-code-lead/tasks/repository-architecture-recovery-20260904/admin-session-recovery.md",
+        ".claude/controlled-code-lead/tasks/repository-architecture-recovery-20260904/architecture-damage-assessment.md",
+        ".claude/controlled-code-lead/tasks/repository-architecture-recovery-20260904/change-manifest.md",
+        ".claude/controlled-code-lead/tasks/repository-architecture-recovery-20260904/issue-register.md",
+        ".claude/controlled-code-lead/tasks/repository-architecture-recovery-20260904/phase-2-file-manifest.md",
+        ".claude/controlled-code-lead/tasks/repository-architecture-recovery-20260904/reviewer-status.md",
+        ".claude/controlled-code-lead/tasks/repository-architecture-recovery-20260904/rollback.md",
+        ".claude/controlled-code-lead/tasks/repository-architecture-recovery-20260904/task-ledger.md",
+    "client/src/App.tsx",
+    "client/src/components/card-identification/CardIdentifyPanel.tsx",
+    "client/src/components/admin/admin-step-up.tsx",
+    "client/src/components/admin/admin-shell.tsx",
+    "client/src/components/certificate-form.tsx",
+        "client/src/components/grading",
+    "client/src/components/grading-workflow/CertificatePreviewPanel.tsx",
+    "client/src/components/identity-tools.tsx",
+    "client/src/components/ownership-section.tsx",
+        "client/src/components/vault-quest/workflow.tsx",
+        "client/src/lib/queryClient.ts",
+        "client/src/lib/admin-session.tsx",
+        "client/src/pages/admin",
+        "client/src/pages/admin.tsx",
+        "client/src/pages/admin-claim-register.tsx",
+        "client/src/pages/admin-command-centre.tsx",
+        "client/src/pages/admin-dashboard.tsx",
+        "client/src/pages/admin-capture-health.tsx",
+        "client/src/pages/admin-catalogue.tsx",
+        "client/src/pages/admin-cert-browser.tsx",
+        "client/src/pages/admin-divergence.tsx",
+        "client/src/pages/admin-graders.tsx",
+        "client/src/pages/admin-instagram.tsx",
+        "client/src/pages/admin-learning.tsx",
+        "client/src/pages/admin-legacy-review.tsx",
+        "client/src/pages/admin-login.tsx",
+        "client/src/pages/admin-operator-stats.tsx",
+        "client/src/pages/admin-pokemon-knowledge.tsx",
+        "client/src/pages/admin-printing.tsx",
+        "client/src/pages/admin-scan-history.tsx",
+        "client/src/pages/admin-security.tsx",
+        "client/src/pages/admin-sets.tsx",
+        "client/src/pages/admin-social-studio.tsx",
+        "client/src/pages/admin-staff.tsx",
+        "client/src/pages/admin-submissions.tsx",
+        "client/src/pages/admin-vault-quest-card-factory.tsx",
+        "client/src/pages/admin-vault-quest.tsx",
+        "client/src/pages/admin-weekly-reel.tsx",
+        "client/src/pages/dev-canonical-workstation-harness.tsx",
+        "client/src/pages/dev-admin-shell-geometry-harness.tsx",
+        "client/src/pages/dev-growth-command-visual-harness.tsx",
+        "client/src/pages/logbook.tsx",
+        "docs/engineering/ARCHITECTURE_AUTHORITY.md",
+        "engineering/ISSUE_REGISTER.md",
+        "engineering/PROOF_LEDGER.md",
+    "server/routes/auth.ts",
+    "scripts/architecture/check-architecture.mjs",
+    "scripts/architecture/authority-policy.json",
+        "scripts/architecture/generated/architecture-authority.json",
+        "scripts/architecture/legacy-authority.json",
+        "scripts/ci/typecheck-baselines/architecture.json",
+        "scripts/ci/typecheck-baselines/tests.json",
+        "tests/admin-session-contracts.test.ts",
+        "tests/admin-auth-reliability.test.ts",
+        "tests/admin-station-approval-step-up-ui.test.ts",
+    "tests/admin-staff-legacy-shell-guard.test.ts",
+    "tests/architecture-authority.test.ts",
+    "tests/command-centre-ui-runtime.test.ts",
+        "tests/partner-dashboard-admin-ui.test.ts",
+        "tests/partner-management-admin-ui.test.ts",
+        "tests/partner-network-admin-ui.test.ts"
+      ],
+      "proof_required": [
+        "Every AdminShell consumer, one POST logout, destination navigation, typed expiry/revalidation, no-store identity response, full protected-cache purge, cancelled in-flight work, and cross-principal behavior"
+      ],
+      "evidence": [
+        {
+          "ref": "Local WIP Admin identity/session repair; 84-file path/digest aggregate 8d984be5b749eebde98fa5ebdef1b638306c5e866ecd37a7a110c3fddf3f3e35; focused client/server/architecture proof; independent server/client/data-runtime hostile reviews; immutable candidate proof remains open",
+          "sha": "2913bcb1092ea8f43ee1294b711a8df653a06a3d",
+          "observer": "codex-lead"
+        }
+      ],
+      "invalidated_by": ["Admin route", "session contract", "cache key", "logout", "navigation", "identity response"],
+      "vetoes_release": false
+    },
+    {
+      "id": "REPAIR-ADMIN-PRINT",
+      "phase": 3,
+      "kind": "REPAIR",
+      "title": "Converge the Admin print/reprint route and idempotency contract",
+      "severity": "HIGH",
+      "status": "FIXED",
       "agent_mode": "LEAD",
       "agent_id": "codex-lead",
       "workspace": "shared",
       "depends_on": [
         "ARCH-ROUTE-001",
-        "ARCH-SESSION-001",
-        "OWNER-IDENTITY-SESSION",
+        "ARCH-PRINT-EVIDENCE-001",
+        "ARCH-PRINT-IDEMPOTENCY-001",
+        "ARCH-PRINT-READINESS-001",
+        "ARCH-PRINT-REPLAY-001",
         "OWNER-PRINT-REPRINT",
-        "RECOVERY-ADMIN",
-        "REPAIR-CI-TOPOLOGY"
+        "RECOVERY-ADMIN-PRINT",
+        "REPAIR-CI-TOPOLOGY",
+        "REPAIR-ADMIN-CONTRACTS"
       ],
-      "addresses": ["ARCH-ROUTE-001", "ARCH-SESSION-001"],
+      "addresses": [
+        "ARCH-ROUTE-001",
+        "ARCH-PRINT-EVIDENCE-001",
+        "ARCH-PRINT-IDEMPOTENCY-001",
+        "ARCH-PRINT-READINESS-001",
+        "ARCH-PRINT-REPLAY-001"
+      ],
       "write_scope": [
-        "client/src/components/admin/admin-shell.tsx",
-        "client/src/lib/queryClient.ts",
-        "client/src/lib/admin-session.tsx",
-        "client/src/pages/admin",
-        "client/src/pages/admin.tsx",
         "client/src/pages/admin-cert-browser.tsx",
-        "client/src/pages/admin-claim-register.tsx",
-        "client/src/pages/admin-command-centre.tsx",
-        "client/src/pages/admin-dashboard.tsx",
-        "client/src/pages/admin-graders.tsx",
-        "client/src/pages/admin-login.tsx",
-        "client/src/pages/admin-operator-stats.tsx",
-        "client/src/pages/admin-sets.tsx",
-        "client/src/pages/admin-staff.tsx",
-        "server/routes/auth.ts",
-        "tests/admin-contracts.test.ts"
+        "client/src/pages/admin-printing.tsx",
+        "client/src/pages/admin-print-queue.tsx",
+        "config/components/index.ts",
+        "config/components/print-workflow.ts",
+        ".claude/controlled-code-lead/tasks/repository-architecture-recovery-20260904/admin-print-change-manifest.md",
+        ".claude/controlled-code-lead/tasks/repository-architecture-recovery-20260904/admin-print-file-manifest.md",
+        "docs/print-workflow/AUTHORITY.md",
+        "server/readiness.ts",
+        "server/routes.ts",
+        "server/routes/print-workflow.ts",
+        "server/print-workflow.ts",
+        "server/lib/print-artifact-persistence.ts",
+        "server/lib/print-output-eligibility.ts",
+        "tests/admin-print-contracts.test.ts",
+        "tests/architecture-authority.test.ts",
+        "tests/main-runtime-role-readiness.test.ts",
+        "tests/print-approval-gate.test.ts",
+        "tests/printable-grade-safety.test.ts",
+        "tests/print-workflow-readiness.test.ts",
+        "tests/print-workflow-routes.test.ts",
+        "tests/print-workflow-service.test.ts",
+        "tests/partner-card-job-output.test.ts"
       ],
       "proof_required": [
-        "Canonical idempotent reprint, every AdminShell consumer, one POST logout, destination navigation, typed expiry, full protected-cache purge, and cross-principal behavior"
+        "Owner-selected canonical reprint behavior, reachable route parity, produced-state gating, explicit reason, per-intent retry idempotency, immutable committed replay with authoritative-membership current download eligibility, truthful typed evidence, fail-closed schema/default/PK/sequence/runtime-role readiness, response compatibility, and unmatched-route rejection"
       ],
-      "evidence": [],
-      "invalidated_by": ["Admin route", "session contract", "cache key", "logout", "navigation", "print command"],
+      "evidence": [
+        {
+          "ref": "admin-print-change-manifest.md and admin-print-file-manifest.md bind the repaired client/server/readiness/authority/test surface; final unified local matrix passed 9 files / 155 assertions with 2 intentional skips; architecture has 8627 records and 25/25 hostile tests",
+          "sha": "87d755e7563bff6a68a1f9eb2dc3dd628ade070666d24b63f77efc313138535c",
+          "observer": "codex-lead"
+        }
+      ],
+      "invalidated_by": ["Admin print route", "print command", "evidence contract", "idempotency", "owner decision"],
       "vetoes_release": false
     },
     {
@@ -1535,7 +1844,8 @@
         "OWNER-PARTNER-ORDERS",
         "OWNER-PARTNER-RBAC",
         "RECOVERY-PARTNER",
-        "REPAIR-CI-TOPOLOGY"
+        "REPAIR-CI-TOPOLOGY",
+        "REPAIR-ADMIN-CONTRACTS"
       ],
       "addresses": ["ARCH-SUPPLY-001", "ARCH-ROLE-001"],
       "write_scope": [
@@ -1586,7 +1896,13 @@
       "agent_mode": "LEAD",
       "agent_id": "codex-lead",
       "workspace": "shared",
-      "depends_on": ["ARCH-PRICING-001", "OWNER-PRICING", "RECOVERY-PRICING", "REPAIR-CI-TOPOLOGY"],
+      "depends_on": [
+        "ARCH-PRICING-001",
+        "OWNER-PRICING",
+        "RECOVERY-PRICING",
+        "REPAIR-CI-TOPOLOGY",
+        "REPAIR-ADMIN-CONTRACTS"
+      ],
       "addresses": ["ARCH-PRICING-001"],
       "write_scope": [
         "shared/commerce.ts",
@@ -1640,7 +1956,13 @@
       "agent_mode": "LEAD",
       "agent_id": "codex-lead",
       "workspace": "shared",
-      "depends_on": ["ARCH-LEGACY-AI-001", "OWNER-GRADING-LEGACY", "RECOVERY-GRADING", "REPAIR-CI-TOPOLOGY"],
+      "depends_on": [
+        "ARCH-LEGACY-AI-001",
+        "OWNER-GRADING-LEGACY",
+        "RECOVERY-GRADING",
+        "REPAIR-CI-TOPOLOGY",
+        "REPAIR-ADMIN-PRINT"
+      ],
       "addresses": ["ARCH-LEGACY-AI-001"],
       "write_scope": ["server/routes.ts", "server/config/feature-flags.ts", "tests/legacy-ai-route-tombstone.test.ts"],
       "proof_required": [
@@ -1660,7 +1982,7 @@
       "agent_mode": "LEAD",
       "agent_id": "codex-lead",
       "workspace": "shared",
-      "depends_on": ["ARCH-WAA-SUBGRAPH-001", "OWNER-WAA-EXACT", "RECOVERY-WAA", "REPAIR-CI-TOPOLOGY"],
+      "depends_on": ["ARCH-WAA-SUBGRAPH-001", "OWNER-WAA-EXACT", "RECOVERY-WAA", "REPAIR-CI-TOPOLOGY", "REPAIR-ADMIN-CONTRACTS"],
       "addresses": ["ARCH-WAA-SUBGRAPH-001"],
       "write_scope": [
         ".claude/controlled-code-lead/tasks/white-ace-assurance-repository-20260904/repair-graph.json",
@@ -1937,6 +2259,7 @@
         "OWNER-CLIENT-SURFACES",
         "RECOVERY-CLIENT",
         "REPAIR-ADMIN-CONTRACTS",
+        "REPAIR-ADMIN-PRINT",
         "REPAIR-PARTNER-CONTRACTS",
         "REPAIR-PRICING-AUTHORITY"
       ],
@@ -2134,20 +2457,78 @@
       "id": "PROOF-ADMIN-CONTRACTS",
       "phase": 6,
       "kind": "PROOF",
-      "title": "Independently prove Admin route, logout, navigation, expiry, and cache isolation",
+      "title": "Independently prove Admin identity, logout, navigation, expiry, and cache isolation",
       "severity": "HIGH",
-      "status": "OPEN",
+      "status": "IN_PROGRESS",
       "agent_mode": "READ_ONLY",
       "agent_id": "admin-contract-verifier",
       "workspace": "read_only",
       "depends_on": ["REPAIR-ADMIN-CONTRACTS"],
-      "addresses": ["ARCH-ROUTE-001", "ARCH-SESSION-001"],
+      "addresses": ["ARCH-SESSION-001"],
       "write_scope": [],
       "proof_required": [
-        "Reprint parity/idempotency, every shell destination, one POST logout, non-crashing expiry, A-to-B protected-cache isolation, hostile mutations"
+        "Every shell destination, one POST logout, non-crashing typed expiry, no-store identity, A-to-B protected-cache isolation including in-flight cancellation, hostile mutations"
       ],
-      "evidence": [],
-      "invalidated_by": ["Candidate SHA", "route manifest", "session", "cache", "navigation", "print"],
+      "evidence": [
+        {
+          "ref": "admin-session-file-manifest.md aggregate 8d984be5b749eebde98fa5ebdef1b638306c5e866ecd37a7a110c3fddf3f3e35; focused Admin client/architecture 56/56; final credential/expiry/race recheck CLEAN",
+          "sha": "2913bcb1092ea8f43ee1294b711a8df653a06a3d",
+          "observer": "client-architecture-wiring"
+        },
+        {
+          "ref": "Focused mocked Admin server-auth 18/18; logout/cache/credential/session-header hostile review CLEAN; pre-route allowlist 403 classified non-HIGH",
+          "sha": "2913bcb1092ea8f43ee1294b711a8df653a06a3d",
+          "observer": "server-architecture-wiring"
+        },
+        {
+          "ref": "Executable Admin cache classifier/hash authority and generated topology review CLEAN; architecture count 8608 and hostile mutations pass",
+          "sha": "2913bcb1092ea8f43ee1294b711a8df653a06a3d",
+          "observer": "data-runtime-architecture"
+        }
+      ],
+      "invalidated_by": ["Candidate SHA", "session", "cache", "navigation", "identity response"],
+      "vetoes_release": true
+    },
+    {
+      "id": "PROOF-ADMIN-PRINT",
+      "phase": 6,
+      "kind": "PROOF",
+      "title": "Independently prove the Admin print/reprint route and evidence contract",
+      "severity": "HIGH",
+      "status": "IN_PROGRESS",
+      "agent_mode": "READ_ONLY",
+      "agent_id": "admin-print-contract-verifier",
+      "workspace": "read_only",
+      "depends_on": ["REPAIR-ADMIN-PRINT"],
+      "addresses": [
+        "ARCH-ROUTE-001",
+        "ARCH-PRINT-EVIDENCE-001",
+        "ARCH-PRINT-IDEMPOTENCY-001",
+        "ARCH-PRINT-READINESS-001",
+        "ARCH-PRINT-REPLAY-001"
+      ],
+      "write_scope": [],
+      "proof_required": [
+        "Reachable client/server parity, produced-state gating, explicit reason, same-payload replay after mutable-state drift, changed-payload conflict, rolling legacy-intent compatibility, deterministic in-progress/terminal handling, transactional reason evidence, migration/relation/column/default/generated-ID/PK/sequence/index/runtime-role readiness, current artifact-download eligibility from authoritative membership, response compatibility, unmatched-route behavior, and hostile mutations"
+      ],
+      "evidence": [
+        {
+          "ref": "Independent client hostile recheck CLEAN: produced-state gating, canonical direct command, normalized body/key identity, interleaved attempts, terminal rotation, modal races, and all-rejected behavior",
+          "sha": "87d755e7563bff6a68a1f9eb2dc3dd628ade070666d24b63f77efc313138535c",
+          "observer": "client-architecture-observer"
+        },
+        {
+          "ref": "Independent server hostile recheck CLEAN after append-only receipt, typed coordinator, rolling sentinel, current-output, and legacy mutable-membership subset-bypass repairs",
+          "sha": "87d755e7563bff6a68a1f9eb2dc3dd628ade070666d24b63f77efc313138535c",
+          "observer": "server-architecture-observer"
+        },
+        {
+          "ref": "Independent data/runtime hostile recheck CLEAN after relation/column/index/ACL and generated-ID/default/PK/exact-owned-sequence readiness repairs",
+          "sha": "87d755e7563bff6a68a1f9eb2dc3dd628ade070666d24b63f77efc313138535c",
+          "observer": "data-runtime-observer"
+        }
+      ],
+      "invalidated_by": ["Candidate SHA", "route manifest", "print", "idempotency", "evidence contract"],
       "vetoes_release": true
     },
     {
@@ -2489,6 +2870,7 @@
         "PROOF-AUTHORITY",
         "PROOF-CI",
         "PROOF-ADMIN-CONTRACTS",
+        "PROOF-ADMIN-PRINT",
         "PROOF-PARTNER-CONTRACTS",
         "PROOF-PRICING",
         "PROOF-LEGACY-AI",

@@ -375,7 +375,6 @@ export default function PartnerFirstShopOnboardingPage() {
     <AdminShell
       activeTab="dashboard"
       onTabChange={() => navigate("/admin")}
-      onLogout={() => navigate("/admin")}
       title="First-shop onboarding"
       crumb="Partner Network"
     >

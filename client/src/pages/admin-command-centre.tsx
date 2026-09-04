@@ -581,13 +581,6 @@ export default function AdminCommandCentrePage() {
     setLastRefreshAt(Date.now());
     await dashboardQuery.refetch();
   };
-  const handleLogout = async () => {
-    await apiRequest("POST", "/api/admin/logout");
-    queryClient.removeQueries({ queryKey: COMMAND_CENTRE_QUERY_PREFIX });
-    queryClient.removeQueries({ queryKey: ["/api/admin/db-info"] });
-    queryClient.removeQueries({ queryKey: ["/api/admin/session"] });
-    navigate("/cert");
-  };
   const selected = dashboard?.registry.find((item) => item.id === selectedCapability);
   const selectedDepartment = selected
     ? COMMAND_CENTRE_DEPARTMENTS.find((department) => department.id === selected.departmentId)
@@ -596,7 +589,6 @@ export default function AdminCommandCentrePage() {
     <AdminShell
       activeTab="command-centre"
       onTabChange={() => navigate("/admin")}
-      onLogout={handleLogout}
       title="Command Centre"
       crumb="MINTVAULT · INSIGHT"
       disableEnvironmentPolling

@@ -42,6 +42,20 @@ beforeAll(async () => {
     CREATE TABLE session (sid varchar PRIMARY KEY, sess json NOT NULL, expire timestamp(6) NOT NULL);
     CREATE TABLE partner_applications (id uuid PRIMARY KEY, status text NOT NULL);
     CREATE TABLE partner_organisations (id uuid PRIMARY KEY, status text NOT NULL);
+    CREATE TABLE print_batches (id serial PRIMARY KEY);
+    CREATE TABLE print_events (id serial PRIMARY KEY);
+    CREATE TABLE label_prints (id serial PRIMARY KEY);
+    CREATE TABLE label_overrides (id serial PRIMARY KEY);
+    CREATE TABLE reprint_log (id serial PRIMARY KEY);
+    CREATE TABLE audit_log (
+      id serial PRIMARY KEY,
+      entity_type text NOT NULL,
+      entity_id text NOT NULL,
+      action text NOT NULL,
+      admin_user text,
+      details jsonb DEFAULT '{}',
+      created_at timestamptz NOT NULL DEFAULT now()
+    );
   `);
   await applyMigrations(admin, [migration()]);
   await admin.query(`
@@ -137,6 +151,57 @@ describe("main database runtime readiness authority", () => {
     await admin.query("ALTER ROLE mintvault_readiness_login NOSUPERUSER");
 
     await expect(runtimeReady()).resolves.toBe(true);
+  });
+
+  it("fails closed on print relation and owned-sequence privilege drift", async () => {
+    await expect(runtimeReady()).resolves.toBe(true);
+
+    await admin.query("REVOKE INSERT ON print_events FROM mintvault_app");
+    await expect(runtimeReady()).resolves.toBe(false);
+    await admin.query("GRANT INSERT ON print_events TO mintvault_app");
+
+    await admin.query("GRANT UPDATE ON audit_log TO mintvault_app");
+    await expect(runtimeReady()).resolves.toBe(false);
+    await admin.query("REVOKE UPDATE ON audit_log FROM mintvault_app");
+
+    await admin.query("GRANT DELETE ON print_batches TO mintvault_app");
+    await expect(runtimeReady()).resolves.toBe(false);
+    await admin.query("REVOKE DELETE ON print_batches FROM mintvault_app");
+
+    await admin.query("REVOKE USAGE ON SEQUENCE print_events_id_seq FROM mintvault_app");
+    await expect(runtimeReady()).resolves.toBe(false);
+    await admin.query("GRANT USAGE ON SEQUENCE print_events_id_seq TO mintvault_app");
+
+    await admin.query("GRANT UPDATE ON SEQUENCE audit_log_id_seq TO mintvault_app");
+    await expect(runtimeReady()).resolves.toBe(false);
+    await admin.query("REVOKE UPDATE ON SEQUENCE audit_log_id_seq FROM mintvault_app");
+
+    await expect(runtimeReady()).resolves.toBe(true);
+  });
+
+  it("executes the append-only reprint receipt read and insert under the production runtime role", async () => {
+    await runtime.query("BEGIN");
+    try {
+      await runtime.query("SELECT pg_advisory_xact_lock($1)", [8_422_611]);
+      await expect(
+        runtime.query(
+          `SELECT details FROM audit_log
+            WHERE entity_type='print_reprint_request'
+              AND entity_id='print_reprint_request_runtime_proof'
+              AND action='idempotency_committed'
+            ORDER BY id`
+        )
+      ).resolves.toMatchObject({ rows: [] });
+      await expect(
+        runtime.query(
+          `INSERT INTO audit_log(entity_type,entity_id,action,admin_user,details)
+           VALUES ('print_reprint_request','print_reprint_request_runtime_proof',
+                   'idempotency_committed','runtime-proof','{}'::jsonb)`
+        )
+      ).resolves.toMatchObject({ rowCount: 1 });
+    } finally {
+      await runtime.query("ROLLBACK");
+    }
   });
 
   it("requires the distinct Partner authority to read every operational relation", async () => {

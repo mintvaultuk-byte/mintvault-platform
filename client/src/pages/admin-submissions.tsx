@@ -1,6 +1,6 @@
 import { useState, useEffect, useMemo, useRef } from "react";
 import { useQuery, useMutation } from "@tanstack/react-query";
-import { apiRequest, queryClient } from "@/lib/queryClient";
+import { adminFetch, apiRequest, queryClient } from "@/lib/queryClient";
 import {
   SUBMISSION_STATUS_LABELS,
   SUBMISSION_STATUS_TRANSITIONS,
@@ -134,7 +134,7 @@ export default function AdminSubmissions() {
   const { data: subs = [], isLoading } = useQuery<SubmissionRow[]>({
     queryKey: ["/api/admin/submissions", statusFilter, dateFrom, dateTo],
     queryFn: async () => {
-      const res = await fetch(apiUrl, { credentials: "include" });
+      const res = await adminFetch(apiUrl, { credentials: "include" });
       if (!res.ok) throw new Error("Failed to fetch submissions");
       return res.json();
     },
@@ -389,7 +389,7 @@ function SubmissionDetail({ submissionId, onBack }: { submissionId: string; onBa
   const editShippingMutation = useMutation({
     mutationFn: async () => {
       const wasShipped = !!sub?.shippedAt;
-      const res = await fetch(`/api/admin/submissions/${submissionId}/return-label`, {
+      const res = await adminFetch(`/api/admin/submissions/${submissionId}/return-label`, {
         method: "POST",
         credentials: "include",
         headers: { "Content-Type": "application/json" },
@@ -423,7 +423,7 @@ function SubmissionDetail({ submissionId, onBack }: { submissionId: string; onBa
 
   const resendShippingMutation = useMutation({
     mutationFn: async () => {
-      const res = await fetch(`/api/admin/submissions/${submissionId}/resend-shipping`, {
+      const res = await adminFetch(`/api/admin/submissions/${submissionId}/resend-shipping`, {
         method: "POST",
         credentials: "include",
       });
@@ -443,7 +443,7 @@ function SubmissionDetail({ submissionId, onBack }: { submissionId: string; onBa
   // already delivered is a no-op (unchanged:true).
   const markDeliveredMutation = useMutation({
     mutationFn: async () => {
-      const res = await fetch(`/api/admin/submissions/${submissionId}/mark-delivered`, {
+      const res = await adminFetch(`/api/admin/submissions/${submissionId}/mark-delivered`, {
         method: "POST",
         credentials: "include",
       });
@@ -462,7 +462,7 @@ function SubmissionDetail({ submissionId, onBack }: { submissionId: string; onBa
   // affordance is deliberately small (icon-only on the stepper area).
   const clearDeliveredMutation = useMutation({
     mutationFn: async () => {
-      const res = await fetch(`/api/admin/submissions/${submissionId}/mark-delivered/clear`, {
+      const res = await adminFetch(`/api/admin/submissions/${submissionId}/mark-delivered/clear`, {
         method: "POST",
         credentials: "include",
       });
@@ -498,7 +498,7 @@ function SubmissionDetail({ submissionId, onBack }: { submissionId: string; onBa
   // floor (received) hard with a 400.
   const stepBackMutation = useMutation({
     mutationFn: async () => {
-      const res = await fetch(`/api/admin/submissions/${submissionId}/step-back`, {
+      const res = await adminFetch(`/api/admin/submissions/${submissionId}/step-back`, {
         method: "POST",
         credentials: "include",
       });
@@ -518,7 +518,7 @@ function SubmissionDetail({ submissionId, onBack }: { submissionId: string; onBa
       receiptIdempotencyKey.current ??= crypto.randomUUID();
       const form = new FormData();
       files.forEach((f) => form.append("photos", f));
-      const res = await fetch(`/api/admin/submissions/${submissionId}/mark-received`, {
+      const res = await adminFetch(`/api/admin/submissions/${submissionId}/mark-received`, {
         method: "POST",
         credentials: "include",
         headers: { "Idempotency-Key": receiptIdempotencyKey.current },
@@ -1801,7 +1801,7 @@ export function AdminIntake() {
     setResult(null);
     setLoading(true);
     try {
-      const res = await fetch(`/api/admin/submissions/${trimmed}`, { credentials: "include" });
+      const res = await adminFetch(`/api/admin/submissions/${trimmed}`, { credentials: "include" });
       if (!res.ok) {
         setError("Submission not found");
         return;

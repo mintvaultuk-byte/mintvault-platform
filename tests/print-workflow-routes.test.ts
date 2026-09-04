@@ -10,6 +10,7 @@ import { describe, it, expect, beforeAll, afterAll, vi } from "vitest";
 import express from "express";
 import session from "express-session";
 import pg from "pg";
+import { readFileSync } from "node:fs";
 import { drizzle } from "drizzle-orm/node-postgres";
 import { applyMigrations, listMigrationFiles } from "../scripts/db/migrate";
 import { startPostgres17, type DisposablePostgres17 } from "./helpers/postgres17-cluster";
@@ -67,6 +68,13 @@ const BASE_DDL = `
   ALTER TABLE certificates ADD COLUMN owner_name text;
   ALTER TABLE certificates ADD COLUMN owner_email text;
   ALTER TABLE certificates ADD COLUMN front_image_path text;
+  CREATE TABLE object_write_operations (
+    id uuid PRIMARY KEY DEFAULT gen_random_uuid(), tenant_id uuid, idempotency_key text NOT NULL,
+    operation_kind text NOT NULL, aggregate_type text NOT NULL, aggregate_id text, actor_id text,
+    state text NOT NULL DEFAULT 'PREPARED', manifest_sha256 text NOT NULL DEFAULT '',
+    expected_state jsonb NOT NULL DEFAULT '{}', intent_payload jsonb NOT NULL DEFAULT '{}', result_payload jsonb,
+    lease_token uuid, lease_expires_at timestamptz
+  );
 `;
 
 let cluster: DisposablePostgres17;
@@ -74,11 +82,17 @@ let admin: InstanceType<typeof Client>;
 let baseUrl: string;
 let server: ReturnType<express.Express["listen"]>;
 
-async function req(path: string, opts: { method?: string; body?: unknown; cookie?: string; staff?: string } = {}) {
+async function req(
+  path: string,
+  opts: { method?: string; body?: unknown; cookie?: string; staff?: string; idempotencyKey?: string | null } = {}
+) {
   const headers: Record<string, string> = { "content-type": "application/json" };
   if (opts.cookie) headers.cookie = opts.cookie;
   if (opts.staff) headers["x-test-proxy-staff"] = opts.staff;
   if (path.endsWith("/printing/workflow/batch")) headers["idempotency-key"] = "route-permission-proof";
+  if (path.endsWith("/printing/workflow/reprint") && opts.idempotencyKey !== null) {
+    headers["idempotency-key"] = opts.idempotencyKey ?? "route-reprint-proof";
+  }
   return fetch(`${baseUrl}${path}`, {
     method: opts.method ?? "GET",
     headers,
@@ -98,7 +112,13 @@ describe("print-workflow routes — permission enforcement (DB-backed)", () => {
     const file = listMigrationFiles().find((m) => m.filename.includes("0022_print_workflow"))!;
     await applyMigrations(admin, [file]);
     // A printed cert so 'complete' has something an admin can legitimately act on.
-    await admin.query(`INSERT INTO certificates (certificate_number, print_state, grade_approved_at) VALUES ('MV-DONE', 'printed', now())`);
+    await admin.query(`
+      INSERT INTO certificates (certificate_number, print_state, grade_approved_at)
+      VALUES
+        ('MV-DONE', 'printed', now()),
+        ('MV-REPRINT', 'printed', now()),
+        ('MV-STAFF-REPRINT', 'printed', now())
+    `);
 
     runtime.pool = new Pool({ connectionString: cluster.url, max: 4 });
     runtime.db = drizzle(runtime.pool as InstanceType<typeof Pool>);
@@ -181,5 +201,100 @@ describe("print-workflow routes — permission enforcement (DB-backed)", () => {
     const body = (await r.json()) as { applied: string[]; rejected: unknown[] };
     expect(body.applied).toEqual([]);
     expect(body.rejected.length).toBe(1);
+  });
+
+  it("requires a bounded idempotency key for workflow reprint", async () => {
+    const missing = await req("/api/admin/printing/workflow/reprint", {
+      method: "POST",
+      cookie: adminCookie,
+      idempotencyKey: null,
+      body: {
+        certIds: ["MV-REPRINT"],
+        reason: "Replacement required after damaged print",
+        reasonCategory: "damaged_print",
+      },
+    });
+    expect(missing.status).toBe(400);
+
+    const oversized = await req("/api/admin/printing/workflow/reprint", {
+      method: "POST",
+      cookie: adminCookie,
+      idempotencyKey: "x".repeat(201),
+      body: {
+        certIds: ["MV-REPRINT"],
+        reason: "Replacement required after damaged print",
+        reasonCategory: "damaged_print",
+      },
+    });
+    expect(oversized.status).toBe(400);
+  });
+
+  it("replays the exact workflow reprint result and rejects changed payloads", async () => {
+    const body = {
+      certIds: ["MV-REPRINT"],
+      reason: "Replacement required after damaged print",
+      reasonCategory: "damaged_print",
+    };
+    const first = await req("/api/admin/printing/workflow/reprint", {
+      method: "POST",
+      cookie: adminCookie,
+      idempotencyKey: "route-reprint-stable",
+      body,
+    });
+    expect(first.status).toBe(200);
+    const firstResult = await first.json();
+    expect(firstResult).toEqual({ applied: ["MV-REPRINT"], rejected: [] });
+
+    const replay = await req("/api/admin/printing/workflow/reprint", {
+      method: "POST",
+      cookie: adminCookie,
+      idempotencyKey: "route-reprint-stable",
+      body,
+    });
+    expect(replay.status).toBe(200);
+    expect(await replay.json()).toEqual(firstResult);
+    const evidence = await admin.query(
+      `SELECT
+         (SELECT count(*)::int FROM print_events WHERE cert_id='MV-REPRINT' AND action='reprint') AS events,
+         (SELECT count(*)::int FROM reprint_log WHERE cert_id='MV-REPRINT') AS logs`
+    );
+    expect(evidence.rows[0]).toEqual({ events: 1, logs: 1 });
+
+    const conflict = await req("/api/admin/printing/workflow/reprint", {
+      method: "POST",
+      cookie: adminCookie,
+      idempotencyKey: "route-reprint-stable",
+      body: { ...body, reasonCategory: "lost_label" },
+    });
+    expect(conflict.status).toBe(409);
+    expect(await conflict.json()).toMatchObject({ code: "PRINT_REPRINT_IDEMPOTENCY_CONFLICT" });
+  });
+
+  it("scopes workflow reprint keys by the authenticated actor", async () => {
+    const response = await req("/api/admin/printing/workflow/reprint", {
+      method: "POST",
+      staff: "staffer@mintvault",
+      idempotencyKey: "route-reprint-stable",
+      body: {
+        certIds: ["MV-STAFF-REPRINT"],
+        reason: "Replacement required after printer damage",
+        reasonCategory: "printer_error",
+      },
+    });
+    expect(response.status).toBe(200);
+    expect(await response.json()).toEqual({ applied: ["MV-STAFF-REPRINT"], rejected: [] });
+  });
+
+  it("keeps append-only receipt reads privilege-safe and maps durable retry states deterministically", () => {
+    const workflow = readFileSync("server/print-workflow.ts", "utf8");
+    const receiptRead = workflow.slice(workflow.indexOf("SELECT details"), workflow.indexOf("if (prior.rows.length"));
+    expect(receiptRead).not.toContain("FOR UPDATE");
+
+    const routes = readFileSync("server/routes.ts", "utf8");
+    const directCatch = routes.slice(routes.indexOf('console.error("[reprint] error:"'), routes.indexOf("// ── PRINT BATCH ARTIFACT RETRIEVAL"));
+    expect(directCatch).toContain("ObjectWriteConflictError");
+    expect(directCatch).toContain("ObjectWriteInProgressError");
+    expect(directCatch).toContain("ObjectWriteTerminalError");
+    expect((directCatch.match(/res\.status\(409\)/g) ?? [])).toHaveLength(3);
   });
 });

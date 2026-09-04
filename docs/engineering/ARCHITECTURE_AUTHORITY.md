@@ -24,27 +24,27 @@ control, not a claim that the legacy root has already been decomposed.
 
 ## Current census
 
-The current snapshot contains 8,704 records:
+The current snapshot contains 8,608 records:
 
 | Record            | Count | Evidence captured                                                                                                                                    |
 | ----------------- | ----: | ---------------------------------------------------------------------------------------------------------------------------------------------------- |
-| Client route      |   172 | path, component/import target, wrappers, permission and environment guards                                                                           |
+| Client route      |   172 | path, rendered leaf/import target, wrapper/guard dominance chain, permission and environment guards                                                   |
 | Component         |     7 | canonical manifest, runtime state, source roots, relations and migrations                                                                            |
 | Job               |    37 | recurring scheduler/worker registration, cadence, lock and lifecycle evidence where statically declared                                              |
 | Layer exception   |     4 | exact source/target exception and finding disposition                                                                                                |
 | Migration         |   169 | lineage, number, classification and SHA-256 checksum                                                                                                 |
 | Migration lineage |     6 | lineage-exclusion document checksum plus each exact collision/convergence declaration                                                                |
-| Object writer     |    88 | individual object-store write/lifecycle/retention call and owner                                                                                     |
-| Pricing authority | 1,763 | price/tier/discount/fee values, currency-bearing literals, imports, and transport projections                                                        |
-| Provider adapter  |   166 | individual fetch/SDK client or operation effect and owner                                                                                            |
-| Role authority    |   714 | capability consumers and role/actor definitions, defaults, mappings, and comparisons                                                                 |
+| Object writer     |    90 | individual object-store write/lifecycle/retention call and owner                                                                                     |
+| Pricing authority | 1,779 | price/tier/discount/fee values, currency-bearing literals, imports, and static or JSX transport projections                                          |
+| Provider adapter  |   166 | individual fetch/SDK operation, origin/method/callsite authority, lifecycle options and owner                                                        |
+| Role authority    |   725 | capability consumers and role/actor definitions, defaults, mappings, and comparisons                                                                 |
 | Route middleware  |    61 | application/router middleware prefix, order, actor and capability contribution                                                                       |
-| Route mount       |    68 | Express `.use` and ordinary registrar-call composition edges in registration order                                                                   |
+| Route mount       |    69 | Express `.use` and ordinary registrar-call composition edges in registration order                                                                   |
 | Schema object     |     3 | non-table schema declarations covered by policy                                                                                                      |
-| Server route      |   979 | method, declared/effective path, root-reachable mount chain and order, actor/capability evidence, command context and handler-local provider effects |
-| Session/principal |   584 | cache-key principal binding, session fields, and auth/session provider definitions and consumers                                                     |
+| Server route      |   987 | method, declared/effective path, root-reachable mount chain and order, route-local middleware order, actor/capability evidence and delegated effects |
+| Session/principal |   583 | cache-key principal binding, session fields, and auth/session provider definitions and consumers                                                     |
 | Table             |   360 | Drizzle, unmanaged-schema and migration-DDL table identities                                                                                         |
-| Table access      | 3,434 | individual Drizzle, constant/helper/tagged raw-SQL, or explicitly unclassified SQL access and owner                                                  |
+| Table access      | 3,301 | individual Drizzle, constant/helper/tagged raw-SQL, or explicitly unclassified SQL access and owner                                                  |
 | Timer             |    89 | one-shot timeout/watchdog/retry/debounce call, delay and tracked/untracked lifecycle                                                                 |
 
 The scanner evaluates constants, template expressions, bounded `for...of` registrations,
@@ -53,19 +53,30 @@ receiver provenance. It composes only from an actual `express()` root; router-lo
 registrar-local calls are not promoted to synthetic roots. Routes that cannot be reached
 from that composition graph are rejected rather than silently counted as endpoints.
 
-Client route records traverse nested JSX to bind rendered components, import targets,
-ancestor/descendant guards, permissions, redirects, environment guards, and the resolved
-source file of each rendered component. Non-public Partner routes fail if the reachable
-JSX tree lacks `PartnerRouteGuard`; routes importing a disabled component also fail even
-when their declaration lives in the shared root.
+Client route records traverse nested JSX to bind each rendered leaf to its exact import
+target and ordered ancestor guard chain, including guards introduced through local
+component aliases. Non-public Partner leaves fail unless `PartnerRouteGuard` dominates
+that leaf and resolves to the canonical guard module; a sibling guard or same-named
+foreign import cannot satisfy the rule. Routes importing a disabled component also fail
+even when their declaration lives in the shared root.
 
-Raw SQL discovery resolves local constants, follows statically identified query-helper
-parameters at call sites, and excludes CTE aliases from table ownership. Unresolved SQL
-sinks remain explicit `sql-unclassified` records. Provider and object-store operations
-are inventoried individually and are attached to a route when the call is lexically
-inside that route's handler argument. Calls to imported/local named helpers are followed
-transitively to provider/object sinks and recorded as delegated commands; unresolved
-delegation remains visibly unclassified.
+Admin query records are also bound to the executable cache authority in
+`client/src/lib/queryClient.ts`. The gate verifies the exact public-key exception set,
+the protected-by-default classifier, the principal-scoped hash branch, and both required
+principal fields (`email` and `isSuperAdmin`). Public records are annotated as shared;
+protected records are annotated as principal-partitioned when an Admin principal is
+active. Dead references, inverted public returns, missing role binding, or public-set
+drift fail hostile mutations.
+
+Raw SQL discovery resolves lexical constants and principal-cache aliases, follows
+statically identified query-helper parameters at call sites, and excludes CTE aliases
+and object property names from authority. Unresolved SQL sinks remain explicit
+`sql-unclassified` records. Dynamic imports and same-named bindings are resolved in
+their lexical scope rather than file-wide. Provider and object-store operations are
+inventoried individually; HTTP records retain the resolved origin plus callsite method,
+abort signal and idempotency authority. Calls to imported/local named helpers are
+followed transitively to provider/object sinks and recorded as delegated commands;
+unresolved delegation remains visibly unclassified.
 
 Migration authority includes the main and Vault Quest lineages. Duplicate identities,
 including leading-zero aliases, checksum drift, malformed lineage-exclusion declarations,
@@ -98,7 +109,7 @@ new unowned topology. Adding an exact legacy key requires an explicit manual
 `--adopt-unowned --write` review, after which the resulting ledger diff must be reviewed
 like source code. Every legacy entry must still resolve to a current `known-legacy`
 record; removed or newly explicitly owned keys fail as obsolete, so they cannot be
-reused as a silent fallback. The current reconciled ledger contains 3,734 exact keys.
+reused as a silent fallback. The current reconciled ledger contains 3,673 exact keys.
 
 The scanner is static. It never imports application modules, starts workers, connects to
 a database, or calls providers.

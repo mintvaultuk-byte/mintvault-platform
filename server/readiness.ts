@@ -545,6 +545,247 @@ const OBJECT_WRITE_CONTRACT_PREDICATE = `
 
 export const OBJECT_WRITE_READINESS_SQL = `SELECT (${OBJECT_WRITE_CONTRACT_PREDICATE}) AS ready`;
 
+const PRINT_WORKFLOW_CONTRACT_PREDICATE = `
+  to_regclass('public.certificates') IS NOT NULL
+  AND to_regclass('public.print_batches') IS NOT NULL
+  AND to_regclass('public.print_events') IS NOT NULL
+  AND to_regclass('public.label_prints') IS NOT NULL
+  AND to_regclass('public.label_overrides') IS NOT NULL
+  AND to_regclass('public.reprint_log') IS NOT NULL
+  AND to_regclass('public.audit_log') IS NOT NULL
+  AND NOT EXISTS (
+    SELECT 1 FROM (VALUES
+      ('certificates','certificate_number','text',true),
+      ('certificates','print_state','character varying(24)',true),
+      ('certificates','grade_type','text',true),
+      ('certificates','grade','numeric(4,1)',false),
+      ('certificates','grade_approved_at','timestamp without time zone|timestamp with time zone',false),
+      ('certificates','grader_status','character varying(20)',true),
+      ('certificates','status','character varying(10)',true),
+      ('certificates','deleted_at','timestamp without time zone|timestamp with time zone',false),
+      ('certificates','ownership_status','character varying(20)',true),
+      ('certificates','updated_at','timestamp without time zone|timestamp with time zone',false),
+      ('certificates','claim_code','text',false),
+      ('print_batches','id','integer',true),
+      ('print_batches','batch_id','text',true),
+      ('print_batches','kind','character varying(12)',true),
+      ('print_batches','status','character varying(12)',true),
+      ('print_batches','cert_ids','jsonb',true),
+      ('print_batches','cert_count','integer',true),
+      ('print_batches','success_count','integer',true),
+      ('print_batches','failure_count','integer',true),
+      ('print_batches','created_by','text',false),
+      ('print_batches','created_by_role','character varying(16)',false),
+      ('print_batches','created_at','timestamp without time zone',true),
+      ('print_batches','printed_at','timestamp without time zone',false),
+      ('print_batches','notes','text',false),
+      ('print_batches','reason','text',false),
+      ('print_batches','reason_category','character varying(24)',false),
+      ('print_batches','layout_version','text',false),
+      ('print_events','id','integer',true),
+      ('print_events','cert_id','text',true),
+      ('print_events','batch_id','text',false),
+      ('print_events','actor','text',true),
+      ('print_events','actor_role','character varying(16)',false),
+      ('print_events','action','character varying(24)',true),
+      ('print_events','from_state','character varying(24)',false),
+      ('print_events','to_state','character varying(24)',false),
+      ('print_events','reason','text',false),
+      ('print_events','reason_category','character varying(24)',false),
+      ('print_events','created_at','timestamp without time zone',true),
+      ('label_prints','id','integer',true),
+      ('label_prints','cert_id','text',true),
+      ('label_prints','sheet_ref','text',false),
+      ('label_prints','queued_at','timestamp without time zone|timestamp with time zone',true),
+      ('label_prints','printed_at','timestamp without time zone|timestamp with time zone',false),
+      ('label_overrides','id','integer',true),
+      ('label_overrides','cert_id','text',true),
+      ('label_overrides','card_name_override','text',false),
+      ('label_overrides','set_override','text',false),
+      ('label_overrides','variant_override','text',false),
+      ('label_overrides','language_override','text',false),
+      ('label_overrides','year_override','text',false),
+      ('label_overrides','edited_at','timestamp without time zone|timestamp with time zone',true),
+      ('reprint_log','id','integer',true),
+      ('reprint_log','cert_id','text',true),
+      ('reprint_log','reprint_time','timestamp without time zone|timestamp with time zone',true),
+      ('audit_log','id','integer',true),
+      ('audit_log','entity_type','text',true),
+      ('audit_log','entity_id','text',true),
+      ('audit_log','action','text',true),
+      ('audit_log','admin_user','text',false),
+      ('audit_log','details','jsonb',false),
+      ('audit_log','created_at','timestamp without time zone|timestamp with time zone',true)
+    ) AS required(relation_name,column_name,expected_type,required_not_null)
+    LEFT JOIN pg_attribute attribute
+      ON attribute.attrelid=to_regclass('public.' || required.relation_name)
+     AND attribute.attname=required.column_name
+     AND attribute.attnum > 0
+     AND NOT attribute.attisdropped
+    WHERE format_type(attribute.atttypid,attribute.atttypmod) IS NULL
+       OR NOT (format_type(attribute.atttypid,attribute.atttypmod) = ANY(string_to_array(required.expected_type,'|')))
+       OR (required.required_not_null AND attribute.attnotnull IS DISTINCT FROM true)
+  )
+  AND NOT EXISTS (
+    SELECT 1 FROM (VALUES
+      ('certificates','print_state',ARRAY['''awaiting_approval''::character varying']),
+      ('print_batches','id',ARRAY[
+        'nextval(''print_batches_id_seq''::regclass)',
+        'nextval(''public.print_batches_id_seq''::regclass)'
+      ]),
+      ('print_batches','kind',ARRAY['''batch''::character varying']),
+      ('print_batches','status',ARRAY['''open''::character varying']),
+      ('print_batches','cert_ids',ARRAY['''[]''::jsonb']),
+      ('print_batches','cert_count',ARRAY['0']),
+      ('print_batches','success_count',ARRAY['0']),
+      ('print_batches','failure_count',ARRAY['0']),
+      ('print_batches','created_at',ARRAY['now()']),
+      ('print_events','id',ARRAY[
+        'nextval(''print_events_id_seq''::regclass)',
+        'nextval(''public.print_events_id_seq''::regclass)'
+      ]),
+      ('print_events','created_at',ARRAY['now()']),
+      ('label_prints','id',ARRAY[
+        'nextval(''label_prints_id_seq''::regclass)',
+        'nextval(''public.label_prints_id_seq''::regclass)'
+      ]),
+      ('label_prints','queued_at',ARRAY['now()']),
+      ('label_overrides','id',ARRAY[
+        'nextval(''label_overrides_id_seq''::regclass)',
+        'nextval(''public.label_overrides_id_seq''::regclass)'
+      ]),
+      ('label_overrides','edited_at',ARRAY['now()']),
+      ('reprint_log','id',ARRAY[
+        'nextval(''reprint_log_id_seq''::regclass)',
+        'nextval(''public.reprint_log_id_seq''::regclass)'
+      ]),
+      ('reprint_log','reprint_time',ARRAY['now()']),
+      ('audit_log','id',ARRAY[
+        'nextval(''audit_log_id_seq''::regclass)',
+        'nextval(''public.audit_log_id_seq''::regclass)'
+      ]),
+      ('audit_log','created_at',ARRAY['now()'])
+    ) AS required(relation_name,column_name,expected_expressions)
+    LEFT JOIN pg_attribute attribute
+      ON attribute.attrelid=to_regclass('public.' || required.relation_name)
+     AND attribute.attname=required.column_name
+     AND attribute.attnum > 0
+     AND NOT attribute.attisdropped
+    LEFT JOIN pg_attrdef default_row
+      ON default_row.adrelid=attribute.attrelid
+     AND default_row.adnum=attribute.attnum
+    WHERE pg_get_expr(default_row.adbin,default_row.adrelid) IS NULL
+       OR NOT (pg_get_expr(default_row.adbin,default_row.adrelid) = ANY(required.expected_expressions))
+  )
+  AND NOT EXISTS (
+    SELECT 1 FROM (VALUES
+      ('print_batches'),
+      ('print_events'),
+      ('label_prints'),
+      ('label_overrides'),
+      ('reprint_log'),
+      ('audit_log')
+    ) AS required(relation_name)
+    WHERE NOT EXISTS (
+      SELECT 1
+        FROM pg_attribute attribute
+        JOIN pg_constraint constraint_row
+          ON constraint_row.conrelid=attribute.attrelid
+         AND constraint_row.contype='p'
+         AND constraint_row.convalidated
+         AND constraint_row.conkey=ARRAY[attribute.attnum]
+       WHERE attribute.attrelid=to_regclass('public.' || required.relation_name)
+         AND attribute.attname='id'
+         AND attribute.attnum > 0
+         AND NOT attribute.attisdropped
+    )
+  )
+  AND NOT EXISTS (
+    SELECT 1 FROM (VALUES
+      ('print_batches','print_batches_id_seq'),
+      ('print_events','print_events_id_seq'),
+      ('label_prints','label_prints_id_seq'),
+      ('label_overrides','label_overrides_id_seq'),
+      ('reprint_log','reprint_log_id_seq'),
+      ('audit_log','audit_log_id_seq')
+    ) AS required(relation_name,sequence_name)
+    WHERE pg_get_serial_sequence('public.' || required.relation_name,'id')
+          IS DISTINCT FROM 'public.' || required.sequence_name
+  )
+  AND EXISTS (
+    SELECT 1 FROM pg_constraint constraint_row
+     WHERE constraint_row.conrelid=to_regclass('public.print_batches')
+       AND constraint_row.contype='u'
+       AND constraint_row.convalidated
+       AND pg_get_constraintdef(constraint_row.oid)='UNIQUE (batch_id)'
+  )
+  AND EXISTS (
+    SELECT 1 FROM pg_constraint constraint_row
+     WHERE constraint_row.conrelid=to_regclass('public.label_prints')
+       AND constraint_row.contype='u'
+       AND constraint_row.convalidated
+       AND pg_get_constraintdef(constraint_row.oid)='UNIQUE (cert_id)'
+  )
+  AND EXISTS (
+    SELECT 1 FROM pg_constraint constraint_row
+     WHERE constraint_row.conrelid=to_regclass('public.label_overrides')
+       AND constraint_row.contype='u'
+       AND constraint_row.convalidated
+       AND pg_get_constraintdef(constraint_row.oid)='UNIQUE (cert_id)'
+  )
+  AND EXISTS (
+    SELECT 1 FROM pg_index index_row
+     WHERE index_row.indexrelid=to_regclass('public.idx_certificates_print_state')
+       AND index_row.indrelid=to_regclass('public.certificates')
+       AND index_row.indisvalid AND index_row.indisready
+       AND index_row.indpred IS NULL
+       AND index_row.indnkeyatts=1 AND index_row.indnatts=1 AND index_row.indexprs IS NULL
+       AND pg_get_indexdef(index_row.indexrelid,1,true)='print_state'
+  )
+  AND EXISTS (
+    SELECT 1 FROM pg_index index_row
+     WHERE index_row.indexrelid=to_regclass('public.idx_print_events_cert')
+       AND index_row.indrelid=to_regclass('public.print_events')
+       AND index_row.indisvalid AND index_row.indisready
+       AND index_row.indpred IS NULL
+       AND index_row.indnkeyatts=1 AND index_row.indnatts=1 AND index_row.indexprs IS NULL
+       AND pg_get_indexdef(index_row.indexrelid,1,true)='cert_id'
+  )
+  AND EXISTS (
+    SELECT 1 FROM pg_index index_row
+     WHERE index_row.indexrelid=to_regclass('public.idx_print_batches_status')
+       AND index_row.indrelid=to_regclass('public.print_batches')
+       AND index_row.indisvalid AND index_row.indisready AND index_row.indpred IS NULL
+       AND index_row.indnkeyatts=1 AND index_row.indnatts=1 AND index_row.indexprs IS NULL
+       AND pg_get_indexdef(index_row.indexrelid,1,true)='status'
+  )
+  AND EXISTS (
+    SELECT 1 FROM pg_index index_row
+     WHERE index_row.indexrelid=to_regclass('public.idx_print_batches_created_at')
+       AND index_row.indrelid=to_regclass('public.print_batches')
+       AND index_row.indisvalid AND index_row.indisready AND index_row.indpred IS NULL
+       AND index_row.indnkeyatts=1 AND index_row.indnatts=1 AND index_row.indexprs IS NULL
+       AND pg_get_indexdef(index_row.indexrelid,1,true)='created_at'
+  )
+  AND EXISTS (
+    SELECT 1 FROM pg_index index_row
+     WHERE index_row.indexrelid=to_regclass('public.idx_print_events_batch')
+       AND index_row.indrelid=to_regclass('public.print_events')
+       AND index_row.indisvalid AND index_row.indisready AND index_row.indpred IS NULL
+       AND index_row.indnkeyatts=1 AND index_row.indnatts=1 AND index_row.indexprs IS NULL
+       AND pg_get_indexdef(index_row.indexrelid,1,true)='batch_id'
+  )
+  AND EXISTS (
+    SELECT 1 FROM pg_index index_row
+     WHERE index_row.indexrelid=to_regclass('public.idx_print_events_created_at')
+       AND index_row.indrelid=to_regclass('public.print_events')
+       AND index_row.indisvalid AND index_row.indisready AND index_row.indpred IS NULL
+       AND index_row.indnkeyatts=1 AND index_row.indnatts=1 AND index_row.indexprs IS NULL
+       AND pg_get_indexdef(index_row.indexrelid,1,true)='created_at'
+  )`;
+
+export const PRINT_WORKFLOW_READINESS_SQL = `SELECT (${PRINT_WORKFLOW_CONTRACT_PREDICATE}) AS ready`;
+
 export interface ReleaseReadiness {
   ok: boolean;
   missingRelations: string[];
@@ -572,6 +813,8 @@ WITH required_relations(name) AS (
   SELECT (${CUSTOMER_NOTIFICATION_CONTRACT_PREDICATE}) AS ready
 ), object_write_contract AS (
   SELECT (${OBJECT_WRITE_CONTRACT_PREDICATE}) AS ready
+), print_workflow_contract AS (
+  SELECT (${PRINT_WORKFLOW_CONTRACT_PREDICATE}) AS ready
 ), runtime_authority AS (
   SELECT CASE WHEN NOT $5::boolean THEN true ELSE EXISTS (
     SELECT 1
@@ -617,6 +860,56 @@ WITH required_relations(name) AS (
        AND has_table_privilege(login.rolname, 'public.certificates', 'SELECT')
        AND has_table_privilege(login.rolname, 'public.certificates', 'INSERT')
        AND has_table_privilege(login.rolname, 'public.certificates', 'UPDATE')
+       AND NOT has_table_privilege(login.rolname, 'public.certificates', 'DELETE')
+       AND NOT has_table_privilege(login.rolname, 'public.certificates', 'TRUNCATE')
+       AND has_table_privilege(login.rolname, 'public.print_batches', 'SELECT')
+       AND has_table_privilege(login.rolname, 'public.print_batches', 'INSERT')
+       AND has_table_privilege(login.rolname, 'public.print_batches', 'UPDATE')
+       AND NOT has_table_privilege(login.rolname, 'public.print_batches', 'DELETE')
+       AND NOT has_table_privilege(login.rolname, 'public.print_batches', 'TRUNCATE')
+       AND has_table_privilege(login.rolname, 'public.label_prints', 'SELECT')
+       AND has_table_privilege(login.rolname, 'public.label_prints', 'INSERT')
+       AND has_table_privilege(login.rolname, 'public.label_prints', 'UPDATE')
+       AND NOT has_table_privilege(login.rolname, 'public.label_prints', 'DELETE')
+       AND NOT has_table_privilege(login.rolname, 'public.label_prints', 'TRUNCATE')
+       AND has_table_privilege(login.rolname, 'public.label_overrides', 'SELECT')
+       AND has_table_privilege(login.rolname, 'public.label_overrides', 'INSERT')
+       AND has_table_privilege(login.rolname, 'public.label_overrides', 'UPDATE')
+       AND has_table_privilege(login.rolname, 'public.label_overrides', 'DELETE')
+       AND NOT has_table_privilege(login.rolname, 'public.label_overrides', 'TRUNCATE')
+       AND has_table_privilege(login.rolname, 'public.reprint_log', 'SELECT')
+       AND has_table_privilege(login.rolname, 'public.reprint_log', 'INSERT')
+       AND has_table_privilege(login.rolname, 'public.reprint_log', 'UPDATE')
+       AND NOT has_table_privilege(login.rolname, 'public.reprint_log', 'DELETE')
+       AND NOT has_table_privilege(login.rolname, 'public.reprint_log', 'TRUNCATE')
+       AND has_table_privilege(login.rolname, 'public.print_events', 'SELECT')
+       AND has_table_privilege(login.rolname, 'public.print_events', 'INSERT')
+       AND NOT has_table_privilege(login.rolname, 'public.print_events', 'UPDATE')
+       AND NOT has_table_privilege(login.rolname, 'public.print_events', 'DELETE')
+       AND NOT has_table_privilege(login.rolname, 'public.print_events', 'TRUNCATE')
+       AND has_table_privilege(login.rolname, 'public.audit_log', 'SELECT')
+       AND has_table_privilege(login.rolname, 'public.audit_log', 'INSERT')
+       AND NOT has_table_privilege(login.rolname, 'public.audit_log', 'UPDATE')
+       AND NOT has_table_privilege(login.rolname, 'public.audit_log', 'DELETE')
+       AND NOT has_table_privilege(login.rolname, 'public.audit_log', 'TRUNCATE')
+       AND has_sequence_privilege(login.rolname, 'public.print_batches_id_seq', 'USAGE')
+       AND has_sequence_privilege(login.rolname, 'public.print_batches_id_seq', 'SELECT')
+       AND NOT has_sequence_privilege(login.rolname, 'public.print_batches_id_seq', 'UPDATE')
+       AND has_sequence_privilege(login.rolname, 'public.print_events_id_seq', 'USAGE')
+       AND has_sequence_privilege(login.rolname, 'public.print_events_id_seq', 'SELECT')
+       AND NOT has_sequence_privilege(login.rolname, 'public.print_events_id_seq', 'UPDATE')
+       AND has_sequence_privilege(login.rolname, 'public.label_prints_id_seq', 'USAGE')
+       AND has_sequence_privilege(login.rolname, 'public.label_prints_id_seq', 'SELECT')
+       AND NOT has_sequence_privilege(login.rolname, 'public.label_prints_id_seq', 'UPDATE')
+       AND has_sequence_privilege(login.rolname, 'public.label_overrides_id_seq', 'USAGE')
+       AND has_sequence_privilege(login.rolname, 'public.label_overrides_id_seq', 'SELECT')
+       AND NOT has_sequence_privilege(login.rolname, 'public.label_overrides_id_seq', 'UPDATE')
+       AND has_sequence_privilege(login.rolname, 'public.reprint_log_id_seq', 'USAGE')
+       AND has_sequence_privilege(login.rolname, 'public.reprint_log_id_seq', 'SELECT')
+       AND NOT has_sequence_privilege(login.rolname, 'public.reprint_log_id_seq', 'UPDATE')
+       AND has_sequence_privilege(login.rolname, 'public.audit_log_id_seq', 'USAGE')
+       AND has_sequence_privilege(login.rolname, 'public.audit_log_id_seq', 'SELECT')
+       AND NOT has_sequence_privilege(login.rolname, 'public.audit_log_id_seq', 'UPDATE')
        AND has_table_privilege(login.rolname, 'public.partner_applications', 'SELECT')
        AND has_table_privilege(login.rolname, 'public.partner_applications', 'INSERT')
        AND has_table_privilege(login.rolname, 'public.partner_applications', 'UPDATE')
@@ -652,7 +945,7 @@ WITH required_relations(name) AS (
 ), missing_relations AS (
   SELECT array_agg(name ORDER BY name) AS names
     FROM required_relations, session_contract, payment_fulfilment_contract,
-         customer_notification_contract, object_write_contract
+         customer_notification_contract, object_write_contract, print_workflow_contract
    WHERE to_regclass(name) IS NULL
       OR (name = 'public.session' AND NOT session_contract.ready)
       OR (
@@ -666,6 +959,18 @@ WITH required_relations(name) AS (
       OR (
         name IN ('public.object_write_operations','public.object_write_items')
         AND NOT object_write_contract.ready
+      )
+      OR (
+        name IN (
+          'public.certificates',
+          'public.print_batches',
+          'public.print_events',
+          'public.label_prints',
+          'public.label_overrides',
+          'public.reprint_log',
+          'public.audit_log'
+        )
+        AND NOT print_workflow_contract.ready
       )
 ), missing_migrations AS (
   SELECT array_agg(r.filename ORDER BY r.filename) AS names

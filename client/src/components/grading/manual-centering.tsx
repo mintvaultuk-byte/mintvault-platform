@@ -1,3 +1,4 @@
+import { adminFetch } from "@/lib/queryClient";
 import { useState, useRef, useCallback } from "react";
 import { X, Save, ZoomIn, ZoomOut, RotateCcw } from "lucide-react";
 import { useToast } from "@/hooks/use-toast";
@@ -258,7 +259,7 @@ export default function ManualCentering({
   async function save() {
     setSaving(true);
     try {
-      const r = await fetch(`/api/admin/certificates/${certId}/manual-centering`, {
+      const r = await adminFetch(`/api/admin/certificates/${certId}/manual-centering`, {
         method: "POST",
         credentials: "include",
         headers: { "Content-Type": "application/json" },

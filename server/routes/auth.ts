@@ -92,7 +92,7 @@ export function registerAuthRoutes(app: Express): void {
         recordFailedLogin(req);
         await registerAdminPasswordFailure();
         await new Promise((resolve) => setTimeout(resolve, FAILED_LOGIN_DELAY_MS));
-        return res.status(401).json({ error: "Invalid credentials" });
+        return res.status(401).json({ error: "Invalid credentials", code: "admin_credential_rejected" });
       }
 
       clearLoginAttempts(req);
@@ -131,7 +131,7 @@ export function registerAuthRoutes(app: Express): void {
         recordFailedLogin(req);
         await registerAdminPasswordFailure();
         await new Promise((resolve) => setTimeout(resolve, FAILED_LOGIN_DELAY_MS));
-        return res.status(401).json({ error: "Invalid credentials" });
+        return res.status(401).json({ error: "Invalid credentials", code: "admin_credential_rejected" });
       }
 
       clearLoginAttempts(req);
@@ -183,7 +183,7 @@ export function registerAuthRoutes(app: Express): void {
       const adminUser = await storage.getUserByEmail(adminEmail);
       if (!adminUser || !(adminUser as { pinHash?: string }).pinHash) {
         await new Promise((resolve) => setTimeout(resolve, FAILED_LOGIN_DELAY_MS));
-        return res.status(401).json({ error: "Invalid credentials" });
+        return res.status(401).json({ error: "Invalid credentials", code: "admin_credential_rejected" });
       }
 
       const passwordCheck = await verifyAdminPassword(password, adminUser);
@@ -192,7 +192,9 @@ export function registerAuthRoutes(app: Express): void {
         const post = await registerFailure(adminEmail);
         await logPinEvent(adminEmail, false, post.locked ? "lockout_triggered" : "wrong_pin", ipH);
         await new Promise((resolve) => setTimeout(resolve, FAILED_LOGIN_DELAY_MS));
-        return res.status(post.locked ? 423 : 401).json({ error: "Invalid credentials" });
+        return res
+          .status(post.locked ? 423 : 401)
+          .json({ error: "Invalid credentials", code: "admin_credential_rejected" });
       }
 
       await resetFailures(adminEmail);
@@ -231,7 +233,7 @@ export function registerAuthRoutes(app: Express): void {
       const adminUser = await storage.getUserByEmail(ADMIN_EMAIL);
       if (!adminUser) {
         await new Promise((resolve) => setTimeout(resolve, FAILED_LOGIN_DELAY_MS));
-        return res.status(401).json({ error: "Invalid credentials" });
+        return res.status(401).json({ error: "Invalid credentials", code: "admin_credential_rejected" });
       }
       if (!(adminUser as any).pinHash) {
         // PIN not yet set — keep pendingAdmin flag in session, frontend
@@ -261,7 +263,7 @@ export function registerAuthRoutes(app: Express): void {
           clearPendingAdmin(req);
           return res.status(401).json({ error: "Too many failed attempts, please start again" });
         }
-        return res.status(401).json({ error: "Invalid credentials" });
+        return res.status(401).json({ error: "Invalid credentials", code: "admin_credential_rejected" });
       }
 
       clearPinAttempts(req);
@@ -312,6 +314,8 @@ export function registerAuthRoutes(app: Express): void {
   });
 
   app.get("/api/admin/session", async (req, res) => {
+    res.set("Cache-Control", "private, no-store");
+    res.vary("Cookie");
     const status = classifyAdminSession(req);
     if (status.authenticated) {
       const adminUser = await storage.getUserByEmail(ADMIN_EMAIL);
@@ -403,7 +407,7 @@ export function registerAuthRoutes(app: Express): void {
         const { currentPassphrase, newPassphrase, confirmPassphrase, pin } = req.body || {};
         if (!(await verifyAdminPinConfirmation(req, pin))) {
           await new Promise((resolve) => setTimeout(resolve, FAILED_LOGIN_DELAY_MS));
-          return res.status(401).json({ error: "Invalid credentials" });
+          return res.status(401).json({ error: "Invalid credentials", code: "admin_credential_rejected" });
         }
         if (!newPassphrase || String(newPassphrase).length < 14 || newPassphrase !== confirmPassphrase) {
           return res.status(400).json({ error: "Invalid credentials" });
@@ -412,7 +416,7 @@ export function registerAuthRoutes(app: Express): void {
         const current = await verifyAdminPassword(String(currentPassphrase || ""), adminUser);
         if (!current.valid) {
           await new Promise((resolve) => setTimeout(resolve, FAILED_LOGIN_DELAY_MS));
-          return res.status(401).json({ error: "Invalid credentials" });
+          return res.status(401).json({ error: "Invalid credentials", code: "admin_credential_rejected" });
         }
         const newHash = await hashPassword(String(newPassphrase));
         const updated = await db.execute(sql`
@@ -456,7 +460,7 @@ export function registerAuthRoutes(app: Express): void {
         const { currentPin, newPin, confirmPin } = req.body || {};
         if (!(await verifyAdminPinConfirmation(req, currentPin))) {
           await new Promise((resolve) => setTimeout(resolve, FAILED_LOGIN_DELAY_MS));
-          return res.status(401).json({ error: "Invalid credentials" });
+          return res.status(401).json({ error: "Invalid credentials", code: "admin_credential_rejected" });
         }
         if (!newPin || newPin !== confirmPin) return res.status(400).json({ error: "Invalid credentials" });
         const { hashPin, validatePinStrength, WeakPinError, resetFailures } = await import("../pin");
@@ -512,7 +516,7 @@ export function registerAuthRoutes(app: Express): void {
         const { pin } = req.body || {};
         if (!(await verifyAdminPinConfirmation(req, pin))) {
           await new Promise((resolve) => setTimeout(resolve, FAILED_LOGIN_DELAY_MS));
-          return res.status(401).json({ error: "Invalid credentials" });
+          return res.status(401).json({ error: "Invalid credentials", code: "admin_credential_rejected" });
         }
         const updated = await db.execute(sql`
         UPDATE users

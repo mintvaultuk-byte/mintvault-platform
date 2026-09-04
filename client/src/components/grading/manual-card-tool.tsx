@@ -1,3 +1,4 @@
+import { adminFetch } from "@/lib/queryClient";
 import { useState, useRef, useEffect, useLayoutEffect } from "react";
 import {
   Loader2,
@@ -1099,7 +1100,7 @@ export default function ManualCardTool({
           });
           return;
         }
-        const cenRes = await fetch(`${apiBase}/certificates/${certId}/manual-centering`, {
+        const cenRes = await adminFetch(`${apiBase}/certificates/${certId}/manual-centering`, {
           method: "POST",
           credentials: "include",
           headers: { "Content-Type": "application/json" },
@@ -1189,7 +1190,7 @@ export default function ManualCardTool({
       }
 
       // ── LEGACY SYNCHRONOUS PATH (no defects phase / no upload owner) ─────
-      const cropRes = await fetch(`${apiBase}/certificates/${certId}/recrop`, {
+      const cropRes = await adminFetch(`${apiBase}/certificates/${certId}/recrop`, {
         method: "POST",
         credentials: "include",
         headers: { "Content-Type": "application/json" },

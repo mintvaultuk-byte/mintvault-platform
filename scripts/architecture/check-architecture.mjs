@@ -153,6 +153,34 @@ function importTarget(root, files, file, specifier) {
   return specifier;
 }
 
+function lexicalScope(node) {
+  let current = node.parent;
+  while (current && !ts.isBlock(current) && !ts.isSourceFile(current)) current = current.parent;
+  return current;
+}
+
+function lexicalEntry(model, entries, name, useNode) {
+  const position = useNode?.getStart(model.source) ?? Number.MAX_SAFE_INTEGER;
+  return entries
+    .filter(
+      (entry) =>
+        entry.name === name &&
+        entry.position <= position &&
+        entry.scope &&
+        entry.scope.getStart(model.source) <= position &&
+        position <= entry.scope.getEnd()
+    )
+    .sort((left, right) => right.position - left.position)[0];
+}
+
+function lexicalInitializer(model, name, useNode) {
+  return lexicalEntry(model, model.lexicalConstants, name, useNode)?.initializer ?? null;
+}
+
+function importBindingFor(model, name, useNode) {
+  return lexicalEntry(model, model.dynamicImports, name, useNode) ?? model.imports.get(name);
+}
+
 function makeModels(root, files, policy) {
   const approvedApplicationRoots = new Set(
     (policy.applicationRoots ?? []).map((item) => `${item.file}#${item.context}:${item.receiver}`)
@@ -167,7 +195,9 @@ function makeModels(root, files, policy) {
       text,
       source,
       imports: new Map(),
+      dynamicImports: [],
       constants: new Map(),
+      lexicalConstants: [],
       functions: new Map(),
       functionContexts: new Map(),
       contextParents: new Map(),
@@ -245,6 +275,12 @@ function makeModels(root, files, policy) {
       if (ts.isVariableDeclaration(node) && ts.isIdentifier(node.name) && node.initializer) {
         model.constants.set(`${nextContext}:${node.name.text}`, node.initializer);
         if (nextContext === "<module>") model.constants.set(node.name.text, node.initializer);
+        model.lexicalConstants.push({
+          name: node.name.text,
+          initializer: node.initializer,
+          position: node.getStart(source),
+          scope: lexicalScope(node),
+        });
         if (ts.isArrowFunction(node.initializer) || ts.isFunctionExpression(node.initializer)) {
           model.functions.set(node.name.text, node.initializer);
           model.functionContexts.set(node.name.text, node.name.text);
@@ -280,7 +316,15 @@ function makeModels(root, files, policy) {
         const specifier = dynamicImportSpecifier(node.initializer);
         const target = specifier ? importTarget(root, files, file, specifier) : null;
         if (target && ts.isIdentifier(node.name)) {
-          model.imports.set(node.name.text, { target, imported: "*", runtime: true, dynamic: true });
+          model.dynamicImports.push({
+            name: node.name.text,
+            target,
+            imported: "*",
+            runtime: true,
+            dynamic: true,
+            position: node.getStart(source),
+            scope: lexicalScope(node),
+          });
         } else if (target && ts.isObjectBindingPattern(node.name)) {
           for (const element of node.name.elements) {
             if (!ts.isIdentifier(element.name)) continue;
@@ -289,7 +333,15 @@ function makeModels(root, files, policy) {
               (ts.isIdentifier(element.propertyName) || ts.isStringLiteralLike(element.propertyName))
                 ? element.propertyName.text
                 : element.name.text;
-            model.imports.set(element.name.text, { target, imported, runtime: true, dynamic: true });
+            model.dynamicImports.push({
+              name: element.name.text,
+              target,
+              imported,
+              runtime: true,
+              dynamic: true,
+              position: node.getStart(source),
+              scope: lexicalScope(node),
+            });
           }
         }
       }
@@ -398,9 +450,12 @@ function evaluate(node, model, context, models, bindings = new Map(), seen = new
     const marker = `${model.file}#${context}#${node.text}`;
     if (seen.has(marker)) return null;
     const nextSeen = new Set(seen).add(marker);
-    const local = model.constants.get(`${context}:${node.text}`) ?? model.constants.get(node.text);
+    const local =
+      lexicalInitializer(model, node.text, node) ??
+      model.constants.get(`${context}:${node.text}`) ??
+      model.constants.get(node.text);
     if (local) return evaluate(local, model, context, models, bindings, nextSeen);
-    const imported = model.imports.get(node.text);
+    const imported = importBindingFor(model, node.text, node);
     const target = imported?.target ? models.get(imported.target) : null;
     if (target)
       return evaluate(target.constants.get(imported.imported), target, "<module>", models, bindings, nextSeen);
@@ -513,7 +568,10 @@ function resolvedExpressionNode(node, model, context, seen = new Set()) {
   if (!node || !ts.isIdentifier(node)) return node;
   const marker = `${model.file}#${context}#expression#${node.text}`;
   if (seen.has(marker)) return node;
-  const initializer = model.constants.get(`${context}:${node.text}`) ?? model.constants.get(node.text);
+  const initializer =
+    lexicalInitializer(model, node.text, node) ??
+    model.constants.get(`${context}:${node.text}`) ??
+    model.constants.get(node.text);
   return initializer ? resolvedExpressionNode(initializer, model, context, new Set(seen).add(marker)) : node;
 }
 
@@ -562,6 +620,72 @@ function objectHeaderAuthority(node, model, context) {
     if (name && /idempotency[-_ ]?key/i.test(name)) evidence = "declared-header";
   }
   return evidence;
+}
+
+function symbolicAuthority(node, model, context, models, bindings = new Map(), seen = new Set()) {
+  node = unwrap(node);
+  if (!node) return "<missing>";
+  const evaluated = evaluate(node, model, context, models, bindings);
+  if (["string", "number", "boolean"].includes(typeof evaluated)) return String(evaluated);
+  if (ts.isIdentifier(node)) {
+    const marker = `${model.file}#${context}#symbolic#${node.text}`;
+    if (seen.has(marker)) return `<dynamic:${node.text}>`;
+    const initializer =
+      lexicalInitializer(model, node.text, node) ??
+      model.constants.get(`${context}:${node.text}`) ??
+      model.constants.get(node.text);
+    if (initializer) {
+      return symbolicAuthority(initializer, model, context, models, bindings, new Set(seen).add(marker));
+    }
+    return `<dynamic:${node.text}>`;
+  }
+  if (ts.isTemplateExpression(node)) {
+    return (
+      node.head.text +
+      node.templateSpans
+        .map(
+          (span) => `${symbolicAuthority(span.expression, model, context, models, bindings, seen)}${span.literal.text}`
+        )
+        .join("")
+    );
+  }
+  if (ts.isBinaryExpression(node) && node.operatorToken.kind === ts.SyntaxKind.PlusToken) {
+    return `${symbolicAuthority(node.left, model, context, models, bindings, seen)}${symbolicAuthority(
+      node.right,
+      model,
+      context,
+      models,
+      bindings,
+      seen
+    )}`;
+  }
+  return `<dynamic:${expressionText(node, model.source)}>`;
+}
+
+function fetchOptionFacts(options, model, context, models, bindings = new Map()) {
+  const method = objectPropertyNode(options, "method", model, context);
+  const signal = objectPropertyNode(options, "signal", model, context);
+  const headers = objectPropertyNode(options, "headers", model, context);
+  const methodValue = method.property ? evaluate(method.property, model, context, models, bindings) : null;
+  return {
+    httpMethod:
+      typeof methodValue === "string"
+        ? methodValue.toUpperCase()
+        : !options || (method.complete && ts.isObjectLiteralExpression(method.object) && !method.property)
+          ? "GET"
+          : "unclassified",
+    timeoutSignal: signal.property
+      ? expressionText(resolvedExpressionNode(signal.property, model, context), model.source)
+      : !options || signal.complete
+        ? "not-declared"
+        : "unclassified",
+    idempotencyEvidence: headers.property
+      ? objectHeaderAuthority(headers.property, model, context)
+      : !options || headers.complete
+        ? "not-declared"
+        : "unclassified",
+    optionsAuthority: options ? symbolicAuthority(options, model, context, models, bindings) : "default-fetch-options",
+  };
 }
 
 function staticSql(node, source) {
@@ -654,7 +778,7 @@ function normalizePath(prefix, path) {
 
 function functionTarget(expression, model, models, context = "<module>") {
   if (ts.isIdentifier(expression)) {
-    const imported = model.imports.get(expression.text);
+    const imported = importBindingFor(model, expression.text, expression);
     if (imported?.target) {
       const importedModel = models.get(imported.target);
       return `${imported.target}#${importedModel?.functionContexts.get(imported.imported) ?? imported.imported}`;
@@ -686,7 +810,7 @@ function functionTarget(expression, model, models, context = "<module>") {
     if (classKey && model.functions.has(classKey))
       return `${model.file}#${model.functionContexts.get(classKey) ?? classKey}`;
   }
-  const imported = model.imports.get(parts[0]);
+  const imported = importBindingFor(model, parts[0], cursor);
   if (!imported?.target) return null;
   const importedModel = models.get(imported.target);
   const importedBase =
@@ -709,7 +833,7 @@ function callableTarget(expression, model, context, models) {
     return `${model.file}#${context}:router:${expression.text}`;
   const target = ts.isCallExpression(expression) ? expression.expression : expression;
   if (!ts.isIdentifier(target)) return null;
-  const imported = model.imports.get(target.text);
+  const imported = importBindingFor(model, target.text, target);
   if (imported?.target) {
     const importedModel = models.get(imported.target);
     const exported = importedModel?.exportedRegistrars.get(imported.imported);
@@ -729,20 +853,28 @@ function callableTarget(expression, model, context, models) {
 function registrarFor(receiver, model, context) {
   if (!ts.isIdentifier(receiver)) return null;
   const seen = new Set();
-  let declaringContext = context;
-  while (declaringContext && !seen.has(declaringContext)) {
-    seen.add(declaringContext);
-    if (model.rootReceivers.get(declaringContext)?.has(receiver.text))
-      return `<root:${model.file}#${declaringContext}:${receiver.text}>`;
-    if (model.unapprovedRootReceivers.get(declaringContext)?.has(receiver.text))
-      return `<unapproved-root:${model.file}#${declaringContext}:${receiver.text}>`;
-    if (model.routerVariables.get(declaringContext)?.has(receiver.text))
-      return `${model.file}#${declaringContext}:router:${receiver.text}`;
-    if (model.expressReceivers.get(declaringContext)?.has(receiver.text))
-      return `${model.file}#${declaringContext}:param:${receiver.text}`;
-    declaringContext = model.contextParents.get(declaringContext);
+  function resolveName(name, startContext) {
+    const marker = `${startContext}:${name}`;
+    if (seen.has(marker)) return null;
+    seen.add(marker);
+    let declaringContext = startContext;
+    while (declaringContext) {
+      if (model.rootReceivers.get(declaringContext)?.has(name))
+        return `<root:${model.file}#${declaringContext}:${name}>`;
+      if (model.unapprovedRootReceivers.get(declaringContext)?.has(name))
+        return `<unapproved-root:${model.file}#${declaringContext}:${name}>`;
+      if (model.routerVariables.get(declaringContext)?.has(name))
+        return `${model.file}#${declaringContext}:router:${name}`;
+      if (model.expressReceivers.get(declaringContext)?.has(name))
+        return `${model.file}#${declaringContext}:param:${name}`;
+      declaringContext = model.contextParents.get(declaringContext);
+    }
+    const initializer = lexicalInitializer(model, name, receiver);
+    return initializer && ts.isIdentifier(unwrap(initializer))
+      ? resolveName(unwrap(initializer).text, startContext)
+      : null;
   }
-  return null;
+  return resolveName(receiver.text, context);
 }
 
 function propagateExpressReceivers(models) {
@@ -873,6 +1005,7 @@ function scanModel(root, model, models, policy) {
       line: lineOf(source, node),
       handlerContext: `${file}#${context}`,
       handlerRanges: handlerArguments.map((argument) => [argument.getStart(source), argument.getEnd()]),
+      routeLocalMiddleware: handlerArguments.map((argument) => expressionText(argument, source)),
       delegatedHandlerContexts: handlerArguments
         .map((argument) => functionTarget(argument, model, models, context))
         .filter(Boolean),
@@ -1016,6 +1149,9 @@ function scanModel(root, model, models, policy) {
           file,
           line: lineOf(source, node),
           position: node.getStart(source),
+          callerContext: nextContext,
+          arguments: [...node.arguments],
+          bindings: new Map(bindings),
         });
         const separator = invokedFunction.lastIndexOf("#");
         const targetFile = invokedFunction.slice(0, separator);
@@ -1104,39 +1240,19 @@ function scanModel(root, model, models, policy) {
         }
       }
       if ((file.startsWith("server/") || file.startsWith("scripts/")) && /^fetch$/.test(callName)) {
-        const url = typeof evaluated === "string" ? evaluated : expressionText(first, source);
+        const urlAuthority = symbolicAuthority(first, model, nextContext, models, bindings);
         let provider = "dynamic-fetch";
-        const match = String(url).match(/https?:\/\/[^/'"`$}\s]+/);
+        const match = urlAuthority.match(/https?:\/\/[^/'"`$<>}\s]+/);
         if (match) provider = match[0];
         const options = node.arguments[1];
-        const method = objectPropertyNode(options, "method", model, nextContext);
-        const signal = objectPropertyNode(options, "signal", model, nextContext);
-        const headers = objectPropertyNode(options, "headers", model, nextContext);
-        const methodValue = method.property ? evaluate(method.property, model, nextContext, models, bindings) : null;
         add("provider-adapter", `fetch:${provider}`, node, {
           effect: "http-fetch",
-          urlAuthority: typeof evaluated === "string" ? evaluated : `unclassified:${expressionText(first, source)}`,
-          httpMethod:
-            typeof methodValue === "string"
-              ? methodValue.toUpperCase()
-              : !options || (method.complete && ts.isObjectLiteralExpression(method.object) && !method.property)
-                ? "GET"
-                : "unclassified",
-          timeoutSignal: signal.property
-            ? expressionText(signal.property, source)
-            : !options || signal.complete
-              ? "not-declared"
-              : "unclassified",
-          idempotencyEvidence: headers.property
-            ? objectHeaderAuthority(headers.property, model, nextContext)
-            : !options || headers.complete
-              ? "not-declared"
-              : "unclassified",
-          optionsAuthority: options
-            ? expressionText(resolvedExpressionNode(options, model, nextContext), source)
-            : "default-fetch-options",
+          urlAuthority,
+          ...fetchOptionFacts(options, model, nextContext, models, bindings),
           _position: node.getStart(source),
           _context: `${file}#${nextContext}`,
+          _fetchUrlNode: first,
+          _fetchOptionsNode: options,
         });
       }
       const objectEffect =
@@ -1311,33 +1427,61 @@ function scanModel(root, model, models, policy) {
       const componentAttribute = attributeValue(attribute(node, "component"));
       const descendants = [];
       const routeElement = ts.isJsxOpeningElement(node) && ts.isJsxElement(node.parent) ? node.parent : null;
-      function collectDescendants(current) {
-        if (current !== routeElement && (ts.isJsxElement(current) || ts.isJsxSelfClosingElement(current))) {
+      const wrapperDetails = (opening) => {
+        const component = opening.tagName.getText(source);
+        return {
+          component,
+          importTarget: model.imports.get(component)?.target ?? "inline-or-unclassified",
+          props: Object.fromEntries(
+            opening.attributes.properties
+              .filter(ts.isJsxAttribute)
+              .map((item) => [item.name.getText(source), String(attributeValue(item) ?? "present")])
+          ),
+        };
+      };
+      const outerGuardChain = ancestors
+        .filter((ancestor) => ts.isJsxElement(ancestor))
+        .map((ancestor) => wrapperDetails(ancestor.openingElement))
+        .filter((item) => !["Route", "Switch"].includes(item.component));
+      function collectDescendants(current, guardChain = outerGuardChain) {
+        if (current === routeElement) {
+          for (const child of current.children) collectDescendants(child, guardChain);
+          return;
+        }
+        if (ts.isJsxElement(current) || ts.isJsxSelfClosingElement(current)) {
           const opening = ts.isJsxElement(current) ? current.openingElement : current;
-          const tag = opening.tagName.getText(source);
-          if (tag === "Route") return;
+          const details = wrapperDetails(opening);
+          if (details.component === "Route") return;
           const childElements = [];
           if (ts.isJsxElement(current)) {
             for (const child of current.children) {
               if (ts.isJsxElement(child) || ts.isJsxSelfClosingElement(child)) childElements.push(child);
+              else ts.forEachChild(child, (nested) => collectDescendants(nested, guardChain));
             }
           }
-          const props = Object.fromEntries(
-            opening.attributes.properties
-              .filter(ts.isJsxAttribute)
-              .map((item) => [item.name.getText(source), String(attributeValue(item) ?? "present")])
-          );
-          descendants.push({ tag, opening, props, wrapsJsx: childElements.length > 0 });
+          const wrapsJsx = childElements.length > 0;
+          descendants.push({
+            tag: details.component,
+            opening,
+            props: details.props,
+            importTarget: details.importTarget,
+            wrapsJsx,
+            guardChain,
+          });
+          const nextChain = /^[A-Z]/.test(details.component) && wrapsJsx ? [...guardChain, details] : guardChain;
+          for (const child of childElements) collectDescendants(child, nextChain);
+          return;
         }
-        ts.forEachChild(current, collectDescendants);
+        ts.forEachChild(current, (child) => collectDescendants(child, guardChain));
       }
       if (routeElement) collectDescendants(routeElement);
       const attributeComponentName = componentAttribute
         ? String(componentAttribute).replace(/[^A-Za-z0-9_$].*$/, "")
         : null;
-      const childComponents = descendants
-        .filter((item) => /^[A-Z]/.test(item.tag) && (!item.wrapsJsx || item.tag === "Redirect"))
-        .map((item) => item.tag);
+      const childComponentEntries = descendants.filter(
+        (item) => /^[A-Z]/.test(item.tag) && (!item.wrapsJsx || item.tag === "Redirect")
+      );
+      const childComponents = childComponentEntries.map((item) => item.tag);
       const renderedComponents = [...new Set([attributeComponentName, ...childComponents].filter(Boolean))];
       const componentImports = renderedComponents.map((componentName) => {
         const imported = model.imports.get(componentName);
@@ -1350,21 +1494,28 @@ function scanModel(root, model, models, policy) {
           return model.imports.get(componentName)?.target ?? null;
         })
         .filter(Boolean);
-      const ancestorWrappers = ancestors
-        .filter((ancestor) => ts.isJsxElement(ancestor))
-        .map((ancestor) => ancestor.openingElement.tagName.getText(source))
-        .filter((name) => !["Route", "Switch"].includes(name));
+      const componentGuardChains = [
+        ...(attributeComponentName ? [{ component: attributeComponentName, guards: outerGuardChain }] : []),
+        ...childComponentEntries.map((item) => ({ component: item.tag, guards: item.guardChain })),
+      ];
+      const ancestorWrappers = outerGuardChain.map((item) => item.component);
       const descendantWrappers = descendants
         .filter((item) => /^[A-Z]/.test(item.tag) && item.wrapsJsx)
         .map((item) => item.tag);
       const wrappers = [...new Set([...ancestorWrappers, ...descendantWrappers])];
       const requiredPermissions = [
         attributeValue(attribute(node, "requiredPermission")),
-        ...descendants.map((item) => item.props.requiredPermission),
+        ...componentGuardChains.flatMap((item) => item.guards.map((guard) => guard.props.requiredPermission)),
       ].filter(Boolean);
-      const guardProps = descendants
-        .filter((item) => /(?:Guard|Boundary|Provider|Route)$/.test(item.tag))
-        .map((item) => ({ component: item.tag, props: item.props }));
+      const guardProps = componentGuardChains.flatMap((item) =>
+        item.guards
+          .filter((guard) => /(?:Guard|Boundary|Provider|Route)$/.test(guard.component))
+          .map((guard) => ({
+            component: guard.component,
+            importTarget: guard.importTarget,
+            props: guard.props,
+          }))
+      );
       const redirectTargets = descendants
         .filter((item) => item.tag === "Redirect" && item.props.to)
         .map((item) => item.props.to);
@@ -1397,7 +1548,9 @@ function scanModel(root, model, models, policy) {
         typeof path === "string" &&
         (path === "/partner" || path.startsWith("/partner/")) &&
         !partnerPublic.has(path) &&
-        !wrappers.includes("PartnerRouteGuard")
+        componentGuardChains
+          .filter((item) => item.component !== "Redirect")
+          .some((item) => !item.guards.some((guard) => guard.component === "PartnerRouteGuard"))
       ) {
         violations.push({
           code: "UNGUARDED_PARTNER_CLIENT_ROUTE",
@@ -1410,6 +1563,7 @@ function scanModel(root, model, models, policy) {
         componentImports,
         _componentSourcePaths: componentSourcePaths,
         wrappers,
+        componentGuardChains,
         requiredPermissions: [...new Set(requiredPermissions.map(String))],
         guardProps,
         redirectTargets,
@@ -1502,6 +1656,7 @@ function routeRecords(routes, mounts, middlewares) {
           ...new Set([...route.capabilities, ...applicableMiddleware.flatMap((middleware) => middleware.capabilities)]),
         ].sort(),
         middleware: applicableMiddleware.map((item) => item.middleware),
+        routeLocalMiddleware: route.routeLocalMiddleware,
         requestSchemas: route.requestSchemas,
         responseSchemas: route.responseSchemas,
         retirementState: route.retirementState,
@@ -1597,7 +1752,143 @@ function declarationName(node, source) {
   return "<anonymous>";
 }
 
-function semanticAuthorityRecords(model) {
+function firstStaticQueryKey(node, model) {
+  const resolved = resolvedExpressionNode(node, model, "<module>");
+  if (!resolved || !ts.isArrayLiteralExpression(resolved) || resolved.elements.length === 0) return null;
+  const first = resolvedExpressionNode(resolved.elements[0], model, "<module>");
+  return first && ts.isStringLiteralLike(first) ? first.text : null;
+}
+
+function readAdminCacheAuthority(models, policy) {
+  const declaration = policy.adminCacheAuthority;
+  if (!declaration) return { configured: false, publicQueryKeys: new Set(), violations: [] };
+  const violations = [];
+  const exact = ["classifier", "file", "hash", "principalFields", "publicKeySet"];
+  if (
+    !exactKeys(declaration, exact) ||
+    typeof declaration.file !== "string" ||
+    typeof declaration.classifier !== "string" ||
+    typeof declaration.hash !== "string" ||
+    typeof declaration.publicKeySet !== "string" ||
+    !Array.isArray(declaration.principalFields) ||
+    declaration.principalFields.length === 0 ||
+    declaration.principalFields.some((field) => typeof field !== "string")
+  ) {
+    return {
+      configured: true,
+      publicQueryKeys: new Set(),
+      violations: [
+        {
+          code: "MALFORMED_ADMIN_CACHE_AUTHORITY",
+          source: "scripts/architecture/authority-policy.json:1",
+          target: "adminCacheAuthority",
+        },
+      ],
+    };
+  }
+
+  const model = models.get(declaration.file);
+  const setNode = model?.constants.get(declaration.publicKeySet);
+  const classifier = model?.functions.get(declaration.classifier);
+  const hash = model?.functions.get(declaration.hash);
+  const publicQueryKeys = new Set();
+  if (
+    setNode &&
+    ts.isNewExpression(setNode) &&
+    ts.isIdentifier(setNode.expression) &&
+    setNode.expression.text === "Set" &&
+    setNode.arguments?.length === 1 &&
+    ts.isArrayLiteralExpression(setNode.arguments[0]) &&
+    setNode.arguments[0].elements.every(ts.isStringLiteralLike)
+  ) {
+    for (const element of setNode.arguments[0].elements) publicQueryKeys.add(element.text);
+  } else {
+    violations.push({
+      code: "ADMIN_CACHE_AUTHORITY_DRIFT",
+      source: `${declaration.file}:1`,
+      target: `${declaration.publicKeySet} must be a static Set of public query-key literals`,
+    });
+  }
+
+  const classifierStatements = classifier?.body && ts.isBlock(classifier.body) ? [...classifier.body.statements] : [];
+  const classifierFalseReturn = (statement) =>
+    ts.isIfStatement(statement) &&
+    ts.isReturnStatement(statement.thenStatement) &&
+    statement.thenStatement.expression?.kind === ts.SyntaxKind.FalseKeyword;
+  const classifierShapeValid =
+    classifierStatements.length === 4 &&
+    ts.isVariableStatement(classifierStatements[0]) &&
+    classifierStatements[0].declarationList.declarations.length === 1 &&
+    classifierStatements[0].declarationList.declarations[0].name.getText(model.source) === "first" &&
+    classifierStatements[0].declarationList.declarations[0].initializer?.getText(model.source) === "queryKey[0]" &&
+    classifierFalseReturn(classifierStatements[1]) &&
+    classifierStatements[1].expression.getText(model.source) === 'first === "public"' &&
+    classifierFalseReturn(classifierStatements[2]) &&
+    classifierStatements[2].expression.getText(model.source) ===
+      `typeof first === "string" && ${declaration.publicKeySet}.has(first)` &&
+    ts.isReturnStatement(classifierStatements[3]) &&
+    classifierStatements[3].expression?.kind === ts.SyntaxKind.TrueKeyword;
+  if (!classifierShapeValid) {
+    violations.push({
+      code: "ADMIN_CACHE_AUTHORITY_DRIFT",
+      source: `${declaration.file}:1`,
+      target: `${declaration.classifier} must control both public exceptions and default protected classification`,
+    });
+  }
+
+  const hashStatements = hash?.body && ts.isBlock(hash.body) ? [...hash.body.statements] : [];
+  const hashDeclaration =
+    hashStatements[0] && ts.isVariableStatement(hashStatements[0])
+      ? hashStatements[0].declarationList.declarations[0]
+      : null;
+  const publicHashBranch = hashStatements[1];
+  const protectedHashReturn = hashStatements[2];
+  const protectedTemplate =
+    protectedHashReturn &&
+    ts.isReturnStatement(protectedHashReturn) &&
+    protectedHashReturn.expression &&
+    ts.isTemplateExpression(protectedHashReturn.expression)
+      ? protectedHashReturn.expression
+      : null;
+  const templateExpressions = protectedTemplate?.templateSpans.map((span) => span.expression) ?? [];
+  const principalHash = templateExpressions.find(
+    (expression) => ts.isCallExpression(expression) && expression.expression.getText(model.source) === "hashKey"
+  );
+  const principalFields =
+    principalHash &&
+    ts.isCallExpression(principalHash) &&
+    principalHash.arguments.length === 1 &&
+    ts.isArrayLiteralExpression(principalHash.arguments[0])
+      ? principalHash.arguments[0].elements.map((element) => element.getText(model.source))
+      : [];
+  const hashShapeValid =
+    hashStatements.length === 3 &&
+    hashDeclaration?.name.getText(model.source) === "queryHash" &&
+    hashDeclaration.initializer?.getText(model.source) === "hashKey(queryKey)" &&
+    publicHashBranch &&
+    ts.isIfStatement(publicHashBranch) &&
+    publicHashBranch.expression.getText(model.source) ===
+      `activeAdminPrincipal === null || !${declaration.classifier}(queryKey)` &&
+    ts.isReturnStatement(publicHashBranch.thenStatement) &&
+    publicHashBranch.thenStatement.expression?.getText(model.source) === "queryHash" &&
+    protectedTemplate !== null &&
+    templateExpressions.length === 3 &&
+    templateExpressions[0].getText(model.source) === "ADMIN_QUERY_HASH_PREFIX" &&
+    templateExpressions[2].getText(model.source) === "queryHash" &&
+    JSON.stringify(principalFields) ===
+      JSON.stringify(declaration.principalFields.map((field) => `activeAdminPrincipal.${field}`));
+  if (!hashShapeValid) {
+    violations.push({
+      code: "ADMIN_CACHE_AUTHORITY_DRIFT",
+      source: `${declaration.file}:1`,
+      target: `${declaration.hash} must branch on ${declaration.classifier} and hash the complete Admin scope`,
+    });
+  }
+
+  return { configured: true, declaration, publicQueryKeys, violations };
+}
+
+function semanticAuthorityRecords(model, adminCacheAuthority) {
   const { file, source } = model;
   const records = [];
   const add = (category, id, node, fields = {}) =>
@@ -1622,7 +1913,7 @@ function semanticAuthorityRecords(model) {
       }
       const marker = `${model.file}#principal#${node.text}`;
       if (seen.has(marker)) return false;
-      const initializer = model.constants.get(node.text);
+      const initializer = lexicalInitializer(model, node.text, node) ?? model.constants.get(node.text);
       return initializer ? hasPrincipalExpression(initializer, new Set(seen).add(marker)) : false;
     }
     if (ts.isPropertyAccessExpression(node)) {
@@ -1640,11 +1931,30 @@ function semanticAuthorityRecords(model) {
     if (ts.isTemplateExpression(node)) {
       return node.templateSpans.some((span) => hasPrincipalExpression(span.expression, seen));
     }
+    if (ts.isObjectLiteralExpression(node)) {
+      return node.properties.some((property) => {
+        if (ts.isPropertyAssignment(property)) return hasPrincipalExpression(property.initializer, seen);
+        if (ts.isShorthandPropertyAssignment(property)) return hasPrincipalExpression(property.name, seen);
+        if (ts.isSpreadAssignment(property)) return hasPrincipalExpression(property.expression, seen);
+        return false;
+      });
+    }
     let found = false;
     ts.forEachChild(node, (child) => {
       if (!found && hasPrincipalExpression(child, seen)) found = true;
     });
     return found;
+  }
+  function principalKeyAuthority(node, seen = new Set()) {
+    node = unwrap(node);
+    if (ts.isIdentifier(node)) {
+      const marker = `${model.file}#principal-key#${node.text}`;
+      if (!seen.has(marker)) {
+        const initializer = lexicalInitializer(model, node.text, node) ?? model.constants.get(node.text);
+        if (initializer) return principalKeyAuthority(initializer, new Set(seen).add(marker));
+      }
+    }
+    return expressionText(node, source);
   }
   function visit(node) {
     if (ts.isStringLiteralLike(node)) {
@@ -1688,16 +1998,47 @@ function semanticAuthorityRecords(model) {
     }
     if (ts.isPropertyAssignment(node) && node.name.getText(source) === "queryKey") {
       const key = expressionText(node.initializer, source);
+      const firstKey = firstStaticQueryKey(node.initializer, model);
+      const explicitPublic =
+        adminCacheAuthority.configured &&
+        (firstKey === "public" || adminCacheAuthority.publicQueryKeys.has(firstKey));
       add("session-principal", `cache-key:${key}`, node, {
+        keyAuthority: principalKeyAuthority(node.initializer),
         principalBinding: hasPrincipalExpression(node.initializer)
           ? "declared-in-key"
           : "principal-not-declared-in-key",
+        ...(adminCacheAuthority.configured
+          ? {
+              adminCacheScope: explicitPublic
+                ? "explicit-public-shared"
+                : "principal-partitioned-when-admin-active",
+              cacheClassificationAuthority: `${adminCacheAuthority.declaration.file}#${adminCacheAuthority.declaration.classifier}`,
+              cacheHashAuthority: `${adminCacheAuthority.declaration.file}#${adminCacheAuthority.declaration.hash}`,
+              runtimePrincipalBinding: explicitPublic
+                ? "none-public-shared"
+                : adminCacheAuthority.declaration.principalFields.join("+"),
+            }
+          : {}),
       });
     }
     if (ts.isJsxText(node)) {
       const value = node.text.replace(/\s+/g, " ").trim();
       for (const currency of currencyValues(value))
         add("pricing-authority", `literal:${currency}`, node, { pricingKind: "currency-bearing-jsx" });
+    }
+    if (ts.isJsxExpression(node) && node.expression && ts.isJsxElement(node.parent)) {
+      const siblings = node.parent.children;
+      const index = siblings.indexOf(node);
+      const previous = index > 0 ? siblings[index - 1] : null;
+      const currencyPrefix =
+        previous && ts.isJsxText(previous) ? previous.text.match(/(?:£|\$|GBP|USD)\s*$/i)?.[0] : null;
+      if (currencyPrefix) {
+        const expression = expressionText(node.expression, source);
+        add("pricing-authority", `projection:${currencyPrefix.trim()}:${expression}`, node, {
+          pricingKind: "currency-bearing-jsx-expression",
+          expression,
+        });
+      }
     }
     if (
       (ts.isVariableDeclaration(node) || ts.isFunctionDeclaration(node) || ts.isClassDeclaration(node)) &&
@@ -1964,6 +2305,118 @@ function schemaInventoryRecords(root, files) {
   return records;
 }
 
+function parameterIndexForExpression(node, model, context, seen = new Set()) {
+  node = unwrap(node);
+  if (!node || !ts.isIdentifier(node)) return -1;
+  const marker = `${model.file}#${context}#parameter#${node.text}`;
+  if (seen.has(marker)) return -1;
+  const fn = model.functions.get(context);
+  const direct = [...(fn?.parameters ?? [])].findIndex(
+    (parameter) => ts.isIdentifier(parameter.name) && parameter.name.text === node.text
+  );
+  if (direct >= 0) return direct;
+  const initializer = lexicalInitializer(model, node.text, node);
+  return initializer ? parameterIndexForExpression(initializer, model, context, new Set(seen).add(marker)) : -1;
+}
+
+function optionPropertyParameterIndex(options, propertyName, model, context) {
+  const direct = parameterIndexForExpression(options, model, context);
+  if (direct >= 0) return direct;
+  const object = resolvedExpressionNode(options, model, context);
+  if (!object || !ts.isObjectLiteralExpression(object)) return -1;
+  let authority = -1;
+  for (const member of object.properties) {
+    if (ts.isSpreadAssignment(member)) {
+      authority = parameterIndexForExpression(member.expression, model, context);
+      continue;
+    }
+    if (
+      (ts.isPropertyAssignment(member) || ts.isShorthandPropertyAssignment(member)) &&
+      (ts.isIdentifier(member.name) || ts.isStringLiteralLike(member.name)) &&
+      member.name.text === propertyName
+    ) {
+      authority = -1;
+    }
+  }
+  return authority;
+}
+
+function enrichHttpProviderCallsites(records, calls, models) {
+  for (const record of records.filter((item) => item.effect === "http-fetch" && item._fetchUrlNode)) {
+    const separator = record._context.lastIndexOf("#");
+    const targetFile = record._context.slice(0, separator);
+    const targetContext = record._context.slice(separator + 1);
+    const targetModel = models.get(targetFile);
+    const targetFunction = targetModel?.functions.get(targetContext);
+    if (!targetModel || !targetFunction) continue;
+    const optionParameterIndexes = Object.fromEntries(
+      ["method", "signal", "headers"].map((name) => [
+        name,
+        optionPropertyParameterIndex(record._fetchOptionsNode, name, targetModel, targetContext),
+      ])
+    );
+    const callsiteAuthorities = [];
+    for (const call of calls.filter((item) => item.targetContext === record._context)) {
+      const callerModel = models.get(call.file);
+      if (!callerModel) continue;
+      const targetBindings = new Map();
+      targetFunction.parameters.forEach((parameter, index) => {
+        if (!ts.isIdentifier(parameter.name)) return;
+        const argument = call.arguments[index];
+        const value = argument
+          ? evaluate(argument, callerModel, call.callerContext, models, call.bindings)
+          : parameter.initializer
+            ? evaluate(parameter.initializer, targetModel, targetContext, models, targetBindings)
+            : null;
+        targetBindings.set(parameter.name.text, value);
+      });
+      const callsiteOptions = fetchOptionFacts(
+        record._fetchOptionsNode,
+        targetModel,
+        targetContext,
+        models,
+        targetBindings
+      );
+      const parameterAuthorities = {};
+      const parameterFacts = new Map();
+      for (const index of new Set(Object.values(optionParameterIndexes).filter((value) => value >= 0))) {
+        const argument = call.arguments[index];
+        if (!argument) continue;
+        parameterFacts.set(index, fetchOptionFacts(argument, callerModel, call.callerContext, models, call.bindings));
+        parameterAuthorities[index] = symbolicAuthority(
+          argument,
+          callerModel,
+          call.callerContext,
+          models,
+          call.bindings
+        );
+      }
+      if (parameterFacts.has(optionParameterIndexes.method)) {
+        callsiteOptions.httpMethod = parameterFacts.get(optionParameterIndexes.method).httpMethod;
+      }
+      if (parameterFacts.has(optionParameterIndexes.signal)) {
+        callsiteOptions.timeoutSignal = parameterFacts.get(optionParameterIndexes.signal).timeoutSignal;
+      }
+      if (parameterFacts.has(optionParameterIndexes.headers)) {
+        callsiteOptions.idempotencyEvidence = parameterFacts.get(optionParameterIndexes.headers).idempotencyEvidence;
+      }
+      if (Object.keys(parameterAuthorities).length) {
+        callsiteOptions.parameterOptionsAuthority = parameterAuthorities;
+      }
+      callsiteAuthorities.push({
+        source: `${call.file}:${call.line}`,
+        urlAuthority: symbolicAuthority(record._fetchUrlNode, targetModel, targetContext, models, targetBindings),
+        ...callsiteOptions,
+      });
+    }
+    if (callsiteAuthorities.length) {
+      record.callsiteAuthorities = callsiteAuthorities.sort((left, right) =>
+        JSON.stringify(left).localeCompare(JSON.stringify(right))
+      );
+    }
+  }
+}
+
 function matchesSourceRoot(file, sourceRoot) {
   return sourceRoot.endsWith("/") ? file.startsWith(sourceRoot) : file === sourceRoot;
 }
@@ -2090,11 +2543,13 @@ export function buildArchitectureSnapshot(root, policy) {
         target: rootId,
       });
     }
+  const adminCacheAuthority = readAdminCacheAuthority(models, policy);
+  violations.push(...adminCacheAuthority.violations);
   for (const model of models.values()) {
     if (model.file.startsWith("config/components/")) continue;
     const result = scanModel(root, model, models, policy);
     records.push(...result.records);
-    records.push(...semanticAuthorityRecords(model));
+    records.push(...semanticAuthorityRecords(model, adminCacheAuthority));
     routes.push(...result.routes);
     mounts.push(...result.mounts);
     middlewares.push(...result.middlewares);
@@ -2102,6 +2557,7 @@ export function buildArchitectureSnapshot(root, policy) {
     runtimeDependencies.push(...result.runtimeDependencies);
     violations.push(...result.violations);
   }
+  enrichHttpProviderCallsites(records, calls, models);
   const issueFiles = [
     "engineering/ISSUE_REGISTER.md",
     ".claude/controlled-code-lead/tasks/repository-architecture-recovery-20260904/issue-register.md",
@@ -2428,6 +2884,8 @@ export function buildArchitectureSnapshot(root, policy) {
     delete entry._handlerRanges;
     delete entry._delegatedHandlerContexts;
     delete entry._componentSourcePaths;
+    delete entry._fetchUrlNode;
+    delete entry._fetchOptionsNode;
   }
   violations.sort(
     (a, b) =>

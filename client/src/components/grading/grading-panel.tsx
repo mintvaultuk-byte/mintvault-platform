@@ -1,3 +1,4 @@
+import { adminFetch } from "@/lib/queryClient";
 import { useState, useEffect, useRef, useMemo, type ReactNode } from "react";
 import { cardToolImageSource } from "./card-tool-image-source";
 import { createPortal } from "react-dom";
@@ -109,7 +110,7 @@ function ReprocessButton({ certId, onDone }: { certId: number; onDone: () => voi
         setStatus("loading");
         toast({ title: "Reprocessing images…" });
         try {
-          const r = await fetch(`/api/admin/certificates/${certId}/reprocess-images`, {
+          const r = await adminFetch(`/api/admin/certificates/${certId}/reprocess-images`, {
             method: "POST",
             credentials: "include",
           });
@@ -440,7 +441,7 @@ export default function GradingPanel({
   }>({
     queryKey: [`${apiBase}/certificates/${certId}/images`],
     queryFn: async () => {
-      const res = await fetch(`${apiBase}/certificates/${certId}/images`, { credentials: "include" });
+      const res = await adminFetch(`${apiBase}/certificates/${certId}/images`, { credentials: "include" });
       if (!res.ok) return { urls: {}, quality: {} };
       return res.json();
     },
@@ -484,7 +485,7 @@ export default function GradingPanel({
     queryKey: [`${apiBase}/certificates/${certId}/grading`, aiIdentify],
     queryFn: async () => {
       const url = `${apiBase}/certificates/${certId}/grading${aiIdentify ? "" : "?aiIdentify=0"}`;
-      const res = await fetch(url, { credentials: "include" });
+      const res = await adminFetch(url, { credentials: "include" });
       if (!res.ok) throw new Error(`Grading workflow load failed (${res.status})`);
       return res.json();
     },
@@ -1412,7 +1413,7 @@ export default function GradingPanel({
   async function saveEditedGrade(): Promise<void> {
     setEditSaving(true);
     try {
-      const res = await fetch(`${apiBase}/certificates/${certId}/grade`, {
+      const res = await adminFetch(`${apiBase}/certificates/${certId}/grade`, {
         method: "PUT",
         credentials: "include",
         headers: { "Content-Type": "application/json" },
@@ -1474,7 +1475,7 @@ export default function GradingPanel({
       const autoSaveCertId = certId;
       const autoSaveFingerprint = JSON.stringify(buildPayload());
       try {
-        const res = await fetch(`${apiBase}/certificates/${certId}/grade`, {
+        const res = await adminFetch(`${apiBase}/certificates/${certId}/grade`, {
           method: "PUT",
           credentials: "include",
           headers: { "Content-Type": "application/json" },
@@ -1764,7 +1765,7 @@ export default function GradingPanel({
     try {
       // Staff endpoint (admin OR grader) so this works on the grader panel too —
       // the admin-only /api/admin/tcgdex-lookup silently 401'd for graders before.
-      const res = await fetch(
+      const res = await adminFetch(
         `/api/staff/tcgdex-lookup?code=${encodeURIComponent(setCode)}&number=${encodeURIComponent(cardNumber)}&lang=${encodeURIComponent(lang)}`,
         { credentials: "include" }
       );
@@ -1819,7 +1820,7 @@ export default function GradingPanel({
   async function rerunIdentify() {
     setIdRerunBusy(true);
     try {
-      const res = await fetch(`${apiBase}/certificates/${certId}/identify`, {
+      const res = await adminFetch(`${apiBase}/certificates/${certId}/identify`, {
         method: "POST",
         credentials: "include",
       });
@@ -2250,7 +2251,7 @@ export default function GradingPanel({
     setSaving(true);
     setAutoSaveStatus("saving");
     try {
-      const res = await fetch(`${apiBase}/certificates/${transitionCertId}/grade`, {
+      const res = await adminFetch(`${apiBase}/certificates/${transitionCertId}/grade`, {
         method: "PUT",
         credentials: "include",
         headers: { "Content-Type": "application/json" },
@@ -2399,7 +2400,7 @@ export default function GradingPanel({
     setSaving(true);
     const operation = (async () => {
       try {
-        const res = await fetch(`${apiBase}/certificates/${savingCertId}/grade`, {
+        const res = await adminFetch(`${apiBase}/certificates/${savingCertId}/grade`, {
           method: "PUT",
           credentials: "include",
           headers: { "Content-Type": "application/json" },
@@ -2444,7 +2445,7 @@ export default function GradingPanel({
     try {
       // Persist current state first so the server's read of the cert reflects
       // the admin's just-set subgrades + confirmed defects.
-      const save = await fetch(`${apiBase}/certificates/${certId}/grade`, {
+      const save = await adminFetch(`${apiBase}/certificates/${certId}/grade`, {
         method: "PUT",
         credentials: "include",
         headers: { "Content-Type": "application/json" },
@@ -2453,7 +2454,7 @@ export default function GradingPanel({
       const saved = await save.json().catch(() => ({}));
       if (!save.ok) throw new Error(saved.error || "Could not save observations before generating a description.");
       acceptServerGradeAuthority(saved);
-      const res = await fetch(`${apiBase}/certificates/${certId}/generate-description`, {
+      const res = await adminFetch(`${apiBase}/certificates/${certId}/generate-description`, {
         method: "POST",
         credentials: "include",
         headers: { "Content-Type": "application/json" },
@@ -2495,7 +2496,7 @@ export default function GradingPanel({
     const maxAttempts = 3;
     for (let attempt = 1; attempt <= maxAttempts; attempt++) {
       try {
-        const res = await fetch(`${apiBase}/certificates/${certId}/recrop`, {
+        const res = await adminFetch(`${apiBase}/certificates/${certId}/recrop`, {
           method: "POST",
           credentials: "include",
           headers: { "Content-Type": "application/json" },
@@ -2616,7 +2617,7 @@ export default function GradingPanel({
       if (adminReview) {
         // The Grade→Review barrier already persisted and previewed this exact
         // payload fingerprint. Do not introduce a second unpreviewed save here.
-        res = await fetch(`/api/admin/certificates/${certId}/approve-grader-grade`, {
+        res = await adminFetch(`/api/admin/certificates/${certId}/approve-grader-grade`, {
           method: "POST",
           credentials: "include",
           headers: { "Content-Type": "application/json" },
@@ -2628,21 +2629,21 @@ export default function GradingPanel({
         // re-asserts pending_review + review_required, re-snapshots operator_grade
         // and audits. It NEVER approves/publishes, so this path cannot leave
         // pending_review. (Distinct from /submit, which can auto-approve.)
-        res = await fetch(`${apiBase}/certificates/${certId}/edit-submission`, {
+        res = await adminFetch(`${apiBase}/certificates/${certId}/edit-submission`, {
           method: "POST",
           credentials: "include",
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify(buildPayload()),
         });
       } else if (graderMode) {
-        res = await fetch(`${apiBase}/certificates/${certId}/submit`, {
+        res = await adminFetch(`${apiBase}/certificates/${certId}/submit`, {
           method: "POST",
           credentials: "include",
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify(buildPayload()),
         });
       } else {
-        res = await fetch(`${apiBase}/certificates/${certId}/approve`, {
+        res = await adminFetch(`${apiBase}/certificates/${certId}/approve`, {
           method: "PUT",
           credentials: "include",
           headers: { "Content-Type": "application/json" },
@@ -3167,7 +3168,7 @@ export default function GradingPanel({
                             if (!active || approvalInteractionLocked) return;
                             if (!confirm(`Delete the ${s} image? You'll need to re-upload before grading.`)) return;
                             try {
-                              const r = await fetch(`${apiBase}/certificates/${certId}/images/${s}`, {
+                              const r = await adminFetch(`${apiBase}/certificates/${certId}/images/${s}`, {
                                 method: "DELETE",
                                 credentials: "include",
                               });

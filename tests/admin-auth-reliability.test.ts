@@ -209,11 +209,14 @@ describe("admin auth reliability", () => {
         body: JSON.stringify({ password: "wrong" }),
       });
       expect(failed.status).toBe(401);
+      expect(await failed.json()).toMatchObject({ code: "admin_credential_rejected" });
 
       let cookies = await login(base);
       const refresh = await request(base, "/api/admin/session", {}, cookies);
       expect(refresh.status).toBe(200);
       expect(await refresh.json()).toMatchObject({ authenticated: true });
+      expect(refresh.headers.get("cache-control")).toBe("private, no-store");
+      expect(refresh.headers.get("vary")).toContain("Cookie");
 
       const [tabA, tabB] = await Promise.all([
         request(base, "/api/admin/session", {}, cookies),
@@ -221,6 +224,12 @@ describe("admin auth reliability", () => {
       ]);
       expect(tabA.status).toBe(200);
       expect(tabB.status).toBe(200);
+
+      const getLogout = await request(base, "/api/admin/logout", {}, cookies);
+      expect(getLogout.status).toBe(404);
+      const afterGetLogout = await request(base, "/api/admin/session", {}, cookies);
+      expect(afterGetLogout.status).toBe(200);
+      expect(await afterGetLogout.json()).toMatchObject({ authenticated: true });
 
       const logout = await request(base, "/api/admin/logout", { method: "POST" }, cookies);
       expect(logout.status).toBe(200);
@@ -230,6 +239,9 @@ describe("admin auth reliability", () => {
       const afterLogout = await request(base, "/api/admin/session", {}, cookies);
       expect(afterLogout.status).toBe(200);
       expect(await afterLogout.json()).toMatchObject({ authenticated: false, reason: "not_authenticated" });
+
+      const idempotentLogout = await request(base, "/api/admin/logout", { method: "POST" }, cookies);
+      expect(idempotentLogout.status).toBe(200);
     });
   });
 
@@ -480,6 +492,7 @@ describe("admin auth reliability", () => {
         cookies
       );
       expect(wrongPin.status).toBe(401);
+      expect(await wrongPin.json()).toMatchObject({ code: "admin_credential_rejected" });
     });
   });
 

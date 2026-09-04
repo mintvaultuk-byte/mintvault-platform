@@ -26,6 +26,7 @@ import { readFileSync } from "node:fs";
 import { UnprintableGradeError, checkPrintableGrade, parseStoredGrade } from "../shared/printable-grade";
 import { isNonNumericGrade } from "../shared/schema";
 import { generateLabelPNG } from "../server/labels";
+import { currentPrintOutputBlock } from "../server/lib/print-output-eligibility";
 
 /** A complete, production-shaped numeric certificate. */
 const numericCert = (over: Record<string, unknown> = {}) =>
@@ -308,10 +309,35 @@ describe("preview and print share ONE rule, so they cannot disagree", () => {
     expect(mintAt).toBeGreaterThan(gateAt);
   });
 
-  it("reprint enforces the same rule — no invented historical-artefact exemption", () => {
-    const src = readFileSync(new URL("../server/routes.ts", import.meta.url), "utf8");
-    expect(src).toContain("unprintableRe");
-    expect(src).toMatch(/Cannot reprint/);
+  it("reprint creation and cached-artifact download share the complete current-output gate", () => {
+    const workflow = readFileSync(new URL("../server/print-workflow.ts", import.meta.url), "utf8");
+    const routes = readFileSync(new URL("../server/routes.ts", import.meta.url), "utf8");
+    const persistence = readFileSync(new URL("../server/lib/print-artifact-persistence.ts", import.meta.url), "utf8");
+    expect(workflow).toContain("currentPrintOutputBlock(");
+    expect(persistence).toContain("currentPrintOutputBlock(");
+    expect(routes).toContain("assertBatchArtefactPrintable");
+    expect(routes).toContain("currentPrintOutputBlock(");
+  });
+
+  it("the current-output gate rejects approval, review, validity, deletion, and grade drift", () => {
+    const valid = {
+      gradeType: "numeric",
+      gradeOverall: "9",
+      gradeApprovedAt: new Date("2026-09-04T10:00:00Z"),
+      graderStatus: "approved",
+      status: "active",
+      deletedAt: null,
+    };
+    expect(currentPrintOutputBlock("MV-SAFE", valid)).toBeNull();
+    expect(currentPrintOutputBlock("MV-NO-APPROVAL", { ...valid, gradeApprovedAt: null })?.code).toBe("not_approved");
+    expect(currentPrintOutputBlock("MV-ASSIGNED", { ...valid, graderStatus: "assigned" })?.code).toBe(
+      "grade_review_incomplete"
+    );
+    expect(currentPrintOutputBlock("MV-VOID", { ...valid, status: "voided" })?.code).toBe("cert_not_active");
+    expect(currentPrintOutputBlock("MV-DELETED", { ...valid, deletedAt: new Date() })?.code).toBe("cert_deleted");
+    expect(currentPrintOutputBlock("MV-GRADE", { ...valid, gradeOverall: null })?.code).toBe(
+      "missing_numeric_grade"
+    );
   });
 
   it("all print paths report the blocked certificate number and no customer data", () => {

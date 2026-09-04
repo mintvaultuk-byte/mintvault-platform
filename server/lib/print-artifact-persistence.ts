@@ -1,6 +1,5 @@
 import type { PoolClient } from "pg";
 import type { CertificateRecord, LabelOverride } from "@shared/schema";
-import { checkPrintableGrade } from "@shared/printable-grade";
 import { nextState, type BatchKind, type PrintRole, type PrintState } from "@shared/print-lifecycle";
 import { applyLabelOverrides } from "../labels";
 import {
@@ -10,6 +9,7 @@ import {
   type ObjectWriteFinalizeContext,
 } from "./object-write-coordinator";
 import { printArtifactPlan, type PrintBatchItem } from "../print-batch";
+import { currentPrintOutputBlock } from "./print-output-eligibility";
 
 export interface PrintArtifactIntent {
   batchId: string;
@@ -320,16 +320,8 @@ export async function finalizePrintArtifactObjectWrite(
   }
   for (const item of current.items) {
     const cert = item.cert;
-    const grade = checkPrintableGrade({ gradeType: cert.gradeType, gradeOverall: cert.gradeOverall });
-    if (
-      !grade.printable ||
-      !cert.gradeApprovedAt ||
-      cert.status !== "active" ||
-      cert.graderStatus === "pending_review" ||
-      cert.graderStatus === "assigned"
-    ) {
-      throw new ObjectWriteAbandonError(`Certificate ${cert.certId} is no longer printable`);
-    }
+    const block = currentPrintOutputBlock(cert.certId, cert);
+    if (block) throw new ObjectWriteAbandonError(block.message);
     if (intent.kind === "batch" && cert.ownershipStatus !== "unclaimed") {
       throw new ObjectWriteAbandonError(`Certificate ${cert.certId} became claimed before publication`);
     }
@@ -371,6 +363,31 @@ export async function finalizePrintArtifactObjectWrite(
     `UPDATE print_batches SET status='printing',success_count=$2,failure_count=0 WHERE batch_id=$1`,
     [intent.batchId, intent.certIds.length]
   );
+  const auditRows = intent.reprintRequest
+    ? intent.certIds.map((certId) => ({ certId, ok: true as const }))
+    : undefined;
+  if (intent.reprintRequest) {
+    await client.query(
+      `INSERT INTO audit_log(entity_type,entity_id,action,admin_user,details)
+       SELECT 'cert',cert_id,'reprint',$2,$3::jsonb
+         FROM unnest($1::text[]) AS cert_id`,
+      [
+        intent.certIds,
+        intent.actor,
+        JSON.stringify({
+          reason: intent.reprintRequest.reason,
+          reason_category: intent.reprintRequest.reasonCategory,
+          batch_id: intent.batchId,
+          original_batch_id: null,
+          new_batch_id: `print_batch_${intent.batchId}`,
+          cert_count: intent.certIds.length,
+          sheet_layout_version: intent.layoutVersion,
+          operation_id: context.operationId,
+          actor_role: intent.actorRole,
+        }),
+      ]
+    );
+  }
   await client.query(
     `INSERT INTO audit_log(entity_type,entity_id,action,admin_user,details)
      VALUES ('system',$1,'print_batch_generated',$2,$3::jsonb)`,
@@ -380,6 +397,9 @@ export async function finalizePrintArtifactObjectWrite(
       JSON.stringify({
         operationId: context.operationId,
         certIds: intent.certIds,
+        kind: intent.kind,
+        reason: intent.reason,
+        reasonCategory: intent.reasonCategory,
         renderInputSha256: intent.renderInputSha256,
         layoutVersion: intent.layoutVersion,
         artifacts: descriptors,
@@ -398,6 +418,7 @@ export async function finalizePrintArtifactObjectWrite(
     multiSheet: plan.pdfOnly,
     pageCount: plan.pageCount,
     artifacts: descriptors,
+    ...(auditRows ? { auditRows } : {}),
   };
 }
 

@@ -14,7 +14,7 @@ import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { Panel, AdminButton, Badge } from "@/components/admin";
 import { AdminHeaderRow } from "@/components/admin/AdminHeaderRow";
 import { useToast } from "@/hooks/use-toast";
-import { apiRequest } from "@/lib/queryClient";
+import { adminFetch, apiRequest } from "@/lib/queryClient";
 import { CATALOGUE_CATEGORIES } from "@shared/vocabulary";
 import type { CatalogueCategory } from "@shared/vocabulary";
 import type { CatalogueItem } from "@shared/schema";
@@ -97,7 +97,7 @@ export default function AdminCataloguePage() {
     queryFn: async () => {
       const params = new URLSearchParams({ category, includeArchived: String(includeArchived) });
       if (search.trim()) params.set("search", search.trim());
-      const res = await fetch(`/api/admin/catalogue/items?${params.toString()}`, { credentials: "include" });
+      const res = await adminFetch(`/api/admin/catalogue/items?${params.toString()}`, { credentials: "include" });
       if (!res.ok) throw new Error((await res.json().catch(() => ({}))).error ?? "Failed to load catalogue.");
       return (await res.json()) as { items: CatalogueItem[] };
     },
@@ -107,7 +107,7 @@ export default function AdminCataloguePage() {
     queryKey: ["catalogue-audit"],
     enabled: showAudit,
     queryFn: async () => {
-      const res = await fetch("/api/admin/catalogue/audit?limit=100", { credentials: "include" });
+      const res = await adminFetch("/api/admin/catalogue/audit?limit=100", { credentials: "include" });
       if (!res.ok) throw new Error("Failed to load audit log.");
       return (await res.json()) as { entries: Array<{ id: number; action: string; entityId: string; adminUser: string | null; details: Record<string, unknown>; createdAt: string }> };
     },
@@ -195,7 +195,7 @@ export default function AdminCataloguePage() {
   }
 
   async function exportJson() {
-    const res = await fetch("/api/admin/catalogue/export", { credentials: "include" });
+    const res = await adminFetch("/api/admin/catalogue/export", { credentials: "include" });
     if (!res.ok) {
       toast({ title: "Export failed", variant: "destructive" });
       return;

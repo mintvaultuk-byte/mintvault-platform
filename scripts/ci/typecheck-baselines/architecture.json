@@ -4,8 +4,8 @@
   "contract": {
     "compilerVersion": "5.6.3",
     "configSha256": "07731a08e9e7bae444103835038ea9852ffef04e8688244e33fcaabbaa10ad7a",
-    "trackedFileCount": 814,
-    "trackedFilesSha256": "ad837df507013ef6af3b2bf555107f85f225c5ad7da546eb68091559de32533b",
+    "trackedFileCount": 816,
+    "trackedFilesSha256": "9fa99d065ceefd05a4ecb004135b77dae86fbf4893e1f8eaf7adf39c55c6bcc1",
     "noCheckFileCount": 5,
     "noCheckFiles": [
       "client/src/pages/home-v2-integrated.tsx",
@@ -16,7 +16,7 @@
     ],
     "noCheckFilesSha256": "02696f4860361d93c662e89a01f6d8e1aabab6fc6faebf7147aaade50cc0ba6a"
   },
-  "diagnosticCount": 5,
+  "diagnosticCount": 3,
   "fingerprints": [
     {
       "fingerprint": "client/src/pages/admin-capture-health.tsx|TS7027|Unreachable code detected.",
@@ -24,7 +24,7 @@
     },
     {
       "fingerprint": "server/routes.ts|TS7027|Unreachable code detected.",
-      "count": 4
+      "count": 2
     }
   ]
 }

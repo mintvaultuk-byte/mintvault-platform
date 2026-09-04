@@ -145,7 +145,6 @@ export default function ProjectControlPage() {
     <AdminShell
       activeTab="dashboard"
       onTabChange={() => navigate("/admin")}
-      onLogout={() => navigate("/admin")}
       title="Project Control"
       crumb="Engineering programme"
     >

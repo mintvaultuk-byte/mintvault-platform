@@ -1,3 +1,4 @@
+import { adminFetch } from "@/lib/queryClient";
 /**
  * Admin → Sets / Variants → Legacy Review.
  *
@@ -58,7 +59,7 @@ export default function AdminLegacyReviewPage() {
       proposedClassification?: string | null;
       proposedValue?: string | null;
     }) => {
-      const res = await fetch("/api/admin/rarity-mapping-reviews/decision", {
+      const res = await adminFetch("/api/admin/rarity-mapping-reviews/decision", {
         method: "POST",
         credentials: "include",
         headers: { "Content-Type": "application/json" },

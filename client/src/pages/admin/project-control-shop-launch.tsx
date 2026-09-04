@@ -84,7 +84,6 @@ export default function ProjectControlShopLaunchPage() {
     <AdminShell
       activeTab="dashboard"
       onTabChange={() => navigate("/admin")}
-      onLogout={() => navigate("/admin")}
       title="Partner Shop Launch"
       crumb="Programme"
     >

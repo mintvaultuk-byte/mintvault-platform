@@ -1,3 +1,4 @@
+import { adminFetch } from "@/lib/queryClient";
 import { useState, useEffect } from "react";
 import { Camera, CheckCircle2, Loader2, ScanLine, RefreshCw } from "lucide-react";
 import { useToast } from "@/hooks/use-toast";
@@ -42,7 +43,7 @@ export default function CaptureWizard({ certId, onComplete, recapture = false }:
     const poll = async () => {
       for (const session of active) {
         try {
-          const response = await fetch(`/api/admin/certificates/${certId}/scanner-capture-sessions/${session.id}`, {
+          const response = await adminFetch(`/api/admin/certificates/${certId}/scanner-capture-sessions/${session.id}`, {
             credentials: "include",
           });
           if (!response.ok) continue;
@@ -86,7 +87,7 @@ export default function CaptureWizard({ certId, onComplete, recapture = false }:
     window.localStorage.setItem(WORKSTATION_KEY, station);
     setArmingSide(side);
     try {
-      const response = await fetch(`/api/admin/certificates/${certId}/scanner-capture-sessions`, {
+      const response = await adminFetch(`/api/admin/certificates/${certId}/scanner-capture-sessions`, {
         method: "POST",
         credentials: "include",
         headers: { "content-type": "application/json" },

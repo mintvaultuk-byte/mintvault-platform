@@ -1,3 +1,4 @@
+import { adminFetch } from "@/lib/queryClient";
 import { useEffect, useState } from "react";
 import { useLocation } from "wouter";
 import { KeyRound, LockKeyhole, RotateCcw, ShieldCheck } from "lucide-react";
@@ -42,7 +43,7 @@ export default function AdminSecurityPage() {
   const [err, setErr] = useState<string | null>(null);
 
   async function loadStatus() {
-    const res = await fetch("/api/admin/credentials/status", { credentials: "include" });
+    const res = await adminFetch("/api/admin/credentials/status", { credentials: "include" });
     const data = await res.json().catch(() => ({}));
     if (!res.ok) {
       if (res.status === 401 || res.status === 403) {
@@ -75,11 +76,12 @@ export default function AdminSecurityPage() {
     setErr(null);
     setBusy("passphrase");
     try {
-      const res = await fetch("/api/admin/credentials/passphrase", {
+      const res = await adminFetch("/api/admin/credentials/passphrase", {
         method: "POST",
         credentials: "include",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify(passphrase),
+        adminUnauthorizedPolicy: "credential-rejection-aware",
       });
       if (!res.ok) {
         setErr(safeMessage(res.status, "Passphrase was not changed."));
@@ -99,11 +101,12 @@ export default function AdminSecurityPage() {
     setErr(null);
     setBusy("pin");
     try {
-      const res = await fetch("/api/admin/credentials/pin", {
+      const res = await adminFetch("/api/admin/credentials/pin", {
         method: "POST",
         credentials: "include",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify(pin),
+        adminUnauthorizedPolicy: "credential-rejection-aware",
       });
       if (!res.ok) {
         setErr(safeMessage(res.status, "PIN was not changed."));
@@ -124,11 +127,12 @@ export default function AdminSecurityPage() {
     if (!window.confirm("Sign out all other admin sessions?")) return;
     setBusy("revoke");
     try {
-      const res = await fetch("/api/admin/credentials/revoke-sessions", {
+      const res = await adminFetch("/api/admin/credentials/revoke-sessions", {
         method: "POST",
         credentials: "include",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ pin: revokePin }),
+        adminUnauthorizedPolicy: "credential-rejection-aware",
       });
       if (!res.ok) {
         setErr(safeMessage(res.status, "Sessions were not revoked."));

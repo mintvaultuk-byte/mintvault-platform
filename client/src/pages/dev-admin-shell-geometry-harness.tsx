@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useState } from "react";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import AdminShell from "@/components/admin/admin-shell";
+import { AdminSessionProvider } from "@/lib/admin-session";
 import { GradingWorkstation } from "@/components/grading-workflow/GradingWorkstation";
 import { createCanonicalHarnessFetchFixture } from "./dev-canonical-workstation-harness";
 import { AdminHeaderRow } from "@/components/admin/AdminHeaderRow";
@@ -93,7 +94,8 @@ export default function DevAdminShellGeometryHarness() {
   if (!ready) return null;
   return (
     <QueryClientProvider client={queryClient}>
-      <AdminShell activeTab="certs" onTabChange={() => {}} onLogout={() => {}} focus>
+      <AdminSessionProvider>
+        <AdminShell activeTab="certs" onTabChange={() => {}} focus>
         {/* Byte-identical composition to admin-dashboard.tsx's focus branch:
             surface → shrink-0 header → flex-1 workstation. */}
         <div className={surfaceClass} data-testid="admin-focus-surface" data-legacy={legacy ? "1" : "0"}>
@@ -184,7 +186,8 @@ export default function DevAdminShellGeometryHarness() {
             )}
           </div>
         </div>
-      </AdminShell>
+        </AdminShell>
+      </AdminSessionProvider>
     </QueryClientProvider>
   );
 }

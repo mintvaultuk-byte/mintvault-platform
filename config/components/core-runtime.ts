@@ -4,7 +4,7 @@ export const CORE_RUNTIME_COMPONENT = {
   owner: "core-platform",
   releaseMode: "required",
   runtimeState: "enabled",
-  sourceRoots: ["server/index.ts", "server/routes.ts"],
+  sourceRoots: ["server/index.ts", "server/routes.ts", "client/src/App.tsx"],
   requirements: {
     migrations: [
       { name: "0114_certificate_identity_authority.sql", order: 4 },

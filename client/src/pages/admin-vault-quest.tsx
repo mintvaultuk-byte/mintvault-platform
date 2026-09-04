@@ -1,6 +1,6 @@
 import { useState, useEffect, useCallback, useRef } from "react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
-import { apiRequest } from "@/lib/queryClient";
+import { adminFetch, apiRequest } from "@/lib/queryClient";
 import { useToast } from "@/hooks/use-toast";
 import { AdminButton } from "@/components/admin";
 import { Loader2, Upload, Save, History, FileImage, FileText, FileCode, Plus, AlertCircle, CheckCircle2, LayoutGrid, ArrowLeft, ShieldCheck, RotateCcw, XCircle, PackageCheck, Archive, Wand2, Sparkles, ChevronDown, BookOpen, Lock, Unlock } from "lucide-react";
@@ -250,7 +250,7 @@ async function runExportJob(
   onProgress: (done: number, total: number) => void,
   isAlive: () => boolean = () => true,
 ): Promise<{ rendered: number; skipped: number }> {
-  const startRes = await fetch(startUrl, {
+  const startRes = await adminFetch(startUrl, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
     credentials: "include",
@@ -270,7 +270,7 @@ async function runExportJob(
     // stop polling if the view was left (component unmounted) — the job keeps
     // running server-side and can be re-downloaded within its TTL.
     if (!isAlive()) return { rendered: 0, skipped: 0 };
-    const sRes = await fetch(base, { credentials: "include" });
+    const sRes = await adminFetch(base, { credentials: "include" });
     if (!sRes.ok) {
       const err = new Error(`lost track of the export (${sRes.status}) — it may have expired`) as Error & { status?: number };
       err.status = sRes.status;
@@ -280,7 +280,7 @@ async function runExportJob(
     onProgress(s.done ?? 0, s.total ?? count ?? 0);
     if (s.state === "error") throw new Error(s.error || "export failed");
     if (s.state === "done") {
-      const fRes = await fetch(`${base}/file`, { credentials: "include" });
+      const fRes = await adminFetch(`${base}/file`, { credentials: "include" });
       if (!fRes.ok) {
         const err = new Error((await fRes.json().catch(() => ({}))).error || `download failed (${fRes.status})`) as Error & { status?: number };
         err.status = fRes.status;
@@ -693,7 +693,7 @@ const STEP_TO_ANCHOR: Record<string, string> = {
 // rather than throwing on non-2xx like apiRequest — runGenerationWithRecovery's
 // classifier needs to see all three shapes to decide "keep polling" vs "done".
 async function postJson(url: string, body: unknown): Promise<{ status: number; json: unknown }> {
-  const res = await fetch(url, {
+  const res = await adminFetch(url, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
     credentials: "include",
@@ -1022,7 +1022,7 @@ function CharacterBibleView({ onBack, onAuthError, deepLink }: { onBack: () => v
     try {
       const fd = new FormData();
       fd.append("file", file);
-      const res = await fetch(`/api/admin/vault-quest/characters/${encodeURIComponent(selected.characterId)}/artwork`, {
+      const res = await adminFetch(`/api/admin/vault-quest/characters/${encodeURIComponent(selected.characterId)}/artwork`, {
         method: "POST",
         body: fd,
         credentials: "include",
@@ -1075,7 +1075,7 @@ function CharacterBibleView({ onBack, onAuthError, deepLink }: { onBack: () => v
       const fd = new FormData();
       fd.append("file", file);
       if (confirmReplaceLocked) fd.append("confirmReplaceLocked", "true");
-      const res = await fetch(`/api/admin/vault-quest/characters/${encodeURIComponent(selected.characterId)}/reference/action_pose/upload`, {
+      const res = await adminFetch(`/api/admin/vault-quest/characters/${encodeURIComponent(selected.characterId)}/reference/action_pose/upload`, {
         method: "POST",
         body: fd,
         credentials: "include",
@@ -3085,7 +3085,7 @@ export default function AdminVaultQuest() {
     try {
       const fd = new FormData();
       fd.append("file", file);
-      const res = await fetch(`/api/admin/vault-quest/cards/${encodeURIComponent(form.cardId)}/art?slot=${slot}`, { method: "POST", body: fd, credentials: "include" });
+      const res = await adminFetch(`/api/admin/vault-quest/cards/${encodeURIComponent(form.cardId)}/art?slot=${slot}`, { method: "POST", body: fd, credentials: "include" });
       if (!res.ok) {
         const err = new Error((await res.json().catch(() => ({}))).error || `upload failed (${res.status})`) as Error & { status?: number };
         err.status = res.status;
@@ -3205,7 +3205,7 @@ export default function AdminVaultQuest() {
 
   async function exportCard(fmt: "svg" | "png" | "pdf") {
     try {
-      const res = await fetch(`/api/admin/vault-quest/cards/export/${fmt}`, { method: "POST", headers: { "Content-Type": "application/json" }, credentials: "include", body: JSON.stringify(toPayload(form)) });
+      const res = await adminFetch(`/api/admin/vault-quest/cards/export/${fmt}`, { method: "POST", headers: { "Content-Type": "application/json" }, credentials: "include", body: JSON.stringify(toPayload(form)) });
       if (!res.ok) {
         const err = new Error((await res.json().catch(() => ({}))).error || `export failed (${res.status})`) as Error & { status?: number };
         err.status = res.status;
@@ -3265,7 +3265,7 @@ export default function AdminVaultQuest() {
 
   async function loadCard(cardId: string) {
     try {
-      const res = await fetch(`/api/admin/vault-quest/cards/${encodeURIComponent(cardId)}`, { credentials: "include" });
+      const res = await adminFetch(`/api/admin/vault-quest/cards/${encodeURIComponent(cardId)}`, { credentials: "include" });
       if (!res.ok) throw new Error((await res.json().catch(() => ({}))).error || `load failed (${res.status})`);
       const data = (await res.json()) as { card: Record<string, unknown>; previousStage: string | null; familyName: string | null; base: BaseRef };
       const c = data.card;
@@ -3297,7 +3297,7 @@ export default function AdminVaultQuest() {
   async function runFullQa() {
     if (!form.cardId) return;
     try {
-      const res = await fetch(`/api/admin/vault-quest/cards/${encodeURIComponent(form.cardId)}/evaluate`, { credentials: "include" });
+      const res = await adminFetch(`/api/admin/vault-quest/cards/${encodeURIComponent(form.cardId)}/evaluate`, { credentials: "include" });
       if (!res.ok) {
         const err = new Error((await res.json().catch(() => ({}))).error || "evaluate failed") as Error & { status?: number };
         err.status = res.status;
@@ -3313,7 +3313,7 @@ export default function AdminVaultQuest() {
     if (!form.cardId) { toast({ title: "Save the card first", variant: "destructive" }); return; }
     if (dirty) { toast({ title: "Save your changes before changing status", variant: "destructive" }); return; }
     try {
-      const res = await fetch(`/api/admin/vault-quest/cards/${encodeURIComponent(form.cardId)}/status`, {
+      const res = await adminFetch(`/api/admin/vault-quest/cards/${encodeURIComponent(form.cardId)}/status`, {
         method: "POST", headers: { "Content-Type": "application/json" }, credentials: "include", body: JSON.stringify({ to, override }),
       });
       const data = await res.json();

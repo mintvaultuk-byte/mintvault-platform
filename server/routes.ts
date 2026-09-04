@@ -227,10 +227,13 @@ import {
   IMAGE_VARIANTS_AUDIT_ACTION,
 } from "./lib/certificate-image-persistence";
 import { resolveCommittedPrintArtifactKey } from "./lib/print-artifact-persistence";
+import { currentPrintOutputBlock } from "./lib/print-output-eligibility";
 import {
   ObjectWriteAbandonError,
   ObjectWriteConflictError,
   ObjectWriteCoordinator,
+  ObjectWriteInProgressError,
+  ObjectWriteTerminalError,
   createPoolTransactionRunner,
   type ObjectWriteItemInput,
 } from "./lib/object-write-coordinator";
@@ -4549,7 +4552,7 @@ export async function registerRoutes(httpServer: Server, app: Express): Promise<
       }
       // Normalize input IDs so "MV-0000000042" and "MV42" both resolve —
       // allCerts store certId in canonical form, and find() below is exact.
-      const ids = certIds.map((c: unknown) => normalizeCertId(String(c)));
+      const ids = [...new Set(certIds.map((c: unknown) => normalizeCertId(String(c))))].sort();
 
       // Rolling-compatible adapter: this legacy URL now delegates to the
       // canonical durable workflow. Cached clients still receive the envelope
@@ -4985,18 +4988,10 @@ export async function registerRoutes(httpServer: Server, app: Express): Promise<
       }
       const { certIds, reason } = parsed.data;
       const idempotencyKey = req.header("Idempotency-Key")?.trim() ?? "";
-      if (!idempotencyKey) return res.status(400).json({ error: "Idempotency-Key header required" });
-      const {
-        MAX_CERTS_PER_BATCH,
-        SHEET_LAYOUT_VERSION,
-        printArtifactPlan,
-        generatePrintBatchPDF,
-        generatePrintBatchCutSVG,
-        generatePrintBatchPNG,
-        deriveBatchId,
-        uploadPrintBatchArtifacts,
-        uploadPrintBatchPDF,
-      } = await import("./print-batch");
+      if (!idempotencyKey || idempotencyKey.length > 200) {
+        return res.status(400).json({ error: "Idempotency-Key header (1-200 characters) required" });
+      }
+      const { MAX_CERTS_PER_BATCH, SHEET_LAYOUT_VERSION } = await import("./print-batch");
       if (certIds.length > MAX_CERTS_PER_BATCH) {
         return res.status(400).json({ error: `Maximum ${MAX_CERTS_PER_BATCH} certs per batch` });
       }
@@ -5009,7 +5004,7 @@ export async function registerRoutes(httpServer: Server, app: Express): Promise<
         certIds: ids,
         identity,
         reason,
-        reasonCategory: "legacy_unspecified",
+        reasonCategory: null,
         idempotencyKey,
         recordReprintRequest: true,
       });
@@ -5034,214 +5029,28 @@ export async function registerRoutes(httpServer: Server, app: Express): Promise<
         mintedFor: [],
         generatedAt: new Date().toISOString(),
         sheetLayoutVersion: SHEET_LAYOUT_VERSION,
-        auditRows: durable.applied.map((certId) => ({ certId, ok: true })),
+        auditRows: durable.auditRows ?? [],
         isMultiSheet: durable.pdfOnly,
         isPdfMultiPage: durable.isPdfMultiPage,
         pageCount: durable.pageCount,
       });
 
-      // Resolve certs. Skip the "unclaimed only" check — that's the whole
-      // point of this endpoint. Still reject not-found / soft-deleted /
-      // missing-grade so the layout doesn't draw garbage.
-      const allCerts = await storage.listCertificates();
-      // Reprint enforces the SAME grade printability rule as a fresh batch. There is no
-      // separate immutable-historical-artefact render path in this codebase, so none is
-      // invented here: a reprint re-renders from the CURRENT certificate row, which means
-      // an invalid grade would print an invented panel exactly as a fresh batch would.
-      // Pre-pass, before the claim-code minting below.
-      const unprintableRe: { certId: string; code: string; message: string }[] = [];
-      for (const id of ids) {
-        const c = allCerts.find((x: any) => x.certId === id);
-        if (!c) continue;
-        const verdict = checkPrintableGrade({ gradeType: (c as any).gradeType, gradeOverall: (c as any).gradeOverall });
-        if (!verdict.printable) {
-          unprintableRe.push({
-            certId: id,
-            code: verdict.reason ?? "unprintable_grade",
-            message: `${id}: ${verdict.message}`,
-          });
-        }
-      }
-      if (unprintableRe.length) {
-        return res.status(422).json({
-          error: `Cannot reprint — ${unprintableRe.length === 1 ? "this certificate is" : "these certificates are"} not ready: ${unprintableRe.map((u) => u.message).join(" ")}`,
-          code: "UNPRINTABLE_GRADE",
-          blockedCertIds: unprintableRe.map((u) => u.certId),
-          blocked: unprintableRe,
-        });
-      }
-      // Reprint enforces the SAME approval / review-state gate as a fresh batch,
-      // for the same reason the printability rule is shared: a reprint re-renders
-      // from the CURRENT certificate row, so a card that is mid-correction or
-      // unapproved would emit a physical label exactly as a fresh batch would.
-      const unapprovedRe: { certId: string; code: string; message: string }[] = [];
-      for (const id of ids) {
-        const c = allCerts.find((x: any) => x.certId === id);
-        if (!c) continue;
-        unapprovedRe.push(...checkPrintApproval(id, c as unknown as Record<string, unknown>));
-      }
-      if (unapprovedRe.length) {
-        return res.status(422).json({
-          error: `Cannot reprint — ${unapprovedRe.length === 1 ? "this certificate is" : "these certificates are"} not approved for printing: ${unapprovedRe.map((u) => u.message).join(" ")}`,
-          code: "NOT_APPROVED_FOR_PRINT",
-          blockedCertIds: unapprovedRe.map((u) => u.certId),
-          blocked: unapprovedRe,
-        });
-      }
-      const { getPartnerPrintEligibilityBlocks } = await import("./partner/print-eligibility");
-      const partnerBlocks = await getPartnerPrintEligibilityBlocks(ids);
-      if (partnerBlocks.length) {
-        return res.status(422).json({
-          error: `Cannot reprint — ${partnerBlocks.map((block) => block.message).join(" ")}`,
-          code: "PARTNER_PRINT_INELIGIBLE",
-          blockedCertIds: partnerBlocks.map((block) => block.certId),
-          blocked: partnerBlocks,
-        });
-      }
-      const items: { cert: any; claimCode: string }[] = [];
-      const missing: string[] = [];
-      const mintedFor: string[] = [];
-      for (const id of ids) {
-        const cert = allCerts.find((c: any) => c.certId === id);
-        if (!cert) {
-          missing.push(id);
-          continue;
-        }
-        let code: string | undefined = (cert as any).claimCode || (cert as any).claim_code;
-        if (!code) {
-          // A claimed cert without a claim code shouldn't normally exist
-          // (claim required a code in the first place) but we mint defensively
-          // so the insert renders something rather than throwing.
-          code = await storage.getOrGenerateClaimCode(id);
-          mintedFor.push(id);
-        }
-        items.push({ cert, claimCode: String(code) });
-      }
-      if (missing.length) return res.status(404).json({ error: `Certs not found: ${missing.join(", ")}` });
-
-      const adminUser = (req.session as any)?.adminEmail || "admin";
-      const batchId = deriveBatchId(ids, `${adminUser}|reprint`);
-      const generatedAt = new Date().toISOString();
-
-      // Reprint endpoint is NOT idempotent on the audit trail — every
-      // reprint of a claimed cert must produce a fresh audit_log entry
-      // with the reason. Generating duplicates if an admin double-clicks
-      // is a feature here: each click is a deliberate operational decision.
-      // We still derive batchId from inputs so the operator can match
-      // filenames at the printer.
-
-      const artifactPlan = printArtifactPlan(items.length);
-      let pdfBuf: Buffer;
-      let svgStr = "";
-      let pngBuf: Buffer | null = null;
-      if (artifactPlan.pdfOnly) {
-        pdfBuf = await generatePrintBatchPDF(items);
-      } else {
-        [pdfBuf, svgStr, pngBuf] = await Promise.all([
-          generatePrintBatchPDF(items),
-          Promise.resolve(generatePrintBatchCutSVG(items.length)),
-          generatePrintBatchPNG(items),
-        ]);
-      }
-
-      // Persist PDF + PNG to R2 so the client can retrieve them via stable
-      // server URLs instead of expiring blob URLs.
-      try {
-        if (artifactPlan.pdfOnly) await uploadPrintBatchPDF(batchId, pdfBuf);
-        else await uploadPrintBatchArtifacts(batchId, pdfBuf, pngBuf!);
-      } catch (uploadErr: any) {
-        console.error("[reprint] R2 upload failed:", uploadErr.message);
-        return res.status(500).json({ error: "Failed to store print batch artefacts" });
-      }
-
-      // One audit_log row per cert. Best-effort: failure here is logged
-      // but does not block the operator from getting the artifacts —
-      // recovery is a manual SQL insert if needed, the operator has the
-      // batch_id from the response.
-      const auditRows: { certId: string; ok: boolean }[] = [];
-      for (const it of items) {
-        const certId = (it.cert as any).certId as string;
-        try {
-          await db.execute(sql`
-            INSERT INTO audit_log (entity_type, entity_id, action, admin_user, details, created_at)
-            VALUES (
-              'cert',
-              ${certId},
-              'reprint',
-              ${adminUser},
-              ${JSON.stringify({
-                reason,
-                batch_id: batchId,
-                original_batch_id: null,
-                new_batch_id: `print_batch_${batchId}`,
-                cert_count: items.length,
-                sheet_layout_version: SHEET_LAYOUT_VERSION,
-              })}::jsonb,
-              NOW()
-            )
-          `);
-          auditRows.push({ certId, ok: true });
-        } catch (e: any) {
-          console.warn(`[reprint] audit_log failed for ${certId}:`, e.message);
-          auditRows.push({ certId, ok: false });
-        }
-      }
-
-      // Standard print_batch_generated row + labelPrints dual-write so
-      // history UI surfaces the reprint sheet the same as a regular batch.
-      try {
-        await db.execute(sql`
-          INSERT INTO audit_log (entity_type, entity_id, action, admin_user, details, created_at)
-          VALUES (
-            'system',
-            ${`print_batch_${batchId}`},
-            'print_batch_generated',
-            ${adminUser},
-            ${JSON.stringify({
-              batch_id: batchId,
-              cert_ids: ids,
-              cert_count: items.length,
-              pdf_size_bytes: pdfBuf.length,
-              svg_size_bytes: Buffer.byteLength(svgStr, "utf8"),
-              png_size_bytes: pngBuf?.length ?? 0,
-              auto_generated_codes_for: mintedFor,
-              sheet_layout_version: SHEET_LAYOUT_VERSION,
-              layout: artifactPlan.pdfOnly ? "pdf_only" : "front_plus_insert",
-              source: "reprint",
-              reason,
-            })}::jsonb,
-            NOW()
-          )
-        `);
-      } catch (auditErr: any) {
-        console.warn("[reprint] print_batch_generated audit_log failed:", auditErr.message);
-      }
-      try {
-        await storage.queueForPrinting(ids, `print_batch_${batchId}`);
-      } catch (qErr: any) {
-        console.warn("[reprint] queueForPrinting failed:", qErr.message);
-      }
-
-      res.json({
-        pdfUrl: `/api/admin/print-batch/${batchId}/pdf`,
-        ...(artifactPlan.pdfOnly
-          ? {}
-          : {
-              pngUrl: `/api/admin/print-batch/${batchId}/png`,
-              svg: Buffer.from(svgStr, "utf8").toString("base64"),
-            }),
-        batchId,
-        certIds: ids,
-        mintedFor,
-        generatedAt,
-        isMultiSheet: artifactPlan.pdfOnly,
-        isPdfMultiPage: artifactPlan.isPdfMultiPage,
-        pageCount: artifactPlan.pageCount,
-        sheetLayoutVersion: SHEET_LAYOUT_VERSION,
-        auditRows,
-      });
     } catch (err: any) {
       console.error("[reprint] error:", err.message);
+      if (err instanceof ObjectWriteConflictError) {
+        return res.status(409).json({ code: err.code, error: err.message });
+      }
+      if (err instanceof ObjectWriteInProgressError) {
+        res.setHeader("Retry-After", "1");
+        return res.status(409).json({ code: err.code, error: err.message, retryable: true });
+      }
+      if (err instanceof ObjectWriteTerminalError) {
+        return res.status(409).json({
+          code: err.code,
+          error: "This print attempt was safely abandoned and cannot be resumed. Start a new attempt.",
+          retryable: false,
+        });
+      }
       sendServerError(res, err);
     }
   });
@@ -5259,63 +5068,78 @@ export async function registerRoutes(httpServer: Server, app: Express): Promise<
    * 2026-07-02 sheet whose panels read 0 / POOR — remained downloadable and printable by
    * batch id. Re-validate the batch's certificates against the same rule before serving.
    *
-   * Cert membership is resolved from `print_batches.cert_ids` when the row exists, and
-   * otherwise from `label_prints.sheet_ref` (which is how pre-0022 legacy sheets are
-   * recorded). If membership cannot be resolved at all we FAIL CLOSED rather than serve an
-   * artefact we cannot vouch for.
+   * Cert membership must come from `print_batches.cert_ids`, the immutable membership
+   * recorded when the artefact is committed. `label_prints.sheet_ref` is deliberately not
+   * a fallback: it is a mutable per-certificate pointer that moves on later reprints and can
+   * therefore describe only a subset of an older sheet. Pre-0022 artefacts without an
+   * authoritative batch row FAIL CLOSED and must be regenerated.
    */
   async function assertBatchArtefactPrintable(
     batchId: string
   ): Promise<{ ok: true } | { ok: false; blocked: string[]; message: string }> {
-    let certIds: string[] = [];
-    try {
-      const b = await db.execute(sql`SELECT cert_ids FROM print_batches WHERE batch_id = ${batchId}`);
-      const row = b.rows[0] as { cert_ids?: string[] } | undefined;
-      if (row?.cert_ids?.length) certIds = row.cert_ids;
-    } catch {
-      /* print_batches may not exist yet (pre-0022) — fall through to label_prints */
-    }
-    if (certIds.length === 0) {
-      const lp = await db.execute(
-        sql`SELECT cert_id FROM label_prints WHERE sheet_ref = ${`print_batch_${batchId}`} OR sheet_ref = ${batchId}`
-      );
-      certIds = (lp.rows as unknown as { cert_id: string }[]).map((r) => r.cert_id).filter(Boolean);
-    }
+    const batch = await db.execute(sql`SELECT cert_ids FROM print_batches WHERE batch_id = ${batchId}`);
+    const row = batch.rows[0] as { cert_ids?: unknown } | undefined;
+    const certIds =
+      Array.isArray(row?.cert_ids) &&
+      row.cert_ids.length > 0 &&
+      row.cert_ids.every((certId): certId is string => typeof certId === "string" && certId.length > 0)
+        ? row.cert_ids
+        : [];
     if (certIds.length === 0) {
       return {
         ok: false,
         blocked: [],
         message:
-          "This print sheet's certificates cannot be identified, so it cannot be verified as safe to print. " +
+          "This print sheet has no authoritative certificate membership, so it cannot be verified as safe to print. " +
           "Create a fresh batch instead.",
       };
     }
     const rows = await db.execute(
-      sql`SELECT certificate_number, grade_type, grade::text AS grade FROM certificates
+      sql`SELECT certificate_number, grade_type, grade::text AS grade,
+                 grade_approved_at, grader_status, status, deleted_at
+            FROM certificates
            WHERE certificate_number IN (${sql.join(
              certIds.map((c) => sql`${c}`),
              sql`, `
            )})`
     );
     const byId = new Map(
-      (rows.rows as unknown as { certificate_number: string; grade_type: string | null; grade: string | null }[]).map(
-        (r) => [r.certificate_number, r]
-      )
+      (
+        rows.rows as unknown as Array<{
+          certificate_number: string;
+          grade_type: string | null;
+          grade: string | null;
+          grade_approved_at: Date | string | null;
+          grader_status: string | null;
+          status: string | null;
+          deleted_at: Date | string | null;
+        }>
+      ).map((r) => [r.certificate_number, r])
     );
     const blocked: string[] = [];
     for (const id of certIds) {
       const r = byId.get(id);
       // A cert missing from the result fails CLOSED.
-      const v = checkPrintableGrade({ gradeType: r?.grade_type ?? null, gradeOverall: r?.grade ?? null });
-      if (!v.printable) blocked.push(id);
+      const block = r
+        ? currentPrintOutputBlock(id, {
+            gradeType: r.grade_type,
+            gradeOverall: r.grade,
+            gradeApprovedAt: r.grade_approved_at,
+            graderStatus: r.grader_status,
+            status: r.status,
+            deletedAt: r.deleted_at,
+          })
+        : { certId: id, code: "not_found", message: `${id}: certificate no longer exists.` };
+      if (block) blocked.push(id);
     }
     if (blocked.length) {
       return {
         ok: false,
         blocked,
         message:
-          `This print sheet contains ${blocked.length === 1 ? "a certificate" : "certificates"} without a valid grade ` +
-          `(${blocked.join(", ")}), so it cannot be downloaded or printed. Grade ${blocked.length === 1 ? "it" : "them"} and create a fresh batch.`,
+          `This print sheet contains ${blocked.length === 1 ? "a certificate" : "certificates"} that are no longer ` +
+          `approved, active, or printable (${blocked.join(", ")}), so it cannot be downloaded or printed. ` +
+          "Resolve the certificate state and create a fresh batch.",
       };
     }
     const { getPartnerPrintEligibilityBlocks } = await import("./partner/print-eligibility");

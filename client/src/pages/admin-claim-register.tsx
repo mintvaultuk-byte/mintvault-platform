@@ -1,3 +1,4 @@
+import { adminFetch } from "@/lib/queryClient";
 /**
  * Super Admin — Claim Code / Ownership Register.
  *
@@ -202,7 +203,7 @@ export default function AdminClaimRegisterPage() {
   const { data, isLoading, isFetching, error, refetch } = useQuery<RegisterResponse>({
     queryKey: ["/api/admin/claim-register"],
     queryFn: async () => {
-      const res = await fetch("/api/admin/claim-register");
+      const res = await adminFetch("/api/admin/claim-register");
       if (!res.ok) throw new Error("Could not load the claim register.");
       return res.json();
     },
@@ -228,7 +229,6 @@ export default function AdminClaimRegisterPage() {
     <AdminShell
       activeTab="claim-register"
       onTabChange={() => navigate("/admin")}
-      onLogout={() => navigate("/admin/login")}
       title="Claim Register"
       crumb="MINTVAULT · OPERATIONS"
       disableEnvironmentPolling

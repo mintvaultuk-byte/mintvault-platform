@@ -2,866 +2,6 @@
   "schemaVersion": 1,
   "records": [
     {
-      "key": "client-route|client/src/App.tsx|/#0",
-      "finding": "ARCH-AUTHORITY-001",
-      "expiresWith": "the bounded-context repair that assigns explicit authority"
-    },
-    {
-      "key": "client-route|client/src/App.tsx|/about/our-story#0",
-      "finding": "ARCH-AUTHORITY-001",
-      "expiresWith": "the bounded-context repair that assigns explicit authority"
-    },
-    {
-      "key": "client-route|client/src/App.tsx|/about/the-mintvault-slab#0",
-      "finding": "ARCH-AUTHORITY-001",
-      "expiresWith": "the bounded-context repair that assigns explicit authority"
-    },
-    {
-      "key": "client-route|client/src/App.tsx|/account/settings#0",
-      "finding": "ARCH-AUTHORITY-001",
-      "expiresWith": "the bounded-context repair that assigns explicit authority"
-    },
-    {
-      "key": "client-route|client/src/App.tsx|/admin/catalogue#0",
-      "finding": "ARCH-AUTHORITY-001",
-      "expiresWith": "the bounded-context repair that assigns explicit authority"
-    },
-    {
-      "key": "client-route|client/src/App.tsx|/admin/cert/:id#0",
-      "finding": "ARCH-AUTHORITY-001",
-      "expiresWith": "the bounded-context repair that assigns explicit authority"
-    },
-    {
-      "key": "client-route|client/src/App.tsx|/admin/claim-register#0",
-      "finding": "ARCH-AUTHORITY-001",
-      "expiresWith": "the bounded-context repair that assigns explicit authority"
-    },
-    {
-      "key": "client-route|client/src/App.tsx|/admin/command#0",
-      "finding": "ARCH-AUTHORITY-001",
-      "expiresWith": "the bounded-context repair that assigns explicit authority"
-    },
-    {
-      "key": "client-route|client/src/App.tsx|/admin/community#0",
-      "finding": "ARCH-AUTHORITY-001",
-      "expiresWith": "the bounded-context repair that assigns explicit authority"
-    },
-    {
-      "key": "client-route|client/src/App.tsx|/admin/graders#0",
-      "finding": "ARCH-AUTHORITY-001",
-      "expiresWith": "the bounded-context repair that assigns explicit authority"
-    },
-    {
-      "key": "client-route|client/src/App.tsx|/admin/growth#0",
-      "finding": "ARCH-AUTHORITY-001",
-      "expiresWith": "the bounded-context repair that assigns explicit authority"
-    },
-    {
-      "key": "client-route|client/src/App.tsx|/admin/instagram#0",
-      "finding": "ARCH-AUTHORITY-001",
-      "expiresWith": "the bounded-context repair that assigns explicit authority"
-    },
-    {
-      "key": "client-route|client/src/App.tsx|/admin/legacy-review#0",
-      "finding": "ARCH-AUTHORITY-001",
-      "expiresWith": "the bounded-context repair that assigns explicit authority"
-    },
-    {
-      "key": "client-route|client/src/App.tsx|/admin/login#0",
-      "finding": "ARCH-AUTHORITY-001",
-      "expiresWith": "the bounded-context repair that assigns explicit authority"
-    },
-    {
-      "key": "client-route|client/src/App.tsx|/admin/mvgs-calibration#0",
-      "finding": "ARCH-AUTHORITY-001",
-      "expiresWith": "the bounded-context repair that assigns explicit authority"
-    },
-    {
-      "key": "client-route|client/src/App.tsx|/admin/operator-stats#0",
-      "finding": "ARCH-AUTHORITY-001",
-      "expiresWith": "the bounded-context repair that assigns explicit authority"
-    },
-    {
-      "key": "client-route|client/src/App.tsx|/admin/partner-network/partners/:partnerId#0",
-      "finding": "ARCH-AUTHORITY-001",
-      "expiresWith": "the bounded-context repair that assigns explicit authority"
-    },
-    {
-      "key": "client-route|client/src/App.tsx|/admin/partner-network/partners#0",
-      "finding": "ARCH-AUTHORITY-001",
-      "expiresWith": "the bounded-context repair that assigns explicit authority"
-    },
-    {
-      "key": "client-route|client/src/App.tsx|/admin/partner-network#0",
-      "finding": "ARCH-AUTHORITY-001",
-      "expiresWith": "the bounded-context repair that assigns explicit authority"
-    },
-    {
-      "key": "client-route|client/src/App.tsx|/admin/partners/:partnerId/activity#0",
-      "finding": "ARCH-AUTHORITY-001",
-      "expiresWith": "the bounded-context repair that assigns explicit authority"
-    },
-    {
-      "key": "client-route|client/src/App.tsx|/admin/partners/:partnerId/cards#0",
-      "finding": "ARCH-AUTHORITY-001",
-      "expiresWith": "the bounded-context repair that assigns explicit authority"
-    },
-    {
-      "key": "client-route|client/src/App.tsx|/admin/partners/:partnerId/credits#0",
-      "finding": "ARCH-AUTHORITY-001",
-      "expiresWith": "the bounded-context repair that assigns explicit authority"
-    },
-    {
-      "key": "client-route|client/src/App.tsx|/admin/partners/:partnerId/locations#0",
-      "finding": "ARCH-AUTHORITY-001",
-      "expiresWith": "the bounded-context repair that assigns explicit authority"
-    },
-    {
-      "key": "client-route|client/src/App.tsx|/admin/partners/:partnerId/onboarding#0",
-      "finding": "ARCH-AUTHORITY-001",
-      "expiresWith": "the bounded-context repair that assigns explicit authority"
-    },
-    {
-      "key": "client-route|client/src/App.tsx|/admin/partners/:partnerId/security#0",
-      "finding": "ARCH-AUTHORITY-001",
-      "expiresWith": "the bounded-context repair that assigns explicit authority"
-    },
-    {
-      "key": "client-route|client/src/App.tsx|/admin/partners/:partnerId/staff#0",
-      "finding": "ARCH-AUTHORITY-001",
-      "expiresWith": "the bounded-context repair that assigns explicit authority"
-    },
-    {
-      "key": "client-route|client/src/App.tsx|/admin/partners/:partnerId/stations#0",
-      "finding": "ARCH-AUTHORITY-001",
-      "expiresWith": "the bounded-context repair that assigns explicit authority"
-    },
-    {
-      "key": "client-route|client/src/App.tsx|/admin/partners/:partnerId#0",
-      "finding": "ARCH-AUTHORITY-001",
-      "expiresWith": "the bounded-context repair that assigns explicit authority"
-    },
-    {
-      "key": "client-route|client/src/App.tsx|/admin/partners/dashboard#0",
-      "finding": "ARCH-AUTHORITY-001",
-      "expiresWith": "the bounded-context repair that assigns explicit authority"
-    },
-    {
-      "key": "client-route|client/src/App.tsx|/admin/partners/directory#0",
-      "finding": "ARCH-AUTHORITY-001",
-      "expiresWith": "the bounded-context repair that assigns explicit authority"
-    },
-    {
-      "key": "client-route|client/src/App.tsx|/admin/partners/infrastructure#0",
-      "finding": "ARCH-AUTHORITY-001",
-      "expiresWith": "the bounded-context repair that assigns explicit authority"
-    },
-    {
-      "key": "client-route|client/src/App.tsx|/admin/partners/onboarding#0",
-      "finding": "ARCH-AUTHORITY-001",
-      "expiresWith": "the bounded-context repair that assigns explicit authority"
-    },
-    {
-      "key": "client-route|client/src/App.tsx|/admin/partners/settings/infrastructure#0",
-      "finding": "ARCH-AUTHORITY-001",
-      "expiresWith": "the bounded-context repair that assigns explicit authority"
-    },
-    {
-      "key": "client-route|client/src/App.tsx|/admin/partners/settings/stations#0",
-      "finding": "ARCH-AUTHORITY-001",
-      "expiresWith": "the bounded-context repair that assigns explicit authority"
-    },
-    {
-      "key": "client-route|client/src/App.tsx|/admin/partners/settings#0",
-      "finding": "ARCH-AUTHORITY-001",
-      "expiresWith": "the bounded-context repair that assigns explicit authority"
-    },
-    {
-      "key": "client-route|client/src/App.tsx|/admin/partners/shops#0",
-      "finding": "ARCH-AUTHORITY-001",
-      "expiresWith": "the bounded-context repair that assigns explicit authority"
-    },
-    {
-      "key": "client-route|client/src/App.tsx|/admin/partners/stations#0",
-      "finding": "ARCH-AUTHORITY-001",
-      "expiresWith": "the bounded-context repair that assigns explicit authority"
-    },
-    {
-      "key": "client-route|client/src/App.tsx|/admin/partners/supplies/requests#0",
-      "finding": "ARCH-AUTHORITY-001",
-      "expiresWith": "the bounded-context repair that assigns explicit authority"
-    },
-    {
-      "key": "client-route|client/src/App.tsx|/admin/partners/supplies#0",
-      "finding": "ARCH-AUTHORITY-001",
-      "expiresWith": "the bounded-context repair that assigns explicit authority"
-    },
-    {
-      "key": "client-route|client/src/App.tsx|/admin/partners#0",
-      "finding": "ARCH-AUTHORITY-001",
-      "expiresWith": "the bounded-context repair that assigns explicit authority"
-    },
-    {
-      "key": "client-route|client/src/App.tsx|/admin/pokemon-knowledge#0",
-      "finding": "ARCH-AUTHORITY-001",
-      "expiresWith": "the bounded-context repair that assigns explicit authority"
-    },
-    {
-      "key": "client-route|client/src/App.tsx|/admin/project-control/package/:key#0",
-      "finding": "ARCH-AUTHORITY-001",
-      "expiresWith": "the bounded-context repair that assigns explicit authority"
-    },
-    {
-      "key": "client-route|client/src/App.tsx|/admin/project-control/scanner#0",
-      "finding": "ARCH-AUTHORITY-001",
-      "expiresWith": "the bounded-context repair that assigns explicit authority"
-    },
-    {
-      "key": "client-route|client/src/App.tsx|/admin/project-control/shop-launch#0",
-      "finding": "ARCH-AUTHORITY-001",
-      "expiresWith": "the bounded-context repair that assigns explicit authority"
-    },
-    {
-      "key": "client-route|client/src/App.tsx|/admin/project-control#0",
-      "finding": "ARCH-AUTHORITY-001",
-      "expiresWith": "the bounded-context repair that assigns explicit authority"
-    },
-    {
-      "key": "client-route|client/src/App.tsx|/admin/promotions#0",
-      "finding": "ARCH-AUTHORITY-001",
-      "expiresWith": "the bounded-context repair that assigns explicit authority"
-    },
-    {
-      "key": "client-route|client/src/App.tsx|/admin/security#0",
-      "finding": "ARCH-AUTHORITY-001",
-      "expiresWith": "the bounded-context repair that assigns explicit authority"
-    },
-    {
-      "key": "client-route|client/src/App.tsx|/admin/sets#0",
-      "finding": "ARCH-AUTHORITY-001",
-      "expiresWith": "the bounded-context repair that assigns explicit authority"
-    },
-    {
-      "key": "client-route|client/src/App.tsx|/admin/social-studio#0",
-      "finding": "ARCH-AUTHORITY-001",
-      "expiresWith": "the bounded-context repair that assigns explicit authority"
-    },
-    {
-      "key": "client-route|client/src/App.tsx|/admin/staff#0",
-      "finding": "ARCH-AUTHORITY-001",
-      "expiresWith": "the bounded-context repair that assigns explicit authority"
-    },
-    {
-      "key": "client-route|client/src/App.tsx|/admin/vault-quest/card-factory#0",
-      "finding": "ARCH-AUTHORITY-001",
-      "expiresWith": "the bounded-context repair that assigns explicit authority"
-    },
-    {
-      "key": "client-route|client/src/App.tsx|/admin/vault-quest/studio#0",
-      "finding": "ARCH-AUTHORITY-001",
-      "expiresWith": "the bounded-context repair that assigns explicit authority"
-    },
-    {
-      "key": "client-route|client/src/App.tsx|/admin/vault-quest#0",
-      "finding": "ARCH-AUTHORITY-001",
-      "expiresWith": "the bounded-context repair that assigns explicit authority"
-    },
-    {
-      "key": "client-route|client/src/App.tsx|/admin/weekly-reel#0",
-      "finding": "ARCH-AUTHORITY-001",
-      "expiresWith": "the bounded-context repair that assigns explicit authority"
-    },
-    {
-      "key": "client-route|client/src/App.tsx|/admin#0",
-      "finding": "ARCH-AUTHORITY-001",
-      "expiresWith": "the bounded-context repair that assigns explicit authority"
-    },
-    {
-      "key": "client-route|client/src/App.tsx|/ai-pre-grade#0",
-      "finding": "ARCH-AUTHORITY-001",
-      "expiresWith": "the bounded-context repair that assigns explicit authority"
-    },
-    {
-      "key": "client-route|client/src/App.tsx|/api-docs#0",
-      "finding": "ARCH-AUTHORITY-001",
-      "expiresWith": "the bounded-context repair that assigns explicit authority"
-    },
-    {
-      "key": "client-route|client/src/App.tsx|/auth/pin/forgot#0",
-      "finding": "ARCH-AUTHORITY-001",
-      "expiresWith": "the bounded-context repair that assigns explicit authority"
-    },
-    {
-      "key": "client-route|client/src/App.tsx|/auth/pin/setup#0",
-      "finding": "ARCH-AUTHORITY-001",
-      "expiresWith": "the bounded-context repair that assigns explicit authority"
-    },
-    {
-      "key": "client-route|client/src/App.tsx|/best-card-grading-uk#0",
-      "finding": "ARCH-AUTHORITY-001",
-      "expiresWith": "the bounded-context repair that assigns explicit authority"
-    },
-    {
-      "key": "client-route|client/src/App.tsx|/card-grading-cost-uk#0",
-      "finding": "ARCH-AUTHORITY-001",
-      "expiresWith": "the bounded-context repair that assigns explicit authority"
-    },
-    {
-      "key": "client-route|client/src/App.tsx|/card-grading-near-me#0",
-      "finding": "ARCH-AUTHORITY-001",
-      "expiresWith": "the bounded-context repair that assigns explicit authority"
-    },
-    {
-      "key": "client-route|client/src/App.tsx|/card-grading-service-uk#0",
-      "finding": "ARCH-AUTHORITY-001",
-      "expiresWith": "the bounded-context repair that assigns explicit authority"
-    },
-    {
-      "key": "client-route|client/src/App.tsx|/cert/:id/report#0",
-      "finding": "ARCH-AUTHORITY-001",
-      "expiresWith": "the bounded-context repair that assigns explicit authority"
-    },
-    {
-      "key": "client-route|client/src/App.tsx|/cert/:id#0",
-      "finding": "ARCH-AUTHORITY-001",
-      "expiresWith": "the bounded-context repair that assigns explicit authority"
-    },
-    {
-      "key": "client-route|client/src/App.tsx|/cert#0",
-      "finding": "ARCH-AUTHORITY-001",
-      "expiresWith": "the bounded-context repair that assigns explicit authority"
-    },
-    {
-      "key": "client-route|client/src/App.tsx|/claim#0",
-      "finding": "ARCH-AUTHORITY-001",
-      "expiresWith": "the bounded-context repair that assigns explicit authority"
-    },
-    {
-      "key": "client-route|client/src/App.tsx|/community#0",
-      "finding": "ARCH-AUTHORITY-001",
-      "expiresWith": "the bounded-context repair that assigns explicit authority"
-    },
-    {
-      "key": "client-route|client/src/App.tsx|/customer-login#0",
-      "finding": "ARCH-AUTHORITY-001",
-      "expiresWith": "the bounded-context repair that assigns explicit authority"
-    },
-    {
-      "key": "client-route|client/src/App.tsx|/dashboard#0",
-      "finding": "ARCH-AUTHORITY-001",
-      "expiresWith": "the bounded-context repair that assigns explicit authority"
-    },
-    {
-      "key": "client-route|client/src/App.tsx|/dev/admin-shell-geometry#0",
-      "finding": "ARCH-AUTHORITY-001",
-      "expiresWith": "the bounded-context repair that assigns explicit authority"
-    },
-    {
-      "key": "client-route|client/src/App.tsx|/dev/canonical-workstation#0",
-      "finding": "ARCH-AUTHORITY-001",
-      "expiresWith": "the bounded-context repair that assigns explicit authority"
-    },
-    {
-      "key": "client-route|client/src/App.tsx|/dev/card-details#0",
-      "finding": "ARCH-AUTHORITY-001",
-      "expiresWith": "the bounded-context repair that assigns explicit authority"
-    },
-    {
-      "key": "client-route|client/src/App.tsx|/dev/growth-command-visual#0",
-      "finding": "ARCH-AUTHORITY-001",
-      "expiresWith": "the bounded-context repair that assigns explicit authority"
-    },
-    {
-      "key": "client-route|client/src/App.tsx|/find-a-partner#0",
-      "finding": "ARCH-AUTHORITY-001",
-      "expiresWith": "the bounded-context repair that assigns explicit authority"
-    },
-    {
-      "key": "client-route|client/src/App.tsx|/forgot-password#0",
-      "finding": "ARCH-AUTHORITY-001",
-      "expiresWith": "the bounded-context repair that assigns explicit authority"
-    },
-    {
-      "key": "client-route|client/src/App.tsx|/grader/login#0",
-      "finding": "ARCH-AUTHORITY-001",
-      "expiresWith": "the bounded-context repair that assigns explicit authority"
-    },
-    {
-      "key": "client-route|client/src/App.tsx|/grader#0",
-      "finding": "ARCH-AUTHORITY-001",
-      "expiresWith": "the bounded-context repair that assigns explicit authority"
-    },
-    {
-      "key": "client-route|client/src/App.tsx|/grading-glossary#0",
-      "finding": "ARCH-AUTHORITY-001",
-      "expiresWith": "the bounded-context repair that assigns explicit authority"
-    },
-    {
-      "key": "client-route|client/src/App.tsx|/grading-scale#0",
-      "finding": "ARCH-AUTHORITY-001",
-      "expiresWith": "the bounded-context repair that assigns explicit authority"
-    },
-    {
-      "key": "client-route|client/src/App.tsx|/grading-standard#0",
-      "finding": "ARCH-AUTHORITY-001",
-      "expiresWith": "the bounded-context repair that assigns explicit authority"
-    },
-    {
-      "key": "client-route|client/src/App.tsx|/grading/eligible-cards#0",
-      "finding": "ARCH-AUTHORITY-001",
-      "expiresWith": "the bounded-context repair that assigns explicit authority"
-    },
-    {
-      "key": "client-route|client/src/App.tsx|/guides/:slug#0",
-      "finding": "ARCH-AUTHORITY-001",
-      "expiresWith": "the bounded-context repair that assigns explicit authority"
-    },
-    {
-      "key": "client-route|client/src/App.tsx|/guides#0",
-      "finding": "ARCH-AUTHORITY-001",
-      "expiresWith": "the bounded-context repair that assigns explicit authority"
-    },
-    {
-      "key": "client-route|client/src/App.tsx|/help/contact#0",
-      "finding": "ARCH-AUTHORITY-001",
-      "expiresWith": "the bounded-context repair that assigns explicit authority"
-    },
-    {
-      "key": "client-route|client/src/App.tsx|/help/faq#0",
-      "finding": "ARCH-AUTHORITY-001",
-      "expiresWith": "the bounded-context repair that assigns explicit authority"
-    },
-    {
-      "key": "client-route|client/src/App.tsx|/home-v2-integrated#0",
-      "finding": "ARCH-AUTHORITY-001",
-      "expiresWith": "the bounded-context repair that assigns explicit authority"
-    },
-    {
-      "key": "client-route|client/src/App.tsx|/home-v3#0",
-      "finding": "ARCH-AUTHORITY-001",
-      "expiresWith": "the bounded-context repair that assigns explicit authority"
-    },
-    {
-      "key": "client-route|client/src/App.tsx|/home-v4#0",
-      "finding": "ARCH-AUTHORITY-001",
-      "expiresWith": "the bounded-context repair that assigns explicit authority"
-    },
-    {
-      "key": "client-route|client/src/App.tsx|/how-it-works-v2#0",
-      "finding": "ARCH-AUTHORITY-001",
-      "expiresWith": "the bounded-context repair that assigns explicit authority"
-    },
-    {
-      "key": "client-route|client/src/App.tsx|/how-it-works#0",
-      "finding": "ARCH-AUTHORITY-001",
-      "expiresWith": "the bounded-context repair that assigns explicit authority"
-    },
-    {
-      "key": "client-route|client/src/App.tsx|/how-to-grade-pokemon-cards#0",
-      "finding": "ARCH-AUTHORITY-001",
-      "expiresWith": "the bounded-context repair that assigns explicit authority"
-    },
-    {
-      "key": "client-route|client/src/App.tsx|/journal/:slug#0",
-      "finding": "ARCH-AUTHORITY-001",
-      "expiresWith": "the bounded-context repair that assigns explicit authority"
-    },
-    {
-      "key": "client-route|client/src/App.tsx|/journal#0",
-      "finding": "ARCH-AUTHORITY-001",
-      "expiresWith": "the bounded-context repair that assigns explicit authority"
-    },
-    {
-      "key": "client-route|client/src/App.tsx|/labels#0",
-      "finding": "ARCH-AUTHORITY-001",
-      "expiresWith": "the bounded-context repair that assigns explicit authority"
-    },
-    {
-      "key": "client-route|client/src/App.tsx|/legal/:slug#0",
-      "finding": "ARCH-AUTHORITY-001",
-      "expiresWith": "the bounded-context repair that assigns explicit authority"
-    },
-    {
-      "key": "client-route|client/src/App.tsx|/liability-and-insurance#0",
-      "finding": "ARCH-AUTHORITY-001",
-      "expiresWith": "the bounded-context repair that assigns explicit authority"
-    },
-    {
-      "key": "client-route|client/src/App.tsx|/login#0",
-      "finding": "ARCH-AUTHORITY-001",
-      "expiresWith": "the bounded-context repair that assigns explicit authority"
-    },
-    {
-      "key": "client-route|client/src/App.tsx|/mtg-card-grading-uk#0",
-      "finding": "ARCH-AUTHORITY-001",
-      "expiresWith": "the bounded-context repair that assigns explicit authority"
-    },
-    {
-      "key": "client-route|client/src/App.tsx|/mvgs/join#0",
-      "finding": "ARCH-AUTHORITY-001",
-      "expiresWith": "the bounded-context repair that assigns explicit authority"
-    },
-    {
-      "key": "client-route|client/src/App.tsx|/nfc/:certId#0",
-      "finding": "ARCH-AUTHORITY-001",
-      "expiresWith": "the bounded-context repair that assigns explicit authority"
-    },
-    {
-      "key": "client-route|client/src/App.tsx|/one-piece-card-grading-uk#0",
-      "finding": "ARCH-AUTHORITY-001",
-      "expiresWith": "the bounded-context repair that assigns explicit authority"
-    },
-    {
-      "key": "client-route|client/src/App.tsx|/ownership#0",
-      "finding": "ARCH-AUTHORITY-001",
-      "expiresWith": "the bounded-context repair that assigns explicit authority"
-    },
-    {
-      "key": "client-route|client/src/App.tsx|/partner/*#0",
-      "finding": "ARCH-AUTHORITY-001",
-      "expiresWith": "the bounded-context repair that assigns explicit authority"
-    },
-    {
-      "key": "client-route|client/src/App.tsx|/partner/billing#0",
-      "finding": "ARCH-AUTHORITY-001",
-      "expiresWith": "the bounded-context repair that assigns explicit authority"
-    },
-    {
-      "key": "client-route|client/src/App.tsx|/partner/certificates#0",
-      "finding": "ARCH-AUTHORITY-001",
-      "expiresWith": "the bounded-context repair that assigns explicit authority"
-    },
-    {
-      "key": "client-route|client/src/App.tsx|/partner/customers#0",
-      "finding": "ARCH-AUTHORITY-001",
-      "expiresWith": "the bounded-context repair that assigns explicit authority"
-    },
-    {
-      "key": "client-route|client/src/App.tsx|/partner/dashboard#0",
-      "finding": "ARCH-AUTHORITY-001",
-      "expiresWith": "the bounded-context repair that assigns explicit authority"
-    },
-    {
-      "key": "client-route|client/src/App.tsx|/partner/forgot-password#0",
-      "finding": "ARCH-AUTHORITY-001",
-      "expiresWith": "the bounded-context repair that assigns explicit authority"
-    },
-    {
-      "key": "client-route|client/src/App.tsx|/partner/grading#0",
-      "finding": "ARCH-AUTHORITY-001",
-      "expiresWith": "the bounded-context repair that assigns explicit authority"
-    },
-    {
-      "key": "client-route|client/src/App.tsx|/partner/help#0",
-      "finding": "ARCH-AUTHORITY-001",
-      "expiresWith": "the bounded-context repair that assigns explicit authority"
-    },
-    {
-      "key": "client-route|client/src/App.tsx|/partner/invite#0",
-      "finding": "ARCH-AUTHORITY-001",
-      "expiresWith": "the bounded-context repair that assigns explicit authority"
-    },
-    {
-      "key": "client-route|client/src/App.tsx|/partner/locations#0",
-      "finding": "ARCH-AUTHORITY-001",
-      "expiresWith": "the bounded-context repair that assigns explicit authority"
-    },
-    {
-      "key": "client-route|client/src/App.tsx|/partner/login#0",
-      "finding": "ARCH-AUTHORITY-001",
-      "expiresWith": "the bounded-context repair that assigns explicit authority"
-    },
-    {
-      "key": "client-route|client/src/App.tsx|/partner/onboarding#0",
-      "finding": "ARCH-AUTHORITY-001",
-      "expiresWith": "the bounded-context repair that assigns explicit authority"
-    },
-    {
-      "key": "client-route|client/src/App.tsx|/partner/orders#0",
-      "finding": "ARCH-AUTHORITY-001",
-      "expiresWith": "the bounded-context repair that assigns explicit authority"
-    },
-    {
-      "key": "client-route|client/src/App.tsx|/partner/public-profile#0",
-      "finding": "ARCH-AUTHORITY-001",
-      "expiresWith": "the bounded-context repair that assigns explicit authority"
-    },
-    {
-      "key": "client-route|client/src/App.tsx|/partner/reset#0",
-      "finding": "ARCH-AUTHORITY-001",
-      "expiresWith": "the bounded-context repair that assigns explicit authority"
-    },
-    {
-      "key": "client-route|client/src/App.tsx|/partner/security#0",
-      "finding": "ARCH-AUTHORITY-001",
-      "expiresWith": "the bounded-context repair that assigns explicit authority"
-    },
-    {
-      "key": "client-route|client/src/App.tsx|/partner/submissions/:id#0",
-      "finding": "ARCH-AUTHORITY-001",
-      "expiresWith": "the bounded-context repair that assigns explicit authority"
-    },
-    {
-      "key": "client-route|client/src/App.tsx|/partner/submissions/new#0",
-      "finding": "ARCH-AUTHORITY-001",
-      "expiresWith": "the bounded-context repair that assigns explicit authority"
-    },
-    {
-      "key": "client-route|client/src/App.tsx|/partner/submissions#0",
-      "finding": "ARCH-AUTHORITY-001",
-      "expiresWith": "the bounded-context repair that assigns explicit authority"
-    },
-    {
-      "key": "client-route|client/src/App.tsx|/partner/supplies#0",
-      "finding": "ARCH-AUTHORITY-001",
-      "expiresWith": "the bounded-context repair that assigns explicit authority"
-    },
-    {
-      "key": "client-route|client/src/App.tsx|/partner/users#0",
-      "finding": "ARCH-AUTHORITY-001",
-      "expiresWith": "the bounded-context repair that assigns explicit authority"
-    },
-    {
-      "key": "client-route|client/src/App.tsx|/partner#0",
-      "finding": "ARCH-AUTHORITY-001",
-      "expiresWith": "the bounded-context repair that assigns explicit authority"
-    },
-    {
-      "key": "client-route|client/src/App.tsx|/partners/location/:publicRef#0",
-      "finding": "ARCH-AUTHORITY-001",
-      "expiresWith": "the bounded-context repair that assigns explicit authority"
-    },
-    {
-      "key": "client-route|client/src/App.tsx|/partners#0",
-      "finding": "ARCH-AUTHORITY-001",
-      "expiresWith": "the bounded-context repair that assigns explicit authority"
-    },
-    {
-      "key": "client-route|client/src/App.tsx|/pokemon-card-grading-uk#0",
-      "finding": "ARCH-AUTHORITY-001",
-      "expiresWith": "the bounded-context repair that assigns explicit authority"
-    },
-    {
-      "key": "client-route|client/src/App.tsx|/population/certs#0",
-      "finding": "ARCH-AUTHORITY-001",
-      "expiresWith": "the bounded-context repair that assigns explicit authority"
-    },
-    {
-      "key": "client-route|client/src/App.tsx|/population#0",
-      "finding": "ARCH-AUTHORITY-001",
-      "expiresWith": "the bounded-context repair that assigns explicit authority"
-    },
-    {
-      "key": "client-route|client/src/App.tsx|/pre-grade#0",
-      "finding": "ARCH-AUTHORITY-001",
-      "expiresWith": "the bounded-context repair that assigns explicit authority"
-    },
-    {
-      "key": "client-route|client/src/App.tsx|/pricing-demo#0",
-      "finding": "ARCH-AUTHORITY-001",
-      "expiresWith": "the bounded-context repair that assigns explicit authority"
-    },
-    {
-      "key": "client-route|client/src/App.tsx|/pricing-v2#0",
-      "finding": "ARCH-AUTHORITY-001",
-      "expiresWith": "the bounded-context repair that assigns explicit authority"
-    },
-    {
-      "key": "client-route|client/src/App.tsx|/pricing#0",
-      "finding": "ARCH-AUTHORITY-001",
-      "expiresWith": "the bounded-context repair that assigns explicit authority"
-    },
-    {
-      "key": "client-route|client/src/App.tsx|/psa-alternative-uk#0",
-      "finding": "ARCH-AUTHORITY-001",
-      "expiresWith": "the bounded-context repair that assigns explicit authority"
-    },
-    {
-      "key": "client-route|client/src/App.tsx|/reels#0",
-      "finding": "ARCH-AUTHORITY-001",
-      "expiresWith": "the bounded-context repair that assigns explicit authority"
-    },
-    {
-      "key": "client-route|client/src/App.tsx|/registry#0",
-      "finding": "ARCH-AUTHORITY-001",
-      "expiresWith": "the bounded-context repair that assigns explicit authority"
-    },
-    {
-      "key": "client-route|client/src/App.tsx|/reports#0",
-      "finding": "ARCH-AUTHORITY-001",
-      "expiresWith": "the bounded-context repair that assigns explicit authority"
-    },
-    {
-      "key": "client-route|client/src/App.tsx|/reset-password#0",
-      "finding": "ARCH-AUTHORITY-001",
-      "expiresWith": "the bounded-context repair that assigns explicit authority"
-    },
-    {
-      "key": "client-route|client/src/App.tsx|/share/reel/:date/:certNumber#0",
-      "finding": "ARCH-AUTHORITY-001",
-      "expiresWith": "the bounded-context repair that assigns explicit authority"
-    },
-    {
-      "key": "client-route|client/src/App.tsx|/showroom/:username#0",
-      "finding": "ARCH-AUTHORITY-001",
-      "expiresWith": "the bounded-context repair that assigns explicit authority"
-    },
-    {
-      "key": "client-route|client/src/App.tsx|/showrooms#0",
-      "finding": "ARCH-AUTHORITY-001",
-      "expiresWith": "the bounded-context repair that assigns explicit authority"
-    },
-    {
-      "key": "client-route|client/src/App.tsx|/signup#0",
-      "finding": "ARCH-AUTHORITY-001",
-      "expiresWith": "the bounded-context repair that assigns explicit authority"
-    },
-    {
-      "key": "client-route|client/src/App.tsx|/sports-card-grading-uk#0",
-      "finding": "ARCH-AUTHORITY-001",
-      "expiresWith": "the bounded-context repair that assigns explicit authority"
-    },
-    {
-      "key": "client-route|client/src/App.tsx|/staff/login#0",
-      "finding": "ARCH-AUTHORITY-001",
-      "expiresWith": "the bounded-context repair that assigns explicit authority"
-    },
-    {
-      "key": "client-route|client/src/App.tsx|/staff#0",
-      "finding": "ARCH-AUTHORITY-001",
-      "expiresWith": "the bounded-context repair that assigns explicit authority"
-    },
-    {
-      "key": "client-route|client/src/App.tsx|/standard#0",
-      "finding": "ARCH-AUTHORITY-001",
-      "expiresWith": "the bounded-context repair that assigns explicit authority"
-    },
-    {
-      "key": "client-route|client/src/App.tsx|/stolen-card-protection#0",
-      "finding": "ARCH-AUTHORITY-001",
-      "expiresWith": "the bounded-context repair that assigns explicit authority"
-    },
-    {
-      "key": "client-route|client/src/App.tsx|/submit/success#0",
-      "finding": "ARCH-AUTHORITY-001",
-      "expiresWith": "the bounded-context repair that assigns explicit authority"
-    },
-    {
-      "key": "client-route|client/src/App.tsx|/submit#0",
-      "finding": "ARCH-AUTHORITY-001",
-      "expiresWith": "the bounded-context repair that assigns explicit authority"
-    },
-    {
-      "key": "client-route|client/src/App.tsx|/tcg-grading-uk#0",
-      "finding": "ARCH-AUTHORITY-001",
-      "expiresWith": "the bounded-context repair that assigns explicit authority"
-    },
-    {
-      "key": "client-route|client/src/App.tsx|/tcg#0",
-      "finding": "ARCH-AUTHORITY-001",
-      "expiresWith": "the bounded-context repair that assigns explicit authority"
-    },
-    {
-      "key": "client-route|client/src/App.tsx|/technology#0",
-      "finding": "ARCH-AUTHORITY-001",
-      "expiresWith": "the bounded-context repair that assigns explicit authority"
-    },
-    {
-      "key": "client-route|client/src/App.tsx|/terms-and-conditions#0",
-      "finding": "ARCH-AUTHORITY-001",
-      "expiresWith": "the bounded-context repair that assigns explicit authority"
-    },
-    {
-      "key": "client-route|client/src/App.tsx|/tools/estimate#0",
-      "finding": "ARCH-AUTHORITY-001",
-      "expiresWith": "the bounded-context repair that assigns explicit authority"
-    },
-    {
-      "key": "client-route|client/src/App.tsx|/track#0",
-      "finding": "ARCH-AUTHORITY-001",
-      "expiresWith": "the bounded-context repair that assigns explicit authority"
-    },
-    {
-      "key": "client-route|client/src/App.tsx|/trading-card-grading-uk#0",
-      "finding": "ARCH-AUTHORITY-001",
-      "expiresWith": "the bounded-context repair that assigns explicit authority"
-    },
-    {
-      "key": "client-route|client/src/App.tsx|/transfer/accept#0",
-      "finding": "ARCH-AUTHORITY-001",
-      "expiresWith": "the bounded-context repair that assigns explicit authority"
-    },
-    {
-      "key": "client-route|client/src/App.tsx|/transfer/claim-by-code#0",
-      "finding": "ARCH-AUTHORITY-001",
-      "expiresWith": "the bounded-context repair that assigns explicit authority"
-    },
-    {
-      "key": "client-route|client/src/App.tsx|/transfer#0",
-      "finding": "ARCH-AUTHORITY-001",
-      "expiresWith": "the bounded-context repair that assigns explicit authority"
-    },
-    {
-      "key": "client-route|client/src/App.tsx|/upload/:certId/:imageType#0",
-      "finding": "ARCH-AUTHORITY-001",
-      "expiresWith": "the bounded-context repair that assigns explicit authority"
-    },
-    {
-      "key": "client-route|client/src/App.tsx|/vault-club#0",
-      "finding": "ARCH-AUTHORITY-001",
-      "expiresWith": "the bounded-context repair that assigns explicit authority"
-    },
-    {
-      "key": "client-route|client/src/App.tsx|/vault-reports/about#0",
-      "finding": "ARCH-AUTHORITY-001",
-      "expiresWith": "the bounded-context repair that assigns explicit authority"
-    },
-    {
-      "key": "client-route|client/src/App.tsx|/vault-reports/how-to-read#0",
-      "finding": "ARCH-AUTHORITY-001",
-      "expiresWith": "the bounded-context repair that assigns explicit authority"
-    },
-    {
-      "key": "client-route|client/src/App.tsx|/vault/:certId#0",
-      "finding": "ARCH-AUTHORITY-001",
-      "expiresWith": "the bounded-context repair that assigns explicit authority"
-    },
-    {
-      "key": "client-route|client/src/App.tsx|/verify-email#0",
-      "finding": "ARCH-AUTHORITY-001",
-      "expiresWith": "the bounded-context repair that assigns explicit authority"
-    },
-    {
-      "key": "client-route|client/src/App.tsx|/verify#0",
-      "finding": "ARCH-AUTHORITY-001",
-      "expiresWith": "the bounded-context repair that assigns explicit authority"
-    },
-    {
-      "key": "client-route|client/src/App.tsx|/why-mintvault#0",
-      "finding": "ARCH-AUTHORITY-001",
-      "expiresWith": "the bounded-context repair that assigns explicit authority"
-    },
-    {
-      "key": "client-route|client/src/App.tsx|/yugioh-card-grading-uk#0",
-      "finding": "ARCH-AUTHORITY-001",
-      "expiresWith": "the bounded-context repair that assigns explicit authority"
-    },
-    {
-      "key": "client-route|client/src/App.tsx|<pathless>#0",
-      "finding": "ARCH-AUTHORITY-001",
-      "expiresWith": "the bounded-context repair that assigns explicit authority"
-    },
-    {
-      "key": "client-route|client/src/App.tsx|<pathless>#1",
-      "finding": "ARCH-AUTHORITY-001",
-      "expiresWith": "the bounded-context repair that assigns explicit authority"
-    },
-    {
-      "key": "client-route|client/src/App.tsx|<pathless>#2",
-      "finding": "ARCH-AUTHORITY-001",
-      "expiresWith": "the bounded-context repair that assigns explicit authority"
-    },
-    {
       "key": "job|scripts/hot-folder-watcher.js|setInterval:() => { if (cond()) { clearInterval(id); resolve(); } else if (Date.now() - start > timeout) { clearInterval(id); reject(new Error('Timeout')); } }#0",
       "finding": "ARCH-AUTHORITY-001",
       "expiresWith": "the bounded-context repair that assigns explicit authority"
@@ -1047,11 +187,6 @@
       "expiresWith": "the bounded-context repair that assigns explicit authority"
     },
     {
-      "key": "object-writer|server/print-workflow.ts|ObjectWriteCoordinator#0",
-      "finding": "ARCH-AUTHORITY-001",
-      "expiresWith": "the bounded-context repair that assigns explicit authority"
-    },
-    {
       "key": "object-writer|server/routes/admin-config.ts|uploadToR2:r2Key#0",
       "finding": "ARCH-AUTHORITY-001",
       "expiresWith": "the bounded-context repair that assigns explicit authority"
@@ -1103,36 +238,6 @@
     },
     {
       "key": "object-writer|server/slab-showcase.ts|uploadToR2:key#0",
-      "finding": "ARCH-AUTHORITY-001",
-      "expiresWith": "the bounded-context repair that assigns explicit authority"
-    },
-    {
-      "key": "pricing-authority|client/src/App.tsx|endpoint:@/pages/pricing#0",
-      "finding": "ARCH-AUTHORITY-001",
-      "expiresWith": "the bounded-context repair that assigns explicit authority"
-    },
-    {
-      "key": "pricing-authority|client/src/App.tsx|endpoint:/pricing#0",
-      "finding": "ARCH-AUTHORITY-001",
-      "expiresWith": "the bounded-context repair that assigns explicit authority"
-    },
-    {
-      "key": "pricing-authority|client/src/App.tsx|value:CardGradingCostUkPage#0",
-      "finding": "ARCH-AUTHORITY-001",
-      "expiresWith": "the bounded-context repair that assigns explicit authority"
-    },
-    {
-      "key": "pricing-authority|client/src/App.tsx|value:Pricing#0",
-      "finding": "ARCH-AUTHORITY-001",
-      "expiresWith": "the bounded-context repair that assigns explicit authority"
-    },
-    {
-      "key": "pricing-authority|client/src/App.tsx|value:PricingDemo#0",
-      "finding": "ARCH-AUTHORITY-001",
-      "expiresWith": "the bounded-context repair that assigns explicit authority"
-    },
-    {
-      "key": "pricing-authority|client/src/App.tsx|value:PricingV2Mockup#0",
       "finding": "ARCH-AUTHORITY-001",
       "expiresWith": "the bounded-context repair that assigns explicit authority"
     },
@@ -1442,6 +547,21 @@
       "expiresWith": "the bounded-context repair that assigns explicit authority"
     },
     {
+      "key": "pricing-authority|client/src/pages/admin-pricing.tsx|projection:£:(parseInt(editForm.pricePerCard, 10) / 100 || 0).toFixed(2)#0",
+      "finding": "ARCH-AUTHORITY-001",
+      "expiresWith": "the bounded-context repair that assigns explicit authority"
+    },
+    {
+      "key": "pricing-authority|client/src/pages/admin-pricing.tsx|projection:£:(tier.price_per_card / 100).toFixed(tier.price_per_card % 100 === 0 ? 0 : 2)#0",
+      "finding": "ARCH-AUTHORITY-001",
+      "expiresWith": "the bounded-context repair that assigns explicit authority"
+    },
+    {
+      "key": "pricing-authority|client/src/pages/admin-pricing.tsx|projection:£:tier.max_value_gbp.toLocaleString()#0",
+      "finding": "ARCH-AUTHORITY-001",
+      "expiresWith": "the bounded-context repair that assigns explicit authority"
+    },
+    {
       "key": "pricing-authority|client/src/pages/admin-pricing.tsx|value:pricePerCard#0",
       "finding": "ARCH-AUTHORITY-001",
       "expiresWith": "the bounded-context repair that assigns explicit authority"
@@ -1498,6 +618,21 @@
     },
     {
       "key": "pricing-authority|client/src/pages/admin-submissions.tsx|literal:£500#2",
+      "finding": "ARCH-AUTHORITY-001",
+      "expiresWith": "the bounded-context repair that assigns explicit authority"
+    },
+    {
+      "key": "pricing-authority|client/src/pages/admin-submissions.tsx|projection:£:(sub.returnPostageCost / 100).toFixed(2)#0",
+      "finding": "ARCH-AUTHORITY-001",
+      "expiresWith": "the bounded-context repair that assigns explicit authority"
+    },
+    {
+      "key": "pricing-authority|client/src/pages/admin-submissions.tsx|projection:£:declaredValue.toLocaleString()#0",
+      "finding": "ARCH-AUTHORITY-001",
+      "expiresWith": "the bounded-context repair that assigns explicit authority"
+    },
+    {
+      "key": "pricing-authority|client/src/pages/admin-submissions.tsx|projection:£:parseFloat(sub.totalPrice || \"0\").toFixed(2)#0",
       "finding": "ARCH-AUTHORITY-001",
       "expiresWith": "the bounded-context repair that assigns explicit authority"
     },
@@ -1578,6 +713,11 @@
     },
     {
       "key": "pricing-authority|client/src/pages/admin-vault-quest.tsx|value:costModeFor#0",
+      "finding": "ARCH-AUTHORITY-001",
+      "expiresWith": "the bounded-context repair that assigns explicit authority"
+    },
+    {
+      "key": "pricing-authority|client/src/pages/admin-weekly-reel.tsx|projection:$:(r.estimatedCostUsd ?? 0).toFixed(2)#0",
       "finding": "ARCH-AUTHORITY-001",
       "expiresWith": "the bounded-context repair that assigns explicit authority"
     },
@@ -1672,22 +812,12 @@
       "expiresWith": "the bounded-context repair that assigns explicit authority"
     },
     {
+      "key": "pricing-authority|client/src/pages/dashboard.tsx|projection:£:totalGbp#0",
+      "finding": "ARCH-AUTHORITY-001",
+      "expiresWith": "the bounded-context repair that assigns explicit authority"
+    },
+    {
       "key": "pricing-authority|client/src/pages/dashboard.tsx|value:discountLabel#0",
-      "finding": "ARCH-AUTHORITY-001",
-      "expiresWith": "the bounded-context repair that assigns explicit authority"
-    },
-    {
-      "key": "pricing-authority|client/src/pages/dev-growth-command-visual-harness.tsx|value:costPerPaidCardGBP#0",
-      "finding": "ARCH-AUTHORITY-001",
-      "expiresWith": "the bounded-context repair that assigns explicit authority"
-    },
-    {
-      "key": "pricing-authority|client/src/pages/dev-growth-command-visual-harness.tsx|value:costPerPaidOrderGBP#0",
-      "finding": "ARCH-AUTHORITY-001",
-      "expiresWith": "the bounded-context repair that assigns explicit authority"
-    },
-    {
-      "key": "pricing-authority|client/src/pages/dev-growth-command-visual-harness.tsx|value:costs#0",
       "finding": "ARCH-AUTHORITY-001",
       "expiresWith": "the bounded-context repair that assigns explicit authority"
     },
@@ -2977,6 +2107,36 @@
       "expiresWith": "the bounded-context repair that assigns explicit authority"
     },
     {
+      "key": "pricing-authority|client/src/pages/submit.tsx|projection:£:(insurance.shippingPence / 100).toFixed(2)#0",
+      "finding": "ARCH-AUTHORITY-001",
+      "expiresWith": "the bounded-context repair that assigns explicit authority"
+    },
+    {
+      "key": "pricing-authority|client/src/pages/submit.tsx|projection:£:(quote.effectiveDiscountAmount / 100).toFixed(2)#0",
+      "finding": "ARCH-AUTHORITY-001",
+      "expiresWith": "the bounded-context repair that assigns explicit authority"
+    },
+    {
+      "key": "pricing-authority|client/src/pages/submit.tsx|projection:£:(quote.totalInsuranceFee / 100).toFixed(2)#0",
+      "finding": "ARCH-AUTHORITY-001",
+      "expiresWith": "the bounded-context repair that assigns explicit authority"
+    },
+    {
+      "key": "pricing-authority|client/src/pages/submit.tsx|projection:£:cardItemsDeclaredSum.toLocaleString()#0",
+      "finding": "ARCH-AUTHORITY-001",
+      "expiresWith": "the bounded-context repair that assigns explicit authority"
+    },
+    {
+      "key": "pricing-authority|client/src/pages/submit.tsx|projection:£:declaredPerCard.toLocaleString()#0",
+      "finding": "ARCH-AUTHORITY-001",
+      "expiresWith": "the bounded-context repair that assigns explicit authority"
+    },
+    {
+      "key": "pricing-authority|client/src/pages/submit.tsx|projection:£:state.declaredValue.toLocaleString()#0",
+      "finding": "ARCH-AUTHORITY-001",
+      "expiresWith": "the bounded-context repair that assigns explicit authority"
+    },
+    {
       "key": "pricing-authority|client/src/pages/submit.tsx|value:{ data: vaultClubDiscount }#0",
       "finding": "ARCH-AUTHORITY-001",
       "expiresWith": "the bounded-context repair that assigns explicit authority"
@@ -3183,6 +2343,11 @@
     },
     {
       "key": "pricing-authority|scripts/architecture/check-architecture.mjs|value:pricingKind#4",
+      "finding": "ARCH-AUTHORITY-001",
+      "expiresWith": "the bounded-context repair that assigns explicit authority"
+    },
+    {
+      "key": "pricing-authority|scripts/architecture/check-architecture.mjs|value:pricingKind#5",
       "finding": "ARCH-AUTHORITY-001",
       "expiresWith": "the bounded-context repair that assigns explicit authority"
     },
@@ -3798,61 +2963,6 @@
     },
     {
       "key": "pricing-authority|server/lib/paid-submission-confirmation.ts|value:totalPrice#0",
-      "finding": "ARCH-AUTHORITY-001",
-      "expiresWith": "the bounded-context repair that assigns explicit authority"
-    },
-    {
-      "key": "pricing-authority|server/lib/print-artifact-persistence.ts|literal:$1#0",
-      "finding": "ARCH-AUTHORITY-001",
-      "expiresWith": "the bounded-context repair that assigns explicit authority"
-    },
-    {
-      "key": "pricing-authority|server/lib/print-artifact-persistence.ts|literal:$1#1",
-      "finding": "ARCH-AUTHORITY-001",
-      "expiresWith": "the bounded-context repair that assigns explicit authority"
-    },
-    {
-      "key": "pricing-authority|server/lib/print-artifact-persistence.ts|literal:$1#2",
-      "finding": "ARCH-AUTHORITY-001",
-      "expiresWith": "the bounded-context repair that assigns explicit authority"
-    },
-    {
-      "key": "pricing-authority|server/lib/print-artifact-persistence.ts|literal:$1#3",
-      "finding": "ARCH-AUTHORITY-001",
-      "expiresWith": "the bounded-context repair that assigns explicit authority"
-    },
-    {
-      "key": "pricing-authority|server/lib/print-artifact-persistence.ts|literal:$1#4",
-      "finding": "ARCH-AUTHORITY-001",
-      "expiresWith": "the bounded-context repair that assigns explicit authority"
-    },
-    {
-      "key": "pricing-authority|server/lib/print-artifact-persistence.ts|literal:$1#5",
-      "finding": "ARCH-AUTHORITY-001",
-      "expiresWith": "the bounded-context repair that assigns explicit authority"
-    },
-    {
-      "key": "pricing-authority|server/lib/print-artifact-persistence.ts|literal:$1#6",
-      "finding": "ARCH-AUTHORITY-001",
-      "expiresWith": "the bounded-context repair that assigns explicit authority"
-    },
-    {
-      "key": "pricing-authority|server/lib/print-artifact-persistence.ts|literal:$1#7",
-      "finding": "ARCH-AUTHORITY-001",
-      "expiresWith": "the bounded-context repair that assigns explicit authority"
-    },
-    {
-      "key": "pricing-authority|server/lib/print-artifact-persistence.ts|literal:$1#8",
-      "finding": "ARCH-AUTHORITY-001",
-      "expiresWith": "the bounded-context repair that assigns explicit authority"
-    },
-    {
-      "key": "pricing-authority|server/lib/print-artifact-persistence.ts|literal:$1#9",
-      "finding": "ARCH-AUTHORITY-001",
-      "expiresWith": "the bounded-context repair that assigns explicit authority"
-    },
-    {
-      "key": "pricing-authority|server/lib/print-artifact-persistence.ts|literal:$2#0",
       "finding": "ARCH-AUTHORITY-001",
       "expiresWith": "the bounded-context repair that assigns explicit authority"
     },
@@ -5107,16 +4217,6 @@
       "expiresWith": "the bounded-context repair that assigns explicit authority"
     },
     {
-      "key": "provider-adapter|scripts/_staging-verify-perf.ts|fetch:dynamic-fetch#1",
-      "finding": "ARCH-AUTHORITY-001",
-      "expiresWith": "the bounded-context repair that assigns explicit authority"
-    },
-    {
-      "key": "provider-adapter|scripts/_staging-verify-perf.ts|fetch:dynamic-fetch#2",
-      "finding": "ARCH-AUTHORITY-001",
-      "expiresWith": "the bounded-context repair that assigns explicit authority"
-    },
-    {
       "key": "provider-adapter|scripts/_staging-verify-perf.ts|fetch:https://mintvault-v2.fly.dev#0",
       "finding": "ARCH-AUTHORITY-001",
       "expiresWith": "the bounded-context repair that assigns explicit authority"
@@ -5132,7 +4232,12 @@
       "expiresWith": "the bounded-context repair that assigns explicit authority"
     },
     {
-      "key": "provider-adapter|scripts/_staging-verify-promotions.ts|fetch:dynamic-fetch#0",
+      "key": "provider-adapter|scripts/_staging-verify-perf.ts|fetch:https://mintvault-v2.fly.dev#3",
+      "finding": "ARCH-AUTHORITY-001",
+      "expiresWith": "the bounded-context repair that assigns explicit authority"
+    },
+    {
+      "key": "provider-adapter|scripts/_staging-verify-perf.ts|fetch:https://mintvault-v2.fly.dev#4",
       "finding": "ARCH-AUTHORITY-001",
       "expiresWith": "the bounded-context repair that assigns explicit authority"
     },
@@ -5157,6 +4262,11 @@
       "expiresWith": "the bounded-context repair that assigns explicit authority"
     },
     {
+      "key": "provider-adapter|scripts/_staging-verify-promotions.ts|fetch:https://mintvault-v2.fly.dev#4",
+      "finding": "ARCH-AUTHORITY-001",
+      "expiresWith": "the bounded-context repair that assigns explicit authority"
+    },
+    {
       "key": "provider-adapter|scripts/_test-mv109-spur-fix.ts|module:@aws-sdk/client-s3#0",
       "finding": "ARCH-AUTHORITY-001",
       "expiresWith": "the bounded-context repair that assigns explicit authority"
@@ -5177,37 +4287,37 @@
       "expiresWith": "the bounded-context repair that assigns explicit authority"
     },
     {
-      "key": "provider-adapter|scripts/command-centre-runtime-harness.ts|fetch:dynamic-fetch#0",
-      "finding": "ARCH-AUTHORITY-001",
-      "expiresWith": "the bounded-context repair that assigns explicit authority"
-    },
-    {
-      "key": "provider-adapter|scripts/command-centre-runtime-harness.ts|fetch:dynamic-fetch#1",
-      "finding": "ARCH-AUTHORITY-001",
-      "expiresWith": "the bounded-context repair that assigns explicit authority"
-    },
-    {
-      "key": "provider-adapter|scripts/command-centre-runtime-harness.ts|fetch:dynamic-fetch#2",
-      "finding": "ARCH-AUTHORITY-001",
-      "expiresWith": "the bounded-context repair that assigns explicit authority"
-    },
-    {
-      "key": "provider-adapter|scripts/command-centre-runtime-harness.ts|fetch:dynamic-fetch#3",
-      "finding": "ARCH-AUTHORITY-001",
-      "expiresWith": "the bounded-context repair that assigns explicit authority"
-    },
-    {
       "key": "provider-adapter|scripts/command-centre-runtime-harness.ts|fetch:http://127.0.0.1:#0",
       "finding": "ARCH-AUTHORITY-001",
       "expiresWith": "the bounded-context repair that assigns explicit authority"
     },
     {
-      "key": "provider-adapter|scripts/staging/at23-station-reproof.mjs|fetch:dynamic-fetch#0",
+      "key": "provider-adapter|scripts/command-centre-runtime-harness.ts|fetch:http://127.0.0.1:#1",
       "finding": "ARCH-AUTHORITY-001",
       "expiresWith": "the bounded-context repair that assigns explicit authority"
     },
     {
-      "key": "provider-adapter|scripts/staging/at23-station-reproof.mjs|fetch:dynamic-fetch#1",
+      "key": "provider-adapter|scripts/command-centre-runtime-harness.ts|fetch:http://127.0.0.1:#2",
+      "finding": "ARCH-AUTHORITY-001",
+      "expiresWith": "the bounded-context repair that assigns explicit authority"
+    },
+    {
+      "key": "provider-adapter|scripts/command-centre-runtime-harness.ts|fetch:http://127.0.0.1:#3",
+      "finding": "ARCH-AUTHORITY-001",
+      "expiresWith": "the bounded-context repair that assigns explicit authority"
+    },
+    {
+      "key": "provider-adapter|scripts/command-centre-runtime-harness.ts|fetch:http://127.0.0.1:#4",
+      "finding": "ARCH-AUTHORITY-001",
+      "expiresWith": "the bounded-context repair that assigns explicit authority"
+    },
+    {
+      "key": "provider-adapter|scripts/staging/at23-station-reproof.mjs|fetch:https://mintvault-v2.fly.dev#0",
+      "finding": "ARCH-AUTHORITY-001",
+      "expiresWith": "the bounded-context repair that assigns explicit authority"
+    },
+    {
+      "key": "provider-adapter|scripts/staging/at23-station-reproof.mjs|fetch:https://mintvault-v2.fly.dev#1",
       "finding": "ARCH-AUTHORITY-001",
       "expiresWith": "the bounded-context repair that assigns explicit authority"
     },
@@ -5222,7 +4332,7 @@
       "expiresWith": "the bounded-context repair that assigns explicit authority"
     },
     {
-      "key": "provider-adapter|scripts/upload-share-backgrounds-v2.ts|fetch:dynamic-fetch#1",
+      "key": "provider-adapter|scripts/upload-share-backgrounds-v2.ts|fetch:https://api.higgsfield.ai#0",
       "finding": "ARCH-AUTHORITY-001",
       "expiresWith": "the bounded-context repair that assigns explicit authority"
     },
@@ -5242,12 +4352,12 @@
       "expiresWith": "the bounded-context repair that assigns explicit authority"
     },
     {
-      "key": "provider-adapter|server/ai-grading-service.ts|fetch:dynamic-fetch#0",
+      "key": "provider-adapter|server/ai-grading-service.ts|fetch:https://api.pokemontcg.io#0",
       "finding": "ARCH-AUTHORITY-001",
       "expiresWith": "the bounded-context repair that assigns explicit authority"
     },
     {
-      "key": "provider-adapter|server/ai-grading-service.ts|fetch:https://api.pokemontcg.io#0",
+      "key": "provider-adapter|server/ai-grading-service.ts|fetch:https://api.pokemontcg.io#1",
       "finding": "ARCH-AUTHORITY-001",
       "expiresWith": "the bounded-context repair that assigns explicit authority"
     },
@@ -5272,17 +4382,17 @@
       "expiresWith": "the bounded-context repair that assigns explicit authority"
     },
     {
-      "key": "provider-adapter|server/card-database.ts|fetch:dynamic-fetch#0",
+      "key": "provider-adapter|server/card-database.ts|fetch:https://api.pokemontcg.io#0",
       "finding": "ARCH-AUTHORITY-001",
       "expiresWith": "the bounded-context repair that assigns explicit authority"
     },
     {
-      "key": "provider-adapter|server/card-database.ts|fetch:dynamic-fetch#1",
+      "key": "provider-adapter|server/card-database.ts|fetch:https://api.scryfall.com#0",
       "finding": "ARCH-AUTHORITY-001",
       "expiresWith": "the bounded-context repair that assigns explicit authority"
     },
     {
-      "key": "provider-adapter|server/card-database.ts|fetch:dynamic-fetch#2",
+      "key": "provider-adapter|server/card-database.ts|fetch:https://db.ygoprodeck.com#0",
       "finding": "ARCH-AUTHORITY-001",
       "expiresWith": "the bounded-context repair that assigns explicit authority"
     },
@@ -5327,22 +4437,22 @@
       "expiresWith": "the bounded-context repair that assigns explicit authority"
     },
     {
-      "key": "provider-adapter|server/lib/linkedin-publisher.ts|fetch:dynamic-fetch#2",
-      "finding": "ARCH-AUTHORITY-001",
-      "expiresWith": "the bounded-context repair that assigns explicit authority"
-    },
-    {
       "key": "provider-adapter|server/lib/linkedin-publisher.ts|fetch:https://api.linkedin.com#0",
       "finding": "ARCH-AUTHORITY-001",
       "expiresWith": "the bounded-context repair that assigns explicit authority"
     },
     {
-      "key": "provider-adapter|server/lib/meta-publisher.ts|fetch:dynamic-fetch#0",
+      "key": "provider-adapter|server/lib/linkedin-publisher.ts|fetch:https://api.linkedin.com#1",
       "finding": "ARCH-AUTHORITY-001",
       "expiresWith": "the bounded-context repair that assigns explicit authority"
     },
     {
-      "key": "provider-adapter|server/lib/meta-publisher.ts|fetch:dynamic-fetch#1",
+      "key": "provider-adapter|server/lib/meta-publisher.ts|fetch:https://graph.facebook.com#0",
+      "finding": "ARCH-AUTHORITY-001",
+      "expiresWith": "the bounded-context repair that assigns explicit authority"
+    },
+    {
+      "key": "provider-adapter|server/lib/meta-publisher.ts|fetch:https://graph.facebook.com#1",
       "finding": "ARCH-AUTHORITY-001",
       "expiresWith": "the bounded-context repair that assigns explicit authority"
     },
@@ -5357,12 +4467,12 @@
       "expiresWith": "the bounded-context repair that assigns explicit authority"
     },
     {
-      "key": "provider-adapter|server/lib/pinterest-publisher.ts|fetch:dynamic-fetch#2",
+      "key": "provider-adapter|server/lib/pinterest-publisher.ts|fetch:https://api.pinterest.com#0",
       "finding": "ARCH-AUTHORITY-001",
       "expiresWith": "the bounded-context repair that assigns explicit authority"
     },
     {
-      "key": "provider-adapter|server/lib/pinterest-publisher.ts|fetch:https://api.pinterest.com#0",
+      "key": "provider-adapter|server/lib/pinterest-publisher.ts|fetch:https://api.pinterest.com#1",
       "finding": "ARCH-AUTHORITY-001",
       "expiresWith": "the bounded-context repair that assigns explicit authority"
     },
@@ -5402,22 +4512,17 @@
       "expiresWith": "the bounded-context repair that assigns explicit authority"
     },
     {
-      "key": "provider-adapter|server/lib/segmind-client.ts|fetch:dynamic-fetch#2",
+      "key": "provider-adapter|server/lib/segmind-client.ts|fetch:https://api.segmind.com#0",
       "finding": "ARCH-AUTHORITY-001",
       "expiresWith": "the bounded-context repair that assigns explicit authority"
     },
     {
-      "key": "provider-adapter|server/lib/tiktok-publisher.ts|fetch:dynamic-fetch#0",
+      "key": "provider-adapter|server/lib/tiktok-publisher.ts|fetch:https://open.tiktokapis.com#0",
       "finding": "ARCH-AUTHORITY-001",
       "expiresWith": "the bounded-context repair that assigns explicit authority"
     },
     {
       "key": "provider-adapter|server/lib/twitter-publisher.ts|fetch:dynamic-fetch#0",
-      "finding": "ARCH-AUTHORITY-001",
-      "expiresWith": "the bounded-context repair that assigns explicit authority"
-    },
-    {
-      "key": "provider-adapter|server/lib/twitter-publisher.ts|fetch:dynamic-fetch#1",
       "finding": "ARCH-AUTHORITY-001",
       "expiresWith": "the bounded-context repair that assigns explicit authority"
     },
@@ -5443,6 +4548,11 @@
     },
     {
       "key": "provider-adapter|server/lib/twitter-publisher.ts|fetch:https://upload.twitter.com#2",
+      "finding": "ARCH-AUTHORITY-001",
+      "expiresWith": "the bounded-context repair that assigns explicit authority"
+    },
+    {
+      "key": "provider-adapter|server/lib/twitter-publisher.ts|fetch:https://upload.twitter.com#3",
       "finding": "ARCH-AUTHORITY-001",
       "expiresWith": "the bounded-context repair that assigns explicit authority"
     },
@@ -5548,31 +4658,6 @@
     },
     {
       "key": "provider-adapter|server/webhookHandlers.ts|stripe:stripe.subscriptions.retrieve#0",
-      "finding": "ARCH-AUTHORITY-001",
-      "expiresWith": "the bounded-context repair that assigns explicit authority"
-    },
-    {
-      "key": "role-authority|client/src/App.tsx|capability:partner.cards.assess#0",
-      "finding": "ARCH-AUTHORITY-001",
-      "expiresWith": "the bounded-context repair that assigns explicit authority"
-    },
-    {
-      "key": "role-authority|client/src/App.tsx|capability:partner.location.view#0",
-      "finding": "ARCH-AUTHORITY-001",
-      "expiresWith": "the bounded-context repair that assigns explicit authority"
-    },
-    {
-      "key": "role-authority|client/src/App.tsx|capability:partner.orders.view#0",
-      "finding": "ARCH-AUTHORITY-001",
-      "expiresWith": "the bounded-context repair that assigns explicit authority"
-    },
-    {
-      "key": "role-authority|client/src/App.tsx|capability:partner.supplies.view#0",
-      "finding": "ARCH-AUTHORITY-001",
-      "expiresWith": "the bounded-context repair that assigns explicit authority"
-    },
-    {
-      "key": "role-authority|client/src/App.tsx|capability:partner.supplies.view#1",
       "finding": "ARCH-AUTHORITY-001",
       "expiresWith": "the bounded-context repair that assigns explicit authority"
     },
@@ -6237,52 +5322,7 @@
       "expiresWith": "the bounded-context repair that assigns explicit authority"
     },
     {
-      "key": "role-authority|server/lib/print-artifact-persistence.ts|role:admin#0",
-      "finding": "ARCH-AUTHORITY-001",
-      "expiresWith": "the bounded-context repair that assigns explicit authority"
-    },
-    {
-      "key": "role-authority|server/lib/print-artifact-persistence.ts|role:staff_print#0",
-      "finding": "ARCH-AUTHORITY-001",
-      "expiresWith": "the bounded-context repair that assigns explicit authority"
-    },
-    {
-      "key": "role-authority|server/lib/print-artifact-persistence.ts|role:staff_readonly#0",
-      "finding": "ARCH-AUTHORITY-001",
-      "expiresWith": "the bounded-context repair that assigns explicit authority"
-    },
-    {
-      "key": "role-authority|server/lib/print-artifact-persistence.ts|role:string#0",
-      "finding": "ARCH-AUTHORITY-001",
-      "expiresWith": "the bounded-context repair that assigns explicit authority"
-    },
-    {
       "key": "role-authority|server/lib/scanner-auth.ts|capability:partner.cards.scan#0",
-      "finding": "ARCH-AUTHORITY-001",
-      "expiresWith": "the bounded-context repair that assigns explicit authority"
-    },
-    {
-      "key": "role-authority|server/print-workflow.ts|role:admin#0",
-      "finding": "ARCH-AUTHORITY-001",
-      "expiresWith": "the bounded-context repair that assigns explicit authority"
-    },
-    {
-      "key": "role-authority|server/print-workflow.ts|role:staff_print#0",
-      "finding": "ARCH-AUTHORITY-001",
-      "expiresWith": "the bounded-context repair that assigns explicit authority"
-    },
-    {
-      "key": "role-authority|server/print-workflow.ts|role:staff_readonly#0",
-      "finding": "ARCH-AUTHORITY-001",
-      "expiresWith": "the bounded-context repair that assigns explicit authority"
-    },
-    {
-      "key": "role-authority|server/print-workflow.ts|role:staff_readonly#1",
-      "finding": "ARCH-AUTHORITY-001",
-      "expiresWith": "the bounded-context repair that assigns explicit authority"
-    },
-    {
-      "key": "role-authority|server/print-workflow.ts|role:unknown#0",
       "finding": "ARCH-AUTHORITY-001",
       "expiresWith": "the bounded-context repair that assigns explicit authority"
     },
@@ -7547,46 +6587,6 @@
       "expiresWith": "the bounded-context repair that assigns explicit authority"
     },
     {
-      "key": "server-route|server/routes/print-workflow.ts|GET /api/admin/printing/workflow/batches/:batchId#0",
-      "finding": "ARCH-AUTHORITY-001",
-      "expiresWith": "the bounded-context repair that assigns explicit authority"
-    },
-    {
-      "key": "server-route|server/routes/print-workflow.ts|GET /api/admin/printing/workflow/batches#0",
-      "finding": "ARCH-AUTHORITY-001",
-      "expiresWith": "the bounded-context repair that assigns explicit authority"
-    },
-    {
-      "key": "server-route|server/routes/print-workflow.ts|GET /api/admin/printing/workflow/events#0",
-      "finding": "ARCH-AUTHORITY-001",
-      "expiresWith": "the bounded-context repair that assigns explicit authority"
-    },
-    {
-      "key": "server-route|server/routes/print-workflow.ts|GET /api/admin/printing/workflow/queue#0",
-      "finding": "ARCH-AUTHORITY-001",
-      "expiresWith": "the bounded-context repair that assigns explicit authority"
-    },
-    {
-      "key": "server-route|server/routes/print-workflow.ts|POST /api/admin/printing/workflow/batch#0",
-      "finding": "ARCH-AUTHORITY-001",
-      "expiresWith": "the bounded-context repair that assigns explicit authority"
-    },
-    {
-      "key": "server-route|server/routes/print-workflow.ts|POST /api/admin/printing/workflow/complete#0",
-      "finding": "ARCH-AUTHORITY-001",
-      "expiresWith": "the bounded-context repair that assigns explicit authority"
-    },
-    {
-      "key": "server-route|server/routes/print-workflow.ts|POST /api/admin/printing/workflow/mark-printed#0",
-      "finding": "ARCH-AUTHORITY-001",
-      "expiresWith": "the bounded-context repair that assigns explicit authority"
-    },
-    {
-      "key": "server-route|server/routes/print-workflow.ts|POST /api/admin/printing/workflow/reprint#0",
-      "finding": "ARCH-AUTHORITY-001",
-      "expiresWith": "the bounded-context repair that assigns explicit authority"
-    },
-    {
       "key": "server-route|server/routes/public.ts|GET /api/admin/legal/:slug#0",
       "finding": "ARCH-AUTHORITY-001",
       "expiresWith": "the bounded-context repair that assigns explicit authority"
@@ -8742,17 +7742,7 @@
       "expiresWith": "the bounded-context repair that assigns explicit authority"
     },
     {
-      "key": "session-principal|client/src/App.tsx|provider-use:PartnerSessionProvider#0",
-      "finding": "ARCH-AUTHORITY-001",
-      "expiresWith": "the bounded-context repair that assigns explicit authority"
-    },
-    {
       "key": "session-principal|client/src/components/admin/admin-shell.tsx|cache-key:[\"/api/admin/db-info\"]#0",
-      "finding": "ARCH-AUTHORITY-001",
-      "expiresWith": "the bounded-context repair that assigns explicit authority"
-    },
-    {
-      "key": "session-principal|client/src/components/admin/admin-shell.tsx|cache-key:[\"/api/admin/session\"]#0",
       "finding": "ARCH-AUTHORITY-001",
       "expiresWith": "the bounded-context repair that assigns explicit authority"
     },
@@ -9112,77 +8102,7 @@
       "expiresWith": "the bounded-context repair that assigns explicit authority"
     },
     {
-      "key": "session-principal|client/src/pages/admin-cert-browser.tsx|cache-key:[\"/api/admin/ig/queue\"]#0",
-      "finding": "ARCH-AUTHORITY-001",
-      "expiresWith": "the bounded-context repair that assigns explicit authority"
-    },
-    {
-      "key": "session-principal|client/src/pages/admin-cert-browser.tsx|cache-key:[\"/api/admin/ig/settings\"]#0",
-      "finding": "ARCH-AUTHORITY-001",
-      "expiresWith": "the bounded-context repair that assigns explicit authority"
-    },
-    {
-      "key": "session-principal|client/src/pages/admin-cert-browser.tsx|cache-key:[\"/api/admin/printing/browser\"]#0",
-      "finding": "ARCH-AUTHORITY-001",
-      "expiresWith": "the bounded-context repair that assigns explicit authority"
-    },
-    {
-      "key": "session-principal|client/src/pages/admin-cert-browser.tsx|cache-key:[\"/api/admin/printing/browser\"]#1",
-      "finding": "ARCH-AUTHORITY-001",
-      "expiresWith": "the bounded-context repair that assigns explicit authority"
-    },
-    {
-      "key": "session-principal|client/src/pages/admin-cert-browser.tsx|cache-key:[\"/api/admin/printing/browser\"]#2",
-      "finding": "ARCH-AUTHORITY-001",
-      "expiresWith": "the bounded-context repair that assigns explicit authority"
-    },
-    {
-      "key": "session-principal|client/src/pages/admin-cert-browser.tsx|cache-key:[\"/api/admin/printing/browser\"]#3",
-      "finding": "ARCH-AUTHORITY-001",
-      "expiresWith": "the bounded-context repair that assigns explicit authority"
-    },
-    {
-      "key": "session-principal|client/src/pages/admin-cert-browser.tsx|cache-key:[\"/api/admin/printing/browser\"]#4",
-      "finding": "ARCH-AUTHORITY-001",
-      "expiresWith": "the bounded-context repair that assigns explicit authority"
-    },
-    {
-      "key": "session-principal|client/src/pages/admin-cert-browser.tsx|cache-key:[\"/api/admin/printing/browser/cert\", cert.certId]#0",
-      "finding": "ARCH-AUTHORITY-001",
-      "expiresWith": "the bounded-context repair that assigns explicit authority"
-    },
-    {
-      "key": "session-principal|client/src/pages/admin-cert-browser.tsx|cache-key:[\"/api/admin/printing/browser/cert\", cert.certId]#1",
-      "finding": "ARCH-AUTHORITY-001",
-      "expiresWith": "the bounded-context repair that assigns explicit authority"
-    },
-    {
-      "key": "session-principal|client/src/pages/admin-cert-browser.tsx|cache-key:[\"/api/admin/printing/override\", cert.certId]#0",
-      "finding": "ARCH-AUTHORITY-001",
-      "expiresWith": "the bounded-context repair that assigns explicit authority"
-    },
-    {
-      "key": "session-principal|client/src/pages/admin-cert-browser.tsx|cache-key:[\"/api/admin/printing/override\", cert.certId]#1",
-      "finding": "ARCH-AUTHORITY-001",
-      "expiresWith": "the bounded-context repair that assigns explicit authority"
-    },
-    {
-      "key": "session-principal|client/src/pages/admin-cert-browser.tsx|cache-key:[\"/api/admin/printing/override\", cert.certId]#2",
-      "finding": "ARCH-AUTHORITY-001",
-      "expiresWith": "the bounded-context repair that assigns explicit authority"
-    },
-    {
       "key": "session-principal|client/src/pages/admin-claim-register.tsx|cache-key:[\"/api/admin/claim-register\"]#0",
-      "finding": "ARCH-AUTHORITY-001",
-      "expiresWith": "the bounded-context repair that assigns explicit authority"
-    },
-    {
-      "key": "session-principal|client/src/pages/admin-command-centre.tsx|cache-key:[\"/api/admin/db-info\"]#0",
-      "finding": "ARCH-AUTHORITY-001",
-      "expiresWith": "the bounded-context repair that assigns explicit authority"
-    },
-    {
-      "key": "session-principal|client/src/pages/admin-command-centre.tsx|cache-key:[\"/api/admin/session\"]#0",
       "finding": "ARCH-AUTHORITY-001",
       "expiresWith": "the bounded-context repair that assigns explicit authority"
     },
@@ -9193,11 +8113,6 @@
     },
     {
       "key": "session-principal|client/src/pages/admin-command-centre.tsx|cache-key:COMMAND_CENTRE_QUERY_PREFIX#1",
-      "finding": "ARCH-AUTHORITY-001",
-      "expiresWith": "the bounded-context repair that assigns explicit authority"
-    },
-    {
-      "key": "session-principal|client/src/pages/admin-command-centre.tsx|cache-key:COMMAND_CENTRE_QUERY_PREFIX#2",
       "finding": "ARCH-AUTHORITY-001",
       "expiresWith": "the bounded-context repair that assigns explicit authority"
     },
@@ -9268,11 +8183,6 @@
     },
     {
       "key": "session-principal|client/src/pages/admin-dashboard.tsx|cache-key:[\"/api/admin/operator-stats\"]#0",
-      "finding": "ARCH-AUTHORITY-001",
-      "expiresWith": "the bounded-context repair that assigns explicit authority"
-    },
-    {
-      "key": "session-principal|client/src/pages/admin-dashboard.tsx|cache-key:[\"/api/admin/session\"]#0",
       "finding": "ARCH-AUTHORITY-001",
       "expiresWith": "the bounded-context repair that assigns explicit authority"
     },
@@ -9513,66 +8423,6 @@
     },
     {
       "key": "session-principal|client/src/pages/admin-pricing.tsx|cache-key:[\"/api/service-tiers\"]#0",
-      "finding": "ARCH-AUTHORITY-001",
-      "expiresWith": "the bounded-context repair that assigns explicit authority"
-    },
-    {
-      "key": "session-principal|client/src/pages/admin-print-queue.tsx|cache-key:[`${base}/printing/workflow/events`, certId]#0",
-      "finding": "ARCH-AUTHORITY-001",
-      "expiresWith": "the bounded-context repair that assigns explicit authority"
-    },
-    {
-      "key": "session-principal|client/src/pages/admin-print-queue.tsx|cache-key:batchesKey#0",
-      "finding": "ARCH-AUTHORITY-001",
-      "expiresWith": "the bounded-context repair that assigns explicit authority"
-    },
-    {
-      "key": "session-principal|client/src/pages/admin-print-queue.tsx|cache-key:batchesKey#1",
-      "finding": "ARCH-AUTHORITY-001",
-      "expiresWith": "the bounded-context repair that assigns explicit authority"
-    },
-    {
-      "key": "session-principal|client/src/pages/admin-print-queue.tsx|cache-key:queueKey#0",
-      "finding": "ARCH-AUTHORITY-001",
-      "expiresWith": "the bounded-context repair that assigns explicit authority"
-    },
-    {
-      "key": "session-principal|client/src/pages/admin-print-queue.tsx|cache-key:queueKey#1",
-      "finding": "ARCH-AUTHORITY-001",
-      "expiresWith": "the bounded-context repair that assigns explicit authority"
-    },
-    {
-      "key": "session-principal|client/src/pages/admin-printing.tsx|cache-key:[`${base}/printing/override`, certId]#0",
-      "finding": "ARCH-AUTHORITY-001",
-      "expiresWith": "the bounded-context repair that assigns explicit authority"
-    },
-    {
-      "key": "session-principal|client/src/pages/admin-printing.tsx|cache-key:[`${base}/printing/override`, certId]#1",
-      "finding": "ARCH-AUTHORITY-001",
-      "expiresWith": "the bounded-context repair that assigns explicit authority"
-    },
-    {
-      "key": "session-principal|client/src/pages/admin-printing.tsx|cache-key:[`${base}/printing/queue`]#0",
-      "finding": "ARCH-AUTHORITY-001",
-      "expiresWith": "the bounded-context repair that assigns explicit authority"
-    },
-    {
-      "key": "session-principal|client/src/pages/admin-printing.tsx|cache-key:[`${base}/printing/queue`]#1",
-      "finding": "ARCH-AUTHORITY-001",
-      "expiresWith": "the bounded-context repair that assigns explicit authority"
-    },
-    {
-      "key": "session-principal|client/src/pages/admin-printing.tsx|cache-key:[`${base}/printing/sheets`, latest?.sheetRef]#0",
-      "finding": "ARCH-AUTHORITY-001",
-      "expiresWith": "the bounded-context repair that assigns explicit authority"
-    },
-    {
-      "key": "session-principal|client/src/pages/admin-printing.tsx|cache-key:[`${base}/printing/sheets`]#0",
-      "finding": "ARCH-AUTHORITY-001",
-      "expiresWith": "the bounded-context repair that assigns explicit authority"
-    },
-    {
-      "key": "session-principal|client/src/pages/admin-printing.tsx|cache-key:[`${base}/printing/sheets`]#1",
       "finding": "ARCH-AUTHORITY-001",
       "expiresWith": "the bounded-context repair that assigns explicit authority"
     },
@@ -9913,11 +8763,6 @@
     },
     {
       "key": "session-principal|client/src/pages/admin/community.tsx|cache-key:[\"/api/admin/community\"]#0",
-      "finding": "ARCH-AUTHORITY-001",
-      "expiresWith": "the bounded-context repair that assigns explicit authority"
-    },
-    {
-      "key": "session-principal|client/src/pages/admin/growth.tsx|cache-key:[\"/api/admin/session\"]#0",
       "finding": "ARCH-AUTHORITY-001",
       "expiresWith": "the bounded-context repair that assigns explicit authority"
     },
@@ -13782,116 +12627,6 @@
       "expiresWith": "the bounded-context repair that assigns explicit authority"
     },
     {
-      "key": "table-access|server/lib/print-artifact-persistence.ts|read:public.certificates#0",
-      "finding": "ARCH-AUTHORITY-001",
-      "expiresWith": "the bounded-context repair that assigns explicit authority"
-    },
-    {
-      "key": "table-access|server/lib/print-artifact-persistence.ts|read:public.certificates#1",
-      "finding": "ARCH-AUTHORITY-001",
-      "expiresWith": "the bounded-context repair that assigns explicit authority"
-    },
-    {
-      "key": "table-access|server/lib/print-artifact-persistence.ts|read:public.label_overrides#0",
-      "finding": "ARCH-AUTHORITY-001",
-      "expiresWith": "the bounded-context repair that assigns explicit authority"
-    },
-    {
-      "key": "table-access|server/lib/print-artifact-persistence.ts|read:public.label_overrides#1",
-      "finding": "ARCH-AUTHORITY-001",
-      "expiresWith": "the bounded-context repair that assigns explicit authority"
-    },
-    {
-      "key": "table-access|server/lib/print-artifact-persistence.ts|read:public.object_write_items#0",
-      "finding": "ARCH-AUTHORITY-001",
-      "expiresWith": "the bounded-context repair that assigns explicit authority"
-    },
-    {
-      "key": "table-access|server/lib/print-artifact-persistence.ts|read:public.object_write_operations#0",
-      "finding": "ARCH-AUTHORITY-001",
-      "expiresWith": "the bounded-context repair that assigns explicit authority"
-    },
-    {
-      "key": "table-access|server/lib/print-artifact-persistence.ts|read:public.print_batches#0",
-      "finding": "ARCH-AUTHORITY-001",
-      "expiresWith": "the bounded-context repair that assigns explicit authority"
-    },
-    {
-      "key": "table-access|server/lib/print-artifact-persistence.ts|read:public.print_batches#1",
-      "finding": "ARCH-AUTHORITY-001",
-      "expiresWith": "the bounded-context repair that assigns explicit authority"
-    },
-    {
-      "key": "table-access|server/lib/print-artifact-persistence.ts|write:public.audit_log#0",
-      "finding": "ARCH-AUTHORITY-001",
-      "expiresWith": "the bounded-context repair that assigns explicit authority"
-    },
-    {
-      "key": "table-access|server/lib/print-artifact-persistence.ts|write:public.audit_log#1",
-      "finding": "ARCH-AUTHORITY-001",
-      "expiresWith": "the bounded-context repair that assigns explicit authority"
-    },
-    {
-      "key": "table-access|server/lib/print-artifact-persistence.ts|write:public.audit_log#2",
-      "finding": "ARCH-AUTHORITY-001",
-      "expiresWith": "the bounded-context repair that assigns explicit authority"
-    },
-    {
-      "key": "table-access|server/lib/print-artifact-persistence.ts|write:public.certificates#0",
-      "finding": "ARCH-AUTHORITY-001",
-      "expiresWith": "the bounded-context repair that assigns explicit authority"
-    },
-    {
-      "key": "table-access|server/lib/print-artifact-persistence.ts|write:public.certificates#1",
-      "finding": "ARCH-AUTHORITY-001",
-      "expiresWith": "the bounded-context repair that assigns explicit authority"
-    },
-    {
-      "key": "table-access|server/lib/print-artifact-persistence.ts|write:public.certificates#2",
-      "finding": "ARCH-AUTHORITY-001",
-      "expiresWith": "the bounded-context repair that assigns explicit authority"
-    },
-    {
-      "key": "table-access|server/lib/print-artifact-persistence.ts|write:public.label_prints#0",
-      "finding": "ARCH-AUTHORITY-001",
-      "expiresWith": "the bounded-context repair that assigns explicit authority"
-    },
-    {
-      "key": "table-access|server/lib/print-artifact-persistence.ts|write:public.print_batches#0",
-      "finding": "ARCH-AUTHORITY-001",
-      "expiresWith": "the bounded-context repair that assigns explicit authority"
-    },
-    {
-      "key": "table-access|server/lib/print-artifact-persistence.ts|write:public.print_batches#1",
-      "finding": "ARCH-AUTHORITY-001",
-      "expiresWith": "the bounded-context repair that assigns explicit authority"
-    },
-    {
-      "key": "table-access|server/lib/print-artifact-persistence.ts|write:public.print_batches#2",
-      "finding": "ARCH-AUTHORITY-001",
-      "expiresWith": "the bounded-context repair that assigns explicit authority"
-    },
-    {
-      "key": "table-access|server/lib/print-artifact-persistence.ts|write:public.print_events#0",
-      "finding": "ARCH-AUTHORITY-001",
-      "expiresWith": "the bounded-context repair that assigns explicit authority"
-    },
-    {
-      "key": "table-access|server/lib/print-artifact-persistence.ts|write:public.print_events#1",
-      "finding": "ARCH-AUTHORITY-001",
-      "expiresWith": "the bounded-context repair that assigns explicit authority"
-    },
-    {
-      "key": "table-access|server/lib/print-artifact-persistence.ts|write:public.print_events#2",
-      "finding": "ARCH-AUTHORITY-001",
-      "expiresWith": "the bounded-context repair that assigns explicit authority"
-    },
-    {
-      "key": "table-access|server/lib/print-artifact-persistence.ts|write:public.reprint_log#0",
-      "finding": "ARCH-AUTHORITY-001",
-      "expiresWith": "the bounded-context repair that assigns explicit authority"
-    },
-    {
       "key": "table-access|server/lib/public-auth-rate-limit-store-pg.ts|read:public.public_rate_limit_buckets#0",
       "finding": "ARCH-AUTHORITY-001",
       "expiresWith": "the bounded-context repair that assigns explicit authority"
@@ -14032,202 +12767,12 @@
       "expiresWith": "the bounded-context repair that assigns explicit authority"
     },
     {
-      "key": "table-access|server/print-workflow.ts|read:public.cards#0",
-      "finding": "ARCH-AUTHORITY-001",
-      "expiresWith": "the bounded-context repair that assigns explicit authority"
-    },
-    {
-      "key": "table-access|server/print-workflow.ts|read:public.certificates#0",
-      "finding": "ARCH-AUTHORITY-001",
-      "expiresWith": "the bounded-context repair that assigns explicit authority"
-    },
-    {
-      "key": "table-access|server/print-workflow.ts|read:public.certificates#1",
-      "finding": "ARCH-AUTHORITY-001",
-      "expiresWith": "the bounded-context repair that assigns explicit authority"
-    },
-    {
-      "key": "table-access|server/print-workflow.ts|read:public.certificates#2",
-      "finding": "ARCH-AUTHORITY-001",
-      "expiresWith": "the bounded-context repair that assigns explicit authority"
-    },
-    {
-      "key": "table-access|server/print-workflow.ts|read:public.certificates#3",
-      "finding": "ARCH-AUTHORITY-001",
-      "expiresWith": "the bounded-context repair that assigns explicit authority"
-    },
-    {
-      "key": "table-access|server/print-workflow.ts|read:public.certificates#4",
-      "finding": "ARCH-AUTHORITY-001",
-      "expiresWith": "the bounded-context repair that assigns explicit authority"
-    },
-    {
-      "key": "table-access|server/print-workflow.ts|read:public.label_prints#0",
-      "finding": "ARCH-AUTHORITY-001",
-      "expiresWith": "the bounded-context repair that assigns explicit authority"
-    },
-    {
-      "key": "table-access|server/print-workflow.ts|read:public.object_write_operations#0",
-      "finding": "ARCH-AUTHORITY-001",
-      "expiresWith": "the bounded-context repair that assigns explicit authority"
-    },
-    {
-      "key": "table-access|server/print-workflow.ts|read:public.print_batches#0",
-      "finding": "ARCH-AUTHORITY-001",
-      "expiresWith": "the bounded-context repair that assigns explicit authority"
-    },
-    {
-      "key": "table-access|server/print-workflow.ts|read:public.print_batches#1",
-      "finding": "ARCH-AUTHORITY-001",
-      "expiresWith": "the bounded-context repair that assigns explicit authority"
-    },
-    {
-      "key": "table-access|server/print-workflow.ts|read:public.print_batches#2",
-      "finding": "ARCH-AUTHORITY-001",
-      "expiresWith": "the bounded-context repair that assigns explicit authority"
-    },
-    {
-      "key": "table-access|server/print-workflow.ts|read:public.print_batches#3",
-      "finding": "ARCH-AUTHORITY-001",
-      "expiresWith": "the bounded-context repair that assigns explicit authority"
-    },
-    {
-      "key": "table-access|server/print-workflow.ts|read:public.print_batches#4",
-      "finding": "ARCH-AUTHORITY-001",
-      "expiresWith": "the bounded-context repair that assigns explicit authority"
-    },
-    {
-      "key": "table-access|server/print-workflow.ts|read:public.print_events#0",
-      "finding": "ARCH-AUTHORITY-001",
-      "expiresWith": "the bounded-context repair that assigns explicit authority"
-    },
-    {
-      "key": "table-access|server/print-workflow.ts|read:public.print_events#1",
-      "finding": "ARCH-AUTHORITY-001",
-      "expiresWith": "the bounded-context repair that assigns explicit authority"
-    },
-    {
-      "key": "table-access|server/print-workflow.ts|read:public.print_events#2",
-      "finding": "ARCH-AUTHORITY-001",
-      "expiresWith": "the bounded-context repair that assigns explicit authority"
-    },
-    {
-      "key": "table-access|server/print-workflow.ts|read:public.reprint_log#0",
-      "finding": "ARCH-AUTHORITY-001",
-      "expiresWith": "the bounded-context repair that assigns explicit authority"
-    },
-    {
-      "key": "table-access|server/print-workflow.ts|read:public.submission_items#0",
-      "finding": "ARCH-AUTHORITY-001",
-      "expiresWith": "the bounded-context repair that assigns explicit authority"
-    },
-    {
-      "key": "table-access|server/print-workflow.ts|read:public.submissions#0",
-      "finding": "ARCH-AUTHORITY-001",
-      "expiresWith": "the bounded-context repair that assigns explicit authority"
-    },
-    {
-      "key": "table-access|server/print-workflow.ts|write:public.certificates#0",
-      "finding": "ARCH-AUTHORITY-001",
-      "expiresWith": "the bounded-context repair that assigns explicit authority"
-    },
-    {
-      "key": "table-access|server/print-workflow.ts|write:public.certificates#1",
-      "finding": "ARCH-AUTHORITY-001",
-      "expiresWith": "the bounded-context repair that assigns explicit authority"
-    },
-    {
-      "key": "table-access|server/print-workflow.ts|write:public.certificates#2",
-      "finding": "ARCH-AUTHORITY-001",
-      "expiresWith": "the bounded-context repair that assigns explicit authority"
-    },
-    {
-      "key": "table-access|server/print-workflow.ts|write:public.certificates#3",
-      "finding": "ARCH-AUTHORITY-001",
-      "expiresWith": "the bounded-context repair that assigns explicit authority"
-    },
-    {
-      "key": "table-access|server/print-workflow.ts|write:public.certificates#4",
-      "finding": "ARCH-AUTHORITY-001",
-      "expiresWith": "the bounded-context repair that assigns explicit authority"
-    },
-    {
-      "key": "table-access|server/print-workflow.ts|write:public.certificates#5",
-      "finding": "ARCH-AUTHORITY-001",
-      "expiresWith": "the bounded-context repair that assigns explicit authority"
-    },
-    {
-      "key": "table-access|server/print-workflow.ts|write:public.label_prints#0",
-      "finding": "ARCH-AUTHORITY-001",
-      "expiresWith": "the bounded-context repair that assigns explicit authority"
-    },
-    {
-      "key": "table-access|server/print-workflow.ts|write:public.label_prints#1",
-      "finding": "ARCH-AUTHORITY-001",
-      "expiresWith": "the bounded-context repair that assigns explicit authority"
-    },
-    {
-      "key": "table-access|server/print-workflow.ts|write:public.print_batches#0",
-      "finding": "ARCH-AUTHORITY-001",
-      "expiresWith": "the bounded-context repair that assigns explicit authority"
-    },
-    {
-      "key": "table-access|server/print-workflow.ts|write:public.print_batches#1",
-      "finding": "ARCH-AUTHORITY-001",
-      "expiresWith": "the bounded-context repair that assigns explicit authority"
-    },
-    {
-      "key": "table-access|server/print-workflow.ts|write:public.print_batches#2",
-      "finding": "ARCH-AUTHORITY-001",
-      "expiresWith": "the bounded-context repair that assigns explicit authority"
-    },
-    {
-      "key": "table-access|server/print-workflow.ts|write:public.print_batches#3",
-      "finding": "ARCH-AUTHORITY-001",
-      "expiresWith": "the bounded-context repair that assigns explicit authority"
-    },
-    {
-      "key": "table-access|server/print-workflow.ts|write:public.print_batches#4",
-      "finding": "ARCH-AUTHORITY-001",
-      "expiresWith": "the bounded-context repair that assigns explicit authority"
-    },
-    {
-      "key": "table-access|server/print-workflow.ts|write:public.print_events#0",
-      "finding": "ARCH-AUTHORITY-001",
-      "expiresWith": "the bounded-context repair that assigns explicit authority"
-    },
-    {
-      "key": "table-access|server/print-workflow.ts|write:public.print_events#1",
-      "finding": "ARCH-AUTHORITY-001",
-      "expiresWith": "the bounded-context repair that assigns explicit authority"
-    },
-    {
-      "key": "table-access|server/print-workflow.ts|write:public.print_events#2",
-      "finding": "ARCH-AUTHORITY-001",
-      "expiresWith": "the bounded-context repair that assigns explicit authority"
-    },
-    {
-      "key": "table-access|server/print-workflow.ts|write:public.print_events#3",
-      "finding": "ARCH-AUTHORITY-001",
-      "expiresWith": "the bounded-context repair that assigns explicit authority"
-    },
-    {
-      "key": "table-access|server/print-workflow.ts|write:public.print_events#4",
-      "finding": "ARCH-AUTHORITY-001",
-      "expiresWith": "the bounded-context repair that assigns explicit authority"
-    },
-    {
-      "key": "table-access|server/print-workflow.ts|write:public.print_events#5",
-      "finding": "ARCH-AUTHORITY-001",
-      "expiresWith": "the bounded-context repair that assigns explicit authority"
-    },
-    {
-      "key": "table-access|server/print-workflow.ts|write:public.reprint_log#0",
-      "finding": "ARCH-AUTHORITY-001",
-      "expiresWith": "the bounded-context repair that assigns explicit authority"
-    },
-    {
       "key": "table-access|server/readiness.ts|read:information_schema.columns#0",
+      "finding": "ARCH-AUTHORITY-001",
+      "expiresWith": "the bounded-context repair that assigns explicit authority"
+    },
+    {
+      "key": "table-access|server/readiness.ts|read:public.pg_attrdef#0",
       "finding": "ARCH-AUTHORITY-001",
       "expiresWith": "the bounded-context repair that assigns explicit authority"
     },
@@ -14263,6 +12808,21 @@
     },
     {
       "key": "table-access|server/readiness.ts|read:public.pg_attribute#6",
+      "finding": "ARCH-AUTHORITY-001",
+      "expiresWith": "the bounded-context repair that assigns explicit authority"
+    },
+    {
+      "key": "table-access|server/readiness.ts|read:public.pg_attribute#7",
+      "finding": "ARCH-AUTHORITY-001",
+      "expiresWith": "the bounded-context repair that assigns explicit authority"
+    },
+    {
+      "key": "table-access|server/readiness.ts|read:public.pg_attribute#8",
+      "finding": "ARCH-AUTHORITY-001",
+      "expiresWith": "the bounded-context repair that assigns explicit authority"
+    },
+    {
+      "key": "table-access|server/readiness.ts|read:public.pg_attribute#9",
       "finding": "ARCH-AUTHORITY-001",
       "expiresWith": "the bounded-context repair that assigns explicit authority"
     },
@@ -14337,6 +12897,26 @@
       "expiresWith": "the bounded-context repair that assigns explicit authority"
     },
     {
+      "key": "table-access|server/readiness.ts|read:public.pg_constraint#14",
+      "finding": "ARCH-AUTHORITY-001",
+      "expiresWith": "the bounded-context repair that assigns explicit authority"
+    },
+    {
+      "key": "table-access|server/readiness.ts|read:public.pg_constraint#15",
+      "finding": "ARCH-AUTHORITY-001",
+      "expiresWith": "the bounded-context repair that assigns explicit authority"
+    },
+    {
+      "key": "table-access|server/readiness.ts|read:public.pg_constraint#16",
+      "finding": "ARCH-AUTHORITY-001",
+      "expiresWith": "the bounded-context repair that assigns explicit authority"
+    },
+    {
+      "key": "table-access|server/readiness.ts|read:public.pg_constraint#17",
+      "finding": "ARCH-AUTHORITY-001",
+      "expiresWith": "the bounded-context repair that assigns explicit authority"
+    },
+    {
       "key": "table-access|server/readiness.ts|read:public.pg_constraint#2",
       "finding": "ARCH-AUTHORITY-001",
       "expiresWith": "the bounded-context repair that assigns explicit authority"
@@ -14392,6 +12972,21 @@
       "expiresWith": "the bounded-context repair that assigns explicit authority"
     },
     {
+      "key": "table-access|server/readiness.ts|read:public.pg_index#10",
+      "finding": "ARCH-AUTHORITY-001",
+      "expiresWith": "the bounded-context repair that assigns explicit authority"
+    },
+    {
+      "key": "table-access|server/readiness.ts|read:public.pg_index#11",
+      "finding": "ARCH-AUTHORITY-001",
+      "expiresWith": "the bounded-context repair that assigns explicit authority"
+    },
+    {
+      "key": "table-access|server/readiness.ts|read:public.pg_index#12",
+      "finding": "ARCH-AUTHORITY-001",
+      "expiresWith": "the bounded-context repair that assigns explicit authority"
+    },
+    {
       "key": "table-access|server/readiness.ts|read:public.pg_index#2",
       "finding": "ARCH-AUTHORITY-001",
       "expiresWith": "the bounded-context repair that assigns explicit authority"
@@ -14413,6 +13008,21 @@
     },
     {
       "key": "table-access|server/readiness.ts|read:public.pg_index#6",
+      "finding": "ARCH-AUTHORITY-001",
+      "expiresWith": "the bounded-context repair that assigns explicit authority"
+    },
+    {
+      "key": "table-access|server/readiness.ts|read:public.pg_index#7",
+      "finding": "ARCH-AUTHORITY-001",
+      "expiresWith": "the bounded-context repair that assigns explicit authority"
+    },
+    {
+      "key": "table-access|server/readiness.ts|read:public.pg_index#8",
+      "finding": "ARCH-AUTHORITY-001",
+      "expiresWith": "the bounded-context repair that assigns explicit authority"
+    },
+    {
+      "key": "table-access|server/readiness.ts|read:public.pg_index#9",
       "finding": "ARCH-AUTHORITY-001",
       "expiresWith": "the bounded-context repair that assigns explicit authority"
     },

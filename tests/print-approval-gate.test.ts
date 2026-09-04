@@ -207,6 +207,9 @@ beforeAll(async () => {
   await seedCert({ certNumber: "MV9005", status: "voided" }); // approved but voided
   await seedCert({ certNumber: "MV9006", grade: null }); // approved but NO grade
   await seedCert({ certNumber: "MV9007" }); // second good cert, for the all-or-nothing test
+  await seedCert({ certNumber: "MV9008" }); // committed-artifact revocation proof
+  await seedCert({ certNumber: "MV9009" }); // legacy mutable-membership proof: still points to old sheet
+  await seedCert({ certNumber: "MV9010" }); // legacy mutable-membership proof: pointer moved to new sheet
 
   const express = (await import("express")).default;
   const session = (await import("express-session")).default;
@@ -313,6 +316,42 @@ describe("P0-D print approval gate on the REAL POST /api/admin/print-batch", () 
     // was recorded.
     expect(await claimCodeOf("MV9001")).toBeTruthy();
     expect(await printBatchAuditCount()).toBe(before + 1);
+  }, 120_000);
+
+  it("blocks a committed artifact download after current approval is revoked", async () => {
+    const created = await printBatch(["MV9008"]);
+    expect(created.status).toBe(200);
+    expect(created.body.batchId).toBeTruthy();
+    await client.query(`UPDATE certificates SET grader_status='assigned' WHERE certificate_number='MV9008'`);
+
+    const response = await fetch(`${base}/api/admin/print-batch/${created.body.batchId}/pdf`, {
+      headers: { cookie },
+    });
+    expect(response.status).toBe(422);
+    await expect(response.json()).resolves.toMatchObject({
+      code: "UNPRINTABLE_GRADE",
+      blockedCertIds: ["MV9008"],
+    });
+  }, 120_000);
+
+  it("fails closed for a legacy sheet whose mutable label pointers under-report its membership", async () => {
+    const legacyBatchId = "legacy-sheet-containing-MV9009-and-MV9010";
+    await client.query(
+      `INSERT INTO label_prints (cert_id, sheet_ref) VALUES
+         ('MV9009', $1),
+         ('MV9010', 'newer-sheet-after-reprint')`,
+      [legacyBatchId]
+    );
+    await client.query(`UPDATE certificates SET grader_status='assigned' WHERE certificate_number='MV9010'`);
+
+    const response = await fetch(`${base}/api/admin/print-batch/${legacyBatchId}/pdf`, {
+      headers: { cookie },
+    });
+    expect(response.status).toBe(422);
+    await expect(response.json()).resolves.toMatchObject({
+      code: "UNPRINTABLE_GRADE",
+      blockedCertIds: [],
+    });
   }, 120_000);
 
   it("is ALL-OR-NOTHING: one blocked cert refuses the batch and mints nothing for the good one", async () => {

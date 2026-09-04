@@ -1,3 +1,4 @@
+import { adminFetch } from "@/lib/queryClient";
 import { useState, useRef, useEffect, useLayoutEffect, lazy, Suspense } from "react";
 import { cardToolEnabled } from "./card-tool-image-source";
 import { createPortal } from "react-dom";
@@ -1129,7 +1130,7 @@ export default function ImageViewer({
                         e.stopPropagation();
                         if (!confirm(`Delete the ${s} image? You'll need to re-upload before grading.`)) return;
                         try {
-                          const r = await fetch(`${apiBase}/certificates/${certId}/images/${s}`, {
+                          const r = await adminFetch(`${apiBase}/certificates/${certId}/images/${s}`, {
                             method: "DELETE",
                             credentials: "include",
                           });
@@ -2131,7 +2132,7 @@ function InlineDropZone({
     try {
       const fd = new FormData();
       fd.append(side, f);
-      const res = await fetch(`/api/admin/certificates/${certId}/upload-images`, {
+      const res = await adminFetch(`/api/admin/certificates/${certId}/upload-images`, {
         method: "POST",
         credentials: "include",
         body: fd,

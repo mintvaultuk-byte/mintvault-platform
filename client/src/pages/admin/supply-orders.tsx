@@ -1,3 +1,4 @@
+import { adminFetch } from "@/lib/queryClient";
 import { useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useLocation } from "wouter";
@@ -47,7 +48,7 @@ const money = (pence: number, currency = "GBP") =>
 const label = (value: string) => value.replaceAll("_", " ").replace(/\b\w/g, (letter) => letter.toUpperCase());
 
 async function supplyApi<T>(path: string, method = "GET", body?: unknown): Promise<T> {
-  const response = await fetch(`/api/super-admin/supplies${path}`, {
+  const response = await adminFetch(`/api/super-admin/supplies${path}`, {
     method,
     credentials: "include",
     headers: body === undefined ? undefined : { "Content-Type": "application/json" },
@@ -121,7 +122,6 @@ export default function AdminSupplyOrdersPage() {
     <AdminShell
       activeTab="dashboard"
       onTabChange={() => navigate("/admin")}
-      onLogout={() => navigate("/admin")}
       title="Supply Orders"
       crumb="Operations"
     >

@@ -146,6 +146,29 @@ describe("hosted CI proof topology", () => {
       expect(validateCiTopology(firstKeyVariant)).toContain("workflow does not execute npm run test:partner:critical");
     }
 
+    const quotedDisabledJob = realCiInput();
+    quotedDisabledJob.workflow = quotedDisabledJob.workflow.replace(
+      "name: Lint, Type Check, Test & Build",
+      'name: Lint, Type Check, Test & Build\n    "if": false'
+    );
+    expect(validateCiTopology(quotedDisabledJob)).toContain("jobs.check must be enabled and failure-blocking");
+
+    const quotedDefaults = realCiInput();
+    quotedDefaults.workflow = quotedDefaults.workflow.replace(
+      "    steps:",
+      '    "defaults": { run: { shell: "echo {0}" } }\n    steps:'
+    );
+    expect(validateCiTopology(quotedDefaults)).toContain("jobs.check may not override run defaults");
+
+    for (const firstProperty of ['"shell": echo {0}', '"if": false', '"continue-on-error": true']) {
+      const quotedFirstKey = realCiInput();
+      quotedFirstKey.workflow = quotedFirstKey.workflow.replace(
+        "- name: Isolated Partner critical matrix\n        run: npm run test:partner:critical",
+        `- ${firstProperty}\n        name: Isolated Partner critical matrix\n        run: npm run test:partner:critical`
+      );
+      expect(validateCiTopology(quotedFirstKey)).toContain("workflow does not execute npm run test:partner:critical");
+    }
+
     const lateRootRuntime = realCiInput();
     const node20Block = lateRootRuntime.workflow.match(
       / {6}- uses: actions\/setup-node@[^\n]+\n {8}with:\n(?: {10}#[^\n]*\n)* {10}node-version: 20\.20\.2\n {10}cache: npm\n/

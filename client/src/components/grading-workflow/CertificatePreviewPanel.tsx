@@ -1,3 +1,4 @@
+import { adminFetch } from "@/lib/queryClient";
 /**
  * Live FRONT certificate preview (read-only).
  *
@@ -148,7 +149,7 @@ export function CertificatePreviewPanel({
       }, requestTimeoutMs);
       try {
         const body = expectedRevision == null ? fields : { ...fields, expectedRevision };
-        const res = await fetch(endpoint, {
+        const res = await adminFetch(endpoint, {
           method: "POST",
           credentials: "include",
           headers: { "Content-Type": "application/json" },

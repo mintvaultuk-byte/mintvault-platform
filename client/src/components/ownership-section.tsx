@@ -1,6 +1,6 @@
 import { useState } from "react";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
-import { apiRequest } from "@/lib/queryClient";
+import { adminFetch, apiRequest } from "@/lib/queryClient";
 import type { CertificateRecord } from "@shared/schema";
 import { useToast } from "@/hooks/use-toast";
 import { Badge } from "@/components/ui/badge";
@@ -64,7 +64,7 @@ export default function OwnershipSection({ cert }: { cert: CertificateRecord }) 
 
   const insertMutation = useMutation({
     mutationFn: async () => {
-      const res = await fetch(`/api/admin/certificates/${cert.certId}/claim-insert?format=pdf`);
+      const res = await adminFetch(`/api/admin/certificates/${cert.certId}/claim-insert?format=pdf`);
       return res.blob();
     },
     onSuccess: (blob: Blob) => {

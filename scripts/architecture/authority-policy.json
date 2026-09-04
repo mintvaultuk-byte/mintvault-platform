@@ -3,6 +3,13 @@
   "snapshot": "scripts/architecture/generated/architecture-authority.json",
   "legacyAuthority": "scripts/architecture/legacy-authority.json",
   "componentIndex": "config/components/index.ts",
+  "adminCacheAuthority": {
+    "file": "client/src/lib/queryClient.ts",
+    "classifier": "isAdminProtectedQueryKey",
+    "hash": "scopedQueryHash",
+    "publicKeySet": "PUBLIC_ADMIN_VIEW_QUERY_KEYS",
+    "principalFields": ["email", "isSuperAdmin"]
+  },
   "applicationRoots": [
     { "file": "server/index.ts", "context": "<module>", "receiver": "app" },
     { "file": "server/partner/app.ts", "context": "createPartnerApp", "receiver": "app" }
@@ -16,7 +23,7 @@
     {
       "id": "core-runtime",
       "owner": "core-platform",
-      "sourceRoots": ["server/index.ts", "server/routes.ts"]
+      "sourceRoots": ["server/index.ts", "server/routes.ts", "client/src/App.tsx"]
     },
     {
       "id": "customer-notifications",
@@ -26,7 +33,12 @@
     {
       "id": "identity-session",
       "owner": "identity-platform",
-      "sourceRoots": ["server/auth.ts", "server/routes/auth.ts"]
+      "sourceRoots": [
+        "server/auth.ts",
+        "server/routes/auth.ts",
+        "client/src/lib/admin-session.tsx",
+        "client/src/lib/queryClient.ts"
+      ]
     },
     {
       "id": "object-write",
@@ -37,6 +49,19 @@
       "id": "partner-operations",
       "owner": "partner-platform",
       "sourceRoots": ["server/partner/", "client/src/pages/partner/", "client/src/components/partner/"]
+    },
+    {
+      "id": "print-workflow",
+      "owner": "print-platform",
+      "sourceRoots": [
+        "server/print-workflow.ts",
+        "server/routes/print-workflow.ts",
+        "server/lib/print-artifact-persistence.ts",
+        "server/lib/print-output-eligibility.ts",
+        "client/src/pages/admin-printing.tsx",
+        "client/src/pages/admin-cert-browser.tsx",
+        "client/src/pages/admin-print-queue.tsx"
+      ]
     },
     {
       "id": "scanner-ingest",
@@ -53,6 +78,8 @@
     { "prefix": "server/partner/", "owner": "partner-platform" },
     { "prefix": "client/src/components/partner/", "owner": "partner-platform" },
     { "prefix": "client/src/pages/partner/", "owner": "partner-platform" },
+    { "prefix": "client/src/pages/dev-admin-shell-geometry-harness.tsx", "owner": "development-fixtures" },
+    { "prefix": "client/src/pages/dev-growth-command-visual-harness.tsx", "owner": "development-fixtures" },
     { "prefix": "server/vault-quest/", "owner": "vault-quest-platform" },
     { "prefix": "client/src/vault-quest/", "owner": "vault-quest-platform" },
     { "prefix": "client/src/pages/vault-reports/", "owner": "vault-quest-platform" },

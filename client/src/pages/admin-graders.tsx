@@ -1,3 +1,4 @@
+import { adminFetch } from "@/lib/queryClient";
 import { useEffect, useState, useCallback } from "react";
 import { useLocation } from "wouter";
 
@@ -32,38 +33,22 @@ type Cert = {
 
 export default function AdminGradersPage() {
   const [, navigate] = useLocation();
-  const [authed, setAuthed] = useState<boolean | null>(null);
   const [graders, setGraders] = useState<Grader[]>([]);
   const [rate, setRate] = useState<number>(0);
   const [msg, setMsg] = useState<string | null>(null);
   const [err, setErr] = useState<string | null>(null);
 
-  useEffect(() => {
-    (async () => {
-      try {
-        const res = await fetch("/api/admin/session", { credentials: "include" });
-        const d = await res.json();
-        setAuthed(res.ok && d.authenticated === true);
-      } catch {
-        setAuthed(false);
-      }
-    })();
-  }, []);
-  useEffect(() => {
-    if (authed === false) navigate("/admin/login?next=/admin/graders", { replace: true });
-  }, [authed, navigate]);
-
   const load = useCallback(async () => {
     const [g, r] = await Promise.all([
-      fetch("/api/admin/graders", { credentials: "include" }),
-      fetch("/api/admin/grader-rate", { credentials: "include" }),
+      adminFetch("/api/admin/graders", { credentials: "include" }),
+      adminFetch("/api/admin/grader-rate", { credentials: "include" }),
     ]);
     if (g.ok) setGraders((await g.json()).graders || []);
     if (r.ok) setRate((await r.json()).rate || 0);
   }, []);
   useEffect(() => {
-    if (authed) load();
-  }, [authed, load]);
+    void load();
+  }, [load]);
 
   // create grader
   const [nEmail, setNEmail] = useState("");
@@ -73,7 +58,7 @@ export default function AdminGradersPage() {
     e.preventDefault();
     setMsg(null);
     setErr(null);
-    const res = await fetch("/api/admin/graders", {
+    const res = await adminFetch("/api/admin/graders", {
       method: "POST",
       credentials: "include",
       headers: { "Content-Type": "application/json" },
@@ -92,7 +77,7 @@ export default function AdminGradersPage() {
     e.preventDefault();
     setMsg(null);
     setErr(null);
-    const res = await fetch("/api/admin/grader-rate", {
+    const res = await adminFetch("/api/admin/grader-rate", {
       method: "POST",
       credentials: "include",
       headers: { "Content-Type": "application/json" },
@@ -115,7 +100,7 @@ export default function AdminGradersPage() {
     setSel(new Set());
     const id = parseInt(subId, 10);
     if (!Number.isInteger(id) || id <= 0) return setErr("Enter a submission ID");
-    const res = await fetch(`/api/admin/submissions/${id}/certs`, { credentials: "include" });
+    const res = await adminFetch(`/api/admin/submissions/${id}/certs`, { credentials: "include" });
     const d = await res.json().catch(() => ({}));
     if (!res.ok) return setErr(d.error || "Failed to load certs");
     setCerts(d.certs || []);
@@ -135,7 +120,7 @@ export default function AdminGradersPage() {
     const cert_ids = Array.from(sel);
     if (!cert_ids.length) return setErr("Select one or more certificates");
     if (action !== "unassign" && !aGrader) return setErr("Pick a grader");
-    const res = await fetch(`/api/admin/graders/${action}`, {
+    const res = await adminFetch(`/api/admin/graders/${action}`, {
       method: "POST",
       credentials: "include",
       headers: { "Content-Type": "application/json" },
@@ -146,18 +131,10 @@ export default function AdminGradersPage() {
     setMsg(`${action} ok — ${d.count} certificate(s) updated`);
     // refresh the cert list + grader counts
     const id = parseInt(subId, 10);
-    const cr = await fetch(`/api/admin/submissions/${id}/certs`, { credentials: "include" });
+    const cr = await adminFetch(`/api/admin/submissions/${id}/certs`, { credentials: "include" });
     if (cr.ok) setCerts((await cr.json()).certs || []);
     setSel(new Set());
     load();
-  }
-
-  if (authed !== true) {
-    return (
-      <div className="min-h-screen bg-black flex items-center justify-center">
-        <div className="animate-pulse h-8 w-32 bg-[#D4AF37]/10 rounded" />
-      </div>
-    );
   }
 
   return (

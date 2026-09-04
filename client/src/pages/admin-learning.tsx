@@ -1,3 +1,4 @@
+import { adminFetch } from "@/lib/queryClient";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { useState, useEffect } from "react";
 import { Brain, TrendingUp, AlertTriangle, CheckCircle2, BarChart3, Clock, ToggleLeft, Database } from "lucide-react";
@@ -184,7 +185,7 @@ export default function AdminLearningPage() {
   const { data: overview, isLoading: loadingOverview } = useQuery<LearningOverview>({
     queryKey: ["/api/admin/learning/overview"],
     queryFn: async () => {
-      const res = await fetch("/api/admin/learning/overview", { credentials: "include" });
+      const res = await adminFetch("/api/admin/learning/overview", { credentials: "include" });
       if (!res.ok) return null;
       return res.json();
     },
@@ -193,7 +194,7 @@ export default function AdminLearningPage() {
   const { data: accuracy } = useQuery<AccuracyData>({
     queryKey: ["/api/admin/learning/accuracy"],
     queryFn: async () => {
-      const res = await fetch("/api/admin/learning/accuracy", { credentials: "include" });
+      const res = await adminFetch("/api/admin/learning/accuracy", { credentials: "include" });
       if (!res.ok) return null as any;
       return res.json();
     },
@@ -202,7 +203,7 @@ export default function AdminLearningPage() {
   const { data: stats } = useQuery<AiDashboardStats>({
     queryKey: ["/api/admin/ai-dashboard-stats"],
     queryFn: async () => {
-      const res = await fetch("/api/admin/ai-dashboard-stats", { credentials: "include" });
+      const res = await adminFetch("/api/admin/ai-dashboard-stats", { credentials: "include" });
       if (!res.ok) return null as any;
       return res.json();
     },
@@ -211,7 +212,7 @@ export default function AdminLearningPage() {
   const { data: flagsData, refetch: refetchFlags } = useQuery<{ flags: AiFeatureFlag[] }>({
     queryKey: ["/api/admin/ai-feature-flags"],
     queryFn: async () => {
-      const res = await fetch("/api/admin/ai-feature-flags", { credentials: "include" });
+      const res = await adminFetch("/api/admin/ai-feature-flags", { credentials: "include" });
       if (!res.ok) return { flags: [] };
       return res.json();
     },
@@ -228,7 +229,7 @@ export default function AdminLearningPage() {
   }>({
     queryKey: ["/api/admin/embedding-status"],
     queryFn: async () => {
-      const res = await fetch("/api/admin/embedding-status", { credentials: "include" });
+      const res = await adminFetch("/api/admin/embedding-status", { credentials: "include" });
       if (!res.ok) return null as any;
       return res.json();
     },
@@ -272,7 +273,7 @@ export default function AdminLearningPage() {
 
   async function pollSyncStatus() {
     try {
-      const res = await fetch("/api/admin/tcgdex-sets/status", { credentials: "include" });
+      const res = await adminFetch("/api/admin/tcgdex-sets/status", { credentials: "include" });
       if (!res.ok) return;
       setSyncStatus((await res.json()) as { running: boolean; count: number; lastSyncedAt: string | null });
     } catch {
@@ -296,7 +297,7 @@ export default function AdminLearningPage() {
   async function startSetSync() {
     setSyncStarting(true);
     try {
-      const res = await fetch("/api/admin/tcgdex-sets/import", { method: "POST", credentials: "include" });
+      const res = await adminFetch("/api/admin/tcgdex-sets/import", { method: "POST", credentials: "include" });
       const d = await res.json().catch(() => ({}));
       if (res.status === 409) {
         toast({ title: "Import already running", description: "Watching progress…" });
@@ -324,7 +325,7 @@ export default function AdminLearningPage() {
   const { data: lastRunData, refetch: refetchLastRun } = useQuery<{ lastRunAtMs: number | null; windowMs: number }>({
     queryKey: ["/api/admin/embed-corpus/last-run"],
     queryFn: async () => {
-      const res = await fetch("/api/admin/embed-corpus/last-run", { credentials: "include" });
+      const res = await adminFetch("/api/admin/embed-corpus/last-run", { credentials: "include" });
       if (!res.ok) return { lastRunAtMs: null, windowMs: 60000 };
       return res.json();
     },
@@ -349,7 +350,7 @@ export default function AdminLearningPage() {
   async function forceEmbedNow() {
     setForceEmbedding(true);
     try {
-      const res = await fetch("/api/admin/embed-corpus/run", { method: "POST", credentials: "include" });
+      const res = await adminFetch("/api/admin/embed-corpus/run", { method: "POST", credentials: "include" });
       const data = await res.json();
       if (!res.ok) throw new Error(data.error || `HTTP ${res.status}`);
       if (data.skipped) {
@@ -378,13 +379,13 @@ export default function AdminLearningPage() {
       // Reverting to env default = DELETE the override, not POST a matching value.
       // This way the row vanishes and the flag follows env going forward.
       if (nextEnabled === flag.envDefault) {
-        const res = await fetch(`/api/admin/ai-feature-flags/${flag.name}`, {
+        const res = await adminFetch(`/api/admin/ai-feature-flags/${flag.name}`, {
           method: "DELETE",
           credentials: "include",
         });
         if (!res.ok) throw new Error((await res.json()).error || `HTTP ${res.status}`);
       } else {
-        const res = await fetch(`/api/admin/ai-feature-flags`, {
+        const res = await adminFetch(`/api/admin/ai-feature-flags`, {
           method: "POST",
           credentials: "include",
           headers: { "Content-Type": "application/json" },

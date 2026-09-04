@@ -23,7 +23,7 @@
 import { useState, useMemo, useEffect } from "react";
 import { Link } from "wouter";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
-import { apiRequest } from "@/lib/queryClient";
+import { adminFetch, apiRequest } from "@/lib/queryClient";
 import {
   Loader2,
   PlayCircle,
@@ -231,7 +231,7 @@ function useSettings() {
   const queryClient = useQueryClient();
   const { data, isLoading } = useQuery<{ settings: PipelineSettings }>({
     queryKey: ["/api/admin/weekly-reel/settings"],
-    queryFn: async () => (await fetch("/api/admin/weekly-reel/settings")).json(),
+    queryFn: async () => (await adminFetch("/api/admin/weekly-reel/settings")).json(),
   });
   const mutation = useMutation({
     mutationFn: async ({ key, value }: { key: keyof PipelineSettings; value: any }) => {
@@ -251,7 +251,7 @@ function PipelineControls({ paused }: { paused: boolean }) {
 
   const { data: keyStatus } = useQuery<KeyStatus>({
     queryKey: ["/api/admin/weekly-reel/key-status"],
-    queryFn: async () => (await fetch("/api/admin/weekly-reel/key-status")).json(),
+    queryFn: async () => (await adminFetch("/api/admin/weekly-reel/key-status")).json(),
   });
 
   const generateMutation = useMutation({
@@ -374,7 +374,7 @@ function ScheduleCard() {
   const { settings, update } = useSettings();
   const { data: meta } = useQuery<MetaStatus>({
     queryKey: ["/api/admin/weekly-reel/meta-status"],
-    queryFn: async () => (await fetch("/api/admin/weekly-reel/meta-status")).json(),
+    queryFn: async () => (await adminFetch("/api/admin/weekly-reel/meta-status")).json(),
   });
   // Peak-hour preview isn't exposed by a dedicated endpoint; we show a
   // hint once smart schedule is on so the operator knows what to expect.
@@ -931,11 +931,11 @@ function SocialPublishing() {
   const { settings, update } = useSettings();
   const { data: meta } = useQuery<MetaStatus>({
     queryKey: ["/api/admin/weekly-reel/meta-status"],
-    queryFn: async () => (await fetch("/api/admin/weekly-reel/meta-status")).json(),
+    queryFn: async () => (await adminFetch("/api/admin/weekly-reel/meta-status")).json(),
   });
   const { data: tiktok } = useQuery<TiktokStatus>({
     queryKey: ["/api/admin/weekly-reel/tiktok-status"],
-    queryFn: async () => (await fetch("/api/admin/weekly-reel/tiktok-status")).json(),
+    queryFn: async () => (await adminFetch("/api/admin/weekly-reel/tiktok-status")).json(),
   });
   if (!settings) return null;
 
@@ -1091,7 +1091,7 @@ function ContentEnhancement() {
   async function upload(endpoint: string, file: File) {
     const fd = new FormData();
     fd.append("file", file);
-    const r = await fetch(endpoint, { method: "POST", body: fd, credentials: "include" });
+    const r = await adminFetch(endpoint, { method: "POST", body: fd, credentials: "include" });
     if (!r.ok) throw new Error(await r.text());
     queryClient.invalidateQueries({ queryKey: ["/api/admin/weekly-reel/settings"] });
     return r.json();
@@ -1250,7 +1250,7 @@ function FeaturedCardsTable() {
 
   const { data, isLoading } = useQuery<{ cards: FeaturedCard[] }>({
     queryKey: ["/api/admin/weekly-reel/featured-cards"],
-    queryFn: async () => (await fetch("/api/admin/weekly-reel/featured-cards")).json(),
+    queryFn: async () => (await adminFetch("/api/admin/weekly-reel/featured-cards")).json(),
   });
 
   const mutationOpts = {
@@ -1515,7 +1515,7 @@ function HistoryEntryRow({ entry, onRerun }: { entry: HistoryEntry; onRerun: () 
 
   const { data: approvalsData } = useQuery<{ cards: ApprovalCard[] }>({
     queryKey: ["/api/admin/weekly-reel/approvals/", entry.date],
-    queryFn: async () => (await fetch(`/api/admin/weekly-reel/approvals/${entry.date}`)).json(),
+    queryFn: async () => (await adminFetch(`/api/admin/weekly-reel/approvals/${entry.date}`)).json(),
     enabled: open,
   });
   const approvals: Record<string, ApprovalCard> = useMemo(() => {
@@ -1532,7 +1532,7 @@ function HistoryEntryRow({ entry, onRerun }: { entry: HistoryEntry; onRerun: () 
     let cancelled = false;
     (async () => {
       try {
-        const r = await fetch(`/api/admin/weekly-reel/thumbnail/${entry.date}`);
+        const r = await adminFetch(`/api/admin/weekly-reel/thumbnail/${entry.date}`);
         if (!r.ok) return;
         const j = await r.json();
         if (!cancelled) setThumbUrl(j.url ?? null);
@@ -1818,7 +1818,7 @@ function HistorySection() {
   const queryClient = useQueryClient();
   const { data, isLoading } = useQuery<{ history: HistoryEntry[] }>({
     queryKey: ["/api/admin/weekly-reel/status"],
-    queryFn: async () => (await fetch("/api/admin/weekly-reel/status")).json(),
+    queryFn: async () => (await adminFetch("/api/admin/weekly-reel/status")).json(),
   });
   const rerunMutation = useMutation({
     mutationFn: async () => (await apiRequest("POST", "/api/admin/weekly-reel/rerun")).json(),
@@ -1858,7 +1858,7 @@ function HistorySection() {
 function AnalyticsSection() {
   const { data, isLoading } = useQuery<AnalyticsResp>({
     queryKey: ["/api/admin/weekly-reel/analytics"],
-    queryFn: async () => (await fetch("/api/admin/weekly-reel/analytics")).json(),
+    queryFn: async () => (await adminFetch("/api/admin/weekly-reel/analytics")).json(),
   });
   const rows = data?.rows ?? [];
   const chartData = useMemo(

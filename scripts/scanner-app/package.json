@@ -21,6 +21,7 @@
     "sharp": "^0.33.5"
   },
   "devDependencies": {
-    "electron": "^42.2.0"
+    "electron": "^42.2.0",
+    "happy-dom": "^20.11.1"
   }
 }

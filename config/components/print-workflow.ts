@@ -1,0 +1,30 @@
+export const PRINT_WORKFLOW_COMPONENT = {
+  schemaVersion: 1,
+  id: "print-workflow",
+  owner: "print-platform",
+  releaseMode: "required",
+  runtimeState: "enabled",
+  sourceRoots: [
+    "server/print-workflow.ts",
+    "server/routes/print-workflow.ts",
+    "server/lib/print-artifact-persistence.ts",
+    "server/lib/print-output-eligibility.ts",
+    "client/src/pages/admin-printing.tsx",
+    "client/src/pages/admin-cert-browser.tsx",
+    "client/src/pages/admin-print-queue.tsx",
+  ],
+  requirements: {
+    migrations: [{ name: "0022_print_workflow_lifecycle.sql", order: 13 }],
+    relations: [
+      { name: "public.print_batches", order: 17 },
+      { name: "public.print_events", order: 18 },
+      { name: "public.label_prints", order: 19 },
+      { name: "public.label_overrides", order: 20 },
+      { name: "public.reprint_log", order: 21 },
+      { name: "public.audit_log", order: 22 },
+    ],
+    triggers: [],
+    environment: [],
+    runtimeSignals: [],
+  },
+} as const;

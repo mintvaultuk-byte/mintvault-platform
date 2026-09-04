@@ -202,7 +202,7 @@ describe("print-workflow service (DB-backed, mocked renderer)", () => {
     seededCerts.length = 0;
     r2Objects.clear();
     await adminClient.query(
-      `TRUNCATE object_write_items,object_write_operations,certificates,label_overrides,label_prints,reprint_log,print_batches,print_events RESTART IDENTITY`
+      `TRUNCATE object_write_items,object_write_operations,certificates,label_overrides,label_prints,reprint_log,print_batches,print_events,audit_log RESTART IDENTITY`
     );
   });
 
@@ -300,6 +300,35 @@ describe("print-workflow service (DB-backed, mocked renderer)", () => {
     expect(Number(events.rows[0].count)).toBe(1); // not doubled
   });
 
+  it("replays a committed artifact result before mutable certificate state and binds the full command", async () => {
+    await seedCert("MVREPLAY", "needs_printing");
+    const command = {
+      certIds: ["MVREPLAY"],
+      identity: ADMIN,
+      idempotencyKey: "committed-replay-contract",
+      notes: "operator sheet one",
+    };
+    const first = await svc.createBatchAtomic(command);
+    expect(first.applied).toEqual(["MVREPLAY"]);
+    await adminClient.query(`DELETE FROM certificates WHERE certificate_number='MVREPLAY'`);
+
+    const replay = await svc.createBatchAtomic(command);
+    expect(replay).toMatchObject({ batchId: first.batchId, applied: ["MVREPLAY"], isDuplicate: true });
+    expect(
+      Number(
+        (await adminClient.query(`SELECT count(*) FROM print_events WHERE cert_id='MVREPLAY' AND action='create_batch'`))
+          .rows[0].count
+      )
+    ).toBe(1);
+
+    await expect(svc.createBatchAtomic({ ...command, notes: "changed operator sheet" })).rejects.toMatchObject({
+      code: "OBJECT_WRITE_IDEMPOTENCY_CONFLICT",
+    });
+    await expect(
+      svc.createBatchAtomic({ ...command, identity: { actor: ADMIN.actor, role: "staff_print" as const } })
+    ).rejects.toMatchObject({ code: "OBJECT_WRITE_IDEMPOTENCY_CONFLICT" });
+  });
+
   it("rejects an already-printed cert (duplicate protection routes to reprint)", async () => {
     await seedCert("MV20", "printed");
     const r = await svc.createBatchAtomic({ certIds: ["MV20"], identity: ADMIN });
@@ -384,6 +413,7 @@ describe("print-workflow service (DB-backed, mocked renderer)", () => {
       reason: "Damaged during slabbing test",
       reasonCategory: "damaged_print",
       identity: ADMIN,
+      idempotencyKey: "mv40-reprint-request",
     });
     expect(await stateOf("MV40")).toBe("reprint_required");
     const rp = await svc.createBatchAtomic({ certIds: ["MV40"], identity: ADMIN });
@@ -399,6 +429,7 @@ describe("print-workflow service (DB-backed, mocked renderer)", () => {
       reason: "too short",
       reasonCategory: "lost_label",
       identity: ADMIN,
+      idempotencyKey: "mv50-invalid-reprint-request",
     });
     expect(bad.applied).toEqual([]);
     expect(await stateOf("MV50")).toBe("printed");
@@ -408,6 +439,7 @@ describe("print-workflow service (DB-backed, mocked renderer)", () => {
       reason: "Lost in the post to the customer",
       reasonCategory: "lost_label",
       identity: ADMIN,
+      idempotencyKey: "mv50-reprint-request",
     });
     expect(await stateOf("MV50")).toBe("reprint_required");
     const log = await adminClient.query(`SELECT COUNT(*) FROM reprint_log WHERE cert_id='MV50'`);
@@ -416,6 +448,250 @@ describe("print-workflow service (DB-backed, mocked renderer)", () => {
       `SELECT reason, reason_category, actor FROM print_events WHERE cert_id='MV50' AND action='reprint'`
     );
     expect(ev.rows[0]).toMatchObject({ reason_category: "lost_label", actor: "admin@mintvault" });
+  });
+
+  it("makes a workflow reprint request crash-safe and idempotent across concurrent retries", async () => {
+    await seedCert("MV-IDEM-A", "printed");
+    await seedCert("MV-IDEM-B", "printed");
+    const command = {
+      certIds: ["MV-IDEM-A", "MV-IDEM-B"],
+      reason: "Labels damaged together during printer alignment",
+      reasonCategory: "printer_error",
+      identity: ADMIN,
+      idempotencyKey: "workflow-reprint-concurrent",
+    };
+    const [first, concurrentReplay] = await Promise.all([
+      svc.requestReprint(command),
+      svc.requestReprint({ ...command, certIds: [...command.certIds].reverse() }),
+    ]);
+    expect(concurrentReplay).toEqual(first);
+    expect([...first.applied].sort()).toEqual(["MV-IDEM-A", "MV-IDEM-B"]);
+    expect(first.rejected).toEqual([]);
+
+    const evidence = await adminClient.query(`
+      SELECT
+        (SELECT count(*)::int FROM print_events WHERE cert_id=ANY($1::text[]) AND action='reprint') AS events,
+        (SELECT count(*)::int FROM reprint_log WHERE cert_id=ANY($1::text[])) AS logs,
+        (SELECT count(*)::int FROM audit_log WHERE entity_type='print_reprint_request' AND action='idempotency_committed') AS receipts
+    `, [command.certIds]);
+    expect(evidence.rows[0]).toEqual({ events: 2, logs: 2, receipts: 1 });
+
+    await expect(
+      svc.requestReprint({ ...command, reasonCategory: "damaged_print" })
+    ).rejects.toBeInstanceOf(svc.PrintReprintIdempotencyConflictError);
+    const alreadyPending = await svc.requestReprint({
+      ...command,
+      idempotencyKey: "workflow-reprint-new-intent",
+    });
+    expect(alreadyPending.applied).toEqual([]);
+    expect(alreadyPending.rejected).toEqual([
+      expect.objectContaining({ certId: "MV-IDEM-A", code: "already_requested" }),
+      expect.objectContaining({ certId: "MV-IDEM-B", code: "already_requested" }),
+    ]);
+    const after = await adminClient.query(`
+      SELECT
+        (SELECT count(*)::int FROM print_events WHERE cert_id=ANY($1::text[]) AND action='reprint') AS events,
+        (SELECT count(*)::int FROM reprint_log WHERE cert_id=ANY($1::text[])) AS logs
+    `, [command.certIds]);
+    expect(after.rows[0]).toEqual({ events: 2, logs: 2 });
+  });
+
+  it("commits direct-reprint compliance rows with verified artifacts and replays them exactly once", async () => {
+    await seedCert("MV-DIRECT", "printed");
+    const command = {
+      certIds: ["MV-DIRECT"],
+      identity: ADMIN,
+      reason: "Customer replacement after postal damage",
+      reasonCategory: null,
+      idempotencyKey: "direct-reprint-evidence",
+      recordReprintRequest: true,
+    };
+    const first = await svc.createBatchAtomic(command);
+    expect(first.auditRows).toEqual([{ certId: "MV-DIRECT", ok: true }]);
+    const audit = await adminClient.query(
+      `SELECT details FROM audit_log WHERE entity_type='cert' AND entity_id='MV-DIRECT' AND action='reprint'`
+    );
+    expect(audit.rows).toHaveLength(1);
+    expect(audit.rows[0].details).toMatchObject({
+      reason: command.reason,
+      reason_category: null,
+      batch_id: first.batchId,
+      new_batch_id: `print_batch_${first.batchId}`,
+      actor_role: "admin",
+    });
+    const batch = await adminClient.query(`SELECT reason_category FROM print_batches WHERE batch_id=$1`, [first.batchId]);
+    expect(batch.rows[0].reason_category).toBeNull();
+
+    // Rolling-deploy compatibility: the retired direct route persisted this
+    // sentinel before null became the canonical uncategorised representation.
+    await adminClient.query("ALTER TABLE object_write_operations DISABLE TRIGGER trg_object_write_operation_guard");
+    try {
+      await adminClient.query(
+        `UPDATE object_write_operations
+            SET intent_payload = jsonb_set(
+              jsonb_set(intent_payload,'{reasonCategory}','"legacy_unspecified"'::jsonb),
+              '{reprintRequest,reasonCategory}','"legacy_unspecified"'::jsonb
+            )
+          WHERE aggregate_id=$1`,
+        [first.batchId]
+      );
+    } finally {
+      await adminClient.query("ALTER TABLE object_write_operations ENABLE TRIGGER trg_object_write_operation_guard");
+    }
+    const replay = await svc.createBatchAtomic(command);
+    expect(replay).toMatchObject({ auditRows: first.auditRows, isDuplicate: true });
+    expect(
+      Number(
+        (await adminClient.query(
+          `SELECT count(*) FROM audit_log WHERE entity_type='cert' AND entity_id='MV-DIRECT' AND action='reprint'`
+        )).rows[0].count
+      )
+    ).toBe(1);
+    await expect(
+      svc.createBatchAtomic({ ...command, reason: "A different reason on the same key" })
+    ).rejects.toMatchObject({ code: "OBJECT_WRITE_IDEMPOTENCY_CONFLICT" });
+  });
+
+  it("rolls back workflow state and evidence when its idempotency receipt cannot commit", async () => {
+    await seedCert("MV-RECEIPT-ROLLBACK", "printed");
+    await adminClient.query(`
+      CREATE FUNCTION reject_print_receipt() RETURNS trigger LANGUAGE plpgsql AS $$
+      BEGIN
+        IF NEW.entity_type='print_reprint_request' THEN
+          RAISE EXCEPTION 'forced receipt failure';
+        END IF;
+        RETURN NEW;
+      END $$;
+      CREATE TRIGGER reject_print_receipt
+        BEFORE INSERT ON audit_log FOR EACH ROW EXECUTE FUNCTION reject_print_receipt();
+    `);
+    const command = {
+      certIds: ["MV-RECEIPT-ROLLBACK"],
+      reason: "Label damaged during controlled receipt proof",
+      reasonCategory: "damaged_print",
+      identity: ADMIN,
+      idempotencyKey: "workflow-receipt-rollback",
+    };
+    await expect(svc.requestReprint(command)).rejects.toThrow();
+    expect(await stateOf("MV-RECEIPT-ROLLBACK")).toBe("printed");
+    const beforeRetry = await adminClient.query(`
+      SELECT
+        (SELECT count(*)::int FROM print_events WHERE cert_id='MV-RECEIPT-ROLLBACK') AS events,
+        (SELECT count(*)::int FROM reprint_log WHERE cert_id='MV-RECEIPT-ROLLBACK') AS logs,
+        (SELECT count(*)::int FROM audit_log WHERE entity_id LIKE 'print_reprint_request_%') AS receipts
+    `);
+    expect(beforeRetry.rows[0]).toEqual({ events: 0, logs: 0, receipts: 0 });
+    await adminClient.query("DROP TRIGGER reject_print_receipt ON audit_log; DROP FUNCTION reject_print_receipt() ");
+    await expect(svc.requestReprint(command)).resolves.toEqual({ applied: ["MV-RECEIPT-ROLLBACK"], rejected: [] });
+  });
+
+  it("orders overlapping different-key workflow requests so reversed input cannot deadlock", async () => {
+    await seedCert("MV-LOCK-A", "printed");
+    await seedCert("MV-LOCK-B", "printed");
+    const base = {
+      reason: "Concurrent replacement after printer damage",
+      reasonCategory: "printer_error",
+      identity: ADMIN,
+    };
+    const [first, second] = await Promise.all([
+      svc.requestReprint({ ...base, certIds: ["MV-LOCK-A", "MV-LOCK-B"], idempotencyKey: "overlap-first" }),
+      svc.requestReprint({ ...base, certIds: ["MV-LOCK-B", "MV-LOCK-A"], idempotencyKey: "overlap-second" }),
+    ]);
+    expect([first.applied.length, second.applied.length].sort()).toEqual([0, 2]);
+    const evidence = await adminClient.query(
+      `SELECT count(*)::int AS count FROM print_events
+        WHERE cert_id=ANY($1::text[]) AND action='reprint'`,
+      [["MV-LOCK-A", "MV-LOCK-B"]]
+    );
+    expect(evidence.rows[0].count).toBe(2);
+  });
+
+  it("keeps direct compliance evidence transactional and resumes after an audit insert failure", async () => {
+    await seedCert("MV-DIRECT-AUDIT-RETRY", "printed");
+    await adminClient.query(`
+      CREATE FUNCTION reject_direct_reprint_audit() RETURNS trigger LANGUAGE plpgsql AS $$
+      BEGIN
+        IF NEW.entity_type='cert' AND NEW.action='reprint' THEN
+          RAISE EXCEPTION 'forced direct audit failure';
+        END IF;
+        RETURN NEW;
+      END $$;
+      CREATE TRIGGER reject_direct_reprint_audit
+        BEFORE INSERT ON audit_log FOR EACH ROW EXECUTE FUNCTION reject_direct_reprint_audit();
+    `);
+    const command = {
+      certIds: ["MV-DIRECT-AUDIT-RETRY"],
+      identity: ADMIN,
+      reason: "Customer replacement after damaged delivery",
+      reasonCategory: null,
+      idempotencyKey: "direct-audit-resume",
+      recordReprintRequest: true,
+    };
+    await expect(svc.createBatchAtomic(command)).rejects.toThrow(/forced direct audit failure/);
+    expect(
+      Number(
+        (
+          await adminClient.query(
+            `SELECT count(*) FROM audit_log
+              WHERE entity_type='cert' AND entity_id='MV-DIRECT-AUDIT-RETRY' AND action='reprint'`
+          )
+        ).rows[0].count
+      )
+    ).toBe(0);
+    await adminClient.query(
+      "DROP TRIGGER reject_direct_reprint_audit ON audit_log; DROP FUNCTION reject_direct_reprint_audit()"
+    );
+    const resumed = await svc.createBatchAtomic(command);
+    expect(resumed.applied).toEqual(["MV-DIRECT-AUDIT-RETRY"]);
+    expect(
+      Number(
+        (
+          await adminClient.query(
+            `SELECT count(*) FROM audit_log
+              WHERE entity_type='cert' AND entity_id='MV-DIRECT-AUDIT-RETRY' AND action='reprint'`
+          )
+        ).rows[0].count
+      )
+    ).toBe(1);
+  });
+
+  it("surfaces in-progress and terminal direct-reprint intents as typed retry states", async () => {
+    await seedCert("MV-DIRECT-STATE", "printed");
+    const command = {
+      certIds: ["MV-DIRECT-STATE"],
+      identity: ADMIN,
+      reason: "Replacement after print transport damage",
+      reasonCategory: null,
+      idempotencyKey: "direct-state-contract",
+      recordReprintRequest: true,
+    };
+    const committed = await svc.createBatchAtomic(command);
+    await adminClient.query("ALTER TABLE object_write_operations DISABLE TRIGGER trg_object_write_operation_guard");
+    try {
+      await adminClient.query(
+        `UPDATE object_write_operations
+            SET state='UPLOADING',lease_owner='test-worker',lease_token=gen_random_uuid(),
+                lease_expires_at=now()+interval '5 minutes'
+          WHERE aggregate_id=$1`,
+        [committed.batchId]
+      );
+    } finally {
+      await adminClient.query("ALTER TABLE object_write_operations ENABLE TRIGGER trg_object_write_operation_guard");
+    }
+    await expect(svc.createBatchAtomic(command)).rejects.toMatchObject({ code: "OBJECT_WRITE_IN_PROGRESS" });
+
+    await adminClient.query("ALTER TABLE object_write_operations DISABLE TRIGGER trg_object_write_operation_guard");
+    try {
+      await adminClient.query(
+        `UPDATE object_write_operations
+            SET state='ABANDONED',lease_owner=NULL,lease_token=NULL,lease_expires_at=NULL,abandoned_at=now()
+          WHERE aggregate_id=$1`,
+        [committed.batchId]
+      );
+    } finally {
+      await adminClient.query("ALTER TABLE object_write_operations ENABLE TRIGGER trg_object_write_operation_guard");
+    }
+    await expect(svc.createBatchAtomic(command)).rejects.toMatchObject({ code: "OBJECT_WRITE_TERMINAL" });
   });
 
   it("marks completed only from printed/reprinted", async () => {
@@ -468,6 +744,7 @@ describe("print-workflow service (DB-backed, mocked renderer)", () => {
       reason: "First damage on the corner",
       reasonCategory: "damaged_print",
       identity: ADMIN,
+      idempotencyKey: "mvrr-reprint-request-1",
     });
     const b1 = await svc.createBatchAtomic({ certIds: ["MVRR"], identity: ADMIN });
     await svc.markBatchPrinted(b1.batchId!, ADMIN);
@@ -477,6 +754,7 @@ describe("print-workflow service (DB-backed, mocked renderer)", () => {
       reason: "Second, different damage later",
       reasonCategory: "damaged_print",
       identity: ADMIN,
+      idempotencyKey: "mvrr-reprint-request-2",
     });
     const b2 = await svc.createBatchAtomic({ certIds: ["MVRR"], identity: ADMIN });
     expect(b2.applied).toEqual(["MVRR"]); // NOT swallowed as a duplicate of b1

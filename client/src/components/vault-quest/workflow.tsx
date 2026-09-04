@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { Link } from "wouter";
-import { apiRequest } from "@/lib/queryClient";
+import { adminFetch, apiRequest } from "@/lib/queryClient";
 import { useToast } from "@/hooks/use-toast";
 import { AdminButton } from "@/components/admin";
 import {
@@ -419,7 +419,7 @@ export async function fetchReuseCheck(params: { characterId?: string; cardId?: s
   if (params.cardId) qs.set("cardId", params.cardId);
   if (params.referenceType) qs.set("referenceType", params.referenceType);
   try {
-    const r = await fetch(`/api/admin/vault-quest/sets/${SET_CODE}/reuse-check?${qs}`, { credentials: "include" });
+    const r = await adminFetch(`/api/admin/vault-quest/sets/${SET_CODE}/reuse-check?${qs}`, { credentials: "include" });
     if (!r.ok) return null;
     return (await r.json()) as ReuseCheck;
   } catch {

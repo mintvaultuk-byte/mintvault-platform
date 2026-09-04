@@ -49,7 +49,6 @@ import {
   formatCount,
   formatCredits,
   formatDateTime,
-  isAuthError,
   isDrilldownTab,
   isVisibilityError,
   PARTNER_DASHBOARD_BASE,
@@ -199,33 +198,11 @@ const td: React.CSSProperties = { padding: "6px 8px", fontSize: 13, verticalAlig
 // ---------------------------------------------------------------------------
 
 export default function AdminPartnerDashboardPage() {
-  const [pathname, navigate] = useLocation();
-  const [authed, setAuthed] = useState<boolean | null>(null);
+  const [, navigate] = useLocation();
   const [filters, setFilters] = useState<PartnerListFilterState>(DEFAULT_FILTERS);
   const [searchDraft, setSearchDraft] = useState("");
   const [selectedPartner, setSelectedPartner] = useState<string | null>(null);
   const [tab, setTab] = useState<DrilldownTab>("overview");
-
-  // Admin session gate — same idiom as the other admin partner pages. The server is the real
-  // gate; this only avoids rendering a broken shell to a signed-out operator.
-  useEffect(() => {
-    let live = true;
-    fetch("/api/admin/session", { credentials: "include" })
-      .then((r) => (r.ok ? r.json() : null))
-      .then((d) => live && setAuthed(!!d?.authenticated))
-      .catch(() => live && setAuthed(false));
-    return () => {
-      live = false;
-    };
-  }, []);
-
-  useEffect(() => {
-    if (authed === false)
-      navigate(
-        `/admin/login?next=${encodeURIComponent(`${pathname}${window.location.search}${window.location.hash}`)}`,
-        { replace: true }
-      );
-  }, [authed, navigate, pathname]);
 
   // Deep-link support: ?partner=<uuid>&tab=<tab>
   useEffect(() => {
@@ -236,12 +213,9 @@ export default function AdminPartnerDashboardPage() {
     if (isDrilldownTab(t)) setTab(t);
   }, []);
 
-  const enabled = authed === true;
-
   const summary = useQuery<{ summary: NetworkSummary }>({
     queryKey: dashKeys.summary(),
     queryFn: () => apiRequest("GET", `${PARTNER_DASHBOARD_BASE}/summary`).then((r) => r.json()),
-    enabled,
     // Global defaults are staleTime:Infinity + no focus refetch, so an ops console would
     // otherwise freeze at its first paint. 60s matches AdminShell's own env-strip poll.
     refetchInterval: 60_000,
@@ -250,7 +224,6 @@ export default function AdminPartnerDashboardPage() {
   const alerts = useQuery<{ alerts: DashboardAlert[] }>({
     queryKey: dashKeys.alerts(),
     queryFn: () => apiRequest("GET", `${PARTNER_DASHBOARD_BASE}/alerts`).then((r) => r.json()),
-    enabled,
     refetchInterval: 60_000,
   });
 
@@ -258,19 +231,7 @@ export default function AdminPartnerDashboardPage() {
     queryKey: dashKeys.partners(filters as unknown as Record<string, unknown>),
     queryFn: () =>
       apiRequest("GET", `${PARTNER_DASHBOARD_BASE}/partners${dashboardQueryString(filters)}`).then((r) => r.json()),
-    enabled,
   });
-
-  // Any 401 anywhere means the shared mv.sid session was evicted (a staff login in the same
-  // browser does exactly that) — route to login rather than show an empty cross-tenant grid.
-  useEffect(() => {
-    if (isAuthError(summary.error) || isAuthError(partners.error) || isAuthError(alerts.error)) {
-      navigate(
-        `/admin/login?next=${encodeURIComponent(`${pathname}${window.location.search}${window.location.hash}`)}`,
-        { replace: true }
-      );
-    }
-  }, [summary.error, partners.error, alerts.error, navigate, pathname]);
 
   const rows = partners.data?.rows ?? [];
   const s = summary.data?.summary;
@@ -286,21 +247,10 @@ export default function AdminPartnerDashboardPage() {
     setTab("overview");
   };
 
-  if (authed === null) {
-    return (
-      <div className="admin-root" style={{ minHeight: "100dvh", display: "grid", placeItems: "center" }}>
-        <div role="status" aria-live="polite">
-          Loading…
-        </div>
-      </div>
-    );
-  }
-
   return (
     <AdminShell
       activeTab="dashboard"
       onTabChange={() => navigate("/admin")}
-      onLogout={() => navigate("/admin")}
       title="Partner Master Dashboard"
       crumb="Partner Network"
     >

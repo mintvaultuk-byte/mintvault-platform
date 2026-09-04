@@ -66,8 +66,10 @@ Submission/Payment, Identity/Auth, Print, Media, Partner, Vault Quest, and Growt
 
 Confirmed examples:
 
-- The reachable Admin Printing UI posts to a reprint endpoint deliberately removed on
-  the server, so its “Reprint PDF” action always receives the unmatched-API 404.
+- At the assessment baseline, the reachable Admin Printing UI posted to a reprint endpoint
+  deliberately removed on the server, so its “Reprint PDF” action always received the
+  unmatched-API 404. The owner-authorized local WIP now routes that produced-state action
+  through the canonical audited/idempotent direct-artifact command; candidate proof is open.
 - Admin logout is implemented inconsistently: multiple leaf pages merely navigate away,
   one uses a GET against a POST-only endpoint, and only some destroy the session.
 - The global QueryClient maps 401 to `null` with `staleTime: Infinity`; typed protected
@@ -150,15 +152,19 @@ delete.
 
 | ID                      | Finding                                                                                                                           | Current disposition               |
 | ----------------------- | --------------------------------------------------------------------------------------------------------------------------------- | --------------------------------- |
-| `ARCH-AUTHORITY-001`    | Declared route/data/schema authority contradicts executable topology.                                                             | OPEN                              |
-| `ARCH-ROUTE-001`        | Reachable reprint UI calls an intentionally removed server endpoint.                                                              | OPEN; print/evidence owner gate   |
-| `ARCH-SESSION-001`      | Admin session destruction, 401 semantics, and protected cache invalidation have no single client authority.                       | OPEN; auth owner gate             |
+| `ARCH-AUTHORITY-001`    | Declared route/data/schema authority contradicts executable topology.                                                             | FIXED_WIP; candidate proof open   |
+| `ARCH-ROUTE-001`        | Reachable reprint UI called an intentionally removed server endpoint.                                                             | FIXED_WIP; candidate proof open   |
+| `ARCH-PRINT-EVIDENCE-001` | Direct reprint advertised compliance evidence that was never written.                                                           | FIXED_WIP; candidate proof open   |
+| `ARCH-PRINT-IDEMPOTENCY-001` | Workflow retries duplicated durable transition evidence.                                                                    | FIXED_WIP; candidate proof open   |
+| `ARCH-PRINT-READINESS-001` | Release readiness omitted live print schema, generated/default, and runtime-authority contracts.                               | FIXED_WIP; candidate proof open   |
+| `ARCH-PRINT-REPLAY-001` | Committed command replay and current artifact-output eligibility were incorrectly wired.                                         | FIXED_WIP; candidate proof open   |
+| `ARCH-SESSION-001`      | Admin session destruction, 401 semantics, and protected cache invalidation had no single client authority.                        | FIXED_WIP; candidate proof open   |
 | `ARCH-SUPPLY-001`       | Duplicate Partner order paths split paid checkout from the orders view.                                                           | OPEN; Partner/commerce owner gate |
 | `ARCH-PRICING-001`      | Admin pricing shape is incompatible and public/checkout/payment pricing authorities diverge.                                      | OPEN; commerce owner gate         |
 | `ARCH-ROLE-001`         | `SCANNER_OPERATOR` exists server-side but is unavailable in active client role management.                                        | OPEN; Partner/RBAC owner gate     |
 | `ARCH-LEGACY-AI-001`    | An obsolete AI grading route remains live under the current feature flag and can mutate protected evidence.                       | OPEN; grading/provider owner gate |
 | `ARCH-SCHEMA-001`       | Always-mounted VQ runtime, shipped migrations, journal, and readiness do not describe one schema estate.                          | OPEN; migration/VQ owner gate     |
-| `ARCH-CI-001`           | Hosted CI omits authoritative isolated Partner, Scanner, and tooling proof topology.                                              | OPEN                              |
+| `ARCH-CI-001`           | Hosted CI omits authoritative isolated Partner, Scanner, and tooling proof topology.                                              | FIXED_WIP; hosted proof open      |
 | `ARCH-SOCIAL-001`       | External-publication jobs lack durable completion/reconciliation and lifecycle-safe lock boundaries.                              | OPEN; provider owner gate         |
 | `ARCH-WAA-SUBGRAPH-001` | The earlier accepted release-integrity HIGHs remain unresolved and must be completed as a mechanically validated nested subgraph. | OPEN; existing exact owner gates  |
 

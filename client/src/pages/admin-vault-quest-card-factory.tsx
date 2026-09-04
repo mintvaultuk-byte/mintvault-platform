@@ -1,3 +1,4 @@
+import { adminFetch } from "@/lib/queryClient";
 import { useEffect, useMemo, useState } from "react";
 import { useQuery } from "@tanstack/react-query";
 import {
@@ -175,7 +176,7 @@ function shortDate(value: string | null) {
 }
 
 async function fetchImageBlob(collectorNumber: string, endpoint: string): Promise<Blob> {
-  const res = await fetch(`/api/admin/vault-quest/card-factory/cards/${collectorNumber}/${endpoint}`, {
+  const res = await adminFetch(`/api/admin/vault-quest/card-factory/cards/${collectorNumber}/${endpoint}`, {
     method: "POST",
     credentials: "include",
   });
@@ -187,7 +188,7 @@ async function fetchImageBlob(collectorNumber: string, endpoint: string): Promis
 }
 
 async function downloadFactoryFile(collectorNumber: string, endpoint: string, fallbackName: string) {
-  const res = await fetch(`/api/admin/vault-quest/card-factory/cards/${collectorNumber}/${endpoint}`, {
+  const res = await adminFetch(`/api/admin/vault-quest/card-factory/cards/${collectorNumber}/${endpoint}`, {
     method: "POST",
     credentials: "include",
   });
@@ -207,7 +208,7 @@ async function downloadFactoryFile(collectorNumber: string, endpoint: string, fa
 }
 
 async function downloadFactoryUrl(urlPath: string, fallbackName: string) {
-  const res = await fetch(urlPath, { method: "POST", credentials: "include" });
+  const res = await adminFetch(urlPath, { method: "POST", credentials: "include" });
   if (!res.ok) {
     const json = await res.json().catch(() => ({}));
     throw new Error(json.error || "Export failed");
@@ -293,7 +294,7 @@ export default function AdminVaultQuestCardFactoryPage() {
   const dashboardQ = useQuery<Dashboard>({
     queryKey: ["/api/admin/vault-quest/card-factory/dashboard"],
     queryFn: async () => {
-      const res = await fetch("/api/admin/vault-quest/card-factory/dashboard", { credentials: "include" });
+      const res = await adminFetch("/api/admin/vault-quest/card-factory/dashboard", { credentials: "include" });
       if (!res.ok) throw new Error("Unable to load Card Factory");
       return res.json();
     },
@@ -387,7 +388,7 @@ export default function AdminVaultQuestCardFactoryPage() {
   const savePlacement = async () => {
     if (!selected) return;
     await runAction("Saved placement", async () => {
-      const res = await fetch(`/api/admin/vault-quest/card-factory/cards/${selected.spec.collectorNumber}/placement`, {
+      const res = await adminFetch(`/api/admin/vault-quest/card-factory/cards/${selected.spec.collectorNumber}/placement`, {
         method: "PUT",
         credentials: "include",
         headers: { "Content-Type": "application/json" },
@@ -400,7 +401,7 @@ export default function AdminVaultQuestCardFactoryPage() {
   const saveCardData = async () => {
     if (!selected) return;
     await runAction("Saved card data", async () => {
-      const res = await fetch(`/api/admin/vault-quest/card-factory/cards/${selected.spec.collectorNumber}/data`, {
+      const res = await adminFetch(`/api/admin/vault-quest/card-factory/cards/${selected.spec.collectorNumber}/data`, {
         method: "PUT",
         credentials: "include",
         headers: { "Content-Type": "application/json" },
@@ -966,7 +967,7 @@ export default function AdminVaultQuestCardFactoryPage() {
                       }
                       onClick={() =>
                         runAction("Approved for print", async () => {
-                          const res = await fetch(
+                          const res = await adminFetch(
                             `/api/admin/vault-quest/card-factory/cards/${selected.spec.collectorNumber}/approve`,
                             { method: "POST", credentials: "include" }
                           );
@@ -1059,7 +1060,7 @@ export default function AdminVaultQuestCardFactoryPage() {
                         type="button"
                         onClick={() =>
                           runAction("Validated all 36", async () => {
-                            const res = await fetch("/api/admin/vault-quest/card-factory/validate-all", {
+                            const res = await adminFetch("/api/admin/vault-quest/card-factory/validate-all", {
                               method: "POST",
                               credentials: "include",
                             });

@@ -1,3 +1,4 @@
+import { adminFetch } from "@/lib/queryClient";
 /**
  * /admin/community — community wall moderation + manual add.
  *
@@ -44,7 +45,7 @@ export default function AdminCommunityPage() {
   const { data, isLoading } = useQuery<{ posts: Post[] }>({
     queryKey: ["/api/admin/community", filter],
     queryFn: async () => {
-      const r = await fetch(`/api/admin/community?filter=${filter}`, { credentials: "include" });
+      const r = await adminFetch(`/api/admin/community?filter=${filter}`, { credentials: "include" });
       if (!r.ok) throw new Error("Failed to load posts");
       return r.json();
     },
@@ -58,7 +59,7 @@ export default function AdminCommunityPage() {
       const fd = new FormData();
       fd.append("imageFile", file);
       Object.entries(form).forEach(([k, v]) => v && fd.append(k, v));
-      const r = await fetch("/api/admin/community", { method: "POST", credentials: "include", body: fd });
+      const r = await adminFetch("/api/admin/community", { method: "POST", credentials: "include", body: fd });
       const j = await r.json();
       if (!r.ok) throw new Error(j.error || "Create failed");
       return j;
@@ -75,7 +76,7 @@ export default function AdminCommunityPage() {
   const patchMutation = useMutation({
     mutationFn: async (vars: { id: number; status?: "approved" | "rejected"; featured?: boolean }) => {
       const { id, ...patch } = vars;
-      const r = await fetch(`/api/admin/community/${id}`, {
+      const r = await adminFetch(`/api/admin/community/${id}`, {
         method: "PATCH",
         headers: { "Content-Type": "application/json" },
         credentials: "include",
@@ -89,7 +90,7 @@ export default function AdminCommunityPage() {
 
   const prewarmMutation = useMutation({
     mutationFn: async () => {
-      const r = await fetch("/api/admin/share/prewarm", { method: "POST", credentials: "include" });
+      const r = await adminFetch("/api/admin/share/prewarm", { method: "POST", credentials: "include" });
       const j = await r.json();
       if (!r.ok) throw new Error(j.error || "Prewarm failed");
       return j as { generated: number; cached: number };

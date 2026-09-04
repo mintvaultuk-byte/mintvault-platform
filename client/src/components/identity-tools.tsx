@@ -20,6 +20,7 @@ import { useEffect, useRef, useState } from "react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { Plus, Search, Loader2, X } from "lucide-react";
 import { useToast } from "@/hooks/use-toast";
+import { adminFetch } from "@/lib/queryClient";
 import { VARIANT_OPTIONS } from "@/lib/variantOptions";
 
 // ── VariantPicker ───────────────────────────────────────────────────────────
@@ -85,7 +86,7 @@ export function VariantPicker({ value, onChange, testId, disabled, inputClassNam
     if (!label) return;
     setSaving(true);
     try {
-      const r = await fetch("/api/staff/custom-variants", {
+      const r = await adminFetch("/api/staff/custom-variants", {
         method: "POST",
         credentials: "include",
         headers: { "Content-Type": "application/json" },
@@ -211,7 +212,7 @@ export function TcgCardSearch({ game = "pokemon", onPick, initialQuery, testId }
     setOpen(true);
     try {
       const params = new URLSearchParams({ game, query: qq, mode: "wildcard" });
-      const r = await fetch(`/api/staff/card-search?${params}`, { credentials: "include" });
+      const r = await adminFetch(`/api/staff/card-search?${params}`, { credentials: "include" });
       const d = await r.json();
       if (!r.ok) throw new Error(d.error || "Search failed");
       const list: TcgCardPick[] = (Array.isArray(d) ? d : []).map((c: any) => ({

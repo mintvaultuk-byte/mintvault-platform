@@ -32,23 +32,23 @@ export function parseWorkflowTopology(source) {
   for (const raw of lines) {
     if (/^\s*#/.test(raw) || !raw.trim()) continue;
     if (/^name:\s*/.test(raw)) workflow.name = scalar(raw.replace(/^name:\s*/, ""));
-    const jobMatch = raw.match(/^ {2}([A-Za-z0-9_-]+):\s*$/);
+    const jobMatch = raw.match(/^ {2}(["']?)([A-Za-z0-9_-]+)\1:\s*$/);
     if (jobMatch) {
-      job = { id: jobMatch[1], name: "", if: "", continueOnError: "", hasRunDefaults: false, steps: [] };
+      job = { id: jobMatch[2], name: "", if: "", continueOnError: "", hasRunDefaults: false, steps: [] };
       workflow.jobs[job.id] = job;
       step = null;
       inSteps = false;
       continue;
     }
     if (!job) continue;
-    if (/^ {4}defaults:\s*(?:$|\{)/.test(raw)) job.hasRunDefaults = true;
-    const jobProperty = raw.match(/^ {4}(name|if|continue-on-error):\s*(.*)$/);
+    if (/^ {4}(["']?)defaults\1:\s*(?:$|\{)/.test(raw)) job.hasRunDefaults = true;
+    const jobProperty = raw.match(/^ {4}(["']?)(name|if|continue-on-error)\1:\s*(.*)$/);
     if (jobProperty && !inSteps) {
-      const [, key, value] = jobProperty;
+      const [, , key, value] = jobProperty;
       if (key === "continue-on-error") job.continueOnError = scalar(value);
       else job[key] = scalar(value);
     }
-    if (/^ {4}steps:\s*$/.test(raw)) {
+    if (/^ {4}(["']?)steps\1:\s*$/.test(raw)) {
       inSteps = true;
       continue;
     }
@@ -58,7 +58,8 @@ export function parseWorkflowTopology(source) {
       step = { name: "", uses: "", run: "", if: "", continueOnError: "", shell: "", with: {} };
       job.steps.push(step);
       runBlockIndent = null;
-      const [, key, value] = stepMatch;
+      const [, rawKey, value] = stepMatch;
+      const key = scalar(rawKey);
       if (["name", "uses", "run", "if", "continue-on-error", "shell"].includes(key)) {
         if (key === "continue-on-error") step.continueOnError = scalar(value);
         else step[key] = scalar(value);
@@ -75,9 +76,9 @@ export function parseWorkflowTopology(source) {
       continue;
     }
     runBlockIndent = null;
-    const property = raw.match(/^ {8}(name|uses|run|if|continue-on-error|shell):\s*(.*)$/);
+    const property = raw.match(/^ {8}(["']?)(name|uses|run|if|continue-on-error|shell)\1:\s*(.*)$/);
     if (property) {
-      const [, key, value] = property;
+      const [, , key, value] = property;
       if (key === "continue-on-error") step.continueOnError = scalar(value);
       else step[key] = scalar(value);
       if (key === "run" && ["|", ">"].includes(value.trim())) {
@@ -86,8 +87,8 @@ export function parseWorkflowTopology(source) {
       }
       continue;
     }
-    const withValue = raw.match(/^ {10}([A-Za-z0-9_-]+):\s*(.*)$/);
-    if (withValue) step.with[withValue[1]] = scalar(withValue[2]);
+    const withValue = raw.match(/^ {10}(["']?)([A-Za-z0-9_-]+)\1:\s*(.*)$/);
+    if (withValue) step.with[withValue[2]] = scalar(withValue[3]);
   }
   return workflow;
 }

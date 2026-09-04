@@ -1,3 +1,4 @@
+import { adminFetch } from "@/lib/queryClient";
 import { useQuery } from "@tanstack/react-query";
 import { useState } from "react";
 import { Activity, RefreshCw, ChevronDown, ChevronRight, CheckCircle2, AlertTriangle, XCircle } from "lucide-react";
@@ -166,7 +167,7 @@ function ScanHealthPanel() {
   }>({
     queryKey: ["/api/admin/scan-health"],
     queryFn: async () => {
-      const res = await fetch("/api/admin/scan-health", { credentials: "include" });
+      const res = await adminFetch("/api/admin/scan-health", { credentials: "include" });
       if (!res.ok) throw new Error(`scan-health ${res.status}`);
       return res.json();
     },
@@ -219,7 +220,7 @@ export default function AdminCaptureHealthPage() {
       params.set("limit", String(limit));
       params.set("onlyFailing", String(onlyFailing));
       if (sinceDays != null) params.set("sinceDays", String(sinceDays));
-      const res = await fetch(`/api/admin/ai-capture-health?${params}`, { credentials: "include" });
+      const res = await adminFetch(`/api/admin/ai-capture-health?${params}`, { credentials: "include" });
       if (!res.ok) throw new Error(`HTTP ${res.status}`);
       return res.json();
     },

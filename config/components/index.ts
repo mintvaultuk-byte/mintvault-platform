@@ -4,6 +4,7 @@ import { CUSTOMER_NOTIFICATIONS_COMPONENT } from "./customer-notifications";
 import { IDENTITY_SESSION_COMPONENT } from "./identity-session";
 import { OBJECT_WRITE_COMPONENT } from "./object-write";
 import { PARTNER_OPERATIONS_COMPONENT } from "./partner-operations";
+import { PRINT_WORKFLOW_COMPONENT } from "./print-workflow";
 import { SCANNER_INGEST_COMPONENT } from "./scanner-ingest";
 
 export {
@@ -13,6 +14,7 @@ export {
   IDENTITY_SESSION_COMPONENT,
   OBJECT_WRITE_COMPONENT,
   PARTNER_OPERATIONS_COMPONENT,
+  PRINT_WORKFLOW_COMPONENT,
   SCANNER_INGEST_COMPONENT,
 };
 
@@ -24,5 +26,6 @@ export const COMPONENT_READINESS_MANIFESTS = Object.freeze([
   IDENTITY_SESSION_COMPONENT,
   OBJECT_WRITE_COMPONENT,
   PARTNER_OPERATIONS_COMPONENT,
+  PRINT_WORKFLOW_COMPONENT,
   SCANNER_INGEST_COMPONENT,
 ]);
