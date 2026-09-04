@@ -31,7 +31,6 @@ import {
   lookupRateLimit,
   verifyRateLimit,
   showcaseRateLimit,
-  aiRateLimit,
   claimRateLimit,
   transferRateLimit,
   transferV2RateLimit,
@@ -47,7 +46,6 @@ import {
   attachImagesUpload,
   phoneUpload,
   hotFolderUpload,
-  gradeWithAiUpload,
   identifyUpload,
   toolsUpload,
   scanUpload,
@@ -142,6 +140,10 @@ import { phoneUploadAdmission } from "./lib/phone-upload-admission";
 import { createHotFolderUploadAuth } from "./lib/hot-folder-upload-auth";
 import { hotFolderUploadAdmission } from "./lib/hot-folder-upload-admission";
 import { refuseRetiredScanIngest } from "./lib/retired-scan-ingest";
+import {
+  LEGACY_AI_ANALYZE_RETIRED_RESPONSE,
+  LEGACY_AI_GRADE_UPLOAD_RETIRED_RESPONSE,
+} from "./lib/retired-ai-grading";
 import { parseHotFolderUploadSide } from "./lib/hot-folder-upload-side";
 import { createSharedPublicRateLimit } from "./lib/shared-public-rate-limit";
 import { publicImageProcessingAdmission } from "./lib/public-image-processing-admission";
@@ -274,7 +276,6 @@ import {
   verifyAndEnrichCardData,
   analyzeCard,
   identifyAndAnalyze,
-  autoCropCard,
   analyzeCardFromBuffers,
   generateImageVariants,
   verifyPokemonCardWithTcgApi,
@@ -2982,144 +2983,16 @@ export async function registerRoutes(httpServer: Server, app: Express): Promise<
     res.json(results);
   });
 
-  // ── AI-ASSISTED GRADING (Build 3 placeholder — superseded by Build 5) ───────
+  // ── AI-ASSISTED GRADING — RETIRED LEGACY IDENTITY ──────────────────────────
 
-  // Rate limit — 1 AI call per 5 seconds per IP
-
-  // OLD endpoint stub — kept to avoid 404 on any lingering clients; real impl in Build 5 below
-  app.post("/api/admin/certificates/:id/analyze-v1-legacy", requireAdmin, aiRateLimit, async (req, res) => {
-    try {
-      const { getFeatureFlag } = await import("./config/feature-flags");
-      if (!(await getFeatureFlag("AI_FULL_GRADE_ENABLED"))) {
-        return res.status(503).json({ error: "AI legacy analyze is disabled" });
-      }
-      const _unused = ""; // placeholder
-      const id = parseInt(String(req.params.id), 10);
-      const cert = await storage.getCertificate(id);
-      if (!cert) return res.status(404).json({ error: "Certificate not found" });
-
-      const apiKey = process.env.ANTHROPIC_API_KEY;
-      if (!apiKey) return res.status(500).json({ error: "ANTHROPIC_API_KEY not set" });
-
-      if (!cert.frontImagePath && !cert.backImagePath) {
-        return res.status(400).json({ error: "Certificate must have at least one image uploaded before AI analysis" });
-      }
-
-      // Fetch images from R2 and convert to base64
-      async function getImageBase64(
-        key: string | null | undefined
-      ): Promise<{ data: string; mediaType: string } | null> {
-        if (!key) return null;
-        try {
-          const { GetObjectCommand } = await import("@aws-sdk/client-s3");
-          const { getR2Client } = await import("./r2");
-          const s3 = getR2Client();
-          const result = await s3.send(new GetObjectCommand({ Bucket: process.env.R2_BUCKET_NAME!, Key: key }));
-          const chunks: Buffer[] = [];
-          for await (const chunk of result.Body as any) chunks.push(Buffer.from(chunk));
-          const buf = Buffer.concat(chunks);
-          const ext = key.split(".").pop()?.toLowerCase() || "jpg";
-          const mediaType = ext === "png" ? "image/png" : "image/jpeg";
-          return { data: buf.toString("base64"), mediaType };
-        } catch {
-          return null;
-        }
-      }
-
-      const [frontImg, backImg] = await Promise.all([
-        getImageBase64(cert.frontImagePath),
-        getImageBase64(cert.backImagePath),
-      ]);
-
-      if (!frontImg && !backImg) {
-        return res.status(400).json({ error: "Could not load card images from storage" });
-      }
-
-      const contentParts: any[] = [];
-      if (frontImg) {
-        contentParts.push({
-          type: "image",
-          source: { type: "base64", media_type: frontImg.mediaType, data: frontImg.data },
-        });
-      }
-      if (backImg) {
-        contentParts.push({
-          type: "image",
-          source: { type: "base64", media_type: backImg.mediaType, data: backImg.data },
-        });
-      }
-      contentParts.push({ type: "text", text: "Legacy endpoint disabled." });
-
-      let anthropicRes;
-      try {
-        anthropicRes = await anthropicFetch(
-          {
-            model: "claude-haiku-4-5-20251001",
-            max_tokens: 4096,
-            messages: [{ role: "user", content: contentParts }],
-          },
-          { apiKey, timeoutMs: 30_000 }
-        );
-      } catch (err: any) {
-        if (err?.name === "AbortError") {
-          return res.status(504).json({ error: "AI service timed out. Please try again." });
-        }
-        throw err;
-      }
-
-      if (!anthropicRes.ok) {
-        const errBody = await anthropicRes.text();
-        console.error("Anthropic API error:", errBody);
-        return res.status(502).json({ error: "AI analysis failed. Try again in a moment." });
-      }
-
-      const anthropicData = await anthropicRes.json();
-      const rawText = anthropicData.content?.[0]?.text || "";
-
-      let analysis: any;
-      try {
-        // Strip any accidental markdown fences
-        const cleaned = rawText
-          .replace(/^```[a-z]*\n?/i, "")
-          .replace(/\n?```$/i, "")
-          .trim();
-        analysis = JSON.parse(cleaned);
-      } catch {
-        console.error("AI response parse failed:", rawText.slice(0, 500));
-        return res.status(502).json({ error: "AI returned invalid JSON. Please retry." });
-      }
-
-      // Normalise AI defects into the DIG format (x/y instead of position_x_percent/position_y_percent)
-      const aiDefectsNorm = (analysis.defects ?? []).map((d: any, i: number) => ({
-        id: i + 1,
-        type: d.type,
-        severity: d.severity === "minor" ? "low" : d.severity === "major" ? "high" : "medium",
-        x: d.position_x_percent ?? d.x ?? 50,
-        y: d.position_y_percent ?? d.y ?? 50,
-        description: d.description,
-      }));
-
-      // Persist to DB
-      await db.execute(sql`
-        UPDATE certificates SET
-          ai_analysis        = ${JSON.stringify(analysis)}::jsonb,
-          ai_draft_grade     = ${analysis.overall_grade ?? null},
-          centering_front_lr = ${analysis.centering?.front_left_right ?? null},
-          centering_front_tb = ${analysis.centering?.front_top_bottom ?? null},
-          centering_back_lr  = ${analysis.centering?.back_left_right ?? null},
-          centering_back_tb  = ${analysis.centering?.back_top_bottom ?? null},
-          defects            = ${JSON.stringify(analysis.defects ?? [])}::jsonb,
-          ai_defects         = ${JSON.stringify(aiDefectsNorm)}::jsonb,
-          updated_at         = NOW()
-        WHERE id = ${id}
-      `);
-
-      res.json({ analysis });
-    } catch (error: any) {
-      console.error("AI analyze error:", error.message, error.stack);
-      res.status(500).json({ error: "Analysis failed" });
-    }
-  });
+  // Authentication remains in front of the terminal
+  // handler, and no limiter, parser, feature check, provider, object, or DB
+  // effect is allowed to run for this route.
+  app.post(
+    "/api/admin/certificates/:id/analyze-v1-legacy",
+    requireAdmin,
+    (_req, res) => res.status(410).json(LEGACY_AI_ANALYZE_RETIRED_RESPONSE)
+  );
 
   // Legacy CertificateForm approval had no revision-bound preview.  Keep an
   // explicit terminal response for stale clients; canonical review is the only
@@ -8874,126 +8747,13 @@ Defects (admin-confirmed): ${defectLines}`;
     }
   });
 
-  // ── Unified "Grade with AI" endpoint — auto-crop, identify, grade in one call ──
-
+  // Retired legacy upload identity. Omitting route-local body admission and
+  // Multer prevents malformed or oversized legacy multipart requests from
+  // allocating upload memory or reaching storage/providers.
   app.post(
     "/api/admin/certificates/grade-with-ai",
     requireAdmin,
-    uploadMemoryAdmission("admin_grade_with_ai", 512),
-    gradeWithAiUpload.fields([
-      { name: "front_image", maxCount: 1 },
-      { name: "back_image", maxCount: 1 },
-    ]),
-    async (req, res) => {
-      try {
-        const files = req.files as {
-          front_image?: Express.Multer.File[];
-          back_image?: Express.Multer.File[];
-        };
-        const frontFile = files.front_image?.[0];
-        if (!frontFile) return res.status(400).json({ error: "front_image is required" });
-        const backFile = files.back_image?.[0];
-        const uploadErr = await rejectInvalidUploads([frontFile, ...(backFile ? [backFile] : [])]);
-        if (uploadErr) return res.status(400).json({ error: uploadErr });
-        const certId = req.body.cert_id ? parseInt(req.body.cert_id, 10) : null;
-        if (certId !== null && !Number.isFinite(certId)) {
-          return res.status(400).json({ error: "Invalid certificate ID" });
-        }
-
-        console.log("[grade-with-ai] starting workflow", {
-          certId,
-          frontSize: `${(frontFile.size / 1024 / 1024).toFixed(1)}MB`,
-          backSize: backFile ? `${(backFile.size / 1024 / 1024).toFixed(1)}MB` : "none",
-        });
-
-        // Step 1: Auto-crop both images
-        const frontCropped = await autoCropCard(frontFile.buffer);
-        const backCropped = backFile ? await autoCropCard(backFile.buffer) : null;
-
-        // Step 2: Upload cropped images to R2
-        const ts = Date.now();
-        const frontKey = `images/grade-ai/${ts}_front.jpg`;
-        const backKey = backCropped ? `images/grade-ai/${ts}_back.jpg` : null;
-        await uploadToR2(frontKey, frontCropped, "image/jpeg");
-        if (backCropped && backKey) await uploadToR2(backKey, backCropped, "image/jpeg");
-
-        // Step 3: Identify the card from front image
-        const identification = await identifyCardFromBuffer(frontCropped, "image/jpeg");
-
-        // Step 4: Run full grading analysis
-        const cardGame = identification.detected_game || undefined;
-        const grading = await analyzeCardFromBuffers(frontCropped, backCropped, cardGame);
-
-        // Step 5: Get signed URLs for the cropped images
-        const frontUrl = await getR2SignedUrl(frontKey, 3600);
-        const backUrl = backKey ? await getR2SignedUrl(backKey, 3600) : null;
-
-        // Step 6: If cert_id provided, save AI analysis to existing cert
-        if (certId) {
-          await db.execute(sql`
-            UPDATE certificates SET
-              ai_analysis = ${JSON.stringify({ identification, grading })}::jsonb,
-              ai_draft_grade = ${typeof grading.overall_grade === "number" ? grading.overall_grade : null},
-              updated_at = NOW()
-            WHERE id = ${certId}
-          `);
-        }
-
-        console.log("[grade-with-ai] complete", {
-          certId,
-          card: identification.detected_name,
-          grade: grading.overall_grade,
-          defects: grading.defects?.length ?? 0,
-        });
-
-        res.json({
-          success: true,
-          cert_id: certId,
-          identification: {
-            card_name: identification.detected_name,
-            set_name: identification.detected_set,
-            card_number: identification.detected_number,
-            year: identification.detected_year,
-            language: identification.detected_language,
-            card_game: identification.detected_game,
-            rarity: identification.detected_rarity,
-            is_holo: identification.is_holo,
-            is_foil: identification.is_foil,
-            confidence: identification.confidence,
-          },
-          grading: {
-            overall_grade: grading.overall_grade,
-            grade_label: grading.grade_label,
-            subgrades: {
-              centering: grading.centering?.subgrade,
-              corners: grading.corners?.subgrade,
-              edges: grading.edges?.subgrade,
-              surface: grading.surface?.subgrade,
-            },
-            centering_measurements: {
-              front_left_right: grading.centering?.front_left_right,
-              front_top_bottom: grading.centering?.front_top_bottom,
-              back_left_right: grading.centering?.back_left_right,
-              back_top_bottom: grading.centering?.back_top_bottom,
-            },
-            defects: grading.defects || [],
-            confidence: grading.confidence,
-            grade_explanation: grading.grade_explanation,
-            is_authentic: grading.is_authentic,
-            is_altered: grading.is_altered,
-            authentication_notes: grading.authentication_notes,
-            recommendations: grading.recommendations,
-          },
-          image_urls: {
-            front_cropped: frontUrl,
-            back_cropped: backUrl,
-          },
-        });
-      } catch (err: any) {
-        console.error("[grade-with-ai] error:", err.message);
-        res.status(500).json({ error: "Grading failed" });
-      }
-    }
+    (_req, res) => res.status(410).json(LEGACY_AI_GRADE_UPLOAD_RETIRED_RESPONSE)
   );
 
   // ── Build 6+: Identify card from uploaded image (no cert required) ─────────

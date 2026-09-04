@@ -79,7 +79,7 @@ Alternative: add `GET /api/admin/scanner/ping` that accepts `X-Scanner-Token` an
 
 **What's missing:** The endpoint has auth (scanner-token or admin cookie) but no rate limit. A runaway watcher could create thousands of certs before anyone notices — each triggers an AI call which costs money.
 
-**Suggested fix:** Add `aiRateLimit` middleware (already exists — used on `/api/admin/certificates/:id/analyze-v1-legacy`) to scan-ingest. Tune for scanner cadence (e.g. 1 per 10s should be ample for manual scanning).
+**Suggested fix:** Add a scanner-cadence-specific limiter to scan-ingest (for example, one request per 10 seconds). Do not reuse the retired legacy AI route as middleware authority; `analyze-v1-legacy` is now an authenticated unconditional 410 tombstone.
 
 **Risk level:** Medium on prod. Low on staging. Worth doing before heavy use of the watcher.
 

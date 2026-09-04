@@ -217,7 +217,7 @@
       "kind": "OWNER_GATE",
       "title": "Decide legacy AI grading route retirement or enrollment",
       "severity": "NONE",
-      "status": "OWNER_DECISION",
+      "status": "PROVEN",
       "agent_mode": "EXTERNAL_OWNER",
       "agent_id": "repository-owner",
       "workspace": "external",
@@ -227,7 +227,13 @@
       "proof_required": [
         "Separate disposition for analyze-v1-legacy and grade-with-ai, including provider/object/evidence effects"
       ],
-      "evidence": [],
+      "evidence": [
+        {
+          "ref": "owner-approval-record.md blanket authorisation; safest behavior-preserving choice recorded in grading-legacy-recovery.md: retire analyze-v1-legacy and grade-with-ai separately as authenticated unconditional typed 410 tombstones with zero provider, object, grading, or evidence effects",
+          "sha": "c3534c856be747e7e66459559d875e3ff3d6f109",
+          "observer": "repository-owner"
+        }
+      ],
       "invalidated_by": ["Grading, feature flag, provider, or owner decision change"],
       "vetoes_release": true
     },
@@ -698,7 +704,7 @@
       "id": "ARCH-LEGACY-AI-001",
       "phase": 1,
       "kind": "FINDING",
-      "title": "Obsolete AI grading route remains live under the current feature flag",
+      "title": "Obsolete AI grading routes bypass canonical command, object, and evidence authority",
       "severity": "HIGH",
       "status": "OPEN",
       "agent_mode": "READ_ONLY",
@@ -708,13 +714,18 @@
       "addresses": [],
       "write_scope": [],
       "proof_required": [
-        "Authenticated route reachability with feature flag enabled and direct R2, provider, and grading-write effects"
+        "Authenticated reachability of analyze-v1-legacy with feature flag enabled and grade-with-ai without a route-level flag, including direct R2, provider, and grading-write effects"
       ],
       "evidence": [
         {
           "ref": "server/routes.ts:2982-3119; server/config/feature-flags.ts:11-14,59,83",
           "sha": "09beacaa5bc03f8e80e4c7e59232df6fc466b7cb",
           "observer": "server-architecture-observer"
+        },
+        {
+          "ref": "grading-legacy-recovery.md independent source recovery: analyze-v1-legacy conditionally reads certificate/object state, calls a provider, and writes grading fields; grade-with-ai admits multipart data then crops, publishes objects, calls identification/grading providers, signs URLs, and may write the certificate without canonical command, object, revision, or evidence control",
+          "sha": "c3534c856be747e7e66459559d875e3ff3d6f109",
+          "observer": "codex-lead"
         }
       ],
       "invalidated_by": ["Legacy route", "feature flag", "AI provider", "grading workflow", "object writer"],
@@ -1455,17 +1466,25 @@
       "kind": "OWNER_GATE",
       "title": "Approve pre-wave legacy AI recovery packet",
       "severity": "NONE",
-      "status": "OPEN",
+      "status": "IN_PROGRESS",
       "agent_mode": "LEAD",
       "agent_id": "codex-lead",
       "workspace": "shared",
       "depends_on": ["ARCH-LEGACY-AI-001"],
       "addresses": [],
-      "write_scope": [],
+      "write_scope": [
+        ".claude/controlled-code-lead/tasks/repository-architecture-recovery-20260904/grading-legacy-recovery.md"
+      ],
       "proof_required": [
         "Exact route disposition, zero-effect tombstone rollback or supported-command compatibility, provider and grading evidence recovery"
       ],
-      "evidence": [],
+      "evidence": [
+        {
+          "ref": "grading-legacy-recovery.md; separately retires both legacy route identities, preserves the supported grading route, defines zero-effect middleware ordering and fail-closed recovery, and binds the clean pre-wave checkpoint c3534c856be747e7e66459559d875e3ff3d6f109",
+          "sha": "c3534c856be747e7e66459559d875e3ff3d6f109",
+          "observer": "codex-lead"
+        }
+      ],
       "invalidated_by": ["Grading route", "provider", "feature flag", "recovery procedure"],
       "vetoes_release": true
     },
@@ -1952,7 +1971,7 @@
       "kind": "REPAIR",
       "title": "Retire or formally enroll legacy AI grading HTTP surfaces",
       "severity": "HIGH",
-      "status": "OPEN",
+      "status": "IN_PROGRESS",
       "agent_mode": "LEAD",
       "agent_id": "codex-lead",
       "workspace": "shared",
@@ -1964,9 +1983,22 @@
         "REPAIR-ADMIN-PRINT"
       ],
       "addresses": ["ARCH-LEGACY-AI-001"],
-      "write_scope": ["server/routes.ts", "server/config/feature-flags.ts", "tests/legacy-ai-route-tombstone.test.ts"],
+      "write_scope": [
+        ".claude/controlled-code-lead/tasks/repository-architecture-recovery-20260904/grading-legacy-change-manifest.md",
+        ".claude/controlled-code-lead/tasks/repository-architecture-recovery-20260904/grading-legacy-file-manifest.md",
+        "docs/ai-audit.md",
+        "docs/scanner-watcher-todo.md",
+        "scripts/architecture/generated/architecture-authority.json",
+        "scripts/ci/typecheck-baselines/architecture.json",
+        "scripts/ci/typecheck-baselines/tests.json",
+        "server/config/feature-flags.ts",
+        "server/lib/retired-ai-grading.ts",
+        "server/routes.ts",
+        "tests/architecture-authority.test.ts",
+        "tests/legacy-ai-route-tombstone.test.ts"
+      ],
       "proof_required": [
-        "Owner-selected support state; retired path is unconditional 410 with zero DB, R2, or provider call, or supported path obeys canonical command/object/evidence lifecycle"
+        "Owner-selected separate retirement of analyze-v1-legacy and grade-with-ai; both are authenticated unconditional typed 410 tombstones mounted before every legacy route-local feature/AI-rate/upload/body/grading-domain-DB/R2/provider/grading/prediction/evidence/audit effect, while bounded global middleware, authentication, and supported grading identities remain unchanged"
       ],
       "evidence": [],
       "invalidated_by": ["Legacy path", "feature flag", "provider", "grading command", "object lifecycle"],
@@ -2595,7 +2627,7 @@
       "addresses": ["ARCH-LEGACY-AI-001"],
       "write_scope": [],
       "proof_required": [
-        "Feature-on request proves unconditional tombstone with zero DB/R2/provider effects, or full canonical enrollment if owner retains it"
+        "Feature-on and adversarial multipart requests prove both exact legacy identities are unconditional typed 410 tombstones after authentication and before every legacy route-local feature/AI-rate/upload/body/grading-domain-DB/R2/provider/grading/prediction/evidence/audit effect; bounded global middleware and supported grading identities remain reachable"
       ],
       "evidence": [],
       "invalidated_by": ["Candidate SHA", "feature flag", "route", "provider", "grading", "object"],

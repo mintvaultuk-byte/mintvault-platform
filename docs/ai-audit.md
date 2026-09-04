@@ -66,7 +66,7 @@ Pricing constants live at `server/ai-grading-service.ts:683-695` (input/output/c
 |---|---|
 | **File / line** | `server/ai-grading-service.ts:581` (`analyzeCardFromBuffers`); `:1437` (`analyzeCard` — R2-key variant). Both use `thinking: true` + multi-image input |
 | **Model** | `claude-opus-4-7`, `max_tokens: 4096`. Includes ALL image variants: front + back + 2× greyscale + 2× highcontrast + angled + closeup (8 images per call) |
-| **Triggered by** | Admin button **"Analyze with AI (Full)"** in cert form (`grading/ai-panel.tsx`) → `POST /api/admin/certificates/:id/analyze` (`routes.ts:8438`); also via `POST /api/admin/certificates/:id/identify-and-analyze` (`8469`); legacy `POST /api/admin/certificates/:id/analyze-v1-legacy` (`2148`); admin scan-ingest fallback (`8728`) |
+| **Triggered by** | Admin button **"Analyze with AI (Full)"** in cert form (`grading/ai-panel.tsx`) → `POST /api/admin/certificates/:id/analyze` (`routes.ts:8438`); also via `POST /api/admin/certificates/:id/identify-and-analyze` (`8469`) and the admin scan-ingest fallback (`8728`). `POST /api/admin/certificates/:id/analyze-v1-legacy` is retired as an authenticated unconditional 410 tombstone and no longer invokes a model. |
 | **Returns** | Full `GradingAnalysis`: per-side centering ratios, 8-corner subgrades, 4-axis subgrades, defect array with positions, authentication notes, overall grade |
 | **Stored at** | `certificates.ai_analysis` jsonb. Subgrades + grade copied to dedicated columns (`centering_score`, `corners_score`, etc.) only on admin **Approve Grade** click |
 | **Downstream usage** | Authoritative grade source the admin reviews. Customer cert reflects values once approved |

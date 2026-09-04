@@ -390,6 +390,28 @@ describe("architecture topology authority", () => {
     expect(attachMiddleware.indexOf("requireAdmin")).toBeLessThan(
       attachMiddleware.findIndex((item) => item.includes("attachImagesUpload"))
     );
+    for (const routeId of [
+      "POST /api/admin/certificates/:id/analyze-v1-legacy",
+      "POST /api/admin/certificates/grade-with-ai",
+    ]) {
+      const retiredRoute = snapshot.records.find(
+        (record: { category: string; id: string }) => record.category === "server-route" && record.id === routeId
+      ) as {
+        actor: string;
+        capabilities: string[];
+        retirementState: string;
+        routeLocalMiddleware: string[];
+        providerEffects: string[];
+      };
+      expect(retiredRoute).toBeTruthy();
+      expect(retiredRoute.actor).toBe("admin");
+      expect(retiredRoute.capabilities).toContain("requireAdmin");
+      expect(retiredRoute.retirementState).toBe("retired");
+      expect(retiredRoute.routeLocalMiddleware).toHaveLength(2);
+      expect(retiredRoute.routeLocalMiddleware[0]).toBe("requireAdmin");
+      expect(retiredRoute.routeLocalMiddleware[1]).toContain("status(410)");
+      expect(retiredRoute.providerEffects).toEqual(["delegated-or-none"]);
+    }
     expect(snapshot.records).toEqual(
       expect.arrayContaining([
         expect.objectContaining({
