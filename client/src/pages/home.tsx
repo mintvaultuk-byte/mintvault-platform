@@ -463,7 +463,7 @@ export default function HomeV2() {
               </h2>
               <p className="font-body text-sm md:text-base leading-relaxed self-end" style={{ color: "#ffffff" }}>
                 Every card, regardless of service level, passes the same four-point inspection (centering, corners,
-                edges, surface). Tier only changes how quickly you see it back.
+                edges, surface). Compare current service features and turnaround below.
               </p>
             </div>
 

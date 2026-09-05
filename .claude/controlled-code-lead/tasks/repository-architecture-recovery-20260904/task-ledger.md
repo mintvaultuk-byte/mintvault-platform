@@ -2,6 +2,13 @@
 
 ## Current checkpoint and next bounded wave
 
+P2b7857c3c3e13befb7979eb26e04c62cfce13fb1e4 is pushed, draftPR336 exact head verified.
+P2c service/ancillary wave is independently34/34, clean53regressions plus34focused
+and final build PASS. One held-out cap-note defect reproduced and repaired. Exact
+packet hashes/limits in pricing-recovery.md. WIP checkpoint/push then P2d13SEO
+pages/guides/metadata and P3 DB→payment/receipt. No idle/owner pause/deployment.
+Hosted7857primary33993242700 app-running/image-red; restricted security UNKNOWN.
+
 P2a checkpoint c26bccfca544781e335e96f08361bc13d8cfb377 is pushed to draftPR336.
 P2b preview de-duplication now independently25/25 locally proven and clean build
 PASS; see pricing-recovery.md exact manifest/hashes/limits. Root checkpoints then

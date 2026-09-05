@@ -442,7 +442,9 @@ function CrossoverTable({ grade }: { grade: number }) {
 // fee follows the service dropdown. Grade is pre-filled from the AI result
 // but editable. All client-side.
 
-const GRADING_FEES = { mintvault: 25, psa: 22, cgc: 15 } as const;
+// Competitor inputs are illustrative estimates, not current price quotes.
+// MintVault requires an actual current service selection in the submission flow.
+const GRADING_FEES = { mintvault: null, psa: 22, cgc: 15 } as const;
 type Service = keyof typeof GRADING_FEES;
 
 function gradeMultiplier(grade: number): number {
@@ -453,7 +455,7 @@ function gradeMultiplier(grade: number): number {
   return 1;
 }
 
-function ValueCalculator({ initialGrade }: { initialGrade: number }) {
+export function ValueCalculator({ initialGrade }: { initialGrade: number }) {
   const [rawValue, setRawValue] = useState<string>("");
   const [service, setService] = useState<Service>("mintvault");
   const [grade, setGrade] = useState<number>(initialGrade);
@@ -468,8 +470,8 @@ function ValueCalculator({ initialGrade }: { initialGrade: number }) {
   const fee = GRADING_FEES[service];
   const mult = gradeMultiplier(grade);
   const expected = hasRaw ? rawNum * mult : 0;
-  const net = hasRaw ? expected - rawNum - fee : 0;
-  const worthIt = hasRaw && net > 0;
+  const net = hasRaw && fee !== null ? expected - rawNum - fee : null;
+  const worthIt = net !== null && net > 0;
 
   const fmt = (n: number) => `£${n.toFixed(2)}`;
 
@@ -504,9 +506,9 @@ function ValueCalculator({ initialGrade }: { initialGrade: number }) {
             className="w-full px-3 py-2 text-sm border border-[#E8E4DC] rounded-lg focus:outline-none focus:border-[#D4AF37] bg-white"
             data-testid="select-service"
           >
-            <option value="mintvault">MintVault (£25)</option>
-            <option value="psa">PSA (£22)</option>
-            <option value="cgc">CGC (£15)</option>
+            <option value="mintvault">MintVault — select a current service</option>
+            <option value="psa">PSA (illustrative £22 estimate)</option>
+            <option value="cgc">CGC (illustrative £15 estimate)</option>
           </select>
         </label>
 
@@ -532,7 +534,7 @@ function ValueCalculator({ initialGrade }: { initialGrade: number }) {
           <div className="flex justify-between items-baseline px-4 py-2.5">
             <dt className="text-xs text-[#888888]">Grading fee</dt>
             <dd className="text-sm font-medium text-[#1A1A1A]" data-testid="text-fee">
-              {fmt(fee)}
+              {fee === null ? <Link href="/pricing" className="underline">View current grading prices</Link> : fmt(fee)}
             </dd>
           </div>
           <div className="flex justify-between items-baseline px-4 py-2.5">
@@ -551,17 +553,21 @@ function ValueCalculator({ initialGrade }: { initialGrade: number }) {
             <dt className="text-xs text-[#888888] font-medium">Net gain</dt>
             <dd
               className={`text-sm font-bold ${
-                !hasRaw ? "text-[#888888]" : net > 0 ? "text-emerald-700" : "text-[#1A1A1A]"
+                net === null ? "text-[#888888]" : net > 0 ? "text-emerald-700" : "text-[#1A1A1A]"
               }`}
               data-testid="text-net"
             >
-              {hasRaw ? `${net >= 0 ? "+" : ""}${fmt(net)}` : "—"}
+              {net !== null ? `${net >= 0 ? "+" : ""}${fmt(net)}` : "—"}
             </dd>
           </div>
         </dl>
       </div>
 
-      {hasRaw && (
+      <p className="mt-3 text-xs text-[#888888]">
+        Illustrative value estimate, not a valuation or payment quote. MintVault fees and net gain require a current
+        service selection; shipping, insurance and discounts are confirmed before payment.
+      </p>
+      {net !== null && (
         <div
           className={`mt-5 text-center py-3 rounded-lg text-sm font-bold uppercase tracking-wider ${
             worthIt

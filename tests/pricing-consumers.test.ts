@@ -33,6 +33,12 @@ import HomeV4 from "../client/src/pages/home-v4";
 import PricingV2 from "../client/src/pages/pricing-v2";
 import PricingDemo from "../client/src/pages/pricing-demo";
 import PricingAnimated from "../client/src/components/ui/pricing-animated";
+import FAQ from "../client/src/pages/help/faq";
+import VaultClub from "../client/src/pages/vault-club";
+import { ValueCalculator } from "../client/src/pages/pre-grade";
+import CertificateForm from "../client/src/components/certificate-form";
+import HowItWorksV2 from "../client/src/pages/how-it-works-v2";
+import { insuranceTiers, insuranceSurchargeBands, bulkDiscountTiers } from "../shared/commerce";
 import { TierPriceWithPromo } from "../client/src/components/v2/promo-display";
 
 const live = {
@@ -52,8 +58,12 @@ const live = {
 
 describe("price-free preview routes", () => {
   for (const [label, component] of [
-    ["Home V2", HomeV2], ["Home V3", HomeV3], ["Home V4", HomeV4],
-    ["Pricing V2", PricingV2], ["Pricing demo", PricingDemo], ["Animated pricing", PricingAnimated],
+    ["Home V2", HomeV2],
+    ["Home V3", HomeV3],
+    ["Home V4", HomeV4],
+    ["Pricing V2", PricingV2],
+    ["Pricing demo", PricingDemo],
+    ["Animated pricing", PricingAnimated],
   ] as const) {
     it(`${label} sends visitors to current pricing without a duplicate grading catalogue`, () => {
       // Preview content has no live quote state. Render the real component tree
@@ -68,6 +78,140 @@ describe("price-free preview routes", () => {
       if (label.startsWith("Home") || label === "Pricing V2") {
         expect(text).toContain("centering, corners, edges, surface");
         expect(text).toContain("9.99");
+      }
+    });
+  }
+});
+
+describe("remaining service price displays", () => {
+  it("certificate tier identifiers are preserved without advertising static prices", () => {
+    client = new QueryClient({
+      defaultOptions: {
+        queries: {
+          retry: false,
+          enabled: false,
+          queryFn: async () => {
+            throw new Error("No certificate network requests in SSR label proof");
+          },
+        },
+      },
+    });
+    container = document.createElement("div");
+    container.innerHTML = renderToStaticMarkup(
+      createElement(
+        QueryClientProvider,
+        { client },
+        createElement(CertificateForm, { certificate: null, onSuccess: () => {} })
+      )
+    );
+    const select = container.querySelector<HTMLSelectElement>('[data-testid="select-service-tier"]')!;
+    expect([...select.options].map((o) => [o.value, o.textContent?.trim()])).toEqual([
+      ["", "Standard (default)"],
+      ["vault-queue", "Vault Queue"],
+      ["standard", "Standard"],
+      ["express", "Express"],
+    ]);
+  });
+  it("how-it-works preview does not promise fixed return coverage", () => {
+    container = document.createElement("div");
+    container.innerHTML = renderToStaticMarkup(createElement(HowItWorksV2));
+    expect(container.textContent).toContain("Based on declared value");
+    expect(container.textContent).not.toContain("£2,500");
+  });
+  it("FAQ opens price and turnaround guidance without stale catalogue values", async () => {
+    await render(FAQ);
+    for (const question of ["What's the turnaround time?", "How much does grading cost?"]) {
+      const button = [...container.querySelectorAll<HTMLButtonElement>("button")].find((b) =>
+        b.textContent?.includes(question)
+      )!;
+      await act(async () => button.click());
+      expect(container.querySelector('a[href="/pricing"]')).not.toBeNull();
+      expect(container.textContent).not.toMatch(/£(?:19|25|45)|(?:40|15|5) working days/);
+    }
+  });
+  it("membership savings do not promise a fixed grading fee or break-even", async () => {
+    await render(VaultClub);
+    expect(container.textContent).toContain("£9.99");
+    expect(container.textContent).toContain("£99");
+    expect(container.textContent).not.toMatch(/£25|£2\.50|four cards|4 cards|bulk wins|overtakes Silver/i);
+    expect(container.querySelector('a[href="/pricing"]')).not.toBeNull();
+  });
+  it("MintVault calculator does not invent a current fee or net-gain recommendation", async () => {
+    await render(() => createElement(ValueCalculator, { initialGrade: 10 }));
+    const input = container.querySelector<HTMLInputElement>('[data-testid="input-raw-value"]')!;
+    await act(async () => {
+      Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, "value")!.set!.call(input, "100");
+      input.dispatchEvent(new Event("input", { bubbles: true }));
+    });
+    expect(container.querySelector('[data-testid="text-expected"]')!.textContent).toContain("300.00");
+    expect(container.querySelector('[data-testid="text-fee"]')!.textContent).not.toContain("£");
+    expect(container.querySelector('[data-testid="text-net"]')!.textContent).toBe("—");
+    expect(container.querySelector('[data-testid="text-verdict"]')).toBeNull();
+    expect(container.querySelector('a[href="/pricing"]')).not.toBeNull();
+    const service = container.querySelector<HTMLSelectElement>('[data-testid="select-service"]')!;
+    await act(async () => {
+      service.value = "psa";
+      service.dispatchEvent(new Event("change", { bubbles: true }));
+    });
+    expect(container.querySelector('[data-testid="text-fee"]')!.textContent).toBe("£22.00");
+    expect(container.querySelector('[data-testid="text-net"]')!.textContent).toBe("+£178.00");
+    expect(container.textContent).toContain("illustrative £22 estimate");
+    await act(async () => {
+      service.value = "mintvault";
+      service.dispatchEvent(new Event("change", { bubbles: true }));
+    });
+    expect(container.querySelector('[data-testid="text-net"]')!.textContent).toBe("—");
+    expect(container.querySelector('[data-testid="text-verdict"]')).toBeNull();
+  });
+  for (const [label, component] of [
+    ["Pricing", Pricing],
+    ["Pricing V2", PricingV2],
+  ] as const) {
+    it(`${label} links each other service to explicit current selection`, async () => {
+      if (label === "Pricing") await render(component);
+      else {
+        container = document.createElement("div");
+        container.innerHTML = renderToStaticMarkup(createElement(component));
+      }
+      for (const type of ["reholder", "crossover", "authentication"]) {
+        expect(container.querySelector(`a[href="/submit?type=${type}"]`)?.textContent).toContain("Current prices");
+      }
+      expect(container.textContent).not.toMatch(/£(?:15|35)(?![\d,.])/);
+      expect(container.textContent).not.toMatch(/No percentage discount|Subscriptions temporarily paused|Tier only changes/);
+    });
+  }
+  for (const [label, component] of [
+    ["Pricing", Pricing],
+    ["Pricing V2", PricingV2],
+  ] as const) {
+    it(`${label} insurance, shipping and bulk cards follow shared policy inputs`, async () => {
+      const shipping = insuranceTiers[0].shippingPence;
+      const surcharge = insuranceSurchargeBands[1].surchargePence;
+      const percent = bulkDiscountTiers[1].percent;
+      const shippingMax = insuranceTiers[3].maxValue;
+      const surchargeMax = insuranceSurchargeBands[3].maxValue;
+      try {
+        insuranceTiers[0].shippingPence = 643;
+        insuranceSurchargeBands[1].surchargePence = 357;
+        bulkDiscountTiers[1].percent = 6.25;
+        insuranceTiers[3].maxValue = 8123;
+        insuranceSurchargeBands[3].maxValue = 8123;
+        if (label === "Pricing") await render(component);
+        else {
+          container = document.createElement("div");
+          container.innerHTML = renderToStaticMarkup(createElement(component));
+        }
+        expect(container.textContent).toContain("£6.43");
+        expect(container.textContent).toContain("£3.57");
+        expect(container.textContent).toContain("6.25%");
+        expect(container.textContent).toContain("8,123");
+        expect(container.textContent).not.toMatch(/7,500|7\.5k/);
+      } finally {
+        insuranceTiers[0].shippingPence = shipping;
+        insuranceSurchargeBands[1].surchargePence = surcharge;
+        bulkDiscountTiers[1].percent = percent;
+        insuranceTiers[3].maxValue = shippingMax;
+        insuranceSurchargeBands[3].maxValue = surchargeMax;
       }
     });
   }

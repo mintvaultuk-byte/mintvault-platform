@@ -2,6 +2,11 @@
   "schemaVersion": 1,
   "records": [
     {
+      "key": "pricing-authority|client/src/pages/pre-grade.tsx|endpoint:/pricing#0",
+      "finding": "ARCH-AUTHORITY-001",
+      "expiresWith": "the bounded-context repair that assigns explicit authority"
+    },
+    {
       "key": "job|scripts/hot-folder-watcher.js|setInterval:() => { if (cond()) { clearInterval(id); resolve(); } else if (Date.now() - start > timeout) { clearInterval(id); reject(new Error('Timeout')); } }#0",
       "finding": "ARCH-AUTHORITY-001",
       "expiresWith": "the bounded-context repair that assigns explicit authority"
@@ -203,21 +208,6 @@
     },
     {
       "key": "object-writer|server/slab-showcase.ts|uploadToR2:key#0",
-      "finding": "ARCH-AUTHORITY-001",
-      "expiresWith": "the bounded-context repair that assigns explicit authority"
-    },
-    {
-      "key": "pricing-authority|client/src/components/certificate-form.tsx|literal:£19#0",
-      "finding": "ARCH-AUTHORITY-001",
-      "expiresWith": "the bounded-context repair that assigns explicit authority"
-    },
-    {
-      "key": "pricing-authority|client/src/components/certificate-form.tsx|literal:£25#0",
-      "finding": "ARCH-AUTHORITY-001",
-      "expiresWith": "the bounded-context repair that assigns explicit authority"
-    },
-    {
-      "key": "pricing-authority|client/src/components/certificate-form.tsx|literal:£45#0",
       "finding": "ARCH-AUTHORITY-001",
       "expiresWith": "the bounded-context repair that assigns explicit authority"
     },
@@ -687,37 +677,12 @@
       "expiresWith": "the bounded-context repair that assigns explicit authority"
     },
     {
-      "key": "pricing-authority|client/src/pages/help/faq.tsx|literal:£19#0",
-      "finding": "ARCH-AUTHORITY-001",
-      "expiresWith": "the bounded-context repair that assigns explicit authority"
-    },
-    {
-      "key": "pricing-authority|client/src/pages/help/faq.tsx|literal:£25#0",
-      "finding": "ARCH-AUTHORITY-001",
-      "expiresWith": "the bounded-context repair that assigns explicit authority"
-    },
-    {
-      "key": "pricing-authority|client/src/pages/help/faq.tsx|literal:£45#0",
-      "finding": "ARCH-AUTHORITY-001",
-      "expiresWith": "the bounded-context repair that assigns explicit authority"
-    },
-    {
-      "key": "pricing-authority|client/src/pages/how-it-works-v2.tsx|literal:£2,500#0",
-      "finding": "ARCH-AUTHORITY-001",
-      "expiresWith": "the bounded-context repair that assigns explicit authority"
-    },
-    {
       "key": "pricing-authority|client/src/pages/pre-grade.tsx|literal:£15#0",
       "finding": "ARCH-AUTHORITY-001",
       "expiresWith": "the bounded-context repair that assigns explicit authority"
     },
     {
       "key": "pricing-authority|client/src/pages/pre-grade.tsx|literal:£22#0",
-      "finding": "ARCH-AUTHORITY-001",
-      "expiresWith": "the bounded-context repair that assigns explicit authority"
-    },
-    {
-      "key": "pricing-authority|client/src/pages/pre-grade.tsx|literal:£25#0",
       "finding": "ARCH-AUTHORITY-001",
       "expiresWith": "the bounded-context repair that assigns explicit authority"
     },
@@ -1458,46 +1423,6 @@
     },
     {
       "key": "pricing-authority|client/src/pages/tools-estimate.tsx|value:price#2",
-      "finding": "ARCH-AUTHORITY-001",
-      "expiresWith": "the bounded-context repair that assigns explicit authority"
-    },
-    {
-      "key": "pricing-authority|client/src/pages/vault-club.tsx|import:VAULT_CLUB_SILVER_DISCOUNT_PERCENT#0",
-      "finding": "ARCH-AUTHORITY-001",
-      "expiresWith": "the bounded-context repair that assigns explicit authority"
-    },
-    {
-      "key": "pricing-authority|client/src/pages/vault-club.tsx|literal:£2.50#0",
-      "finding": "ARCH-AUTHORITY-001",
-      "expiresWith": "the bounded-context repair that assigns explicit authority"
-    },
-    {
-      "key": "pricing-authority|client/src/pages/vault-club.tsx|literal:£2.50#1",
-      "finding": "ARCH-AUTHORITY-001",
-      "expiresWith": "the bounded-context repair that assigns explicit authority"
-    },
-    {
-      "key": "pricing-authority|client/src/pages/vault-club.tsx|literal:£25#0",
-      "finding": "ARCH-AUTHORITY-001",
-      "expiresWith": "the bounded-context repair that assigns explicit authority"
-    },
-    {
-      "key": "pricing-authority|client/src/pages/vault-club.tsx|literal:£25#1",
-      "finding": "ARCH-AUTHORITY-001",
-      "expiresWith": "the bounded-context repair that assigns explicit authority"
-    },
-    {
-      "key": "pricing-authority|client/src/pages/vault-club.tsx|value:annual_price_pence#0",
-      "finding": "ARCH-AUTHORITY-001",
-      "expiresWith": "the bounded-context repair that assigns explicit authority"
-    },
-    {
-      "key": "pricing-authority|client/src/pages/vault-club.tsx|value:grading_discount_percent#0",
-      "finding": "ARCH-AUTHORITY-001",
-      "expiresWith": "the bounded-context repair that assigns explicit authority"
-    },
-    {
-      "key": "pricing-authority|client/src/pages/vault-club.tsx|value:monthly_price_pence#0",
       "finding": "ARCH-AUTHORITY-001",
       "expiresWith": "the bounded-context repair that assigns explicit authority"
     },

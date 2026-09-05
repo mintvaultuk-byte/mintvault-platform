@@ -75,6 +75,8 @@
   ],
   "scanRoots": ["server", "client/src", "shared", "scripts", "migrations", "migrations-vq", "config/components"],
   "ownerRules": [
+    { "prefix": "client/src/pages/help/faq.tsx", "owner": "commerce-platform" },
+    { "prefix": "client/src/pages/vault-club.tsx", "owner": "commerce-platform" },
     { "prefix": "client/src/pages/home-v2-integrated.tsx", "owner": "commerce-platform" },
     { "prefix": "client/src/pages/home-v3.tsx", "owner": "commerce-platform" },
     { "prefix": "client/src/pages/home-v4.tsx", "owner": "commerce-platform" },

@@ -3237,13 +3237,13 @@ export default function CertificateForm({
                           Standard (default)
                         </option>
                         <option value="vault-queue" className="bg-[var(--admin-panel)]">
-                          Vault Queue — £19
+                          Vault Queue
                         </option>
                         <option value="standard" className="bg-[var(--admin-panel)]">
-                          Standard — £25
+                          Standard
                         </option>
                         <option value="express" className="bg-[var(--admin-panel)]">
-                          Express — £45
+                          Express
                         </option>
                       </select>
                     </div>

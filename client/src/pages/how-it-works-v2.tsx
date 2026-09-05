@@ -307,13 +307,13 @@ function ActSubmission() {
                 fontFamily: "'JetBrains Mono', ui-monospace, monospace",
                 fontSize: 10, color: V.inkMute,
                 letterSpacing: "0.15em", textTransform: "uppercase",
-              }}>Insured to</div>
+              }}>Return cover</div>
               <div style={{
                 fontFamily: "'Fraunces', Georgia, serif",
                 fontSize: 22, color: V.ink,
                 fontWeight: 500, marginTop: 4,
                 fontStyle: "italic",
-              }}>£2,500</div>
+              }}>Based on declared value</div>
             </div>
           </div>
         </div>

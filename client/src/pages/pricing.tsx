@@ -148,8 +148,8 @@ export default function PricingV2() {
               </span>
             </h2>
             <p className="font-body text-sm md:text-base leading-relaxed self-end" style={{ color: "#ffffff" }}>
-              Every card passes the same four-point inspection: centering, corners, edges, surface. Tier only changes
-              how quickly the work comes back.{" "}
+              Every card passes the same four-point inspection: centering, corners, edges, surface. Compare current
+              service features and turnaround below.{" "}
               <Link
                 href="/standard"
                 className="underline underline-offset-2"
@@ -343,7 +343,7 @@ export default function PricingV2() {
                         ? "Mid-value cards"
                         : i === 2
                           ? "High-value grails"
-                          : "Cap — contact us above £7.5k";
+                          : "Contact us above the highest listed declared value";
                   return (
                     <tr
                       key={band.maxValue}
@@ -395,8 +395,8 @@ export default function PricingV2() {
               className="font-body text-sm md:text-base leading-relaxed self-end"
               style={{ color: "var(--v2-ink-soft)" }}
             >
-              Three services you can stack onto a submission. Add only what you need &mdash; nothing hidden, nothing
-              default-on.
+              Choose a service to check its current prices and availability. Each service is selected separately in the
+              submission flow.
             </p>
           </div>
 
@@ -415,9 +415,13 @@ export default function PricingV2() {
                     >
                       {addon.name}
                     </h3>
-                    <span className="font-mono-v2 text-lg font-semibold" style={{ color: "var(--v2-gold)" }}>
-                      {addon.display}
-                    </span>
+                    <Link
+                      href={`/submit?type=${id}`}
+                      className="font-mono-v2 text-sm font-semibold underline"
+                      style={{ color: "var(--v2-gold)" }}
+                    >
+                      Current prices and availability →
+                    </Link>
                   </div>
                   <p className="font-body text-sm leading-relaxed" style={{ color: "var(--v2-ink-soft)" }}>
                     {addon.description}
@@ -488,8 +492,8 @@ export default function PricingV2() {
           </div>
 
           <p className="font-body text-xs mt-6" style={{ color: "var(--v2-ink-mute)" }}>
-            Fully insured Royal Mail return. UK addresses only. Above £7,500 declared value, please contact us for
-            bespoke carriage.
+            Fully insured Royal Mail return. UK addresses only. Above the highest listed declared value, please
+            contact us for bespoke carriage.
           </p>
         </div>
       </section>
@@ -509,8 +513,8 @@ export default function PricingV2() {
               className="font-body text-sm md:text-base leading-relaxed self-end"
               style={{ color: "var(--v2-ink-soft)" }}
             >
-              A perks-and-credits membership for collectors who submit regularly. No percentage discount &mdash;
-              tangible perks that cover real costs.
+              A perks-and-credits membership for collectors who submit regularly. Compare current membership
+              benefits with your expected use on the Vault Club page.
             </p>
           </div>
 
@@ -568,7 +572,7 @@ export default function PricingV2() {
                 </GradientButton>
               </Link>
               <p className="font-mono-v2 text-[10px] uppercase tracking-wider" style={{ color: "var(--v2-ink-mute)" }}>
-                Subscriptions temporarily paused &mdash; relaunching with full perks system.
+                See Vault Club for current subscription availability and benefits.
               </p>
             </div>
           </div>

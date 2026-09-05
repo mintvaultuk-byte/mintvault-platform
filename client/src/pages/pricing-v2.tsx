@@ -20,6 +20,10 @@
    ========================================================================= */
 
 import React, { useEffect, useRef, useState } from "react";
+import { insuranceTiers, insuranceSurchargeBands, bulkDiscountTiers } from "@shared/commerce";
+import { ADDON_PRICES, ADDON_ORDER } from "@shared/addons";
+
+const poundsFromPence = (pence: number) => `£${(pence / 100).toFixed(pence % 100 === 0 ? 0 : 2)}`;
 
 // ── DESIGN TOKENS ──────────────────────────────────────────────────────────
 // Mockup-only — production code uses var(--v2-*) CSS variables. Inlined
@@ -546,12 +550,13 @@ function SectionI() {
 // ── SECTION II: VALUE PROTECTION ──────────────────────────────────────────
 
 function SectionII() {
-  const bands = [
-    { tier: "Standard", value: "Up to £500", fee: "Included", note: "Built into every submission", isFree: true },
-    { tier: "Enhanced", value: "Up to £1,500", fee: "+£2", note: "Mid-value cards", isFree: false },
-    { tier: "Premium", value: "Up to £3,000", fee: "+£5", note: "High-value grails", isFree: false },
-    { tier: "Max", value: "Up to £7,500", fee: "+£10", note: "Cap — contact us above £7.5k", isFree: false },
-  ];
+  const bands = insuranceSurchargeBands.map((band, index) => ({
+    tier: ["Standard", "Enhanced", "Premium", "Max"][index] ?? `Band ${index + 1}`,
+    value: `Up to £${band.maxValue.toLocaleString("en-GB")}`,
+    fee: band.surchargePence === 0 ? "Included" : `+${poundsFromPence(band.surchargePence)}`,
+    note: band.surchargePence === 0 ? "Built into every submission" : "Based on declared value",
+    isFree: band.surchargePence === 0,
+  }));
 
   return (
     <section style={{ backgroundColor: V.paper }}>
@@ -598,7 +603,7 @@ function SectionII() {
 
 // ── SECTION III: ADD-ONS ──────────────────────────────────────────────────
 
-function AddonItem({ name, display, description }) {
+function AddonItem({ id, name, description }) {
   const [hovered, setHovered] = useState(false);
   return (
     <div
@@ -613,9 +618,9 @@ function AddonItem({ name, display, description }) {
         <h3 style={{ fontFamily: "'Geist', system-ui, sans-serif", fontStyle: "italic", fontWeight: 500, fontSize: "clamp(1.25rem, 1.8vw, 1.5rem)", color: V.ink }}>
           {name}
         </h3>
-        <span style={{ fontFamily: "'Geist Mono', 'JetBrains Mono', monospace", fontSize: 18, fontWeight: 600, color: hovered ? V.gold : V.gold, transition: "color 200ms" }}>
-          {display}
-        </span>
+        <a href={`/submit?type=${id}`} style={{ fontFamily: "'Geist Mono', 'JetBrains Mono', monospace", fontSize: 14, fontWeight: 600, color: V.gold }}>
+          Current prices and availability →
+        </a>
       </div>
       <p style={{ fontFamily: "'Geist', system-ui, sans-serif", fontSize: 14, lineHeight: 1.6, color: V.inkSoft }}>
         {description}
@@ -625,11 +630,7 @@ function AddonItem({ name, display, description }) {
 }
 
 function SectionIII() {
-  const addons = [
-    { id: "reholder", name: "Reholder", display: "£15", description: "Transfer your card into a new MintVault slab with updated NFC and certificate." },
-    { id: "crossover", name: "Crossover", display: "£35", description: "Re-grade a card from PSA, BGS, CGC, or another grading company." },
-    { id: "authentication", name: "Authentication", display: "£15", description: "Verify authenticity and check for alterations — no grade assigned." },
-  ];
+  const addons = ADDON_ORDER.map((id) => ({ id, name: ADDON_PRICES[id].name, description: ADDON_PRICES[id].description }));
 
   return (
     <section style={{ backgroundColor: V.paperRaised }}>
@@ -642,7 +643,7 @@ function SectionIII() {
             Optional extras.
           </h2>
           <p style={{ fontFamily: "'Geist', system-ui, sans-serif", fontSize: 16, lineHeight: 1.6, alignSelf: "end", color: V.inkSoft }}>
-            Three services you can stack onto a submission. Add only what you need — nothing hidden, nothing default-on.
+            Choose a service to check its current prices and availability. Each service is selected separately in the submission flow.
           </p>
         </div>
         <div className="grid grid-cols-1 md:grid-cols-3 gap-8 md:gap-10">
@@ -656,12 +657,10 @@ function SectionIII() {
 // ── SECTION IV: RETURN SHIPPING ───────────────────────────────────────────
 
 function SectionIV() {
-  const tiers = [
-    { value: "Up to £500", shipping: "£4.99" },
-    { value: "Up to £1,500", shipping: "£9.99" },
-    { value: "Up to £3,000", shipping: "£14.99" },
-    { value: "Up to £7,500", shipping: "£24.99" },
-  ];
+  const tiers = insuranceTiers.map((tier) => ({
+    value: `Up to £${tier.maxValue.toLocaleString("en-GB")}`,
+    shipping: poundsFromPence(tier.shippingPence),
+  }));
   return (
     <section style={{ backgroundColor: V.paperSunk }}>
       <div className="mx-auto max-w-5xl px-6 py-24 md:py-32">
@@ -695,7 +694,7 @@ function SectionIV() {
           </table>
         </div>
         <p style={{ fontFamily: "'Geist', system-ui, sans-serif", fontSize: 12, marginTop: 24, color: V.inkMute }}>
-          Fully insured Royal Mail return. UK addresses only. Above £7,500 declared value, please contact us for bespoke carriage.
+          Fully insured Royal Mail return. UK addresses only. Above the highest listed declared value, please contact us for bespoke carriage.
         </p>
       </div>
     </section>
@@ -728,7 +727,7 @@ function SectionV() {
             Silver membership.
           </h2>
           <p style={{ fontFamily: "'Geist', system-ui, sans-serif", fontSize: 16, lineHeight: 1.6, alignSelf: "end", color: V.inkSoft }}>
-            A perks-and-credits membership for collectors who submit regularly. No percentage discount — tangible perks that cover real costs.
+            A perks-and-credits membership for collectors who submit regularly. Compare current membership benefits with your expected use on the Vault Club page.
           </p>
         </div>
         <div
@@ -772,7 +771,7 @@ function SectionV() {
               See Vault Club →
             </a>
             <p style={{ fontFamily: "'Geist Mono', 'JetBrains Mono', monospace", fontSize: 10, textTransform: "uppercase", letterSpacing: "0.1em", color: V.inkMute }}>
-              Subscriptions temporarily paused — relaunching with full perks system.
+              See Vault Club for current subscription availability and benefits.
             </p>
           </div>
         </div>
@@ -797,18 +796,13 @@ function SectionVI() {
           Bulk discounts apply automatically at checkout based on your card count. The more cards you submit, the more you save per card.
         </p>
         <div className="grid grid-cols-1 md:grid-cols-3 gap-4 mt-10">
-          {/* bulk figures: keep in sync with bulkDiscountTiers (shared/schema.ts) — max 10% (DMCC) */}
-          {[
-            { label: "10–24 cards", body: <><strong style={{ color: V.ink }}>5% off</strong> the per-card grading fee.</> },
-            { label: "25–49 cards", body: <><strong style={{ color: V.ink }}>7.5% off</strong> the per-card grading fee.</> },
-            { label: "50+ cards",   body: <><strong style={{ color: V.ink }}>10% off</strong> the per-card grading fee.</> },
-          ].map((ex) => (
+          {bulkDiscountTiers.filter((band) => band.percent > 0).map((ex) => (
             <div key={ex.label} style={{ borderRadius: 8, padding: 24, backgroundColor: V.paperSunk, border: `1px solid ${V.line}` }}>
               <p style={{ fontFamily: "'Geist Mono', 'JetBrains Mono', monospace", fontSize: 10, textTransform: "uppercase", letterSpacing: "0.15em", marginBottom: 12, color: V.gold }}>
                 {ex.label}
               </p>
               <p style={{ fontFamily: "'Geist', system-ui, sans-serif", fontSize: 14, lineHeight: 1.6, color: V.inkSoft }}>
-                {ex.body}
+                <strong style={{ color: V.ink }}>{ex.percent}% off</strong> the per-card grading fee.
               </p>
             </div>
           ))}

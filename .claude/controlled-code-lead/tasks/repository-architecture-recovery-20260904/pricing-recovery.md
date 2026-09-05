@@ -1,5 +1,67 @@
 # Commercial pricing recovery — existing ARCH-PRICING-001
 
+## P2c service and ancillary copy wave — current
+
+P2b pushed at `7857c3c3e13befb7979eb26e04c62cfce13fb1e4`, draftPR336 exact SHA
+verified; primary33993242700/governance33993242841/33993240440 started. P2c preflight
+CRITICAL/HOSTILE, unrelated vault-worlds preserved. Exact files: existing
+`client/src/pages/{pricing,pricing-v2,vault-club,pre-grade,how-it-works-v2}.tsx`,
+`client/src/pages/help/faq.tsx`, `client/src/components/certificate-form.tsx`,
+and `tests/pricing-consumers.test.ts`. Same architecture policy/legacy/snapshot
+inventory scope only, no diagnostic waiver. Read-only Terra map source-verified.
+
+Insurance/surcharge/bulk tables derive existing client-safe shared commerce inputs.
+Remove fixed FAQ prices/turnaround, certificate option price suffixes (preserve
+IDs), unsupported fixed insurance amount and membership break-even arithmetic.
+Pre-grade retains illustrative value multipliers/external estimates, but has no
+invented MintVault fee/net/verdict; link to current pricing until actual service
+selection. Named export of its existing calculator is allowed for real component
+proof; no grading/provider code change. Fix contradictory membership discount
+stacking copy to existing maximum-of-two/tie policy, not a discount-policy change.
+
+Root also verified `shared/addons.ts`: its static display prices merely claim a
+2026-04-19 DB match; they are not current service-tier authority. Canonical pricing
+and preview other-service cards retain descriptions but link to each explicit
+service selection for current availability/prices. Do not alter shared addon
+constants used elsewhere before those callers are dispositioned in editorial P2d.
+No new projection/service/DB schema/payment mutation. Rollback this client set to
+7857; no stored records affected. Independent proof precedes wave-end WIP push.
+P2c exact manifest addition: `client/src/pages/home.tsx`, only the residual
+tier-only-speed sentence. Canonical/preview membership teasers also lose stale
+no-discount/paused assertions and point to current Vault Club details; no membership
+price, availability configuration or policy is changed.
+
+P2c checkpoint proof: six original behavioral cases ran red before implementation;
+root/independent Sol/final clean34/34 now pass, zero skips. Tests render actual
+FAQ clicks, membership, current-service links, calculator raw-value and service
+switching; certificate option IDs and preview coverage via real component SSR.
+Independent held-out cap mutation found two remaining fixed insurance notes on
+canonical pricing: root reproduced red, repaired, and both canonical/preview
+input-mutation tests now change shipping/surcharge/discount/max without stale caps.
+Final clean client/server build and TypeScript PASS. Scoped lint0errors/56existing
+warnings (mostly unchanged mixed certificate form). Tests ratchet345 unchanged.
+Clean separate4-suite53/53 passes ownedPG pricing/payment-replay, Admin session,
+public bundle; synthetic local-only environment, no live provider or data used.
+Terra final normal architecture8444 PASS (pricing1740→1710, other counts unchanged).
+Two exact owner rules;16 old keys removed/+1 same-link narrow legacy transfer;
+mixed pre-grade/certificate authority finding remains OPEN, no broad adoption.
+Parent101/nested34 valid NOT READY. Postflight known governance/egress/dirty/protected
+and graph-warning vetoes remain unwaived. Latest7857CI33993242700 app-running/image
+red, dependency/Gitleaks/CodeQLgreen. P2d/P3/exactcandidate/hostile/security still OPEN.
+
+Final independent P2c SHA-256:
+```text
+3af5f1cae12c7875342a16dc18ef70a74c27f8c68b1c9bd73e43b5cc3e25a838 client/src/pages/home.tsx
+d9702a9d243fc08469471e1857636e17fd9087199a65a131e9c82393a43dd359 client/src/pages/pricing.tsx
+5470b6ff66c0ba40fd99d9c0f3d0750d3cfc054ac1dc98c5ea9fdbd950c885e7 client/src/pages/pricing-v2.tsx
+9d5bb8a9315ce63e8ffea720b1e7997b06c4b22c62357812ae508ed7b1853eaf client/src/pages/vault-club.tsx
+e14a79688af31128ab40fbe7cf10fc9c7ebfa3b686fd07eeda0269a7c0ba8119 client/src/pages/pre-grade.tsx
+9f2b5d4e6110792041056a47651e7db989b07e4aa7df5bac4fa0c4b63c527a4b client/src/pages/how-it-works-v2.tsx
+3473e5aa36b703aaa36c01e3b988f0435641f8b33820fc4c2ae6e13eaebfa04a client/src/pages/help/faq.tsx
+5e4532faf873df5fb7e1ab6191b9ce4979e6cee957ee80856217bf10e964deaa client/src/components/certificate-form.tsx
+1acae52d8203ed3a792d246b0b798b743cc95aae7348fd71000b346232c2d67d tests/pricing-consumers.test.ts
+```
+
 ## P2b preview wave — current
 
 P2a is pushed at `c26bccfca544781e335e96f08361bc13d8cfb377` to existing draftPR336.

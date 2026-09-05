@@ -1,5 +1,14 @@
 # Engineering proof ledger
 
+## 2026-09-05 pricing P2c — service copy and ancillary authority
+
+[Pricing packet](../.claude/controlled-code-lead/tasks/repository-architecture-recovery-20260904/pricing-recovery.md)
+records root/independentSol/clean34/34 after held-out insurance-cap repair, clean
+separate regressions53/53, final build/TypeScript pass, scoped lint0errors and
+Terra architecture8444. No invented calculator fee/net or fixed membership break-even;
+service links preserve server prices; shared insurance/bulk inputs drive both pages.
+Certificate option IDs/history retained. Full P2d/P3/CI/hostile/release remain OPEN.
+
 ## 2026-09-05 pricing P2b — duplicated preview catalogues retired
 
 [Pricing packet](../.claude/controlled-code-lead/tasks/repository-architecture-recovery-20260904/pricing-recovery.md)

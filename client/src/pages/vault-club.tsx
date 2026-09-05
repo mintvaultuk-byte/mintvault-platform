@@ -28,7 +28,7 @@ const PERKS = [
   {
     number: "01",
     title: `${SILVER.grading_discount_percent}% off every grading submission`,
-    body: "Applied automatically at checkout on the per-card grading fee. Stacks with bulk discounts via max-of-the-two — Silver wins up to 49 cards, bulk wins at 50+.",
+    body: "Applied automatically at checkout on the per-card grading fee. The larger of the membership and bulk discounts applies, not both; ties use the membership discount.",
     value: `${SILVER.grading_discount_percent}% per card`,
   },
   {
@@ -68,12 +68,11 @@ const FAQS = [
   },
   {
     q: "How does Silver stack with bulk discounts?",
-    // bulk figures: keep in sync with bulkDiscountTiers (shared/schema.ts)
-    a: "We apply whichever saves you more, never both. Silver's 10% wins on smaller orders; the bulk discount (5/7.5/10% at 10/25/50+ cards) overtakes Silver at 50+ cards. Tied at 25 cards, Silver wins.",
+    a: "We apply whichever saves you more, never both. If the discounts are equal, the membership discount applies. Your current submission quote shows the applicable saving.",
   },
   {
     q: "What if I don't submit often?",
-    a: "Silver pays off at roughly 4 cards per month at Standard (£25). The 10% discount alone returns £2.50 per card; AI credits and Showroom are bonus on top. If you submit less than that, skip membership and pay per-card — honestly, it's the better deal.",
+    a: "Whether membership is worthwhile depends on current grading prices, your submission volume and the perks you use. Compare your expected savings with the membership cost before subscribing.",
   },
 ];
 
@@ -257,16 +256,16 @@ export default function VaultClubV2() {
               className="font-display italic font-medium text-3xl md:text-5xl leading-tight"
               style={{ color: "var(--v2-ink)" }}
             >
-              Roughly four cards a month.
+              Compare the savings you will use.
             </h2>
             <p
               className="font-body text-sm md:text-base leading-relaxed self-end"
               style={{ color: "var(--v2-ink-soft)" }}
             >
-              Membership is {poundsFromPence(SILVER.monthly_price_pence)}/month. At Standard grading (£25/card), the{" "}
-              {SILVER.grading_discount_percent}% discount alone returns £2.50 per card &mdash; four cards covers the
-              membership. AI Pre-Grade credits, Showroom, and the badge are bonus on top. Submit fewer than that and
-              you&rsquo;re better off paying per-card.
+              Membership is {poundsFromPence(SILVER.monthly_price_pence)}/month. The{" "}
+              {SILVER.grading_discount_percent}% grading discount depends on your selected service and submission volume.
+              Compare <Link href="/pricing" className="underline">current grading prices</Link> and the applicable bulk
+              discount with the membership cost. AI Pre-Grade credits, Showroom and the badge are additional perks.
             </p>
           </div>
         </div>
@@ -414,8 +413,8 @@ export default function VaultClubV2() {
               </h3>
               <p className="font-body text-sm md:text-base leading-relaxed" style={{ color: "var(--v2-ink-soft)" }}>
                 The basket applies whichever saves you more, never both. Silver&rsquo;s{" "}
-                {SILVER.grading_discount_percent}% wins up to 49 cards per submission. The bulk discount overtakes
-                Silver at 50+ cards (10% bracket). Either way, you get the better number.
+                {SILVER.grading_discount_percent}% is compared with the applicable bulk discount.
+                If they are equal, the membership discount applies.
               </p>
             </div>
             <div>
