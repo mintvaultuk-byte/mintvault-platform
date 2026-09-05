@@ -1,5 +1,24 @@
 # Task ledger — repository architecture recovery
 
+## Continuous H1 next checkpoint — Admin fixtures and exact lock parity
+
+H1d is pushed at b6fccb07 and its architecture CI gate passes. H1e fixes the seven
+existing Admin fixture/source-contract suites without runtime changes; H1f updates
+only the PDF type declaration lock entry to match its real stream contract; H1g
+removes one ignored/untracked local file from a release-test input list, preserving
+all assertions and tracked script coverage. Clean exact-lock install under Node20
+passes application typecheck, unchanged test ratchet, architecture and 126 Admin/
+session assertions plus six operational-fixture assertions. Independent cheaper
+workers verify affected surfaces. Full retained proof is in hygiene-wave-proof.md.
+
+Next H1c packet: add an exclusive --r2-proof mode to the EXISTING owned runner and
+one direct child proof, reusing lifecycle/labels/loopback/controlled environment and
+non-vacuous JSON counts. No parallel orchestration framework or restored historical
+PARTNER_REAL_R2_PROOF_* authority (none exists in tracked current source). Then local
+application/browser substrate and existing graph product defects. Continue exact-SHA
+CI observation; image vulnerability veto and restricted evidence are not waived.
+Goal ACTIVE / heartbeat PAUSED. No deployment, shared migration or destructive cleanup.
+
 ## Continuous H1 exact-CI correction — 2026-09-05
 
 Checkpoint2a532416 was non-force pushed to the existing feature branch/PR336.

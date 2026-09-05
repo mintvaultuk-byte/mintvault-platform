@@ -362,7 +362,8 @@ describe("Canonical persistent preview rail", () => {
     expect(WORKSTATION).toContain("onPreviewChange={handleDraftPreviewChange}");
     expect(WORKSTATION).toContain("authoritativePreview ?? panelPreviewFields");
     expect(WORKSTATION).toContain("fields={previewFields}");
-    expect(PREVIEW_PANEL).toContain("fetch(endpoint");
+    expect(PREVIEW_PANEL).toContain('import { adminFetch } from "@/lib/queryClient"');
+    expect(PREVIEW_PANEL).toContain("adminFetch(endpoint");
     expect(PREVIEW_PANEL).toContain("const body = expectedRevision == null ? fields : { ...fields, expectedRevision }");
     expect(PREVIEW_PANEL).toContain('res.headers.get("X-MintVault-Review-Revision")');
     expect(PREVIEW_PANEL).toContain('credentials: "include"');

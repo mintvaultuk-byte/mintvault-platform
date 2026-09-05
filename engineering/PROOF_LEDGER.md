@@ -1,5 +1,17 @@
 # Engineering proof ledger
 
+## 2026-09-05 H1e–g clean-install fixture/type parity
+
+See existing hygiene-wave proof: seven repaired Admin tests plus session contract
+suite pass 126/126 independently and against a clean exact-lock Node20 install.
+Only @types/pdfkit lock entry changes 0.17.5 -> 0.17.6; isolated old/new declaration
+compiler proof is red/green and artifact integrity matches. No PDF runtime edit.
+Operational test's ignored local input removal is reproduced ENOENT -> 6/6 PASS;
+all tracked script/assertion coverage remains. Clean application typecheck, unchanged
+345-diagnostic test ratchet and 8442-record architecture check pass. No release
+closure: exact CI, image vulnerability veto, product defects and restricted evidence
+remain open. H1d is already pushed at b6fccb07; its architecture CI gate passes.
+
 ## 2026-09-05 H1d clean-checkout parity / terminal CI evidence
 
 At pushed2a532416, CI33963442054 failed architecture drift and its image vulnerability

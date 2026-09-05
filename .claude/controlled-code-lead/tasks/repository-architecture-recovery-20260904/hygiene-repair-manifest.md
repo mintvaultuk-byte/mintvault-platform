@@ -130,3 +130,52 @@ local/clean-checkout inventory parity, exact-SHA CI. Root is sole writer; indepe
 functional verifier checks changed inventory semantics. Rollback is this exact diff;
 no live/runtime/migration behavior or destructive cleanup. Existing ARCH-CI-001 /
 REPAIR-AUTHORITY-CONTROLS / REPAIR-CI-TOPOLOGY own this repair.
+
+## H1e — existing Admin test wiring reconciliation
+
+Baseline b6fccb07; existing REPAIR-ADMIN-CONTRACTS / PROOF-ADMIN-CONTRACTS and
+REPAIR-CI-TOPOLOGY own this test-only packet. Terra independently reproduced
+24 failures / 79 passes across the seven named tests under scrubbed Node20.
+Exact files: tests/canonical-grading-workstation-architecture.test.ts,
+tests/grading-workstation-ux-redesign.test.ts, tests/social-studio-phase1.test.ts,
+tests/partner-network-p10-parity.test.ts, tests/partner-network-workspace.test.ts,
+tests/partner-pilot-flag-controls-ui.test.ts and
+tests/partner-user-management-ui-render.test.ts. No product/auth behavior edit.
+
+Retain endpoint/body/revision, UUID, step-up, destructive-action and flag guards.
+Update raw-fetch assertions to the approved adminFetch authority; require central
+App/provider mounting and complete return-path authority instead of obsolete
+page-local authentication. Render fixtures must use the REAL AdminSessionProvider
+inside QueryClientProvider, valid synthetic session identity, and partial request
+mocks preserving real session/cache helpers. Add negative session-boundary proof
+that no Partner data/mutation is requested before authentication. Do not mock the
+provider or remove failing tests. Run these suites plus existing Admin session
+contract proofs and scoped lint/typecheck; independent changed-surface verification.
+Rollback is the exact test-only diff; no migration, provider, deployment or cleanup.
+
+## H1f — exact PDF declaration lock parity
+
+Existing ARCH-CI-001 / REPAIR-CI-TOPOLOGY: CI33964372417/job101301729032 passes
+architecture then reproduces TS2339 for PDFDocument.destroy at server/routes.ts.
+Read-only comparison proves lock0.17.5 extends NodeJS.ReadableStream while installed
+0.17.6 declares the actual Node Readable owner of destroy. Runtime PDFKit already
+inherits Readable. Exact scope: only the @types/pdfkit version/resolved/integrity
+entry in package-lock.json, 0.17.5 -> 0.17.6 (within existing package.json range).
+No route edit, PDF/runtime dependency upgrade, classification or other lock change.
+Registry metadata must match the artifact integrity. Verify isolated old/new type
+contract red/green, package-entry-only diff and pinned Node20 type gates. Existing
+PDF generation tests remain supplementary, not whole-public-route lifecycle proof.
+Rollback restores that one old lock entry; CI would again reject the known mismatch.
+
+## H1g — tracked operational-test fixture boundary
+
+Existing ARCH-CI-001 / REPAIR-CI-TOPOLOGY: governance job101299246537 fails ENOENT
+for scripts/_pr75-schema-diff.ts. Git metadata confirms that exact path is untracked
+and ignored; its contents are not read, modified or published. Exact scope:
+tests/postgres-operational-script-transport.test.ts removes only that workstation
+path from its release-script list. Preserve every assertion and all tracked script
+paths, including TLS/authority checks, dedicated-backend guard and retirement guard.
+Prove existing failure in the clean-source copy, then all six existing assertions
+pass there. This is missing-fixture parity, not a TLS change or a new security/
+supply-chain investigation. Independent verifier checks boundary and unchanged guards.
+Rollback is the one test-list entry; the ignored local script remains untouched.

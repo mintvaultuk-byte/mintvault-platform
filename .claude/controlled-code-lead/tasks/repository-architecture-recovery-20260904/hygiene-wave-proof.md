@@ -236,3 +236,63 @@ passes with the unchanged345 diagnostics; architecture check8442 records PASS;
 git diff --check PASS. Governance-only postflight remains fail-closed on existing
 managed CLAUDE drift, npm egress, preserved dirty work and branch-wide protected
 paths, with Graphify REBUILD_REQUIRED. No acceptance override or full --run claim.
+
+### H1e/H1f/H1g — clean dependency and test-wiring parity
+
+H1d checkpoint `b6fccb07146478a91e10a5932c95c348651e25dc` was non-force pushed.
+CI33964372417/job101301729032 now passes architecture and fails the test typecheck
+ratchet on exactly one fingerprint: PDFDocument.destroy TS2339. Image vulnerability
+gate remains red. The missing downstream reports again follow the early type gate.
+
+H1e: Terra independently reproduced 24 failed / 79 passed assertions in seven Admin
+test files. These retained obsolete raw-fetch/page-local auth strings or rendered
+pages outside the real AdminSessionProvider. Root changed only those test files:
+same endpoints/POST/revision/UUID/step-up/flag/destructive-action assertions remain;
+partial request mocks preserve actual session/cache helpers; real provider mounts
+inside QueryClientProvider with a deterministic complete synthetic principal.
+The new rejection test proves redirect and zero Partner API calls. Root's first
+pass left two missed fixture/string cases; both corrected. Root and independent
+Terra each pass eight suites / 126 assertions / zero skips under Node20.20.2,
+including the existing 22 session-contract cases. Existing React act warnings in
+that unchanged session test are retained, not hidden by an assertion downgrade.
+
+H1f: installed @types/pdfkit was 0.17.6 while the lock pinned 0.17.5. The earlier
+worker statement that local declarations matched the lock was incorrect and was
+corrected before accepting proof. Exact downloaded 0.17.5 extends NodeJS.ReadableStream;
+0.17.6 extends the actual Node Readable. Independent virtual compiler fixture
+reproduces TS2339 on 0.17.5 and zero diagnostics on 0.17.6. Lock-only repair changes
+the version/resolved/integrity of that single package within the existing ^0.17.5
+range; no package.json, runtime PDFKit, route or other lock entry changed.
+Retained new artifact `/private/tmp/mintvault-pdfkit-types-06-QsNhzV/types-pdfkit-0.17.6.tgz`
+has SHA512 exactly equal to the new lock integrity. Old declaration retained at
+`/private/tmp/mintvault-pdfkit-types-n1omQV/pdfkit/index.d.ts`.
+
+Clean proof copy: `/private/tmp/mintvault-h1ef-clean.x3NRtE`, only tracked working
+files plus `npm ci --ignore-scripts --no-audit --no-fund` under scrubbed Node20.20.2.
+Installed 923 packages; engine/deprecation warnings remain, not compatibility or
+security clearance. This install deliberately does not prove native install hooks.
+Local source history was fetched read-only into the disposable copy because the
+historical grading-scope check correctly rejected a history-free archive; no guard
+was removed. Exact clean dependencies use Vitest4.1.7 (root had4.1.11).
+Application tsc --noEmit PASS; unchanged 345-diagnostic test ratchet PASS;
+eight affected/session suites 126/126 PASS; architecture8442/zero violations PASS.
+Root/clean copies of seven H1e tests plus lock are byte-equal; aggregate sorted
+filename-NUL/content SHA256 `2f2a0b35a5b25278e8d781f2aee718258fbfcd6bc857efdcbb0bf6180e1084b6`.
+
+H1g: the clean copy independently reproduced the operational-script test's ENOENT
+for ignored/untracked scripts/_pr75-schema-diff.ts (1 failed / 5 passed). Removing
+only that workstation path from the test list yields all six existing assertions
+PASS against clean dependencies. No ignored contents read/published, tracked script
+coverage removed, transport behavior changed or security investigation reopened.
+
+Scoped H1e lint: zero errors, one pre-existing explicit-any warning in the user UI
+fixture; no new warning. Root test ratchet and application typecheck pass. No HIGH
+product node or release gate is closed by these fixture/declaration corrections.
+Known image/UTC/claim defects, durable object-store/browser, exact candidate CI,
+managed workflow and restricted security/hostile evidence remain open.
+
+Independent Terra H1g recheck confirms the exact one-line deletion, ignored/untracked
+metadata without reading contents, all remaining assertions/paths intact, and6/6
+PASS in the clean copy under pinned Node20. Final governance-only postflight remains
+fail-closed on the same managed CLAUDE/npm-egress/dirty/protected-path conditions
+and Graphify warning. No acceptance override, no --run or final release claim.

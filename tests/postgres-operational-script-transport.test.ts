@@ -39,7 +39,6 @@ describe("operational PostgreSQL script transport", () => {
       "scripts/db/migrate.ts",
       "scripts/db/read-only-session.ts",
       "scripts/rarity-legacy-audit.ts",
-      "scripts/_pr75-schema-diff.ts",
     ]) {
       const script = readFileSync(filename, "utf8");
       expect(script, filename).toContain("securePostgresPoolConnection");
