@@ -2,6 +2,40 @@
 
 **Baseline:** `09beacaa5bc03f8e80e4c7e59232df6fc466b7cb`
 
+## Approved UTC repair packet — 2026-09-05
+
+Pre-wave checkpoint15101b2844187aa184198d5116e2898463dfae61, pushed non-force;
+unrelated docs/planning/vault-worlds preserved. Owner-CREDIT is explicitly approved
+in owner-approval-record.md, superseding only the historical credit exclusion below.
+Root sole writer; CRITICAL/HOSTILE preflight; independent Terra reproduced22/24 on
+owned PostgreSQL17 with Node20.20.2. This bounded nested node requires the reproduced
+WAA-CREDIT-001 finding and OWNER-CREDIT, not completion of unrelated H1 browser or
+restricted security work. Aggregate parent recovery/integration gates remain open.
+
+Exact runtime write: server/estimate-credit-consumption.ts. Preserve existing timestamp
+schema, reservation identity, UTC input-day contract, paid-credit ownership, daily limit,
+CTE atomicity and compare-and-set. Admission stores input.today as the same UTC date
+marker used by comparison and reservation, with a monotonic newer-or-same-window
+predicate. Both refunds write explicitly UTC timestamps. Return refund status from claimed RETURNING before the
+snapshot-visible base-table fallback, matching commit's existing idempotent pattern.
+No other production files, dependencies, migrations, credentials or provider calls.
+
+Exact test write: tests/estimate-credit-consumption-owner-binding.test.ts. Retain existing
+two non-UTC regressions unchanged; add stale non-UTC recovery, first/replayed refund
+result and UTC day-boundary coverage as needed. Run this real PostgreSQL suite plus
+estimate-credit-idempotency and estimate-credit-recovery-lifecycle; independent verifier
+and held-out/isolated mutation evidence required before candidate proof closure.
+Regenerate only affected architecture snapshot records if the existing check requires it;
+never raise diagnostic/no-check/legacy allowances. Existing graph/issue/proof/rollback
+records track the packet; no new planning directory. Budget: one service, one test,
+existing records, targeted checks; stop broadening after the affected invariants pass.
+
+Changed-surface amendment: independent Sol reproduced admission/refund disagreement when
+the trusted request day precedes SQL's day at midnight; root reproduced a delayed old
+request rewinding today's occupied window. The original UTC-NOW patch was not accepted
+as complete. Same-file correction uses the trusted day marker and monotonic predicate;
+two added regression cases preserve this boundary. No separate finding or product scope.
+
 ## Authorised local repairs
 
 | Finding | File | Change | Classification |

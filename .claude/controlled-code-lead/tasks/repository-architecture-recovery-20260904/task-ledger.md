@@ -1,5 +1,16 @@
 # Task ledger — repository architecture recovery
 
+## Continuous UTC-credit wave — 2026-09-05
+
+H1c checkpoint15101b2844187aa184198d5116e2898463dfae61 pushed non-force to existing
+branch/PR336. CI33966648590/job101307847322 reports the new Owned real object-store
+proof step SUCCESS on that SHA; whole run is still pending and image vulnerability
+job101307847300 is red. Governance handles33966648539/33966645906 retained for terminal
+observation. No release claim. The independent nested REPAIR-CREDIT-UTC packet is now
+authorized/materialized in the existing White Ace manifest and rollback; root implements,
+Terra reproduces, Sol independently verifies. Aggregate parent recovery/integration and
+restricted security gates stay open. H1 browser/managed-workflow work is not discarded.
+
 ## Continuous H1c checkpoint — durable owned object-store proof
 
 H1e/f/g are pushed at a6670fc4456e6b4185d3a735b189ef9f86f667b2. Primary CI

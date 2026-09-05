@@ -1,5 +1,16 @@
 # Engineering proof ledger
 
+## 2026-09-05 WAA-CREDIT-001 UTC-day repair
+
+[Exact packet, red/green commands, hashes and limitations](../.claude/controlled-code-lead/tasks/white-ace-assurance-repository-20260904/task-ledger.md):
+approved single-service/single-test repair passes45/45 on root and clean exact-lock
+Node20/owned PG17. Independent held-out proof caught an intermediate midnight defect;
+final day marker, monotonic admission, refund CTE result and UTC compensation fixes
+are re-proven locally. Typecheck, unchanged345-test ratchet/8455-architecture snapshot,
+build and diff check pass; no new lint warning. Independent Sol final45/45, three
+mutation groups red, exact restoration7/7 and hashes verified. Local proof CLEAN;
+immutable-candidate integration remains open. This is not a deployed/release-ready claim.
+
 ## 2026-09-05 H1c durable owned object-store proof
 
 Existing runner now owns pinned loopback MinIO and a direct real server/r2.ts proof

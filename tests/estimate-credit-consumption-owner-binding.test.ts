@@ -366,6 +366,109 @@ describe("PKG-3 estimate-credit consumption owner binding (PostgreSQL 17.10)", (
     }
   });
 
+  it("recovers a stale anonymous reservation without changing its UTC-day authority", async () => {
+    const isolated = await openSessionWhoseLocalDateDiffersFromUtc();
+    const deps = { exec: isolated.exec };
+    try {
+      expect(isolated.sessionDay).not.toBe(isolated.utcDay);
+      const reservation = await mod.consumeEstimateCredit(
+        { ipHash: "non-utc-stale-refund", today: isolated.utcDay }, deps
+      );
+      if (!reservation.ok || !reservation.reservationId) throw new Error("anonymous reservation was not created");
+      await isolated.client.query(
+        `UPDATE estimate_credit_reservations SET created_at = NOW() - INTERVAL '1 hour' WHERE id = $1`,
+        [reservation.reservationId]
+      );
+      expect(await mod.refundStaleEstimateCreditReservations({}, deps)).toEqual({
+        examined: 1, refunded: 1, unrecoverable: 0,
+      });
+      const usage = await isolated.client.query<{ count_today: number; day: string }>(
+        `SELECT count_today, last_used_at::date::text AS day FROM estimate_free_uses WHERE ip_hash = 'non-utc-stale-refund'`
+      );
+      expect(usage.rows[0]).toEqual({ count_today: 0, day: isolated.utcDay });
+      expect(await mod.refundStaleEstimateCreditReservations({}, deps)).toEqual({
+        examined: 0, refunded: 0, unrecoverable: 0,
+      });
+    } finally {
+      await isolated.client.end();
+    }
+  });
+
+  it.each(["direct", "stale"] as const)("%s refund from the previous UTC day cannot release today's use", async (mode) => {
+    const isolated = await openSessionWhoseLocalDateDiffersFromUtc();
+    const deps = { exec: isolated.exec };
+    try {
+      const old = await mod.consumeEstimateCredit(
+        { ipHash: "utc-rollover", today: isolated.utcDay }, deps
+      );
+      if (!old.ok || !old.reservationId) throw new Error("anonymous reservation was not created");
+      // Simulate crossing midnight without changing the process or database clock.
+      await isolated.client.query(
+        `UPDATE estimate_credit_reservations
+            SET free_use_day = free_use_day - 1, created_at = NOW() - INTERVAL '1 hour'
+          WHERE id = $1`, [old.reservationId]
+      );
+      await isolated.client.query(
+        `UPDATE estimate_free_uses SET last_used_at = ($1::date - 1)::timestamp WHERE ip_hash = 'utc-rollover'`,
+        [isolated.utcDay]
+      );
+      const today = await mod.consumeEstimateCredit(
+        { ipHash: "utc-rollover", today: isolated.utcDay }, deps
+      );
+      expect(today.ok).toBe(true);
+      if (mode === "direct") {
+        expect(await mod.settleEstimateCreditReservation(old.reservationId, "refund", deps)).toBe(true);
+        expect(await mod.settleEstimateCreditReservation(old.reservationId, "refund", deps)).toBe(true);
+      } else {
+        expect(await mod.refundStaleEstimateCreditReservations({}, deps)).toEqual({
+          examined: 1, refunded: 1, unrecoverable: 0,
+        });
+      }
+      const usage = await isolated.client.query<{ count_today: number; day: string }>(
+        `SELECT count_today, last_used_at::date::text AS day FROM estimate_free_uses WHERE ip_hash = 'utc-rollover'`
+      );
+      expect(usage.rows[0]).toEqual({ count_today: 1, day: isolated.utcDay });
+      expect(await mod.consumeEstimateCredit(
+        { ipHash: "utc-rollover", today: isolated.utcDay }, deps
+      )).toMatchObject({ ok: false, status: 402 });
+    } finally {
+      await isolated.client.end();
+    }
+  });
+
+  it("uses the trusted request day even when SQL starts after UTC midnight", async () => {
+    const isolated = await openSessionWhoseLocalDateDiffersFromUtc();
+    const deps = { exec: isolated.exec };
+    try {
+      const clock = await isolated.client.query<{ day: string }>(`SELECT ($1::date - 1)::text AS day`, [isolated.utcDay]);
+      const input = { ipHash: "lagged-trusted-day", today: clock.rows[0].day };
+      const first = await mod.consumeEstimateCredit(input, deps);
+      if (!first.ok || !first.reservationId) throw new Error("anonymous reservation was not created");
+      expect(await mod.consumeEstimateCredit(input, deps)).toMatchObject({ ok: false, status: 402 });
+      expect(await mod.settleEstimateCreditReservation(first.reservationId, "refund", deps)).toBe(true);
+      const usage = await isolated.client.query<{ count_today: number }>(
+        `SELECT count_today FROM estimate_free_uses WHERE ip_hash = 'lagged-trusted-day'`
+      );
+      expect(usage.rows[0].count_today).toBe(0);
+    } finally {
+      await isolated.client.end();
+    }
+  });
+
+  it("a delayed previous-day request cannot rewind an already-used current UTC window", async () => {
+    const isolated = await openSessionWhoseLocalDateDiffersFromUtc();
+    const deps = { exec: isolated.exec };
+    try {
+      const input = { ipHash: "never-rewind-day", today: isolated.utcDay };
+      expect(await mod.consumeEstimateCredit(input, deps)).toMatchObject({ ok: true, path: "anon_free" });
+      const clock = await isolated.client.query<{ day: string }>(`SELECT ($1::date - 1)::text AS day`, [isolated.utcDay]);
+      expect(await mod.consumeEstimateCredit({ ...input, today: clock.rows[0].day }, deps)).toMatchObject({ ok: false, status: 402 });
+      expect(await mod.consumeEstimateCredit(input, deps)).toMatchObject({ ok: false, status: 402 });
+    } finally {
+      await isolated.client.end();
+    }
+  });
+
   // 6b — Concurrency (authenticated owner-bound estimate row): FOR UPDATE SKIP LOCKED
   //      guarantees exactly one spend across two racers.
   it("(6b) two concurrent authenticated requests for one owned estimate credit spend exactly one", async () => {

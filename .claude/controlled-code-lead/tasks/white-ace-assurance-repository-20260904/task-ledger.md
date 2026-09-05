@@ -1,5 +1,59 @@
 # Task ledger — White Ace repository assurance and remediation intake
 
+## UTC-credit continuation — 2026-09-05
+
+Pre-wave15101b2844187aa184198d5116e2898463dfae61, preserved unrelated
+docs/planning/vault-worlds, owner-CREDIT approved from existing explicit record.
+Root sole writer, Terra bounded reproduction, Sol independent verification. Read the
+approved packet in change-manifest.md and rollback.md; historical exclusions below
+are not current credit authority. Other protected or external gates remain intact.
+Old service: independent22/24; augmented root suite22pass/5fail after permitting only
+the owned PG17 loopback fixture (first sandbox attempt had EPERM/27skipped, not red proof).
+WIP: UTC timestamp writes and refund RETURNING status; three real credit/idempotency/
+recovery suites43/43, zero skips. Independent boundary/mutation work remains in progress;
+not exact-candidate certification. Parent program valid:true/ready:false,101+34 nodes.
+No migration, deploy, provider call, new dependency or live credential use.
+
+Changed-surface proof: Sol held-out PG17 reproduces trusted request day preceding SQL
+UTC day (repeat admitted; refund reported true while count remained1). Root adds
+lagged-day and late-old-window regressions: intermediate source27pass/2fail. Final
+admission uses input.today::date::timestamp for both writes and monotonic newer-or-same
+day admission; direct/stale compensation retains recorded-day guards and UTC writes.
+Final three-suite matrix45/45 on root Vitest4.1.11 and exact-lock Vitest4.1.7 copy
+/private/tmp/mintvault-h1ef-clean.x3NRtE; no skips. Two initial UTC regressions unchanged;
+five added cases cover stale recovery, old-day direct/stale compensation, midnight
+request lag and old-day rewind. Existing concurrency/idempotency tests remain intact.
+
+Commands: pinned Node20.20.2 runs vitest for estimate-credit-consumption-owner-binding,
+estimate-credit-idempotency, estimate-credit-recovery-lifecycle with --pool=forks
+--maxWorkers=1 --no-file-parallelism. env -i supplies only locale/PATH/POSTGRES17_BIN.
+The existing fixture creates mkdtemp/initdb PG17.10 on a random127.0.0.1 port, assigns
+only that generated cluster URL to its process-local MINTVAULT_DATABASE_URL alias before
+service import, and stops/removes only its owned cluster. No inherited URL or .env read.
+An execution-guard rejection on alias ambiguity was resolved by these read-only source
+checks and an approved retry of the SAME command; no indirect execution or config bypass.
+
+Final npm run check, check:tests (unchanged345), architecture:check (unchanged8455),
+and local production build PASS. Scoped lint0errors,40existing warnings; new tests
+add no explicit-any warnings. git diff --check PASS. No generated snapshot change.
+Governance-only postflight remains fail-closed on managed CLAUDE drift/npm egress/
+preserved dirty tree/branch protected paths; Graphify REBUILD_REQUIRED. No --run or
+--accept-protected used, no hostile/exact-candidate gate waived.
+SHA256 service4bdc8a315a834354151aec0ccf802ad8bccadbc5d7e70aed7ae4544d2caa6e46;
+test099be91c983f1cee6bf26e192c51d36d62857e6fbfb295e8be0efc7ace150087.
+
+Independent Sol final review CLEAN: real45/45, zero skips. Isolated mutations all bite:
+removing trusted-day/UTC writes fails2/3 focused assertions (direct/stale counts);
+weakening monotonic < to <> fails delayed-old admission1/1; reverting refund CTE
+RETURNING result fails1/1. Restore7/7 UTC cluster passes and both hashes match root.
+Completed detached evidence worktree was safely moved with git worktree move from
+.engineering/tmp/waa-credit-proof-15101b28 to
+/private/tmp/mintvault-waa-credit-proof-15101b28, retaining both dirty overlay files,
+Git registration and exact hashes; no files deleted or shared checkout absorbed.
+REPAIR-CREDIT-UTC FIXED; independent local proof clean, PROOF-CREDIT still IN_PROGRESS
+for immutable-candidate binding. No restricted security or final hostile gate closed.
+
+
 ## Stage 0 — Baseline (recorded 2026-09-04 Europe/London)
 
 - Repository: `/Users/cornelius/mintvault-platform`.

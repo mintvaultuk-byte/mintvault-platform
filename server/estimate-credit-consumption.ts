@@ -208,17 +208,21 @@ export async function consumeEstimateCredit(
   }
 
   // ── ANONYMOUS — server-side free tier: 1 estimate per IP per UTC day ─────────
+  // last_used_at is a UTC window marker in a timestamp-without-zone column.
+  // Use the route's trusted day for the marker AND reservation; a separate SQL
+  // clock can cross midnight after the request starts. Never rewind a newer window.
   if (input.ipHash && input.today) {
     const reservationId = crypto.randomUUID();
     const upsert = await exec.execute(sql`
       WITH admitted AS (
         INSERT INTO estimate_free_uses (ip_hash, last_used_at, count_today)
-        VALUES (${input.ipHash}, NOW(), 1)
+        VALUES (${input.ipHash}, ${input.today}::date::timestamp, 1)
         ON CONFLICT (ip_hash) DO UPDATE SET
           count_today = 1,
-          last_used_at = NOW()
-        WHERE estimate_free_uses.last_used_at::date <> ${input.today}::date
-           OR estimate_free_uses.count_today < 1
+          last_used_at = ${input.today}::date::timestamp
+        WHERE estimate_free_uses.last_used_at::date < ${input.today}::date
+           OR (estimate_free_uses.last_used_at::date = ${input.today}::date
+               AND estimate_free_uses.count_today < 1)
         RETURNING count_today
       ), reserved AS (
         INSERT INTO estimate_credit_reservations
@@ -316,7 +320,7 @@ export async function settleEstimateCreditReservation(
              )
            )
          )
-      RETURNING credit_path, session_user_id, estimate_credit_id, ip_hash, free_use_day
+      RETURNING status, credit_path, session_user_id, estimate_credit_id, ip_hash, free_use_day
     ), refund_user AS (
       UPDATE users u
          SET ai_credits_user_balance = ai_credits_user_balance + 1,
@@ -335,7 +339,7 @@ export async function settleEstimateCreditReservation(
     ), refund_anon AS (
       UPDATE estimate_free_uses f
          SET count_today = GREATEST(0, count_today - 1),
-             last_used_at = NOW()
+             last_used_at = CURRENT_TIMESTAMP AT TIME ZONE 'UTC'
         FROM claimed c
        WHERE c.credit_path = 'anon_free'
          AND f.ip_hash = c.ip_hash
@@ -343,9 +347,11 @@ export async function settleEstimateCreditReservation(
          AND f.count_today > 0
       RETURNING f.ip_hash
     )
-    SELECT status
-      FROM estimate_credit_reservations
-     WHERE id = ${reservationId}::uuid
+    SELECT status FROM claimed
+    UNION ALL
+    SELECT status FROM estimate_credit_reservations
+     WHERE id = ${reservationId}::uuid AND NOT EXISTS (SELECT 1 FROM claimed)
+    LIMIT 1
   `);
   return (result.rows[0] as any)?.status === "refunded";
 }
@@ -444,7 +450,7 @@ export async function refundStaleEstimateCreditReservations(
     ), refund_anonymous AS (
       UPDATE estimate_free_uses f
          SET count_today = GREATEST(0, f.count_today - amounts.amount),
-             last_used_at = ${now}
+             last_used_at = (${now}::timestamptz AT TIME ZONE 'UTC')
         FROM anonymous_refund_amounts amounts
        WHERE f.ip_hash = amounts.ip_hash
          AND f.last_used_at::date = amounts.free_use_day
