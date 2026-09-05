@@ -27,6 +27,48 @@ async function architectureModule() {
   return import("../scripts/architecture/check-architecture.mjs");
 }
 
+describe("architecture Git inventory parity", () => {
+  it("excludes ignored local sources while retaining non-ignored new sources", async () => {
+    const { buildArchitectureSnapshot } = await architectureModule();
+    const root = goldenWorkspace();
+    write(root, ".gitignore", "server/local-only.ts\n");
+    write(
+      root,
+      "server/local-only.ts",
+      'import { S3Client } from "@aws-sdk/client-s3"; export const client = new S3Client({});\n'
+    );
+    write(
+      root,
+      "server/new-source.ts",
+      'import { S3Client } from "@aws-sdk/client-s3"; export const client = new S3Client({});\n'
+    );
+    // Positive control: the old plain-filesystem boundary sees this real AST edge.
+    expect(
+      buildArchitectureSnapshot(root, miniaturePolicy).records.some((r) => r.source.startsWith("server/local-only.ts:"))
+    ).toBe(true);
+    expect(spawnSync("git", ["init", "-q"], { cwd: root }).status).toBe(0);
+    const snapshot = buildArchitectureSnapshot(root, miniaturePolicy);
+    expect(snapshot.records.some((r) => r.source.startsWith("server/local-only.ts:"))).toBe(false);
+    expect(snapshot.records.some((r) => r.source.startsWith("server/new-source.ts:"))).toBe(true);
+  });
+
+  it("does not hide tracked source just because an ignore pattern matches it", async () => {
+    const { buildArchitectureSnapshot } = await architectureModule();
+    const root = goldenWorkspace();
+    expect(spawnSync("git", ["init", "-q"], { cwd: root }).status).toBe(0);
+    write(root, ".gitignore", "server/tracked.ts\n");
+    write(
+      root,
+      "server/tracked.ts",
+      'import { S3Client } from "@aws-sdk/client-s3"; export const client = new S3Client({});\n'
+    );
+    expect(spawnSync("git", ["add", "--force", "server/tracked.ts"], { cwd: root }).status).toBe(0);
+    expect(
+      buildArchitectureSnapshot(root, miniaturePolicy).records.some((r) => r.source.startsWith("server/tracked.ts:"))
+    ).toBe(true);
+  });
+});
+
 const miniaturePolicy = {
   schemaVersion: 2,
   snapshot: "snapshot.json",
@@ -1590,8 +1632,7 @@ export function scopedQueryHash(queryKey){
           id: 'cache-key:["/api/public"]',
           adminCacheScope: "explicit-public-shared",
           runtimePrincipalBinding: "none-public-shared",
-          cacheClassificationAuthority:
-            "client/src/lib/queryClient.ts#isAdminProtectedQueryKey",
+          cacheClassificationAuthority: "client/src/lib/queryClient.ts#isAdminProtectedQueryKey",
           cacheHashAuthority: "client/src/lib/queryClient.ts#scopedQueryHash",
         }),
         expect.objectContaining({
@@ -1606,11 +1647,7 @@ export function scopedQueryHash(queryKey){
       ])
     );
 
-    write(
-      root,
-      "client/src/lib/queryClient.ts",
-      cacheAuthority.replace(", activeAdminPrincipal.isSuperAdmin", "")
-    );
+    write(root, "client/src/lib/queryClient.ts", cacheAuthority.replace(", activeAdminPrincipal.isSuperAdmin", ""));
     expect(buildArchitectureSnapshot(root, policy).violations).toEqual(
       expect.arrayContaining([
         expect.objectContaining({

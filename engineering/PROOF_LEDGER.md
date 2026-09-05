@@ -1,5 +1,18 @@
 # Engineering proof ledger
 
+## 2026-09-05 H1d clean-checkout parity / terminal CI evidence
+
+At pushed2a532416, CI33963442054 failed architecture drift and its image vulnerability
+gate; governance33963442029 failed typecheck and31 assertions across12 test files.
+Native hosted AMD64 image build/dependency/dev-tool/runtime-user checks passed, but
+startup proof was skipped. Security evidence remains restricted/UNKNOWN; no waiver.
+H1d WIP: Git-aware inventory, 180 removed ignored/untracked metadata records and no
+changed retained allowance;27/27 architecture assertions pass under Node20.20.2.
+Tracked-files-only copy independently yields8442 records, zero violations and exact
+snapshot equality. Luna verifies inventory semantics under Node24 (not pinned-runtime
+proof); root supplies Node20 proof. See the existing hygiene-wave proof for details.
+This is a functional parity repair, not full CI or release closure.
+
 ## 2026-09-05 continuous H1 local integration checkpoint
 
 [Retained commands, hashes and limitations](../.claude/controlled-code-lead/tasks/repository-architecture-recovery-20260904/hygiene-wave-proof.md):

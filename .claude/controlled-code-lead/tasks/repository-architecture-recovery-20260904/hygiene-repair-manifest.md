@@ -107,3 +107,26 @@ synthetic credentials, use a random loopback port and bucket, verify ownership b
 test/cleanup, remove only that run's container/test volume. Retain script and results;
 this is local S3-compatible proof, not Cloudflare R2/staging certification or durable
 CI integration. A checked-in reusable object-store gate remains subsequent work.
+
+## H1d — clean-checkout architecture inventory parity
+
+Baseline2a532416, CI run33963442054/job101299246896 reproduced architecture failure:
+the filesystem walker included ignored local scripts in the committed graph/legacy
+ledger, but those files do not exist in CI. The five later missing-test-report failures
+are downstream of this early gate, not five new product defects.
+
+Exact implementation: `scripts/architecture/check-architecture.mjs` must enumerate
+Git-tracked plus non-ignored new files for enrolled checkouts, retain tracked files
+even if an ignore pattern matches, and fail if inventory enumeration fails. Preserve
+plain synthetic no-Git fixtures. `tests/architecture-authority.test.ts` gains executable
+Git fixture tests proving ignored local exclusion, new source inclusion and tracked
+ignored inclusion. No category/guard/floor is removed.
+`scripts/architecture/legacy-authority.json` removes only exact records whose source
+is proven untracked AND ignored; retain them in Git history, preserve source files.
+Regenerate `scripts/architecture/generated/architecture-authority.json` from corrected
+inputs. No source content from ignored scripts is read/copied or committed.
+Proof: red/green miniature Git fixture, full existing architecture hostile matrix,
+local/clean-checkout inventory parity, exact-SHA CI. Root is sole writer; independent
+functional verifier checks changed inventory semantics. Rollback is this exact diff;
+no live/runtime/migration behavior or destructive cleanup. Existing ARCH-CI-001 /
+REPAIR-AUTHORITY-CONTROLS / REPAIR-CI-TOPOLOGY own this repair.

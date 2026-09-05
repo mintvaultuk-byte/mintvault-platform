@@ -185,3 +185,54 @@ Durable checked-in object-store orchestration remains next H1 work.
 Postflight remains fail-closed (governance-only): existing managed CLAUDE drift,
 npm package-egress check, dirty checkout and branch-wide protected paths; Graphify
 REBUILD_REQUIRED. No override, no full postflight --run claim, no deployment.
+
+### H1d — exact hosted failure and clean-checkout parity
+
+The owner-authorized non-force push placed2a532416fc33a1dc0ef05722502a142cacec7f0f
+on the existing feature branch and draft PR336. CI33963442054 is terminal FAILURE.
+Job101299246896 stopped at architecture drift: the filesystem inventory admitted
+local Git-ignored sources missing from a clean checkout. Missing subsequent suite
+reports are cascading, not separate product failures.
+
+Changed Git inventory includes tracked and non-ignored new files, retains forced
+tracked ignored files, and fails on Git inventory errors. No-Git source archives and
+synthetic fixtures retain the existing filesystem path. Existing guards/categories
+are unchanged. Metadata-only comparison proves legacy3380->3200, exactly180 removed,
+zero added/changed retained records; all40 paths independently confirmed both ignored
+and untracked. Their local files remain untouched and prior records remain in Git.
+Generated graph8622->8442; no runtime/product/schema edit.
+
+Root Node20.20.2 full architecture suite:27/27 PASS. The regression fixtures compare
+a positive real AST provider edge under the old filesystem boundary with its absence
+when Git excludes the local file, and preserve tracked/new files. An initial fixture
+draft used an inapplicable table declaration and was corrected; those draft failures
+are not claimed as product red proof. Actual CI failure and the AST positive control
+establish the invariant. Independent Luna recheck passed both new fixtures and
+metadata/guard inspection under Node24.14.1, explicitly not pinned-runtime evidence.
+
+Tracked-files-only archive at /private/tmp/mintvault-h1d-clean.QoSfAj (no ignored
+sources or Git metadata) was built from current tracked working files. New analyzer
+returns8442 records, zero violations; compareSnapshot reports ok:true with no added,
+removed, changed or count drift. This independently proves local/clean-source parity.
+
+Image job101299246939 passed native linux/amd64 production build, exact Node20.20.2,
+native/ESM imports, dev-tool absence, UID/read-only application checks and SBOM retention.
+It failed the existing fixable HIGH/CRITICAL vulnerability gate; all subsequent
+readiness/schema/shutdown proof steps were skipped. The Node-package section reports
+21HIGH/1CRITICAL; OS findings are also present, not counted here. No vulnerability
+ignore, threshold downgrade, security certification or restricted-lane reroute.
+Secret scan, dependency review and CodeQL jobs passed but do not override this veto.
+
+Governance33963442029/job101299246537 is terminal FAILURE: TS2339 PDFDocument.destroy
+in server/routes.ts:3230 and31 failed/7349 passed/5 skipped assertions across492 files
+(12 failed/480 passed). Failures include architecture, known certificate image/UTC/
+claim invariants, legacy Admin source/fixture contracts and an ignored operational
+script referenced by a test. Existing graph owns these; no broad audit is relaunched.
+Narrow read-only workers classify PDF type/runtime contract and Admin fixtures while
+root continues H1. Full exact-candidate CI and required hostile/security gates remain open.
+
+Final H1d local controls: scoped ESLint zero errors/warnings; test TypeScript ratchet
+passes with the unchanged345 diagnostics; architecture check8442 records PASS;
+git diff --check PASS. Governance-only postflight remains fail-closed on existing
+managed CLAUDE drift, npm egress, preserved dirty work and branch-wide protected
+paths, with Graphify REBUILD_REQUIRED. No acceptance override or full --run claim.

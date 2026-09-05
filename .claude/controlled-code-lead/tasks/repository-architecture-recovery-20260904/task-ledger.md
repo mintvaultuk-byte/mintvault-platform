@@ -1,5 +1,28 @@
 # Task ledger — repository architecture recovery
 
+## Continuous H1 exact-CI correction — 2026-09-05
+
+Checkpoint2a532416 was non-force pushed to the existing feature branch/PR336.
+CI33963442054 is terminal FAILURE: architecture inventory drift (H1d repair below)
+and production-image vulnerability gate. Hosted native AMD64 build, pinned Node,
+native imports, dev-tool absence and unprivileged/read-only app checks passed;
+image readiness/migration/shutdown steps were skipped after the vulnerability veto.
+The restricted security lane remains UNKNOWN; no bypass or weakened gate.
+
+Governance33963442029 is terminal FAILURE: PDFDocument.destroy type error and
+12/492 test files failing (31 failed, 7349 passed, 5 skipped). Known image/UTC/claim
+backlog failures remain open; Admin fixture/source-contract failures and missing
+ignored operational-script input are being reconciled against actual source, not
+deleted or counted as product proof. Narrow cheaper read-only workers handle PDF
+contract and Admin test classification; root alone writes this checkout.
+
+H1d removes only 180 stale graph/legacy records from 40 Git-ignored/untracked local
+sources, leaving those files untouched. Full architecture suite27/27 on Node20 and
+a tracked-files-only source copy both pass with8442 records/zero violations. New
+tests preserve tracked-ignored and new non-ignored source coverage. Exact updated
+CI remains required; the graph is IN_PROGRESS, not release-ready. Continue H1
+durable object-store/browser substrate and approved repair packets without idle gaps.
+
 ## Continuous H1 progress — 2026-09-05 daytime
 
 Owner rejected half-hour wakeups: heartbeat PAUSED, continuous Goal ACTIVE; no

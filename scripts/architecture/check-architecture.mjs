@@ -3,6 +3,7 @@ import { createHash } from "node:crypto";
 import { existsSync, mkdirSync, readFileSync, readdirSync, statSync, writeFileSync } from "node:fs";
 import { dirname, extname, join, resolve, sep } from "node:path";
 import { fileURLToPath } from "node:url";
+import { spawnSync } from "node:child_process";
 import ts from "typescript";
 
 const ROUTE_METHODS = new Set(["get", "post", "put", "patch", "delete", "options", "head", "all"]);
@@ -59,6 +60,26 @@ function walk(root, relativeRoot) {
     else files.push(portable(child));
   }
   return files;
+}
+
+function architectureFiles(root, scanRoots) {
+  // Synthetic fixtures/source archives have no Git metadata. Enrolled checkouts
+  // must use the same source boundary locally and in CI, including new WIP files
+  // but never ignored workstation scripts. Tracked ignored files still count.
+  if (!existsSync(join(root, ".git"))) return [...new Set(scanRoots.flatMap((part) => walk(root, part)))].sort();
+  const result = spawnSync(
+    "git",
+    ["-C", root, "ls-files", "--cached", "--others", "--exclude-standard", "-z", "--", ...scanRoots],
+    {
+      encoding: "utf8",
+      maxBuffer: 16 * 1024 * 1024,
+    }
+  );
+  if (result.status !== 0)
+    throw new Error(`architecture Git inventory failed: ${result.error?.message || result.stderr || result.status}`);
+  return [...new Set(result.stdout.split("\0").filter(Boolean))]
+    .filter((file) => !file.split("/").some((part) => IGNORED_PARTS.has(part)) && existsSync(join(root, file)))
+    .sort();
 }
 
 function sourceKind(file) {
@@ -2000,8 +2021,7 @@ function semanticAuthorityRecords(model, adminCacheAuthority) {
       const key = expressionText(node.initializer, source);
       const firstKey = firstStaticQueryKey(node.initializer, model);
       const explicitPublic =
-        adminCacheAuthority.configured &&
-        (firstKey === "public" || adminCacheAuthority.publicQueryKeys.has(firstKey));
+        adminCacheAuthority.configured && (firstKey === "public" || adminCacheAuthority.publicQueryKeys.has(firstKey));
       add("session-principal", `cache-key:${key}`, node, {
         keyAuthority: principalKeyAuthority(node.initializer),
         principalBinding: hasPrincipalExpression(node.initializer)
@@ -2009,9 +2029,7 @@ function semanticAuthorityRecords(model, adminCacheAuthority) {
           : "principal-not-declared-in-key",
         ...(adminCacheAuthority.configured
           ? {
-              adminCacheScope: explicitPublic
-                ? "explicit-public-shared"
-                : "principal-partitioned-when-admin-active",
+              adminCacheScope: explicitPublic ? "explicit-public-shared" : "principal-partitioned-when-admin-active",
               cacheClassificationAuthority: `${adminCacheAuthority.declaration.file}#${adminCacheAuthority.declaration.classifier}`,
               cacheHashAuthority: `${adminCacheAuthority.declaration.file}#${adminCacheAuthority.declaration.hash}`,
               runtimePrincipalBinding: explicitPublic
@@ -2517,7 +2535,7 @@ function readLegacyAuthority(root, policy) {
 }
 
 export function buildArchitectureSnapshot(root, policy) {
-  const files = [...new Set(policy.scanRoots.flatMap((scanRoot) => walk(root, scanRoot)))].sort();
+  const files = architectureFiles(root, policy.scanRoots);
   const fileSet = new Set(files);
   const models = makeModels(root, fileSet, policy);
   propagateExpressReceivers(models);
