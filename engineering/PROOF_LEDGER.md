@@ -1,5 +1,17 @@
 # Engineering proof ledger
 
+## 2026-09-06 VQ metadata compatibility
+
+[Existing VQ packet](../.claude/controlled-code-lead/tasks/repository-architecture-recovery-20260904/vq-schema-recovery.md)
+records the reproduced immutable0121/public VQ journal conflict and closed existing
+drizzle namespace correction from5e8140bb. Actual0121 after16VQ SQL preserves rows
+and fingerprint; public journal/receipt/sequence residue refuses without writes.
+Root97, independentSol30, final clean-lock127/127, zero skips, build/type/lint/architecture pass.
+Independent lock-interleaving exposed a scoped stale-preflight defect, reproduced
+and fixed in the same wave; final held-out proof refuses without SQL/journal effects.
+One exact legacy-query identity transfer, no wider registry or diagnostic waiver.
+Historical adoption, metadata grants, image/readiness and final hostile/CI remain OPEN.
+
 ## 2026-09-06 VQ catalog foundation
 
 [Existing VQ packet](../.claude/controlled-code-lead/tasks/repository-architecture-recovery-20260904/vq-schema-recovery.md)

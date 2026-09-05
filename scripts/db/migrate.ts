@@ -49,7 +49,7 @@ export function migrationProfile(estate: MigrationEstate = "main") {
     estate,
     migrationsDir:
       basename(entry) === "migrate.cjs" ? join(dirname(entry), "..", directory) : join(process.cwd(), directory),
-    journalTable: estate === "main" ? "schema_migrations" : "vq_schema_migrations",
+    journalTable: estate === "main" ? "schema_migrations" : "drizzle.vq_schema_migrations",
     advisoryLockKey: estate === "main" ? 4_150_205 : 4_150_206,
   } as const;
 }
@@ -344,7 +344,7 @@ export function listMigrationFiles(dir: string = MIGRATIONS_DIR): MigrationFile[
 
 function journalDdl(estate: MigrationEstate): string {
   const { journalTable } = migrationProfile(estate);
-  return `
+  return `${estate === "vault-quest" ? "CREATE SCHEMA IF NOT EXISTS drizzle;" : ""}
 CREATE TABLE IF NOT EXISTS ${journalTable} (
   id SERIAL PRIMARY KEY,
   filename TEXT NOT NULL UNIQUE,
@@ -364,6 +364,7 @@ interface PgClientLike {
 }
 
 async function ensureJournal(client: PgClientLike, estate: MigrationEstate): Promise<void> {
+  if (estate === "vault-quest") await journalExists(client, estate);
   await client.query(journalDdl(estate));
 }
 
@@ -374,7 +375,15 @@ interface JournalRow {
 
 async function journalExists(client: PgClientLike, estate: MigrationEstate): Promise<boolean> {
   const { journalTable } = migrationProfile(estate);
-  const { rows } = await client.query(`SELECT to_regclass('public.${journalTable}') AS reg`);
+  const relation = estate === "main" ? `public.${journalTable}` : journalTable;
+  const legacyCheck =
+    estate === "vault-quest"
+      ? ", COALESCE(to_regclass('public.vq_schema_migrations'), to_regclass('public.vq_schema_baselines'), to_regclass('public.vq_schema_migrations_id_seq')) AS legacy"
+      : "";
+  const { rows } = await client.query(`SELECT to_regclass('${relation}') AS reg${legacyCheck}`);
+  if (rows[0]?.legacy != null) {
+    throw new Error("Vault Quest refuses legacy public control state; do not copy or fabricate migration history.");
+  }
   return rows[0]?.reg != null;
 }
 
@@ -902,6 +911,9 @@ export async function applyScopedMigration(
     // (9) THE RACE CHECK. Re-read the journal under the lock and require it to be
     // byte-identical to the pre-flight read. If another operator applied anything
     // between planning and execution, the plan is stale — abort rather than act on it.
+    if (estate === "vault-quest" && !(await journalExists(client, estate))) {
+      throw new Error("Scoped Vault Quest journal disappeared after pre-flight. Refusing to run.");
+    }
     const underLock = await journalFingerprint(client, estate);
     if (underLock.fingerprint !== before.fingerprint || underLock.count !== before.count) {
       throw new Error(

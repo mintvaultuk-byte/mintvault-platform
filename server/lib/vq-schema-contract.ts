@@ -36,7 +36,7 @@ export const VQ_BASELINE_RELATIONS = Object.freeze([
 
 // No row contents, sequence current values, role names, credentials or relation OIDs.
 // Stable object names and ordered structural arrays make the evidence portable.
-// The two explicitly named metadata tables are not part of the historical estate.
+// VQ control metadata lives outside public; an unexpected public table must differ.
 export const VQ_SCHEMA_CATALOG_SQL = `
 WITH relations AS (
   SELECT c.oid, c.relname, c.relkind, c.relpersistence, c.relrowsecurity, c.relforcerowsecurity
@@ -44,7 +44,6 @@ WITH relations AS (
     JOIN pg_catalog.pg_namespace n ON n.oid = c.relnamespace
    WHERE n.nspname = 'public' AND left(c.relname, 3) = 'vq_'
      AND c.relkind IN ('r','p','v','m','f')
-     AND c.relname NOT IN ('vq_schema_migrations','vq_schema_baselines')
 )
 SELECT COALESCE(jsonb_agg(jsonb_build_object(
   'name', r.relname, 'kind', r.relkind, 'persistence', r.relpersistence,

@@ -678,7 +678,7 @@ export const UNMANAGED_INVENTORY: readonly UnmanagedEntry[] = [
 /** Non-public schemas known and expected. Any other schema is an unknown that must fail preflight. */
 export const KNOWN_SCHEMAS: readonly { name: string; reason: string }[] = [
   { name: "public", reason: "application schema" },
-  { name: "drizzle", reason: "Drizzle migration metadata schema" },
+  { name: "drizzle", reason: "Shared Drizzle and Vault Quest migration metadata schema" },
   { name: "stripe", reason: "Stripe integration schema (verified on prod)" },
 ] as const;
 

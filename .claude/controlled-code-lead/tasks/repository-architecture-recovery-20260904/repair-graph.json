@@ -2827,6 +2827,11 @@
       ],
       "evidence": [
         {
+          "ref": "vq-schema-recovery.md metadata correction: independentSol30/30 plus held-out scoped-race red/green, clean127/127; current0121 compatibility; history/grants/readiness remain OPEN",
+          "sha": "5e8140bb441f5432a6592c07b6d5047a2e4c105a",
+          "observer": "sol-vq-namespace-verifier"
+        },
+        {
           "ref": "vq-schema-recovery.md catalog foundation: independentTerra16/16, clean68/68; PG16.13/17.10 same26-relation fingerprint; historical writes/readiness remain OPEN",
           "sha": "4d25602cc67d1dc87a00abf6f7b687dfe5413e27",
           "observer": "terra-vq-catalog-verifier"

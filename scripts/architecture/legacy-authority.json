@@ -14117,7 +14117,7 @@
       "expiresWith": "the bounded-context repair that assigns explicit authority"
     },
     {
-      "key": "table-access|scripts/db/migrate.ts|unclassified:`SELECT to_regclass('public.${journalTable}') AS reg`#0",
+      "key": "table-access|scripts/db/migrate.ts|unclassified:`SELECT to_regclass('${relation}') AS reg${legacyCheck}`#0",
       "finding": "ARCH-AUTHORITY-001",
       "expiresWith": "the bounded-context repair that assigns explicit authority"
     },

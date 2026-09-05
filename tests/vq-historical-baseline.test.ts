@@ -1,4 +1,5 @@
 import { createHash } from "node:crypto";
+import { readFileSync } from "node:fs";
 import pg from "pg";
 import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it } from "vitest";
 import { applyMigrations, listMigrationFiles, migrationProfile } from "../scripts/db/migrate";
@@ -36,6 +37,22 @@ afterEach(async () => {
 });
 
 describe("immutable VQ historical schema catalog", () => {
+  it("remains compatible with immutable main runtime authority after VQ creation", async () => {
+    await db.query(
+      "INSERT INTO vq_export_jobs (kind,owner_admin_id,idempotency_key) VALUES ('test','synthetic','main-after-vq')"
+    );
+    const before = (await db.query("SELECT * FROM vq_export_jobs")).rows;
+    await db.query(readFileSync("migrations/0121_main_runtime_role_authority.sql", "utf8"));
+    expect((await db.query("SELECT * FROM vq_export_jobs")).rows).toEqual(before);
+    expect(await fingerprint()).toBe(VQ_BASELINE_FINGERPRINT);
+    expect(
+      (
+        await db.query(
+          "SELECT has_table_privilege('mintvault_app','public.vq_export_jobs','INSERT') insert_ok, has_table_privilege('mintvault_app','public.vq_export_jobs','DELETE') delete_ok"
+        )
+      ).rows[0]
+    ).toEqual({ insert_ok: true, delete_ok: false });
+  });
   it("pins source inventory and structural evidence, not a fabricated migration history", async () => {
     expect(files).toHaveLength(16);
     const sourceHash = createHash("sha256")
@@ -72,8 +89,8 @@ describe("immutable VQ historical schema catalog", () => {
   ])("detects changed %s without a baseline or schema write of its own", async (_name, mutation) => {
     await db.query(mutation);
     expect(await fingerprint()).not.toBe(expected);
-    expect((await db.query("SELECT to_regclass('public.vq_schema_baselines') receipt")).rows[0].receipt).toBeNull();
-    expect((await db.query("SELECT count(*)::int count FROM vq_schema_migrations")).rows[0].count).toBe(16);
+    expect((await db.query("SELECT to_regclass('drizzle.vq_schema_baselines') receipt")).rows[0].receipt).toBeNull();
+    expect((await db.query("SELECT count(*)::int count FROM drizzle.vq_schema_migrations")).rows[0].count).toBe(16);
   });
 
   it("ignores row contents and sequence consumption, not structural changes", async () => {
@@ -92,10 +109,10 @@ describe("immutable VQ historical schema catalog", () => {
   });
 
   it("does not mistake the main journal or any execution ledger for schema evidence", async () => {
-    await db.query("DROP TABLE vq_schema_migrations");
+    await db.query("DROP TABLE drizzle.vq_schema_migrations");
     await db.query("CREATE TABLE schema_migrations (filename text)");
     expect(await fingerprint()).toBe(expected);
     expect((await db.query("SELECT count(*)::int count FROM schema_migrations")).rows[0].count).toBe(0);
-    expect((await db.query("SELECT to_regclass('public.vq_schema_migrations') journal")).rows[0].journal).toBeNull();
+    expect((await db.query("SELECT to_regclass('drizzle.vq_schema_migrations') journal")).rows[0].journal).toBeNull();
   });
 });

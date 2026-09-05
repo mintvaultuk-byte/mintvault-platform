@@ -40,7 +40,9 @@ afterAll(async () => {
 });
 beforeEach(async () => {
   // Only this helper-owned synthetic cluster, never a configured application URL.
-  await client.query("DROP TABLE IF EXISTS main_effect, vq_effect, schema_migrations, vq_schema_migrations");
+  await client.query(
+    "DROP TABLE IF EXISTS main_effect, vq_effect, schema_migrations, drizzle.vq_schema_migrations, public.vq_schema_migrations, public.vq_schema_baselines; DROP SEQUENCE IF EXISTS public.vq_schema_migrations_id_seq"
+  );
 });
 
 describe("closed migration estate namespace", () => {
@@ -52,7 +54,7 @@ describe("closed migration estate namespace", () => {
       advisoryLockKey: 4_150_205,
     });
     const profile = migrationProfile("vault-quest");
-    expect(profile.journalTable).toBe("vq_schema_migrations");
+    expect(profile.journalTable).toBe("drizzle.vq_schema_migrations");
     expect(profile.advisoryLockKey).toBe(4_150_206);
     const files = listMigrationFiles(profile.migrationsDir);
     expect(files).toHaveLength(16);
@@ -77,18 +79,67 @@ describe("closed migration estate namespace", () => {
     await expect(planMigrations(client, [vq], invalid)).rejects.toThrow(/estate/);
     await expect(applyScopedMigration(client, vq.filename, { files: [vq], estate: invalid })).rejects.toThrow(/estate/);
     const result = await client.query(
-      "SELECT to_regclass('public.schema_migrations') a, to_regclass('public.vq_schema_migrations') b"
+      "SELECT to_regclass('public.schema_migrations') a, to_regclass('drizzle.vq_schema_migrations') b"
     );
     expect(result.rows[0]).toEqual({ a: null, b: null });
   });
 
   it("plans missing estates read-only without creating either journal", async () => {
+    const schemaBefore = (await client.query("SELECT to_regnamespace('drizzle') schema")).rows;
     expect((await planMigrations(client, [main])).pending).toEqual([main.filename]);
     expect((await planMigrations(client, [vq], "vault-quest")).pending).toEqual([vq.filename]);
     const result = await client.query(
-      "SELECT to_regclass('public.schema_migrations') a, to_regclass('public.vq_schema_migrations') b"
+      "SELECT to_regclass('public.schema_migrations') a, to_regclass('drizzle.vq_schema_migrations') b"
     );
     expect(result.rows[0]).toEqual({ a: null, b: null });
+    expect((await client.query("SELECT to_regnamespace('drizzle') schema")).rows).toEqual(schemaBefore);
+  });
+
+  it.each(["CREATE TABLE public.vq_schema_baselines (id text)", "CREATE SEQUENCE public.vq_schema_migrations_id_seq"])(
+    "refuses partial public control residue without writes: %s",
+    async (ddl) => {
+      await client.query(ddl);
+      const before = (await client.query("SELECT to_regnamespace('drizzle') schema")).rows;
+      await expect(planMigrations(client, [vq], "vault-quest")).rejects.toThrow(/legacy public control state/);
+      await expect(applyMigrations(client, [vq], { estate: "vault-quest" })).rejects.toThrow(
+        /legacy public control state/
+      );
+      await expect(applyScopedMigration(client, vq.filename, { files: [vq], estate: "vault-quest" })).rejects.toThrow(
+        /legacy public control state/
+      );
+      expect(
+        (await client.query("SELECT to_regclass('drizzle.vq_schema_migrations') journal")).rows[0].journal
+      ).toBeNull();
+      expect((await client.query("SELECT to_regnamespace('drizzle') schema")).rows).toEqual(before);
+      expect(
+        (
+          await client.query(
+            "SELECT COALESCE(to_regclass('public.vq_schema_baselines'), to_regclass('public.vq_schema_migrations_id_seq')) residue"
+          )
+        ).rows[0].residue
+      ).not.toBeNull();
+    }
+  );
+
+  it("refuses old public control state without adopting, copying or deleting it", async () => {
+    await client.query(
+      "CREATE TABLE public.vq_schema_migrations (filename text); INSERT INTO public.vq_schema_migrations VALUES ('preserved-history')"
+    );
+    const before = (await client.query("SELECT to_regnamespace('drizzle') schema")).rows;
+    await expect(planMigrations(client, [vq], "vault-quest")).rejects.toThrow(/legacy public control state/);
+    await expect(applyMigrations(client, [vq], { estate: "vault-quest" })).rejects.toThrow(
+      /legacy public control state/
+    );
+    await expect(applyScopedMigration(client, vq.filename, { files: [vq], estate: "vault-quest" })).rejects.toThrow(
+      /legacy public control state/
+    );
+    expect((await client.query("SELECT * FROM public.vq_schema_migrations")).rows).toEqual([
+      { filename: "preserved-history" },
+    ]);
+    expect(
+      (await client.query("SELECT to_regclass('drizzle.vq_schema_migrations') journal")).rows[0].journal
+    ).toBeNull();
+    expect((await client.query("SELECT to_regnamespace('drizzle') schema")).rows).toEqual(before);
   });
 
   it("applies overlapping numeric identities separately and replays without effects", async () => {
@@ -99,7 +150,7 @@ describe("closed migration estate namespace", () => {
     expect((await client.query("SELECT filename, checksum, status FROM schema_migrations")).rows).toEqual([
       { filename: main.filename, checksum: main.checksum, status: "applied" },
     ]);
-    expect((await client.query("SELECT filename, checksum, status FROM vq_schema_migrations")).rows).toEqual([
+    expect((await client.query("SELECT filename, checksum, status FROM drizzle.vq_schema_migrations")).rows).toEqual([
       { filename: vq.filename, checksum: vq.checksum, status: "applied" },
     ]);
   });
@@ -109,9 +160,9 @@ describe("closed migration estate namespace", () => {
     await expect(
       applyMigrations(client, [file(vq.filename, vq.sql + "; SELECT 1")], { estate: "vault-quest" })
     ).rejects.toThrow(/Checksum mismatch/);
-    await client.query("UPDATE vq_schema_migrations SET status='failed'");
+    await client.query("UPDATE drizzle.vq_schema_migrations SET status='failed'");
     await expect(applyMigrations(client, [vq, forward], { estate: "vault-quest" })).rejects.toThrow(/inconsistent/);
-    await client.query("UPDATE vq_schema_migrations SET status='applied'");
+    await client.query("UPDATE drizzle.vq_schema_migrations SET status='applied'");
     await expect(
       applyMigrations(client, [file("0000_collision.sql", "SELECT 1")], { estate: "vault-quest" })
     ).rejects.toThrow(/identity conflict/);
@@ -141,7 +192,7 @@ describe("closed migration estate namespace", () => {
     await applyMigrations(client, [main]);
     // A main journal does not bootstrap a VQ historical lineage.
     await expect(applyScopedMigration(client, vq.filename, { files: [vq], estate: "vault-quest" })).rejects.toThrow(
-      /no vq_schema_migrations journal/
+      /no drizzle.vq_schema_migrations journal/
     );
     await applyMigrations(client, [vq], { estate: "vault-quest" });
     const before = (await client.query("SELECT * FROM schema_migrations")).rows;
@@ -152,7 +203,7 @@ describe("closed migration estate namespace", () => {
       await applyScopedMigration(client, forward.filename, { files: [vq, forward], estate: "vault-quest" })
     ).toMatchObject({ applied: false, reason: "already_applied", journalBefore: 2, journalAfter: 2 });
     expect((await client.query("SELECT * FROM schema_migrations")).rows).toEqual(before);
-    expect((await client.query("SELECT filename FROM vq_schema_migrations ORDER BY filename")).rows).toEqual([
+    expect((await client.query("SELECT filename FROM drizzle.vq_schema_migrations ORDER BY filename")).rows).toEqual([
       { filename: vq.filename },
       { filename: forward.filename },
     ]);
@@ -174,8 +225,38 @@ describe("closed migration estate namespace", () => {
       })
     ).rejects.toThrow(/does not accept main-lineage/);
     expect(
-      (await client.query("SELECT to_regclass('public.vq_schema_migrations') journal")).rows[0].journal
+      (await client.query("SELECT to_regclass('drizzle.vq_schema_migrations') journal")).rows[0].journal
     ).toBeNull();
+  });
+
+  it("rechecks public control residue under the scoped lock before any migration effect", async () => {
+    await applyMigrations(client, [vq], { estate: "vault-quest" });
+    const before = (await client.query("SELECT * FROM drizzle.vq_schema_migrations")).rows;
+    let injected = false;
+    const racingClient = {
+      async query(sql: string, args?: unknown[]) {
+        if (!injected && sql.includes("pg_try_advisory_lock")) {
+          injected = true;
+          await client.query("CREATE TABLE public.vq_schema_migrations (filename text)");
+        }
+        return client.query(sql, args);
+      },
+    };
+    await expect(
+      applyScopedMigration(racingClient, forward.filename, { files: [vq, forward], estate: "vault-quest" })
+    ).rejects.toThrow(/legacy public control state/);
+    expect(injected).toBe(true);
+    expect((await client.query("SELECT * FROM drizzle.vq_schema_migrations")).rows).toEqual(before);
+    expect(
+      (
+        await client.query(
+          "SELECT column_name FROM information_schema.columns WHERE table_name='vq_effect' AND column_name='proof'"
+        )
+      ).rowCount
+    ).toBe(0);
+    expect(
+      (await client.query("SELECT to_regclass('public.vq_schema_migrations') legacy")).rows[0].legacy
+    ).not.toBeNull();
   });
 });
 
@@ -208,12 +289,12 @@ describe("fresh immutable VQ estate through the real CLI", () => {
       );
     try {
       expect(run(false)).toContain("16 pending");
-      expect((await db.query("SELECT to_regclass('public.vq_schema_migrations') journal")).rows[0].journal).toBeNull();
+      expect((await db.query("SELECT to_regclass('drizzle.vq_schema_migrations') journal")).rows[0].journal).toBeNull();
       expect(run(true)).toContain("Applied 16:");
       const files = listMigrationFiles(migrationProfile("vault-quest").migrationsDir);
       const journal = (
         await db.query(
-          "SELECT filename, checksum, status, completed_at IS NOT NULL completed FROM vq_schema_migrations ORDER BY filename"
+          "SELECT filename, checksum, status, completed_at IS NOT NULL completed FROM drizzle.vq_schema_migrations ORDER BY filename"
         )
       ).rows;
       expect(journal).toEqual(
@@ -229,7 +310,7 @@ describe("fresh immutable VQ estate through the real CLI", () => {
       const before = (await db.query("SELECT * FROM vq_export_jobs")).rows;
       expect(run(true)).toContain("Applied 0:");
       expect((await db.query("SELECT * FROM vq_export_jobs")).rows).toEqual(before);
-      expect((await db.query("SELECT count(*)::int count FROM vq_schema_migrations")).rows[0].count).toBe(16);
+      expect((await db.query("SELECT count(*)::int count FROM drizzle.vq_schema_migrations")).rows[0].count).toBe(16);
       await expect(
         db.query(
           "INSERT INTO vq_export_jobs (kind,owner_admin_id,idempotency_key) VALUES ('test','synthetic-admin','fresh-proof')"

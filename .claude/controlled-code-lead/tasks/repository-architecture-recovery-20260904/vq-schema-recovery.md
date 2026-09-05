@@ -175,7 +175,74 @@ The next metadata design is evaluating an existing migration-only schema to avoi
 0121's public-table classification conflict. No namespace change has been applied;
 the earlier ordering proposal is not an irrevocable implementation decision.
 
-## S1 final proof
+## S2b metadata compatibility correction
+
+Baseline `5e8140bb441f5432a6592c07b6d5047a2e4c105a` is pushed.
+The new public VQ journal conflicts with immutable main0121's explicit public
+table inventory. Resolve this narrow unreleased integration defect by using the
+already-known `drizzle` metadata schema for `drizzle.vq_schema_migrations` and the
+future `drizzle.vq_schema_baselines`. Do not modify ORM `__drizzle_migrations`,
+main's `public.schema_migrations`, any0000–0015SQL, or main0121SQL. No new schema
+registry allowance is needed: `drizzle` already denotes migration metadata.
+
+Exact writes: `scripts/db/migrate.ts`, existing `tests/vq-migration-authority.test.ts`,
+`scripts/db/schema-registry.ts` (existing schema reason only, no acceptance expansion),
+`server/lib/vq-schema-contract.ts`, `tests/vq-historical-baseline.test.ts`, this
+packet and existing task/graph/issue/proof records, plus exact renamed runner
+query identities in legacy/generated architecture inventories if required.
+No new files, owner rules, baseline count/diagnostic allowances or broad extractor
+change. Profile uses a closed qualified identifier. Dry-run never creates a schema.
+Old public control state is refused without adopting, deleting or copying rows.
+All prior S1/S2 proof limits stand; newer namespaced proof supersedes their table
+location, not their claims about business data or absence of deployment.
+
+Proof: reproduce old0121 conflict, then execute immutable0121 after actual16 VQSQL
+without losing rows; preserve main runner regressions, full/scoped VQ journal/
+lock/checksum/replay and catalog fingerprint. Metadata ACL/readiness/history are
+still later0016 work. The root is sole writer, Sol independently reviews this exact
+namespace decision. Rollback may not restore public metadata as a release target;
+keep the unused feature-branch runner unavailable if this compatibility proof fails.
+No shared databases have the new S1 journal from this work, and no external
+migration is performed or inferred. New local metadata is only helper-owned.
+
+## Metadata correction proof
+
+Metadata correction final root proof (baseline5e8140bb + exact WIP): original
+immutable0121 regression reproduced `unclassified public relation(s): vq_schema_migrations`;
+fixed path passes real0121 after all16 VQ files, retains durable rows and the same
+catalog fingerprint. Refuses public journal, receipt and orphan serial sequence
+without copy/adoption/deletion/schema creation. Main defaults stay unchanged.
+Root97/97 before the added residue/race cases; final clean-lock127/127 across seven
+complete suites, zero skips, explicitly executed from the clean-copy working
+directory. Build PASS3366 modules, including migrate.cjs; clean copy has no Git HEAD
+so build identity fallback warning is not candidate provenance. TypeScript/lint0/0;
+test345/script11 ratchets unchanged. Architecture8310 with one exact old-query-key
+transfer, unchanged disposition/expiry; schema registry reason only, no allowance.
+Independent Sol30/30 and held-out interleaving now PASS. Sol reproduced a scoped
+preflight/lock race: legacy public journal could appear before lock acquisition,
+then target SQL executed. Root's new regression was red (applied=true, two journal
+rows), then fixed by checking legacy state again under the lock before any writes.
+Held-out rerun refuses, preserves the journal byte-for-byte and adds no column.
+The targeted red's12 filtered tests are not final proof; full30/127 have zero skips.
+Sol agrees existing drizzle is narrower than adding another accepted schema.
+0016 must require the existing main runtime role, never journal skipped grants;
+runtime must prove metadata USAGE/SELECT and denied mutation. These remain next-wave
+requirements, not completed proof. Ordinary postflight remains unwaived red for
+managed-CLAUDE drift, npm egress, preserved dirty WIP and branch protected review.
+Exact5e8140bb draftPR336 verified; CI33997559856/governance33997559854/33997557543
+running at observation. Prior4d256 primary cancelled, one governance failure and
+one success; no all-green claim or restricted-lane investigation.
+
+Metadata correction source SHA256:
+```text
+160e47abcff3867ad2125953aa0ddeeb7cd7519474cc7af377380019f4491148 scripts/db/migrate.ts
+38a9a39eef533f77116dca9d839e02de18081ef8dcdc243fcd0c4dee3e419ef7 scripts/db/schema-registry.ts
+2d671e11e20b8c059aad4da1388f5c4221f4a26404539d4560253b6f111a68c8 server/lib/vq-schema-contract.ts
+998f63db2ccd90157d840b8fee1c28f40b03218c1470901b49be80b05509d0e2 tests/vq-migration-authority.test.ts
+fe3c154f75fcdff815d314f125fdf191a748d4d54aff16db0cb8ce5401f84a1f tests/vq-historical-baseline.test.ts
+```
+
+### Original S1 checkpoint proof (historical)
 
 S1 local implementation complete; not full VQ closure. Root78/78 across five
 migration suites; independent Sol31/31 across VQ/identity/scoped suites, zero skips.

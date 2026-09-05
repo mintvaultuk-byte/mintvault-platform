@@ -2,6 +2,14 @@
 
 ## Current checkpoint and next bounded wave
 
+2026-09-06 metadata compatibility correction from5e8140bb: reproduced publicjournal
+conflict with immutable0121; closed drizzle namespace fixes it without changing old
+SQL/data/mainjournal. Root97, independent30, final clean127/127 and build pass; exact hashes/limits
+in existing VQ packet. No new schema allowance; partial public control residue
+refuses before writes, including a reproduced-and-fixed scoped preflight/lock race.
+Wave checkpoint/push then0016 required role/grants/receipt
+and historical/readiness work. Software/release/HY-SECURITY remain open, no owner pause.
+
 2026-09-06 catalogfoundation locally proven from pushed4d25602c: same read-only
 fingerprint on ownedPG16.13/17.10, actual26 businessrelations, independent16/16 and
 clean68/68. No history/permission/runtimewrites; helper remains unused. WIPcheckpoint
