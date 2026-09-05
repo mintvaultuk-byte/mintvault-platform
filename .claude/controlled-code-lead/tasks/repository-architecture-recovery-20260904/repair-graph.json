@@ -157,7 +157,7 @@
       "kind": "OWNER_GATE",
       "title": "Decide Partner paid orders versus legacy supply requests",
       "severity": "NONE",
-      "status": "OWNER_DECISION",
+      "status": "PROVEN",
       "agent_mode": "EXTERNAL_OWNER",
       "agent_id": "repository-owner",
       "workspace": "external",
@@ -167,7 +167,7 @@
       "proof_required": [
         "Explicit retain-migrate-retire decision for both historical tables, distinct routes, permissions, rollback, and Stripe order authority"
       ],
-      "evidence": [],
+      "evidence": [{"ref": "owner-approval-record.md; partner-contract-recovery.md: retained histories, route rollback, existing roles; local CI independently verified 64/64; hosted/security vetoes open", "sha": "0494d5fbed5cb30f8379bb507d28c9b2a0a09c0b", "observer": "repository-owner"}],
       "invalidated_by": ["Partner order/request contract change", "owner decision change"],
       "vetoes_release": true
     },
@@ -177,7 +177,7 @@
       "kind": "OWNER_GATE",
       "title": "Authorise shared Partner role contract implementation",
       "severity": "NONE",
-      "status": "OWNER_DECISION",
+      "status": "PROVEN",
       "agent_mode": "EXTERNAL_OWNER",
       "agent_id": "repository-owner",
       "workspace": "external",
@@ -187,7 +187,7 @@
       "proof_required": [
         "Confirm settled Scanner Operator product intent and approve shared/generated client transport changes without expanding server permissions"
       ],
-      "evidence": [],
+      "evidence": [{"ref": "owner-approval-record.md; partner-contract-recovery.md: retained histories, route rollback, existing roles; local CI independently verified 64/64; hosted/security vetoes open", "sha": "0494d5fbed5cb30f8379bb507d28c9b2a0a09c0b", "observer": "repository-owner"}],
       "invalidated_by": ["Partner role or permission contract change", "owner decision change"],
       "vetoes_release": true
     },
@@ -627,7 +627,7 @@
       "kind": "FINDING",
       "title": "Duplicate Partner supply order routes split paid checkout from order history",
       "severity": "HIGH",
-      "status": "OPEN",
+      "status": "FIXED",
       "agent_mode": "READ_ONLY",
       "agent_id": "client-architecture-observer",
       "workspace": "read_only",
@@ -682,7 +682,7 @@
       "kind": "FINDING",
       "title": "Least-privilege Scanner Operator role is absent from active Partner client management",
       "severity": "HIGH",
-      "status": "OPEN",
+      "status": "FIXED",
       "agent_mode": "READ_ONLY",
       "agent_id": "client-architecture-observer",
       "workspace": "read_only",
@@ -1330,7 +1330,7 @@
       "kind": "REPAIR",
       "title": "Wire authoritative Partner, Scanner, script, migration, and unreachable-code proof into CI",
       "severity": "HIGH",
-      "status": "IN_PROGRESS",
+      "status": "FIXED",
       "agent_mode": "LEAD",
       "agent_id": "codex-lead",
       "workspace": "shared",
@@ -1460,17 +1460,17 @@
       "kind": "OWNER_GATE",
       "title": "Approve pre-wave Partner order and RBAC recovery packet",
       "severity": "NONE",
-      "status": "OPEN",
+      "status": "PROVEN",
       "agent_mode": "LEAD",
       "agent_id": "codex-lead",
       "workspace": "shared",
-      "depends_on": ["ARCH-SUPPLY-001", "ARCH-ROLE-001"],
+      "depends_on": ["OWNER-PARTNER-ORDERS", "OWNER-PARTNER-RBAC"],
       "addresses": [],
       "write_scope": [],
       "proof_required": [
         "Both historical tables preserved or explicitly migrated, route/permission rollback, Stripe replay safety, and role compatibility"
       ],
-      "evidence": [],
+      "evidence": [{"ref": "owner-approval-record.md; partner-contract-recovery.md: retained histories, route rollback, existing roles; local CI independently verified 64/64; hosted/security vetoes open", "sha": "0494d5fbed5cb30f8379bb507d28c9b2a0a09c0b", "observer": "codex-lead"}],
       "invalidated_by": ["Partner data", "route", "permission", "Stripe", "recovery procedure"],
       "vetoes_release": true
     },
@@ -1887,7 +1887,7 @@
       "kind": "REPAIR",
       "title": "Separate Partner paid orders and legacy requests; converge permissions, shell, and roles",
       "severity": "HIGH",
-      "status": "OPEN",
+      "status": "FIXED",
       "agent_mode": "LEAD",
       "agent_id": "codex-lead",
       "workspace": "shared",
@@ -1921,12 +1921,25 @@
         "client/src/pages/partner/supplies-orders.tsx",
         "client/src/pages/partner/users.tsx",
         "client/src/App.tsx",
-        "tests/partner-contracts.test.ts"
+        "tests/partner-contracts.test.ts",
+        "tests/partner-contracts-ui.test.ts",
+        "tests/partner-supply-access.test.ts",
+        "scripts/ci/partner-browser-fixture.ts",
+        "scripts/ci/run-disposable-integration.mjs",
+        "scripts/command-centre-runtime-harness.ts",
+        "scripts/command-centre-mobile-layout-check.mjs",
+        "tests/disposable-integration-runner.test.ts",
+        "tests/command-centre-runtime-harness.test.ts",
+        "scripts/architecture/authority-policy.json",
+        "scripts/architecture/legacy-authority.json",
+        "scripts/architecture/generated/architecture-authority.json",
+        "scripts/ci/typecheck-baselines/architecture.json",
+        "scripts/ci/typecheck-baselines/tests.json"
       ],
       "proof_required": [
         "Explicit retain/migrate/retire decision, distinct routes/permissions, both historical tables and fixtures preserved or migrated without loss, paid webhook order in My Orders, legacy request visibility, migration/rollback evidence, one shell, capability controls, and Scanner Operator least privilege"
       ],
-      "evidence": [],
+      "evidence": [{"ref":"owner-approval-record.md; partner-contract-recovery.md: retained histories, route rollback, existing roles; local CI independently verified 64/64; hosted/security vetoes open","sha":"0494d5fbed5cb30f8379bb507d28c9b2a0a09c0b","observer":"codex-lead"},{"ref":"partner-contract-recovery.md: exact hashes; independent Sol HTTP7/React9/runtime47/final-owner2/commerce+scanner33; actual Chrome22/0/0 root+independent+clean; clean exact-lock178; no hosted/final release closure","sha":"0494d5fbed5cb30f8379bb507d28c9b2a0a09c0b","observer":"Sol h1c_lifecycle independent"}],
       "invalidated_by": [
         "Partner router",
         "order/request aggregate",
@@ -2014,7 +2027,8 @@
         "OWNER-GRADING-LEGACY",
         "RECOVERY-GRADING",
         "REPAIR-CI-TOPOLOGY",
-        "REPAIR-ADMIN-PRINT"
+        "REPAIR-ADMIN-PRINT",
+        "REPAIR-PARTNER-CONTRACTS"
       ],
       "addresses": ["ARCH-LEGACY-AI-001"],
       "write_scope": [
@@ -2627,7 +2641,7 @@
       "kind": "PROOF",
       "title": "Independently prove Partner paid orders and Scanner Operator parity",
       "severity": "HIGH",
-      "status": "OPEN",
+      "status": "IN_PROGRESS",
       "agent_mode": "READ_ONLY",
       "agent_id": "partner-contract-verifier",
       "workspace": "read_only",
@@ -2637,7 +2651,7 @@
       "proof_required": [
         "No route collision; paid order visible after checkout; legacy request remains visible under the selected contract; fixtures for both historical tables; migration/no-loss and rollback evidence; one shell; capability matrix; invite/edit Scanner Operator; deny grading/purchase"
       ],
-      "evidence": [],
+      "evidence": [{"ref":"partner-contract-recovery.md: exact hashes; independent Sol HTTP7/React9/runtime47/final-owner2/commerce+scanner33; actual Chrome22/0/0 root+independent+clean; clean exact-lock178; no hosted/final release closure","sha":"0494d5fbed5cb30f8379bb507d28c9b2a0a09c0b","observer":"Sol h1c_lifecycle independent"}],
       "invalidated_by": [
         "Candidate SHA",
         "Partner mount",

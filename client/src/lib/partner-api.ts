@@ -6,10 +6,7 @@
  */
 import { apiRequest } from "./queryClient";
 import type { PartnerOperationalReadiness } from "@shared/partner-readiness";
-import type {
-  AuthenticatedPublicProfileStatus,
-  PartnerPublicPrivacyState,
-} from "@shared/public-partner";
+import type { AuthenticatedPublicProfileStatus, PartnerPublicPrivacyState } from "@shared/public-partner";
 
 export class PartnerApiError extends Error {
   code: string;
@@ -31,7 +28,12 @@ export function partnerErrorMessage(err: unknown): string {
   return "Something went wrong. Please try again.";
 }
 
-async function req<T>(method: string, url: string, data?: unknown, options?: { headers?: Record<string, string> }): Promise<T> {
+async function req<T>(
+  method: string,
+  url: string,
+  data?: unknown,
+  options?: { headers?: Record<string, string> }
+): Promise<T> {
   try {
     // apiRequest deliberately has a very small default surface. Supplies creation needs one
     // additional, server-enforced Idempotency-Key header; merging it here keeps every other
@@ -301,43 +303,94 @@ export type PartnerSuppliesDelivery = {
 
 export const partnerSupplies = {
   catalogue: () =>
-    req<{ products: Array<{ code: PartnerSuppliesProductCode; label: string }> }>("GET", "/api/partner/supplies/catalogue"),
+    req<{ products: Array<{ code: PartnerSuppliesProductCode; label: string }> }>(
+      "GET",
+      "/api/partner/supplies/catalogue"
+    ),
   delivery: () => req<PartnerSuppliesDelivery>("GET", "/api/partner/supplies/delivery"),
-  orders: () => req<{ orders: PartnerSuppliesOrder[] }>("GET", "/api/partner/supplies/orders"),
-  create: (input: { items: Array<{ productCode: PartnerSuppliesProductCode; quantity: number }>; notes?: string | null; idempotencyKey: string }) =>
+  orders: () => req<{ orders: PartnerSuppliesOrder[] }>("GET", "/api/partner/supplies/requests"),
+  create: (input: {
+    items: Array<{ productCode: PartnerSuppliesProductCode; quantity: number }>;
+    notes?: string | null;
+    idempotencyKey: string;
+  }) =>
     req<{ order: PartnerSuppliesOrder; replayed: boolean }>(
       "POST",
-      "/api/partner/supplies/orders",
+      "/api/partner/supplies/requests",
       { items: input.items, notes: input.notes ?? null },
       { headers: { "Idempotency-Key": input.idempotencyKey } }
     ),
 };
 
+/** Read-only transport of stored commerce snapshots; never a checkout pricing input. */
+export interface PartnerPaidSupplyOrder {
+  id: string;
+  status:
+    | "PENDING_PAYMENT"
+    | "PAID"
+    | "PROCESSING"
+    | "DISPATCHED"
+    | "COMPLETED"
+    | "CANCELLED"
+    | "REFUNDED"
+    | "PARTIALLY_REFUNDED";
+  delivery_address: {
+    source?: "approved_location" | "partner_override";
+    locationName?: string;
+    address?: string;
+    recipientName?: string;
+    line1?: string;
+    line2?: string;
+    city?: string;
+    postcode?: string;
+    country?: string;
+  };
+  currency: "GBP";
+  gross_total_pence: number;
+  tax_treatment: "UNCONFIGURED" | "VAT_INCLUDED";
+  vat_rate_basis_points: number | null;
+  net_total_pence: number | null;
+  vat_total_pence: number | null;
+  tracking_reference: string | null;
+  payment_status: "PENDING" | "PAID" | "PARTIALLY_REFUNDED" | "REFUNDED";
+  refunded_total_pence: number;
+  created_at: string;
+  items: Array<{
+    productCode: string;
+    name: string;
+    unitsPerPack: number;
+    quantity: number;
+    grossUnitPricePence: number;
+    grossLineTotalPence: number;
+  }>;
+}
+export const partnerSupplyOrders = {
+  list: () => req<{ orders: PartnerPaidSupplyOrder[] }>("GET", "/api/partner/supplies/orders"),
+};
+
 export const partnerPublicProfile = {
   get: () => req<AuthenticatedPublicProfileStatus>("GET", "/api/partner/public-profile"),
-  save: (locationId: string, data: {
-    expectedProfileVersion: number;
-    expectedLocationVersion: number;
-    publicDisplayName: string;
-    privacyState: PartnerPublicPrivacyState;
-    publicLocationName: string;
-    publicStreetAddress: string;
-    publicServiceArea: string;
-    publicWebsite: string;
-    publicPhone: string;
-    publicEmail: string;
-    mapsEnabled: boolean;
-    attested: boolean;
-  }) => req<{ ok: true }>("POST", `/api/partner/public-profile/locations/${encodeURIComponent(locationId)}`, data),
+  save: (
+    locationId: string,
+    data: {
+      expectedProfileVersion: number;
+      expectedLocationVersion: number;
+      publicDisplayName: string;
+      privacyState: PartnerPublicPrivacyState;
+      publicLocationName: string;
+      publicStreetAddress: string;
+      publicServiceArea: string;
+      publicWebsite: string;
+      publicPhone: string;
+      publicEmail: string;
+      mapsEnabled: boolean;
+      attested: boolean;
+    }
+  ) => req<{ ok: true }>("POST", `/api/partner/public-profile/locations/${encodeURIComponent(locationId)}`, data),
 };
 
 export type GooglePresenceState =
-  | "NOT_CONNECTED"
-  | "CONNECTING"
-  | "CONNECTED"
-  | "ACTION_REQUIRED"
-  | "REVOKED"
-  | "ERROR";
+  "NOT_CONNECTED" | "CONNECTING" | "CONNECTED" | "ACTION_REQUIRED" | "REVOKED" | "ERROR";
 export interface GooglePresenceLocation {
   locationId: string;
   locationName: string;
@@ -351,13 +404,20 @@ export interface GooglePresenceLocation {
   candidates: Array<{ handle: string; businessName: string; businessAddress: string | null }>;
 }
 export type GooglePresenceStatus =
-  | { available: false; reason: "feature_disabled" | "not_configured" | "schema_unavailable"; owner: false; locations: [] }
+  | {
+      available: false;
+      reason: "feature_disabled" | "not_configured" | "schema_unavailable";
+      owner: false;
+      locations: [];
+    }
   | { available: true; owner: boolean; locations: GooglePresenceLocation[] };
 
 export const partnerGooglePresence = {
   status: () => req<GooglePresenceStatus>("GET", "/api/partner/google-business/status"),
   connect: (locationId: string) =>
-    req<{ authorizationUrl: string; expiresInMinutes: number }>("POST", "/api/partner/google-business/connect", { locationId }),
+    req<{ authorizationUrl: string; expiresInMinutes: number }>("POST", "/api/partner/google-business/connect", {
+      locationId,
+    }),
   confirm: (locationId: string, candidateHandle: string) =>
     req<{ ok: true }>("POST", "/api/partner/google-business/confirm", { locationId, candidateHandle }),
   refresh: (locationId: string) =>
@@ -367,7 +427,8 @@ export const partnerGooglePresence = {
 };
 
 // ---- team ----
-export type PartnerTeamRole = "OWNER" | "ADMIN" | "GRADER" | "STAFF";
+export type { PortalTeamRole as PartnerTeamRole } from "@shared/partner-team-roles";
+import type { PortalTeamRole as PartnerTeamRole } from "@shared/partner-team-roles";
 export type PartnerTeamDisplayRole = PartnerTeamRole | "FINANCE_VIEWER" | "TRAINEE" | "UNASSIGNED";
 export type PartnerTeamStatus = "INVITED" | "ACTIVE" | "SUSPENDED" | "REVOKED";
 
@@ -785,7 +846,13 @@ export interface PartnerFirstShopOnboarding {
     addressPostcode: string | null;
     addressCountry: string | null;
   } | null;
-  primaryContact: { full_name?: string; email?: string; contact_type?: string; active?: boolean; is_primary?: boolean } | null;
+  primaryContact: {
+    full_name?: string;
+    email?: string;
+    contact_type?: string;
+    active?: boolean;
+    is_primary?: boolean;
+  } | null;
   owner: { email: string; userStatus: string; readiness?: PartnerUserLoginReadiness } | null;
   operational: PartnerOperationalReadiness;
 }
@@ -798,8 +865,10 @@ export const partnerOperations = {
 
 export const partnerOnboarding = {
   view: () => req<PartnerFirstShopOnboarding>("GET", "/api/partner/onboarding"),
-  updateMainLocation: (deliveryAddress: { line1: string; line2?: string | null; city: string; postcode: string; country: string }, idempotencyKey: string) =>
-    req("PATCH", "/api/partner/onboarding/main-location", { deliveryAddress, idempotencyKey }),
+  updateMainLocation: (
+    deliveryAddress: { line1: string; line2?: string | null; city: string; postcode: string; country: string },
+    idempotencyKey: string
+  ) => req("PATCH", "/api/partner/onboarding/main-location", { deliveryAddress, idempotencyKey }),
   updateOperationsContact: (input: { fullName: string; email: string }, idempotencyKey: string) =>
     req("PUT", "/api/partner/onboarding/operations-contact", { ...input, idempotencyKey }),
 };

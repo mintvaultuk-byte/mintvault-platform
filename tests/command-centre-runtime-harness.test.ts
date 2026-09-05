@@ -39,7 +39,7 @@ afterAll(async () => {
 });
 
 describe("Command Centre rendered-runtime harness safety", () => {
-  it("bootstraps a separate empty Partner fixture with migrated roles and restricted runtime identity", async () => {
+  it.each([false, true])("bootstraps a separate empty Partner fixture with migrated roles and restricted runtime identity (supply contracts=%s)", async (supplyContracts) => {
     const database = `${PARTNER_BROWSER_DB_PREFIX}${process.pid}_${randomUUID().slice(0, 8)}`;
     const url = new URL(runtimeAdminDatabaseUrl);
     url.pathname = `/${database}`;
@@ -48,7 +48,7 @@ describe("Command Centre rendered-runtime harness safety", () => {
     await admin.connect();
     await admin.query(`CREATE DATABASE "${database}"`);
     try {
-      const fixture = await seedPartnerBrowserDatabase(url.toString(), "synthetic-browser-password-123");
+      const fixture = await seedPartnerBrowserDatabase(url.toString(), "synthetic-browser-password-123", supplyContracts);
       expect(fixture.identities.map((identity) => identity.role)).toEqual([
         "PARTNER_OWNER",
         "PARTNER_MANAGER",
@@ -75,6 +75,14 @@ describe("Command Centre rendered-runtime harness safety", () => {
             .flatMap(([role, permissions]) => permissions.map((permission) => `${role}:${permission}`))
             .sort()
         );
+        if (supplyContracts) {
+          expect((await runtime.query("SELECT count(*)::int n FROM partner_supply_orders")).rows[0].n).toBe(0);
+          await runtime.query("BEGIN");
+          await runtime.query("SELECT set_config('app.tenant_id',$1,true)", [fixture.tenantId]);
+          expect((await runtime.query("SELECT status,gross_total_pence FROM partner_supply_orders")).rows).toEqual([{ status: "PAID", gross_total_pence: 7500 }]);
+          expect((await runtime.query("SELECT public_ref FROM partner_supplies_orders")).rows).toEqual([{ public_ref: "SUP-BROWSER-LEGACY" }]);
+          await runtime.query("ROLLBACK");
+        }
       } finally {
         await runtime.end();
       }

@@ -4372,32 +4372,12 @@
       "expiresWith": "the bounded-context repair that assigns explicit authority"
     },
     {
-      "key": "role-authority|client/src/lib/partner-api.ts|role:ADMIN#0",
-      "finding": "ARCH-AUTHORITY-001",
-      "expiresWith": "the bounded-context repair that assigns explicit authority"
-    },
-    {
       "key": "role-authority|client/src/lib/partner-api.ts|role:FINANCE_VIEWER#0",
       "finding": "ARCH-AUTHORITY-001",
       "expiresWith": "the bounded-context repair that assigns explicit authority"
     },
     {
-      "key": "role-authority|client/src/lib/partner-api.ts|role:GRADER#0",
-      "finding": "ARCH-AUTHORITY-001",
-      "expiresWith": "the bounded-context repair that assigns explicit authority"
-    },
-    {
-      "key": "role-authority|client/src/lib/partner-api.ts|role:OWNER#0",
-      "finding": "ARCH-AUTHORITY-001",
-      "expiresWith": "the bounded-context repair that assigns explicit authority"
-    },
-    {
       "key": "role-authority|client/src/lib/partner-api.ts|role:POST#0",
-      "finding": "ARCH-AUTHORITY-001",
-      "expiresWith": "the bounded-context repair that assigns explicit authority"
-    },
-    {
-      "key": "role-authority|client/src/lib/partner-api.ts|role:STAFF#0",
       "finding": "ARCH-AUTHORITY-001",
       "expiresWith": "the bounded-context repair that assigns explicit authority"
     },

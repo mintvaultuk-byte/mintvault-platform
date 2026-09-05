@@ -417,7 +417,7 @@ async function main(): Promise<number> {
     } finally {
       await admin.end();
     }
-    const partnerFixture = partnerBrowserProof ? await seedPartnerBrowserDatabase(runtimeUrl, partnerPassword) : null;
+    const partnerFixture = partnerBrowserProof ? await seedPartnerBrowserDatabase(runtimeUrl, partnerPassword, true) : null;
     if (!partnerFixture)
       await seedRuntimeDatabase(runtimeUrl, runtimeAdminPassword, runtimeAdminPin, commandCentreEnabled);
     const port = await unusedPort();

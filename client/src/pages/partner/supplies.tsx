@@ -17,7 +17,7 @@
  */
 import { useMemo, useRef, useState } from "react";
 import { useMutation, useQuery } from "@tanstack/react-query";
-import { PartnerShell } from "@/components/partner/partner-shell";
+import { usePartnerSession } from "@/hooks/use-partner-session";
 import { apiRequest } from "@/lib/queryClient";
 
 interface SupplyProduct {
@@ -47,12 +47,14 @@ function ProductCard({
   onQuantity,
   onBuy,
   busy,
+  canPurchase,
 }: {
   product: SupplyProduct;
   quantity: number;
   onQuantity: (next: number) => void;
   onBuy: () => void;
   busy: boolean;
+  canPurchase: boolean;
 }) {
   return (
     <div
@@ -96,6 +98,7 @@ function ProductCard({
             min={1}
             max={100}
             value={quantity}
+            disabled={!canPurchase || busy}
             onChange={(event) => onQuantity(Number(event.target.value))}
             data-testid={`supply-qty-${product.code}`}
             className="w-16 rounded px-2 py-1"
@@ -104,7 +107,7 @@ function ProductCard({
         </label>
         <button
           type="button"
-          disabled={!product.purchasable || busy}
+          disabled={!canPurchase || !product.purchasable || busy}
           onClick={onBuy}
           data-testid={`supply-buy-${product.code}`}
           className="rounded-lg px-4 py-2 text-sm font-semibold disabled:opacity-40"
@@ -118,6 +121,8 @@ function ProductCard({
 }
 
 export default function PartnerSuppliesPage() {
+  const { hasPermission } = usePartnerSession();
+  const canPurchase = hasPermission("partner.orders.submit") && hasPermission("partner.credits.purchase");
   const [quantities, setQuantities] = useState<Record<string, number>>({});
   const [banner, setBanner] = useState<string | null>(null);
   /*
@@ -144,6 +149,7 @@ export default function PartnerSuppliesPage() {
 
   const checkout = useMutation({
     mutationFn: async (product: SupplyProduct) => {
+      if (!canPurchase) throw new Error("This role has read-only supply access.");
       const quantity = Math.max(1, Math.min(100, quantities[product.code] ?? 1));
       const key = (idempotencyKeys.current[product.code] ??= crypto.randomUUID());
       const response = await apiRequest("POST", "/api/partner/supplies/checkout", {
@@ -168,51 +174,55 @@ export default function PartnerSuppliesPage() {
   });
 
   return (
-    <PartnerShell>
-      <div data-testid="partner-supplies-root" className="grid gap-4">
-        {banner && (
-          <div
-            role="alert"
-            data-testid="partner-supplies-banner"
-            className="rounded-lg px-3 py-2"
-            style={{ background: "#3a2a0a" }}
-          >
-            {banner}
-          </div>
-        )}
-
-        {/*
-         * The shop's own order history. Supplies is where a purchase STARTS; what happened to
-         * previous ones lives in Orders, and the two are one click apart in both directions.
-         */}
-        <div className="flex flex-wrap items-center gap-3 text-sm">
-          <span className="opacity-70">Ordered something already?</span>
-          <a href="/partner/orders" className="underline" data-testid="partner-supplies-orders-link">
-            View your supply orders →
-          </a>
+    <div data-testid="partner-supplies-root" className="grid gap-4">
+      {!canPurchase && (
+        <p className="text-sm text-muted-foreground">
+          Read-only supply catalogue. Your account does not have purchase permission.
+        </p>
+      )}
+      {banner && (
+        <div
+          role="alert"
+          data-testid="partner-supplies-banner"
+          className="rounded-lg px-3 py-2"
+          style={{ background: "#3a2a0a" }}
+        >
+          {banner}
         </div>
+      )}
 
-        {catalogue.isLoading ? (
-          <div role="status">Loading supplies…</div>
-        ) : catalogue.isError ? (
-          <div role="alert">Supplies are temporarily unavailable.</div>
-        ) : products.length === 0 ? (
-          <div data-testid="partner-supplies-empty">No supplies are available to order right now.</div>
-        ) : (
-          <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3" data-testid="partner-supplies-grid">
-            {products.map((product) => (
-              <ProductCard
-                key={product.code}
-                product={product}
-                quantity={quantities[product.code] ?? 1}
-                onQuantity={(next) => setQuantities((current) => ({ ...current, [product.code]: next }))}
-                onBuy={() => checkout.mutate(product)}
-                busy={checkout.isPending}
-              />
-            ))}
-          </div>
-        )}
+      {/*
+       * The shop's own order history. Supplies is where a purchase STARTS; what happened to
+       * previous ones lives in Orders, and the two are one click apart in both directions.
+       */}
+      <div className="flex flex-wrap items-center gap-3 text-sm">
+        <span className="opacity-70">Ordered something already?</span>
+        <a href="/partner/orders" className="underline" data-testid="partner-supplies-orders-link">
+          View your supply orders →
+        </a>
       </div>
-    </PartnerShell>
+
+      {catalogue.isLoading ? (
+        <div role="status">Loading supplies…</div>
+      ) : catalogue.isError ? (
+        <div role="alert">Supplies are temporarily unavailable.</div>
+      ) : products.length === 0 ? (
+        <div data-testid="partner-supplies-empty">No supplies are available to order right now.</div>
+      ) : (
+        <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3" data-testid="partner-supplies-grid">
+          {products.map((product) => (
+            <ProductCard
+              key={product.code}
+              product={product}
+              quantity={quantities[product.code] ?? 1}
+              onQuantity={(next) => setQuantities((current) => ({ ...current, [product.code]: next }))}
+              onBuy={() => checkout.mutate(product)}
+              busy={checkout.isPending}
+              canPurchase={canPurchase}
+            />
+          ))}
+        </div>
+      )}
+    </div>
   );
 }

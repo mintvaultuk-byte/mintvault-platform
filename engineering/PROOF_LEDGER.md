@@ -1,5 +1,14 @@
 # Engineering proof ledger
 
+## 2026-09-05 Partner contracts — local repair proof, not release closure
+
+[Exact recovery, runs, hashes and limits](../.claude/controlled-code-lead/tasks/repository-architecture-recovery-20260904/partner-contract-recovery.md):
+mounted real HTTP red→green; both tenant histories retained; shared Scanner role
+transport; root/independent Sol/clean exact-lock actual Chrome22/22. Root integrated
+145/145 and clean exact-lock178/178, zero skips; existing money/grants/SQL unchanged.
+ARCH-SUPPLY-001 and ARCH-ROLE-001 locally FIXED_WIP; exact candidate/hosted/final
+hostile proof remains open. No staging/production/provider mutation.
+
 ## 2026-09-05 H1h local Super Admin browser wiring
 
 [Exact runs, commands, hashes and recovery evidence](../.claude/controlled-code-lead/tasks/repository-architecture-recovery-20260904/hygiene-wave-proof.md):

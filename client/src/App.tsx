@@ -184,6 +184,7 @@ const PartnerSecurityPage = lazy(() => import("@/pages/partner/security"));
 const PartnerCertificatesPage = lazy(() => import("@/pages/partner/certificates"));
 const PartnerSuppliesPage = lazy(() => import("@/pages/partner/supplies"));
 const PartnerSuppliesOrdersPage = lazy(() => import("@/pages/partner/supplies-orders"));
+const PartnerSuppliesRequestsPage = lazy(() => import("@/pages/partner/supplies-orders").then((module) => ({ default: module.PartnerSuppliesRequestsPage })));
 const PartnerWorkflowPlaceholderPage = lazy(() => import("@/pages/partner/workflow-placeholder"));
 const FindAPartnerPage = lazy(() => import("@/pages/find-a-partner"));
 const PublicPartnerProfilePage = lazy(() => import("@/pages/public-partner-profile"));
@@ -407,13 +408,18 @@ function PartnerPortalRoutes() {
             </PartnerRouteGuard>
           </Route>
           <Route path="/partner/supplies">
-            <PartnerRouteGuard requiredPermission="partner.supplies.view">
+            <PartnerRouteGuard requiredPermission="partner.orders.view">
               <PartnerSuppliesPage />
             </PartnerRouteGuard>
           </Route>
           <Route path="/partner/orders">
-            <PartnerRouteGuard requiredPermission="partner.supplies.view">
+            <PartnerRouteGuard requiredPermission="partner.orders.view">
               <PartnerSuppliesOrdersPage />
+            </PartnerRouteGuard>
+          </Route>
+          <Route path="/partner/supplies/requests">
+            <PartnerRouteGuard requiredPermission="partner.supplies.view">
+              <PartnerSuppliesRequestsPage />
             </PartnerRouteGuard>
           </Route>
           <Route path="/partner/public-profile">

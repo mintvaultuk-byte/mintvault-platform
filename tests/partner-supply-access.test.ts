@@ -75,7 +75,8 @@ describe("supplies is reachable only by an authenticated Partner", () => {
 
   it("shows the Partner only ACTIVE products, and lets only priced ones be bought", () => {
     expect(partnerPage).toContain("filter((product) => product.active)");
-    expect(partnerPage).toContain("disabled={!product.purchasable || busy}");
+    expect(partnerPage).toContain("disabled={!canPurchase || !product.purchasable || busy}");
+    expect(partnerPage).toContain('hasPermission("partner.orders.submit") && hasPermission("partner.credits.purchase")');
   });
 });
 

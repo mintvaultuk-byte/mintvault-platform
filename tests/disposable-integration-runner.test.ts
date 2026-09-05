@@ -166,7 +166,7 @@ describe("disposable integration runner", () => {
       runId: "owned-run",
       url: "http://127.0.0.1:41003/",
       browser: "Chrome/test",
-      passed: 18,
+      passed: 22,
       failed: 0,
       skipped: 0,
       checks: PARTNER_BROWSER_PROOF_CHECKS.map((name: string) => ({ name, status: "passed" })),

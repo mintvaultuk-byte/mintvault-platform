@@ -41,7 +41,7 @@ export function assertPartnerBrowserDatabase(raw: string): URL {
   return url;
 }
 
-export async function seedPartnerBrowserDatabase(raw: string, password: string) {
+export async function seedPartnerBrowserDatabase(raw: string, password: string, supplyContracts = false) {
   const url = assertPartnerBrowserDatabase(raw);
   if (password.length < 16) throw new Error("Synthetic Partner browser password is required");
   const admin = new Client({
@@ -83,6 +83,7 @@ export async function seedPartnerBrowserDatabase(raw: string, password: string) 
         // capability AFTER 0034 creates the Owner role, never before it exists.
       ].sort()
     );
+    if (supplyContracts) await applyMigrationsRealistic(admin, url.toString(), ["0112_partner_supply_commerce"]);
     const runtimeRole = `partner_browser_${randomBytes(10).toString("hex")}`;
     const runtimePassword = randomBytes(24).toString("hex");
     // Both strings are generated hex/identifier literals, never browser input.
@@ -120,6 +121,39 @@ export async function seedPartnerBrowserDatabase(raw: string, password: string) 
       await admin.query(
         "INSERT INTO partner_feature_flags (tenant_id,location_id,flag,enabled) VALUES (NULL,NULL,$1,true)",
         [flag]
+      );
+    }
+    if (supplyContracts) {
+      await admin.query(
+        `INSERT INTO partner_supply_orders
+        (id,tenant_id,location_id,idempotency_key,status,delivery_address,gross_total_pence,tax_treatment,submitted_by_user_id,paid_at)
+        VALUES ('c1111111-1111-4111-8111-111111111111',$1,$2,'c1111111-1111-4111-8111-111111111111','PAID',
+        '{"source":"approved_location","locationName":"Historical browser shop","address":"3 Paid Snapshot Road"}',7500,'UNCONFIGURED',$3,now())`,
+        [PARTNER_BROWSER_TENANT, PARTNER_BROWSER_LOCATION, PARTNER_BROWSER_IDENTITIES[0].id]
+      );
+      await admin.query(
+        `INSERT INTO partner_supply_payments (tenant_id,order_id,status,gross_total_pence,tax_treatment,paid_at)
+        VALUES ($1,'c1111111-1111-4111-8111-111111111111','PAID',7500,'UNCONFIGURED',now())`,
+        [PARTNER_BROWSER_TENANT]
+      );
+      await admin.query(
+        `INSERT INTO partner_supply_order_items
+        (tenant_id,order_id,product_code,product_name_snapshot,units_per_pack_snapshot,quantity,gross_unit_price_pence,gross_line_total_pence)
+        VALUES ($1,'c1111111-1111-4111-8111-111111111111','plastic_mintvault_slab_box','Browser snapshot slab box',50,1,7500,7500)`,
+        [PARTNER_BROWSER_TENANT]
+      );
+      await admin.query(
+        `INSERT INTO partner_supplies_orders
+        (id,public_ref,tenant_id,partner_id,location_id,requesting_user_id,partner_name_snapshot,shop_name_snapshot,
+        contact_name_snapshot,contact_email_snapshot,delivery_address_snapshot,delivery_postcode_snapshot,idempotency_key,request_fingerprint)
+        VALUES ('d1111111-1111-4111-8111-111111111111','SUP-BROWSER-LEGACY',$1,$1,$2,$3,'Historical browser partner',
+        'Historical request shop','Synthetic owner','historical@example.test','2 Request Snapshot Road','TE2 2ST','browser-legacy-idempotency',repeat('d',64))`,
+        [PARTNER_BROWSER_TENANT, PARTNER_BROWSER_LOCATION, PARTNER_BROWSER_IDENTITIES[0].id]
+      );
+      await admin.query(
+        `INSERT INTO partner_supplies_order_items (tenant_id,order_id,product_code,product_label_snapshot,quantity)
+        VALUES ($1,'d1111111-1111-4111-8111-111111111111','NFC_TAGS','Historical browser tags',3)`,
+        [PARTNER_BROWSER_TENANT]
       );
     }
     await admin.query("COMMIT");

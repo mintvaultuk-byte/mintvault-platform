@@ -75,6 +75,7 @@
   ],
   "scanRoots": ["server", "client/src", "shared", "scripts", "migrations", "migrations-vq", "config/components"],
   "ownerRules": [
+    { "prefix": "shared/partner-team-roles.ts", "owner": "partner-platform" },
     { "prefix": "scripts/command-centre-mobile-layout-check.mjs", "owner": "engineering-test-platform" },
     { "prefix": "scripts/command-centre-runtime-harness.ts", "owner": "engineering-test-platform" },
     { "prefix": "scripts/ci/run-disposable-integration.mjs", "owner": "engineering-test-platform" },

@@ -2,6 +2,38 @@
 
 ## Current checkpoint and next bounded wave
 
+Partner wave on0494 is implemented and independently locally CLEAN: see
+partner-contract-recovery.md for exact file/rollback/run/hash evidence. Root145,
+clean exact-lock178, realChrome22 on root/independentSol/clean. Scope preserves
+all historical SQL/payment/grant authority. Exact-candidate/hostile/release gates
+remain open. Primary0494CI33980226901 is now terminalred(Test/image gate), not
+in-progress; restricted failures remain UNKNOWN. Root is preparing the authorised
+non-force WIP checkpoint while Terra has source-verified the next existing
+ARCH-PRICING-001 recovery packet; no pricing edits yet. No new owner question.
+
+The earlier H1i continuation record below is historical:
+
+H1i checkpoint0494d5fbed5cb30f8379bb507d28c9b2a0a09c0b is now pushed non-force to
+existing draftPR336. PrimaryCI33980226901 and governance33980226895/33980222838
+are in progress on that exactSHA. Post-checkpoint tree initially contained only
+unrelated vault-worlds. Root continues RECOVERY-PARTNER: Terra bounded read-only
+ARCH-SUPPLY-001 route/history contract recovery, root verifies ARCH-ROLE-001 shared
+client-role mismatch. No product edits before the existing recovery/owner graph
+requirements and exact file/rollback/proof packet are materialized. No new broad audit.
+Terra and root source verification confirms mount.ts213-217 orders the legacy router
+first; both GET/supplies/orders handlers remain reachable declarations, with the paid
+handler shadowed. Existing /partner/orders UI/API/guard read legacy request history
+although paid checkout links there. Retain both historical table families; proposed
+route-only disposition is canonical paid /supplies/orders and separate legacy
+/supplies/requests. Existing Admin domains already distinct. No migration is needed.
+Root also verifies server team-service acceptsSCANNER_OPERATOR while partner-api type,
+users ROLES and editable-role guard omit it; use the declared shared/team-role contract
+without expanding server permissions. Existing scanner-operator real DB/parity suite
+and H1i fixture provide proof substrate, not completion of invite/edit/scan proof.
+Next recovery packet must bind mounted real HTTP tenant/role/history tests, legacy
+POST compatibility disposition, one-shell client rendering and exact UI/data rollback.
+Do not merely swap mount order or coalesce the two incompatible order histories.
+
 H1i now locally verified on baseline c35e0d2839b067bfda94b7d1453ebd116d31b60b:
 real Partner browser18/18 independently and clean exact-lock, Admin7/7 regression,
 clean four-suite117/117 (zero skips). Reproduced fixture catalogue ordering and Chrome

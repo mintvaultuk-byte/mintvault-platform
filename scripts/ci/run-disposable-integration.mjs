@@ -39,9 +39,16 @@ export function validateAdminBrowserReport(report, token) {
 }
 export const PARTNER_BROWSER_PROOF_CHECKS = Object.freeze(
   ["owner", "manager", "finance"].flatMap((role) =>
-    ["login", "identity", "dashboard", "team-permission", "logout", "post-logout-refusal"].map(
-      (check) => `${role}-${check}`
-    )
+    [
+      "login",
+      "identity",
+      "dashboard",
+      "team-permission",
+      ...(role === "owner" ? ["paid-order", "legacy-request", "scanner-role-option"] : []),
+      ...(role === "finance" ? ["orders-readonly"] : []),
+      "logout",
+      "post-logout-refusal",
+    ].map((check) => `${role}-${check}`)
   )
 );
 export function validatePartnerBrowserReport(report, token) {

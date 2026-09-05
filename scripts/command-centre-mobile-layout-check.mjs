@@ -273,6 +273,72 @@ async function provePartnerRuntime(send, sessionId) {
     )
       throw new Error(`Partner ${names[index]} team permission did not fail/allow as migrated`);
     passed("team-permission");
+    if (index === 0 || index === 2) {
+      await send("Page.navigate", { url: `${runtimeUrl}partner/orders` }, sessionId);
+      await until(
+        "!!document.querySelector('[data-testid=\"partner-paid-order-c1111111-1111-4111-8111-111111111111\"]')",
+        "paid order snapshot"
+      );
+      if (
+        !(await evaluate(
+          "document.body.textContent.includes('3 Paid Snapshot Road') && document.body.textContent.includes('£75.00') && document.body.textContent.includes('Browser snapshot slab box')"
+        ))
+      )
+        throw new Error("Paid order UI lost its server-owned snapshots");
+      if (index === 0) {
+        passed("paid-order");
+        await send("Page.navigate", { url: `${runtimeUrl}partner/supplies/requests` }, sessionId);
+        await until(
+          "!!document.querySelector('[data-testid=\"partner-supplies-order-SUP-BROWSER-LEGACY\"]')",
+          "legacy request snapshot"
+        );
+        if (
+          !(await evaluate(
+            "document.body.textContent.includes('Historical browser tags') && document.body.textContent.includes('TE2 2ST') && [...document.querySelectorAll('a[href=\"/partner/supplies\"]')].every(a => !a.hasAttribute('aria-current'))"
+          ))
+        )
+          throw new Error("Legacy request snapshot or distinct navigation is incorrect");
+        passed("legacy-request");
+        await send("Page.navigate", { url: `${runtimeUrl}partner/users` }, sessionId);
+        await until("!!document.querySelector('[data-testid=\"button-team-add-member\"]')", "team invite control");
+        await click("button-team-add-member");
+        await until(
+          "!!document.querySelector('[data-testid=\"select-team-invite-role\"]')",
+          "team invite role selector"
+        );
+        await click("select-team-invite-role");
+        await until(
+          "!!document.querySelector('[data-testid=\"team-invite-role-option-SCANNER_OPERATOR\"]')",
+          "Scanner Operator choice"
+        );
+        if (
+          !(await evaluate(
+            "document.querySelectorAll('[data-testid=\"team-invite-role-option-SCANNER_OPERATOR\"]').length === 1 && document.querySelector('[data-testid=\"team-invite-role-option-SCANNER_OPERATOR\"]').getAttribute('aria-disabled') !== 'true'"
+          ))
+        )
+          throw new Error("Scanner Operator is not a unique enabled invite choice");
+        passed("scanner-role-option");
+        // Leave the unsubmitted dialog before exercising the unchanged logout control.
+        await send("Page.navigate", { url: `${runtimeUrl}partner/orders` }, sessionId);
+        await until("!!document.querySelector('[data-testid=\"button-sign-out\"]')", "Partner logout control");
+      } else {
+        await send("Page.navigate", { url: `${runtimeUrl}partner/supplies` }, sessionId);
+        await until("!!document.querySelector('[data-testid=\"partner-supplies-grid\"]')", "Finance catalogue");
+        if (
+          !(await evaluate(
+            'document.querySelectorAll(\'[data-testid="text-partner-brand"]\').length === 1 && document.querySelectorAll(\'[data-testid^="supply-buy-"]\').length > 0 && [...document.querySelectorAll(\'[data-testid^="supply-buy-"], [data-testid^="supply-qty-"]\')].every(control => control.disabled)'
+          ))
+        )
+          throw new Error("Finance catalogue is not read-only under exactly one shell");
+        if ((await read("/api/partner/supplies/requests")).status !== 403)
+          throw new Error("Finance can read legacy requests without its capability");
+        const denied = await evaluate(
+          "fetch('/api/partner/supplies/checkout', {method:'POST',credentials:'include',headers:{'content-type':'application/json'},body:'{}'}).then(r => r.status)"
+        );
+        if (denied !== 403) throw new Error("Finance checkout did not fail before payment handling");
+        passed("orders-readonly");
+      }
+    }
     await click("button-sign-out");
     await until(
       "location.pathname === '/partner/login' && !!document.querySelector('[data-testid=\"input-email\"]')",

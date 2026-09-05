@@ -1,5 +1,14 @@
 # Engineering issue register
 
+## 2026-09-05 Partner contract checkpoint
+
+ARCH-SUPPLY-001 and ARCH-ROLE-001: FIXED_WIP / exact-candidate proof pending.
+Paid history is reachable under orders.view; legacy history has its own route and
+permission, with both tables preserved. Existing five server roles now share one
+client transport contract; no server grant expansion. See the
+[bounded recovery/proof packet](../.claude/controlled-code-lead/tasks/repository-architecture-recovery-20260904/partner-contract-recovery.md).
+Independent/local proof does not close restricted security or whole-release vetoes.
+
 ## 2026-09-05 hygiene planning checkpoint
 
 The current sequencing/dispatch entry point is the addendum in

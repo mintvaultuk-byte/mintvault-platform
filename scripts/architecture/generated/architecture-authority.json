@@ -1,23 +1,23 @@
 {
   "schemaVersion": 2,
   "counts": {
-    "client-route": 172,
+    "client-route": 173,
     "component": 8,
     "job": 37,
     "layer-exception": 4,
     "migration": 169,
     "migration-lineage": 6,
     "object-writer": 89,
-    "pricing-authority": 1774,
+    "pricing-authority": 1778,
     "provider-adapter": 135,
     "role-authority": 733,
     "route-middleware": 61,
     "route-mount": 69,
     "schema-object": 3,
-    "server-route": 987,
-    "session-principal": 585,
+    "server-route": 989,
+    "session-principal": 586,
     "table": 360,
-    "table-access": 3209,
+    "table-access": 3214,
     "timer": 97
   },
   "records": [
@@ -50,7 +50,7 @@
       "redirectTargets": [],
       "environmentGuard": "none-declared",
       "key": "client-route|client/src/App.tsx|/#0",
-      "source": "client/src/App.tsx:675",
+      "source": "client/src/App.tsx:681",
       "owner": "core-platform"
     },
     {
@@ -88,7 +88,7 @@
       "redirectTargets": [],
       "environmentGuard": "none-declared",
       "key": "client-route|client/src/App.tsx|/about/our-story#0",
-      "source": "client/src/App.tsx:739",
+      "source": "client/src/App.tsx:745",
       "owner": "core-platform"
     },
     {
@@ -128,7 +128,7 @@
       ],
       "environmentGuard": "none-declared",
       "key": "client-route|client/src/App.tsx|/about/the-mintvault-slab#0",
-      "source": "client/src/App.tsx:740",
+      "source": "client/src/App.tsx:746",
       "owner": "core-platform"
     },
     {
@@ -166,7 +166,7 @@
       "redirectTargets": [],
       "environmentGuard": "none-declared",
       "key": "client-route|client/src/App.tsx|/account/settings#0",
-      "source": "client/src/App.tsx:756",
+      "source": "client/src/App.tsx:762",
       "owner": "core-platform"
     },
     {
@@ -198,7 +198,7 @@
       "redirectTargets": [],
       "environmentGuard": "none-declared",
       "key": "client-route|client/src/App.tsx|/admin/catalogue#0",
-      "source": "client/src/App.tsx:483",
+      "source": "client/src/App.tsx:489",
       "owner": "core-platform"
     },
     {
@@ -230,7 +230,7 @@
       "redirectTargets": [],
       "environmentGuard": "none-declared",
       "key": "client-route|client/src/App.tsx|/admin/cert/:id#0",
-      "source": "client/src/App.tsx:669",
+      "source": "client/src/App.tsx:675",
       "owner": "core-platform"
     },
     {
@@ -262,7 +262,7 @@
       "redirectTargets": [],
       "environmentGuard": "none-declared",
       "key": "client-route|client/src/App.tsx|/admin/claim-register#0",
-      "source": "client/src/App.tsx:479",
+      "source": "client/src/App.tsx:485",
       "owner": "core-platform"
     },
     {
@@ -294,7 +294,7 @@
       "redirectTargets": [],
       "environmentGuard": "none-declared",
       "key": "client-route|client/src/App.tsx|/admin/command#0",
-      "source": "client/src/App.tsx:472",
+      "source": "client/src/App.tsx:478",
       "owner": "core-platform"
     },
     {
@@ -326,7 +326,7 @@
       "redirectTargets": [],
       "environmentGuard": "none-declared",
       "key": "client-route|client/src/App.tsx|/admin/community#0",
-      "source": "client/src/App.tsx:500",
+      "source": "client/src/App.tsx:506",
       "owner": "core-platform"
     },
     {
@@ -358,7 +358,7 @@
       "redirectTargets": [],
       "environmentGuard": "none-declared",
       "key": "client-route|client/src/App.tsx|/admin/graders#0",
-      "source": "client/src/App.tsx:476",
+      "source": "client/src/App.tsx:482",
       "owner": "core-platform"
     },
     {
@@ -390,7 +390,7 @@
       "redirectTargets": [],
       "environmentGuard": "none-declared",
       "key": "client-route|client/src/App.tsx|/admin/growth#0",
-      "source": "client/src/App.tsx:473",
+      "source": "client/src/App.tsx:479",
       "owner": "core-platform"
     },
     {
@@ -422,7 +422,7 @@
       "redirectTargets": [],
       "environmentGuard": "none-declared",
       "key": "client-route|client/src/App.tsx|/admin/instagram#0",
-      "source": "client/src/App.tsx:493",
+      "source": "client/src/App.tsx:499",
       "owner": "core-platform"
     },
     {
@@ -454,7 +454,7 @@
       "redirectTargets": [],
       "environmentGuard": "none-declared",
       "key": "client-route|client/src/App.tsx|/admin/legacy-review#0",
-      "source": "client/src/App.tsx:481",
+      "source": "client/src/App.tsx:487",
       "owner": "core-platform"
     },
     {
@@ -486,7 +486,7 @@
       "redirectTargets": [],
       "environmentGuard": "none-declared",
       "key": "client-route|client/src/App.tsx|/admin/login#0",
-      "source": "client/src/App.tsx:451",
+      "source": "client/src/App.tsx:457",
       "owner": "core-platform"
     },
     {
@@ -518,7 +518,7 @@
       "redirectTargets": [],
       "environmentGuard": "none-declared",
       "key": "client-route|client/src/App.tsx|/admin/mvgs-calibration#0",
-      "source": "client/src/App.tsx:496",
+      "source": "client/src/App.tsx:502",
       "owner": "core-platform"
     },
     {
@@ -550,7 +550,7 @@
       "redirectTargets": [],
       "environmentGuard": "none-declared",
       "key": "client-route|client/src/App.tsx|/admin/operator-stats#0",
-      "source": "client/src/App.tsx:484",
+      "source": "client/src/App.tsx:490",
       "owner": "core-platform"
     },
     {
@@ -598,7 +598,7 @@
       "redirectTargets": [],
       "environmentGuard": "none-declared",
       "key": "client-route|client/src/App.tsx|/admin/partner-network/partners/:partnerId#0",
-      "source": "client/src/App.tsx:646",
+      "source": "client/src/App.tsx:652",
       "owner": "core-platform"
     },
     {
@@ -646,7 +646,7 @@
       "redirectTargets": [],
       "environmentGuard": "none-declared",
       "key": "client-route|client/src/App.tsx|/admin/partner-network/partners#0",
-      "source": "client/src/App.tsx:653",
+      "source": "client/src/App.tsx:659",
       "owner": "core-platform"
     },
     {
@@ -694,7 +694,7 @@
       "redirectTargets": [],
       "environmentGuard": "none-declared",
       "key": "client-route|client/src/App.tsx|/admin/partner-network#0",
-      "source": "client/src/App.tsx:658",
+      "source": "client/src/App.tsx:664",
       "owner": "core-platform"
     },
     {
@@ -742,7 +742,7 @@
       "redirectTargets": [],
       "environmentGuard": "none-declared",
       "key": "client-route|client/src/App.tsx|/admin/partners/:partnerId/activity#0",
-      "source": "client/src/App.tsx:614",
+      "source": "client/src/App.tsx:620",
       "owner": "core-platform"
     },
     {
@@ -790,7 +790,7 @@
       "redirectTargets": [],
       "environmentGuard": "none-declared",
       "key": "client-route|client/src/App.tsx|/admin/partners/:partnerId/cards#0",
-      "source": "client/src/App.tsx:578",
+      "source": "client/src/App.tsx:584",
       "owner": "core-platform"
     },
     {
@@ -838,7 +838,7 @@
       "redirectTargets": [],
       "environmentGuard": "none-declared",
       "key": "client-route|client/src/App.tsx|/admin/partners/:partnerId/credits#0",
-      "source": "client/src/App.tsx:605",
+      "source": "client/src/App.tsx:611",
       "owner": "core-platform"
     },
     {
@@ -886,7 +886,7 @@
       "redirectTargets": [],
       "environmentGuard": "none-declared",
       "key": "client-route|client/src/App.tsx|/admin/partners/:partnerId/locations#0",
-      "source": "client/src/App.tsx:596",
+      "source": "client/src/App.tsx:602",
       "owner": "core-platform"
     },
     {
@@ -918,7 +918,7 @@
       "redirectTargets": [],
       "environmentGuard": "none-declared",
       "key": "client-route|client/src/App.tsx|/admin/partners/:partnerId/onboarding#0",
-      "source": "client/src/App.tsx:575",
+      "source": "client/src/App.tsx:581",
       "owner": "core-platform"
     },
     {
@@ -966,7 +966,7 @@
       "redirectTargets": [],
       "environmentGuard": "none-declared",
       "key": "client-route|client/src/App.tsx|/admin/partners/:partnerId/security#0",
-      "source": "client/src/App.tsx:623",
+      "source": "client/src/App.tsx:629",
       "owner": "core-platform"
     },
     {
@@ -1014,7 +1014,7 @@
       "redirectTargets": [],
       "environmentGuard": "none-declared",
       "key": "client-route|client/src/App.tsx|/admin/partners/:partnerId/staff#0",
-      "source": "client/src/App.tsx:587",
+      "source": "client/src/App.tsx:593",
       "owner": "core-platform"
     },
     {
@@ -1062,7 +1062,7 @@
       "redirectTargets": [],
       "environmentGuard": "none-declared",
       "key": "client-route|client/src/App.tsx|/admin/partners/:partnerId/stations#0",
-      "source": "client/src/App.tsx:566",
+      "source": "client/src/App.tsx:572",
       "owner": "core-platform"
     },
     {
@@ -1110,7 +1110,7 @@
       "redirectTargets": [],
       "environmentGuard": "none-declared",
       "key": "client-route|client/src/App.tsx|/admin/partners/:partnerId#0",
-      "source": "client/src/App.tsx:632",
+      "source": "client/src/App.tsx:638",
       "owner": "core-platform"
     },
     {
@@ -1158,7 +1158,7 @@
       "redirectTargets": [],
       "environmentGuard": "none-declared",
       "key": "client-route|client/src/App.tsx|/admin/partners/dashboard#0",
-      "source": "client/src/App.tsx:561",
+      "source": "client/src/App.tsx:567",
       "owner": "core-platform"
     },
     {
@@ -1206,7 +1206,7 @@
       "redirectTargets": [],
       "environmentGuard": "none-declared",
       "key": "client-route|client/src/App.tsx|/admin/partners/directory#0",
-      "source": "client/src/App.tsx:547",
+      "source": "client/src/App.tsx:553",
       "owner": "core-platform"
     },
     {
@@ -1254,7 +1254,7 @@
       "redirectTargets": [],
       "environmentGuard": "none-declared",
       "key": "client-route|client/src/App.tsx|/admin/partners/infrastructure#0",
-      "source": "client/src/App.tsx:542",
+      "source": "client/src/App.tsx:548",
       "owner": "core-platform"
     },
     {
@@ -1286,7 +1286,7 @@
       "redirectTargets": [],
       "environmentGuard": "none-declared",
       "key": "client-route|client/src/App.tsx|/admin/partners/onboarding#0",
-      "source": "client/src/App.tsx:552",
+      "source": "client/src/App.tsx:558",
       "owner": "core-platform"
     },
     {
@@ -1318,7 +1318,7 @@
       "redirectTargets": [],
       "environmentGuard": "none-declared",
       "key": "client-route|client/src/App.tsx|/admin/partners/settings/infrastructure#0",
-      "source": "client/src/App.tsx:530",
+      "source": "client/src/App.tsx:536",
       "owner": "core-platform"
     },
     {
@@ -1350,7 +1350,7 @@
       "redirectTargets": [],
       "environmentGuard": "none-declared",
       "key": "client-route|client/src/App.tsx|/admin/partners/settings/stations#0",
-      "source": "client/src/App.tsx:527",
+      "source": "client/src/App.tsx:533",
       "owner": "core-platform"
     },
     {
@@ -1382,7 +1382,7 @@
       "redirectTargets": [],
       "environmentGuard": "none-declared",
       "key": "client-route|client/src/App.tsx|/admin/partners/settings#0",
-      "source": "client/src/App.tsx:533",
+      "source": "client/src/App.tsx:539",
       "owner": "core-platform"
     },
     {
@@ -1414,7 +1414,7 @@
       "redirectTargets": [],
       "environmentGuard": "none-declared",
       "key": "client-route|client/src/App.tsx|/admin/partners/shops#0",
-      "source": "client/src/App.tsx:518",
+      "source": "client/src/App.tsx:524",
       "owner": "core-platform"
     },
     {
@@ -1462,7 +1462,7 @@
       "redirectTargets": [],
       "environmentGuard": "none-declared",
       "key": "client-route|client/src/App.tsx|/admin/partners/stations#0",
-      "source": "client/src/App.tsx:537",
+      "source": "client/src/App.tsx:543",
       "owner": "core-platform"
     },
     {
@@ -1494,7 +1494,7 @@
       "redirectTargets": [],
       "environmentGuard": "none-declared",
       "key": "client-route|client/src/App.tsx|/admin/partners/supplies/requests#0",
-      "source": "client/src/App.tsx:516",
+      "source": "client/src/App.tsx:522",
       "owner": "core-platform"
     },
     {
@@ -1526,7 +1526,7 @@
       "redirectTargets": [],
       "environmentGuard": "none-declared",
       "key": "client-route|client/src/App.tsx|/admin/partners/supplies#0",
-      "source": "client/src/App.tsx:515",
+      "source": "client/src/App.tsx:521",
       "owner": "core-platform"
     },
     {
@@ -1574,7 +1574,7 @@
       "redirectTargets": [],
       "environmentGuard": "none-declared",
       "key": "client-route|client/src/App.tsx|/admin/partners#0",
-      "source": "client/src/App.tsx:639",
+      "source": "client/src/App.tsx:645",
       "owner": "core-platform"
     },
     {
@@ -1606,7 +1606,7 @@
       "redirectTargets": [],
       "environmentGuard": "none-declared",
       "key": "client-route|client/src/App.tsx|/admin/pokemon-knowledge#0",
-      "source": "client/src/App.tsx:482",
+      "source": "client/src/App.tsx:488",
       "owner": "core-platform"
     },
     {
@@ -1638,7 +1638,7 @@
       "redirectTargets": [],
       "environmentGuard": "none-declared",
       "key": "client-route|client/src/App.tsx|/admin/project-control/package/:key#0",
-      "source": "client/src/App.tsx:505",
+      "source": "client/src/App.tsx:511",
       "owner": "core-platform"
     },
     {
@@ -1670,7 +1670,7 @@
       "redirectTargets": [],
       "environmentGuard": "none-declared",
       "key": "client-route|client/src/App.tsx|/admin/project-control/scanner#0",
-      "source": "client/src/App.tsx:504",
+      "source": "client/src/App.tsx:510",
       "owner": "core-platform"
     },
     {
@@ -1702,7 +1702,7 @@
       "redirectTargets": [],
       "environmentGuard": "none-declared",
       "key": "client-route|client/src/App.tsx|/admin/project-control/shop-launch#0",
-      "source": "client/src/App.tsx:503",
+      "source": "client/src/App.tsx:509",
       "owner": "core-platform"
     },
     {
@@ -1734,7 +1734,7 @@
       "redirectTargets": [],
       "environmentGuard": "none-declared",
       "key": "client-route|client/src/App.tsx|/admin/project-control#0",
-      "source": "client/src/App.tsx:506",
+      "source": "client/src/App.tsx:512",
       "owner": "core-platform"
     },
     {
@@ -1766,7 +1766,7 @@
       "redirectTargets": [],
       "environmentGuard": "none-declared",
       "key": "client-route|client/src/App.tsx|/admin/promotions#0",
-      "source": "client/src/App.tsx:475",
+      "source": "client/src/App.tsx:481",
       "owner": "core-platform"
     },
     {
@@ -1798,7 +1798,7 @@
       "redirectTargets": [],
       "environmentGuard": "none-declared",
       "key": "client-route|client/src/App.tsx|/admin/security#0",
-      "source": "client/src/App.tsx:478",
+      "source": "client/src/App.tsx:484",
       "owner": "core-platform"
     },
     {
@@ -1830,7 +1830,7 @@
       "redirectTargets": [],
       "environmentGuard": "none-declared",
       "key": "client-route|client/src/App.tsx|/admin/sets#0",
-      "source": "client/src/App.tsx:480",
+      "source": "client/src/App.tsx:486",
       "owner": "core-platform"
     },
     {
@@ -1862,7 +1862,7 @@
       "redirectTargets": [],
       "environmentGuard": "none-declared",
       "key": "client-route|client/src/App.tsx|/admin/social-studio#0",
-      "source": "client/src/App.tsx:494",
+      "source": "client/src/App.tsx:500",
       "owner": "core-platform"
     },
     {
@@ -1894,7 +1894,7 @@
       "redirectTargets": [],
       "environmentGuard": "none-declared",
       "key": "client-route|client/src/App.tsx|/admin/staff#0",
-      "source": "client/src/App.tsx:477",
+      "source": "client/src/App.tsx:483",
       "owner": "core-platform"
     },
     {
@@ -1926,7 +1926,7 @@
       "redirectTargets": [],
       "environmentGuard": "none-declared",
       "key": "client-route|client/src/App.tsx|/admin/vault-quest/card-factory#0",
-      "source": "client/src/App.tsx:498",
+      "source": "client/src/App.tsx:504",
       "owner": "core-platform"
     },
     {
@@ -1958,7 +1958,7 @@
       "redirectTargets": [],
       "environmentGuard": "none-declared",
       "key": "client-route|client/src/App.tsx|/admin/vault-quest/studio#0",
-      "source": "client/src/App.tsx:497",
+      "source": "client/src/App.tsx:503",
       "owner": "core-platform"
     },
     {
@@ -1990,7 +1990,7 @@
       "redirectTargets": [],
       "environmentGuard": "none-declared",
       "key": "client-route|client/src/App.tsx|/admin/vault-quest#0",
-      "source": "client/src/App.tsx:499",
+      "source": "client/src/App.tsx:505",
       "owner": "core-platform"
     },
     {
@@ -2022,7 +2022,7 @@
       "redirectTargets": [],
       "environmentGuard": "none-declared",
       "key": "client-route|client/src/App.tsx|/admin/weekly-reel#0",
-      "source": "client/src/App.tsx:495",
+      "source": "client/src/App.tsx:501",
       "owner": "core-platform"
     },
     {
@@ -2054,7 +2054,7 @@
       "redirectTargets": [],
       "environmentGuard": "none-declared",
       "key": "client-route|client/src/App.tsx|/admin#0",
-      "source": "client/src/App.tsx:474",
+      "source": "client/src/App.tsx:480",
       "owner": "core-platform"
     },
     {
@@ -2086,7 +2086,7 @@
       "redirectTargets": [],
       "environmentGuard": "none-declared",
       "key": "client-route|client/src/App.tsx|/ai-pre-grade#0",
-      "source": "client/src/App.tsx:679",
+      "source": "client/src/App.tsx:685",
       "owner": "core-platform"
     },
     {
@@ -2124,7 +2124,7 @@
       "redirectTargets": [],
       "environmentGuard": "none-declared",
       "key": "client-route|client/src/App.tsx|/api-docs#0",
-      "source": "client/src/App.tsx:732",
+      "source": "client/src/App.tsx:738",
       "owner": "core-platform"
     },
     {
@@ -2162,7 +2162,7 @@
       "redirectTargets": [],
       "environmentGuard": "none-declared",
       "key": "client-route|client/src/App.tsx|/auth/pin/forgot#0",
-      "source": "client/src/App.tsx:751",
+      "source": "client/src/App.tsx:757",
       "owner": "core-platform"
     },
     {
@@ -2200,7 +2200,7 @@
       "redirectTargets": [],
       "environmentGuard": "none-declared",
       "key": "client-route|client/src/App.tsx|/auth/pin/setup#0",
-      "source": "client/src/App.tsx:750",
+      "source": "client/src/App.tsx:756",
       "owner": "core-platform"
     },
     {
@@ -2238,7 +2238,7 @@
       "redirectTargets": [],
       "environmentGuard": "none-declared",
       "key": "client-route|client/src/App.tsx|/best-card-grading-uk#0",
-      "source": "client/src/App.tsx:720",
+      "source": "client/src/App.tsx:726",
       "owner": "core-platform"
     },
     {
@@ -2276,7 +2276,7 @@
       "redirectTargets": [],
       "environmentGuard": "none-declared",
       "key": "client-route|client/src/App.tsx|/card-grading-cost-uk#0",
-      "source": "client/src/App.tsx:721",
+      "source": "client/src/App.tsx:727",
       "owner": "core-platform"
     },
     {
@@ -2314,7 +2314,7 @@
       "redirectTargets": [],
       "environmentGuard": "none-declared",
       "key": "client-route|client/src/App.tsx|/card-grading-near-me#0",
-      "source": "client/src/App.tsx:722",
+      "source": "client/src/App.tsx:728",
       "owner": "core-platform"
     },
     {
@@ -2352,7 +2352,7 @@
       "redirectTargets": [],
       "environmentGuard": "none-declared",
       "key": "client-route|client/src/App.tsx|/card-grading-service-uk#0",
-      "source": "client/src/App.tsx:712",
+      "source": "client/src/App.tsx:718",
       "owner": "core-platform"
     },
     {
@@ -2384,7 +2384,7 @@
       "redirectTargets": [],
       "environmentGuard": "none-declared",
       "key": "client-route|client/src/App.tsx|/cert/:id/report#0",
-      "source": "client/src/App.tsx:672",
+      "source": "client/src/App.tsx:678",
       "owner": "core-platform"
     },
     {
@@ -2416,7 +2416,7 @@
       "redirectTargets": [],
       "environmentGuard": "none-declared",
       "key": "client-route|client/src/App.tsx|/cert/:id#0",
-      "source": "client/src/App.tsx:673",
+      "source": "client/src/App.tsx:679",
       "owner": "core-platform"
     },
     {
@@ -2456,7 +2456,7 @@
       ],
       "environmentGuard": "none-declared",
       "key": "client-route|client/src/App.tsx|/cert#0",
-      "source": "client/src/App.tsx:689",
+      "source": "client/src/App.tsx:695",
       "owner": "core-platform"
     },
     {
@@ -2494,7 +2494,7 @@
       "redirectTargets": [],
       "environmentGuard": "none-declared",
       "key": "client-route|client/src/App.tsx|/claim#0",
-      "source": "client/src/App.tsx:725",
+      "source": "client/src/App.tsx:731",
       "owner": "core-platform"
     },
     {
@@ -2526,7 +2526,7 @@
       "redirectTargets": [],
       "environmentGuard": "none-declared",
       "key": "client-route|client/src/App.tsx|/community#0",
-      "source": "client/src/App.tsx:663",
+      "source": "client/src/App.tsx:669",
       "owner": "core-platform"
     },
     {
@@ -2564,7 +2564,7 @@
       "redirectTargets": [],
       "environmentGuard": "none-declared",
       "key": "client-route|client/src/App.tsx|/customer-login#0",
-      "source": "client/src/App.tsx:749",
+      "source": "client/src/App.tsx:755",
       "owner": "core-platform"
     },
     {
@@ -2602,7 +2602,7 @@
       "redirectTargets": [],
       "environmentGuard": "none-declared",
       "key": "client-route|client/src/App.tsx|/dashboard#0",
-      "source": "client/src/App.tsx:729",
+      "source": "client/src/App.tsx:735",
       "owner": "core-platform"
     },
     {
@@ -2634,7 +2634,7 @@
       "redirectTargets": [],
       "environmentGuard": "import.meta.env.DEV && <Route path=\"/dev/admin-shell-geometry\" component={DevAdminShellGeometryHarness} />",
       "key": "client-route|client/src/App.tsx|/dev/admin-shell-geometry#0",
-      "source": "client/src/App.tsx:470",
+      "source": "client/src/App.tsx:476",
       "owner": "core-platform"
     },
     {
@@ -2666,7 +2666,7 @@
       "redirectTargets": [],
       "environmentGuard": "import.meta.env.DEV && ( <Route path=\"/dev/canonical-workstation\" component={DevCanonicalWorkstationHarness} /> )",
       "key": "client-route|client/src/App.tsx|/dev/canonical-workstation#0",
-      "source": "client/src/App.tsx:467",
+      "source": "client/src/App.tsx:473",
       "owner": "core-platform"
     },
     {
@@ -2698,7 +2698,7 @@
       "redirectTargets": [],
       "environmentGuard": "import.meta.env.DEV && <Route path=\"/dev/card-details\" component={DevCardDetailsHarness} />",
       "key": "client-route|client/src/App.tsx|/dev/card-details#0",
-      "source": "client/src/App.tsx:469",
+      "source": "client/src/App.tsx:475",
       "owner": "core-platform"
     },
     {
@@ -2730,7 +2730,7 @@
       "redirectTargets": [],
       "environmentGuard": "import.meta.env.DEV && <Route path=\"/dev/growth-command-visual\" component={DevGrowthCommandVisualHarness} />",
       "key": "client-route|client/src/App.tsx|/dev/growth-command-visual#0",
-      "source": "client/src/App.tsx:471",
+      "source": "client/src/App.tsx:477",
       "owner": "core-platform"
     },
     {
@@ -2768,7 +2768,7 @@
       "redirectTargets": [],
       "environmentGuard": "none-declared",
       "key": "client-route|client/src/App.tsx|/find-a-partner#0",
-      "source": "client/src/App.tsx:694",
+      "source": "client/src/App.tsx:700",
       "owner": "core-platform"
     },
     {
@@ -2806,7 +2806,7 @@
       "redirectTargets": [],
       "environmentGuard": "none-declared",
       "key": "client-route|client/src/App.tsx|/forgot-password#0",
-      "source": "client/src/App.tsx:753",
+      "source": "client/src/App.tsx:759",
       "owner": "core-platform"
     },
     {
@@ -2838,7 +2838,7 @@
       "redirectTargets": [],
       "environmentGuard": "none-declared",
       "key": "client-route|client/src/App.tsx|/grader/login#0",
-      "source": "client/src/App.tsx:485",
+      "source": "client/src/App.tsx:491",
       "owner": "core-platform"
     },
     {
@@ -2870,7 +2870,7 @@
       "redirectTargets": [],
       "environmentGuard": "none-declared",
       "key": "client-route|client/src/App.tsx|/grader#0",
-      "source": "client/src/App.tsx:488",
+      "source": "client/src/App.tsx:494",
       "owner": "core-platform"
     },
     {
@@ -2908,7 +2908,7 @@
       "redirectTargets": [],
       "environmentGuard": "none-declared",
       "key": "client-route|client/src/App.tsx|/grading-glossary#0",
-      "source": "client/src/App.tsx:734",
+      "source": "client/src/App.tsx:740",
       "owner": "core-platform"
     },
     {
@@ -2946,7 +2946,7 @@
       "redirectTargets": [],
       "environmentGuard": "none-declared",
       "key": "client-route|client/src/App.tsx|/grading-scale#0",
-      "source": "client/src/App.tsx:733",
+      "source": "client/src/App.tsx:739",
       "owner": "core-platform"
     },
     {
@@ -2978,7 +2978,7 @@
       "redirectTargets": [],
       "environmentGuard": "none-declared",
       "key": "client-route|client/src/App.tsx|/grading-standard#0",
-      "source": "client/src/App.tsx:667",
+      "source": "client/src/App.tsx:673",
       "owner": "core-platform"
     },
     {
@@ -3016,7 +3016,7 @@
       "redirectTargets": [],
       "environmentGuard": "none-declared",
       "key": "client-route|client/src/App.tsx|/grading/eligible-cards#0",
-      "source": "client/src/App.tsx:743",
+      "source": "client/src/App.tsx:749",
       "owner": "core-platform"
     },
     {
@@ -3056,7 +3056,7 @@
       ],
       "environmentGuard": "none-declared",
       "key": "client-route|client/src/App.tsx|/guides/:slug#0",
-      "source": "client/src/App.tsx:707",
+      "source": "client/src/App.tsx:713",
       "owner": "core-platform"
     },
     {
@@ -3096,7 +3096,7 @@
       ],
       "environmentGuard": "none-declared",
       "key": "client-route|client/src/App.tsx|/guides#0",
-      "source": "client/src/App.tsx:704",
+      "source": "client/src/App.tsx:710",
       "owner": "core-platform"
     },
     {
@@ -3134,7 +3134,7 @@
       "redirectTargets": [],
       "environmentGuard": "none-declared",
       "key": "client-route|client/src/App.tsx|/help/contact#0",
-      "source": "client/src/App.tsx:747",
+      "source": "client/src/App.tsx:753",
       "owner": "core-platform"
     },
     {
@@ -3172,7 +3172,7 @@
       "redirectTargets": [],
       "environmentGuard": "none-declared",
       "key": "client-route|client/src/App.tsx|/help/faq#0",
-      "source": "client/src/App.tsx:746",
+      "source": "client/src/App.tsx:752",
       "owner": "core-platform"
     },
     {
@@ -3204,7 +3204,7 @@
       "redirectTargets": [],
       "environmentGuard": "none-declared",
       "key": "client-route|client/src/App.tsx|/home-v2-integrated#0",
-      "source": "client/src/App.tsx:460",
+      "source": "client/src/App.tsx:466",
       "owner": "core-platform"
     },
     {
@@ -3236,7 +3236,7 @@
       "redirectTargets": [],
       "environmentGuard": "none-declared",
       "key": "client-route|client/src/App.tsx|/home-v3#0",
-      "source": "client/src/App.tsx:462",
+      "source": "client/src/App.tsx:468",
       "owner": "core-platform"
     },
     {
@@ -3268,7 +3268,7 @@
       "redirectTargets": [],
       "environmentGuard": "none-declared",
       "key": "client-route|client/src/App.tsx|/home-v4#0",
-      "source": "client/src/App.tsx:463",
+      "source": "client/src/App.tsx:469",
       "owner": "core-platform"
     },
     {
@@ -3300,7 +3300,7 @@
       "redirectTargets": [],
       "environmentGuard": "none-declared",
       "key": "client-route|client/src/App.tsx|/how-it-works-v2#0",
-      "source": "client/src/App.tsx:461",
+      "source": "client/src/App.tsx:467",
       "owner": "core-platform"
     },
     {
@@ -3340,7 +3340,7 @@
       ],
       "environmentGuard": "none-declared",
       "key": "client-route|client/src/App.tsx|/how-it-works#0",
-      "source": "client/src/App.tsx:735",
+      "source": "client/src/App.tsx:741",
       "owner": "core-platform"
     },
     {
@@ -3378,7 +3378,7 @@
       "redirectTargets": [],
       "environmentGuard": "none-declared",
       "key": "client-route|client/src/App.tsx|/how-to-grade-pokemon-cards#0",
-      "source": "client/src/App.tsx:714",
+      "source": "client/src/App.tsx:720",
       "owner": "core-platform"
     },
     {
@@ -3410,7 +3410,7 @@
       "redirectTargets": [],
       "environmentGuard": "none-declared",
       "key": "client-route|client/src/App.tsx|/journal/:slug#0",
-      "source": "client/src/App.tsx:683",
+      "source": "client/src/App.tsx:689",
       "owner": "core-platform"
     },
     {
@@ -3442,7 +3442,7 @@
       "redirectTargets": [],
       "environmentGuard": "none-declared",
       "key": "client-route|client/src/App.tsx|/journal#0",
-      "source": "client/src/App.tsx:682",
+      "source": "client/src/App.tsx:688",
       "owner": "core-platform"
     },
     {
@@ -3480,7 +3480,7 @@
       "redirectTargets": [],
       "environmentGuard": "none-declared",
       "key": "client-route|client/src/App.tsx|/labels#0",
-      "source": "client/src/App.tsx:696",
+      "source": "client/src/App.tsx:702",
       "owner": "core-platform"
     },
     {
@@ -3518,7 +3518,7 @@
       "redirectTargets": [],
       "environmentGuard": "none-declared",
       "key": "client-route|client/src/App.tsx|/legal/:slug#0",
-      "source": "client/src/App.tsx:738",
+      "source": "client/src/App.tsx:744",
       "owner": "core-platform"
     },
     {
@@ -3556,7 +3556,7 @@
       "redirectTargets": [],
       "environmentGuard": "none-declared",
       "key": "client-route|client/src/App.tsx|/liability-and-insurance#0",
-      "source": "client/src/App.tsx:703",
+      "source": "client/src/App.tsx:709",
       "owner": "core-platform"
     },
     {
@@ -3594,7 +3594,7 @@
       "redirectTargets": [],
       "environmentGuard": "none-declared",
       "key": "client-route|client/src/App.tsx|/login#0",
-      "source": "client/src/App.tsx:748",
+      "source": "client/src/App.tsx:754",
       "owner": "core-platform"
     },
     {
@@ -3632,7 +3632,7 @@
       "redirectTargets": [],
       "environmentGuard": "none-declared",
       "key": "client-route|client/src/App.tsx|/mtg-card-grading-uk#0",
-      "source": "client/src/App.tsx:719",
+      "source": "client/src/App.tsx:725",
       "owner": "core-platform"
     },
     {
@@ -3664,7 +3664,7 @@
       "redirectTargets": [],
       "environmentGuard": "none-declared",
       "key": "client-route|client/src/App.tsx|/mvgs/join#0",
-      "source": "client/src/App.tsx:668",
+      "source": "client/src/App.tsx:674",
       "owner": "core-platform"
     },
     {
@@ -3696,7 +3696,7 @@
       "redirectTargets": [],
       "environmentGuard": "none-declared",
       "key": "client-route|client/src/App.tsx|/nfc/:certId#0",
-      "source": "client/src/App.tsx:671",
+      "source": "client/src/App.tsx:677",
       "owner": "core-platform"
     },
     {
@@ -3734,7 +3734,7 @@
       "redirectTargets": [],
       "environmentGuard": "none-declared",
       "key": "client-route|client/src/App.tsx|/one-piece-card-grading-uk#0",
-      "source": "client/src/App.tsx:717",
+      "source": "client/src/App.tsx:723",
       "owner": "core-platform"
     },
     {
@@ -3772,7 +3772,7 @@
       "redirectTargets": [],
       "environmentGuard": "none-declared",
       "key": "client-route|client/src/App.tsx|/ownership#0",
-      "source": "client/src/App.tsx:724",
+      "source": "client/src/App.tsx:730",
       "owner": "core-platform"
     },
     {
@@ -3804,7 +3804,7 @@
       "redirectTargets": [],
       "environmentGuard": "none-declared",
       "key": "client-route|client/src/App.tsx|/partner/*#0",
-      "source": "client/src/App.tsx:457",
+      "source": "client/src/App.tsx:463",
       "owner": "core-platform"
     },
     {
@@ -3862,7 +3862,7 @@
       "redirectTargets": [],
       "environmentGuard": "none-declared",
       "key": "client-route|client/src/App.tsx|/partner/billing#0",
-      "source": "client/src/App.tsx:399",
+      "source": "client/src/App.tsx:400",
       "owner": "core-platform"
     },
     {
@@ -3926,7 +3926,7 @@
       "redirectTargets": [],
       "environmentGuard": "none-declared",
       "key": "client-route|client/src/App.tsx|/partner/certificates#0",
-      "source": "client/src/App.tsx:404",
+      "source": "client/src/App.tsx:405",
       "owner": "core-platform"
     },
     {
@@ -3984,7 +3984,7 @@
       "redirectTargets": [],
       "environmentGuard": "none-declared",
       "key": "client-route|client/src/App.tsx|/partner/customers#0",
-      "source": "client/src/App.tsx:379",
+      "source": "client/src/App.tsx:380",
       "owner": "core-platform"
     },
     {
@@ -4042,7 +4042,7 @@
       "redirectTargets": [],
       "environmentGuard": "none-declared",
       "key": "client-route|client/src/App.tsx|/partner/dashboard#0",
-      "source": "client/src/App.tsx:354",
+      "source": "client/src/App.tsx:355",
       "owner": "core-platform"
     },
     {
@@ -4089,7 +4089,7 @@
       "redirectTargets": [],
       "environmentGuard": "none-declared",
       "key": "client-route|client/src/App.tsx|/partner/forgot-password#0",
-      "source": "client/src/App.tsx:348",
+      "source": "client/src/App.tsx:349",
       "owner": "core-platform"
     },
     {
@@ -4153,7 +4153,7 @@
       "redirectTargets": [],
       "environmentGuard": "none-declared",
       "key": "client-route|client/src/App.tsx|/partner/grading#0",
-      "source": "client/src/App.tsx:384",
+      "source": "client/src/App.tsx:385",
       "owner": "core-platform"
     },
     {
@@ -4211,7 +4211,7 @@
       "redirectTargets": [],
       "environmentGuard": "none-declared",
       "key": "client-route|client/src/App.tsx|/partner/help#0",
-      "source": "client/src/App.tsx:424",
+      "source": "client/src/App.tsx:430",
       "owner": "core-platform"
     },
     {
@@ -4258,7 +4258,7 @@
       "redirectTargets": [],
       "environmentGuard": "none-declared",
       "key": "client-route|client/src/App.tsx|/partner/invite#0",
-      "source": "client/src/App.tsx:343",
+      "source": "client/src/App.tsx:344",
       "owner": "core-platform"
     },
     {
@@ -4316,7 +4316,7 @@
       "redirectTargets": [],
       "environmentGuard": "none-declared",
       "key": "client-route|client/src/App.tsx|/partner/locations#0",
-      "source": "client/src/App.tsx:394",
+      "source": "client/src/App.tsx:395",
       "owner": "core-platform"
     },
     {
@@ -4363,7 +4363,7 @@
       "redirectTargets": [],
       "environmentGuard": "none-declared",
       "key": "client-route|client/src/App.tsx|/partner/login#0",
-      "source": "client/src/App.tsx:340",
+      "source": "client/src/App.tsx:341",
       "owner": "core-platform"
     },
     {
@@ -4421,7 +4421,7 @@
       "redirectTargets": [],
       "environmentGuard": "none-declared",
       "key": "client-route|client/src/App.tsx|/partner/onboarding#0",
-      "source": "client/src/App.tsx:359",
+      "source": "client/src/App.tsx:360",
       "owner": "core-platform"
     },
     {
@@ -4454,14 +4454,14 @@
               "component": "PartnerRouteGuard",
               "importTarget": "client/src/components/partner/partner-route-guard.tsx",
               "props": {
-                "requiredPermission": "partner.supplies.view"
+                "requiredPermission": "partner.orders.view"
               }
             }
           ]
         }
       ],
       "requiredPermissions": [
-        "partner.supplies.view"
+        "partner.orders.view"
       ],
       "guardProps": [
         {
@@ -4478,14 +4478,14 @@
           "component": "PartnerRouteGuard",
           "importTarget": "client/src/components/partner/partner-route-guard.tsx",
           "props": {
-            "requiredPermission": "partner.supplies.view"
+            "requiredPermission": "partner.orders.view"
           }
         }
       ],
       "redirectTargets": [],
       "environmentGuard": "none-declared",
       "key": "client-route|client/src/App.tsx|/partner/orders#0",
-      "source": "client/src/App.tsx:414",
+      "source": "client/src/App.tsx:415",
       "owner": "core-platform"
     },
     {
@@ -4549,7 +4549,7 @@
       "redirectTargets": [],
       "environmentGuard": "none-declared",
       "key": "client-route|client/src/App.tsx|/partner/public-profile#0",
-      "source": "client/src/App.tsx:419",
+      "source": "client/src/App.tsx:425",
       "owner": "core-platform"
     },
     {
@@ -4596,7 +4596,7 @@
       "redirectTargets": [],
       "environmentGuard": "none-declared",
       "key": "client-route|client/src/App.tsx|/partner/reset#0",
-      "source": "client/src/App.tsx:351",
+      "source": "client/src/App.tsx:352",
       "owner": "core-platform"
     },
     {
@@ -4654,7 +4654,7 @@
       "redirectTargets": [],
       "environmentGuard": "none-declared",
       "key": "client-route|client/src/App.tsx|/partner/security#0",
-      "source": "client/src/App.tsx:429",
+      "source": "client/src/App.tsx:435",
       "owner": "core-platform"
     },
     {
@@ -4712,7 +4712,7 @@
       "redirectTargets": [],
       "environmentGuard": "none-declared",
       "key": "client-route|client/src/App.tsx|/partner/submissions/:id#0",
-      "source": "client/src/App.tsx:369",
+      "source": "client/src/App.tsx:370",
       "owner": "core-platform"
     },
     {
@@ -4770,7 +4770,7 @@
       "redirectTargets": [],
       "environmentGuard": "none-declared",
       "key": "client-route|client/src/App.tsx|/partner/submissions/new#0",
-      "source": "client/src/App.tsx:364",
+      "source": "client/src/App.tsx:365",
       "owner": "core-platform"
     },
     {
@@ -4828,15 +4828,15 @@
       "redirectTargets": [],
       "environmentGuard": "none-declared",
       "key": "client-route|client/src/App.tsx|/partner/submissions#0",
-      "source": "client/src/App.tsx:374",
+      "source": "client/src/App.tsx:375",
       "owner": "core-platform"
     },
     {
       "category": "client-route",
-      "id": "/partner/supplies",
-      "component": "PartnerSuppliesPage",
+      "id": "/partner/supplies/requests",
+      "component": "PartnerSuppliesRequestsPage",
       "componentImports": [
-        "@/pages/partner/supplies"
+        "@/pages/partner/supplies-orders"
       ],
       "wrappers": [
         "ErrorBoundary",
@@ -4845,7 +4845,7 @@
       ],
       "componentGuardChains": [
         {
-          "component": "PartnerSuppliesPage",
+          "component": "PartnerSuppliesRequestsPage",
           "guards": [
             {
               "component": "ErrorBoundary",
@@ -4891,8 +4891,72 @@
       ],
       "redirectTargets": [],
       "environmentGuard": "none-declared",
+      "key": "client-route|client/src/App.tsx|/partner/supplies/requests#0",
+      "source": "client/src/App.tsx:420",
+      "owner": "core-platform"
+    },
+    {
+      "category": "client-route",
+      "id": "/partner/supplies",
+      "component": "PartnerSuppliesPage",
+      "componentImports": [
+        "@/pages/partner/supplies"
+      ],
+      "wrappers": [
+        "ErrorBoundary",
+        "PartnerSessionProvider",
+        "PartnerRouteGuard"
+      ],
+      "componentGuardChains": [
+        {
+          "component": "PartnerSuppliesPage",
+          "guards": [
+            {
+              "component": "ErrorBoundary",
+              "importTarget": "client/src/components/error-boundary.tsx",
+              "props": {}
+            },
+            {
+              "component": "PartnerSessionProvider",
+              "importTarget": "client/src/hooks/use-partner-session.tsx",
+              "props": {}
+            },
+            {
+              "component": "PartnerRouteGuard",
+              "importTarget": "client/src/components/partner/partner-route-guard.tsx",
+              "props": {
+                "requiredPermission": "partner.orders.view"
+              }
+            }
+          ]
+        }
+      ],
+      "requiredPermissions": [
+        "partner.orders.view"
+      ],
+      "guardProps": [
+        {
+          "component": "ErrorBoundary",
+          "importTarget": "client/src/components/error-boundary.tsx",
+          "props": {}
+        },
+        {
+          "component": "PartnerSessionProvider",
+          "importTarget": "client/src/hooks/use-partner-session.tsx",
+          "props": {}
+        },
+        {
+          "component": "PartnerRouteGuard",
+          "importTarget": "client/src/components/partner/partner-route-guard.tsx",
+          "props": {
+            "requiredPermission": "partner.orders.view"
+          }
+        }
+      ],
+      "redirectTargets": [],
+      "environmentGuard": "none-declared",
       "key": "client-route|client/src/App.tsx|/partner/supplies#0",
-      "source": "client/src/App.tsx:409",
+      "source": "client/src/App.tsx:410",
       "owner": "core-platform"
     },
     {
@@ -4950,7 +5014,7 @@
       "redirectTargets": [],
       "environmentGuard": "none-declared",
       "key": "client-route|client/src/App.tsx|/partner/users#0",
-      "source": "client/src/App.tsx:389",
+      "source": "client/src/App.tsx:390",
       "owner": "core-platform"
     },
     {
@@ -4982,7 +5046,7 @@
       "redirectTargets": [],
       "environmentGuard": "none-declared",
       "key": "client-route|client/src/App.tsx|/partner#0",
-      "source": "client/src/App.tsx:454",
+      "source": "client/src/App.tsx:460",
       "owner": "core-platform"
     },
     {
@@ -5020,7 +5084,7 @@
       "redirectTargets": [],
       "environmentGuard": "none-declared",
       "key": "client-route|client/src/App.tsx|/partners/location/:publicRef#0",
-      "source": "client/src/App.tsx:693",
+      "source": "client/src/App.tsx:699",
       "owner": "core-platform"
     },
     {
@@ -5058,7 +5122,7 @@
       "redirectTargets": [],
       "environmentGuard": "none-declared",
       "key": "client-route|client/src/App.tsx|/partners#0",
-      "source": "client/src/App.tsx:695",
+      "source": "client/src/App.tsx:701",
       "owner": "core-platform"
     },
     {
@@ -5096,7 +5160,7 @@
       "redirectTargets": [],
       "environmentGuard": "none-declared",
       "key": "client-route|client/src/App.tsx|/pokemon-card-grading-uk#0",
-      "source": "client/src/App.tsx:710",
+      "source": "client/src/App.tsx:716",
       "owner": "core-platform"
     },
     {
@@ -5134,7 +5198,7 @@
       "redirectTargets": [],
       "environmentGuard": "none-declared",
       "key": "client-route|client/src/App.tsx|/population/certs#0",
-      "source": "client/src/App.tsx:731",
+      "source": "client/src/App.tsx:737",
       "owner": "core-platform"
     },
     {
@@ -5172,7 +5236,7 @@
       "redirectTargets": [],
       "environmentGuard": "none-declared",
       "key": "client-route|client/src/App.tsx|/population#0",
-      "source": "client/src/App.tsx:730",
+      "source": "client/src/App.tsx:736",
       "owner": "core-platform"
     },
     {
@@ -5204,7 +5268,7 @@
       "redirectTargets": [],
       "environmentGuard": "none-declared",
       "key": "client-route|client/src/App.tsx|/pre-grade#0",
-      "source": "client/src/App.tsx:680",
+      "source": "client/src/App.tsx:686",
       "owner": "core-platform"
     },
     {
@@ -5236,7 +5300,7 @@
       "redirectTargets": [],
       "environmentGuard": "none-declared",
       "key": "client-route|client/src/App.tsx|/pricing-demo#0",
-      "source": "client/src/App.tsx:465",
+      "source": "client/src/App.tsx:471",
       "owner": "core-platform"
     },
     {
@@ -5268,7 +5332,7 @@
       "redirectTargets": [],
       "environmentGuard": "none-declared",
       "key": "client-route|client/src/App.tsx|/pricing-v2#0",
-      "source": "client/src/App.tsx:464",
+      "source": "client/src/App.tsx:470",
       "owner": "core-platform"
     },
     {
@@ -5300,7 +5364,7 @@
       "redirectTargets": [],
       "environmentGuard": "none-declared",
       "key": "client-route|client/src/App.tsx|/pricing#0",
-      "source": "client/src/App.tsx:676",
+      "source": "client/src/App.tsx:682",
       "owner": "core-platform"
     },
     {
@@ -5338,7 +5402,7 @@
       "redirectTargets": [],
       "environmentGuard": "none-declared",
       "key": "client-route|client/src/App.tsx|/psa-alternative-uk#0",
-      "source": "client/src/App.tsx:713",
+      "source": "client/src/App.tsx:719",
       "owner": "core-platform"
     },
     {
@@ -5370,7 +5434,7 @@
       "redirectTargets": [],
       "environmentGuard": "none-declared",
       "key": "client-route|client/src/App.tsx|/reels#0",
-      "source": "client/src/App.tsx:664",
+      "source": "client/src/App.tsx:670",
       "owner": "core-platform"
     },
     {
@@ -5402,7 +5466,7 @@
       "redirectTargets": [],
       "environmentGuard": "none-declared",
       "key": "client-route|client/src/App.tsx|/registry#0",
-      "source": "client/src/App.tsx:685",
+      "source": "client/src/App.tsx:691",
       "owner": "core-platform"
     },
     {
@@ -5440,7 +5504,7 @@
       "redirectTargets": [],
       "environmentGuard": "none-declared",
       "key": "client-route|client/src/App.tsx|/reports#0",
-      "source": "client/src/App.tsx:697",
+      "source": "client/src/App.tsx:703",
       "owner": "core-platform"
     },
     {
@@ -5478,7 +5542,7 @@
       "redirectTargets": [],
       "environmentGuard": "none-declared",
       "key": "client-route|client/src/App.tsx|/reset-password#0",
-      "source": "client/src/App.tsx:754",
+      "source": "client/src/App.tsx:760",
       "owner": "core-platform"
     },
     {
@@ -5510,7 +5574,7 @@
       "redirectTargets": [],
       "environmentGuard": "none-declared",
       "key": "client-route|client/src/App.tsx|/share/reel/:date/:certNumber#0",
-      "source": "client/src/App.tsx:665",
+      "source": "client/src/App.tsx:671",
       "owner": "core-platform"
     },
     {
@@ -5548,7 +5612,7 @@
       "redirectTargets": [],
       "environmentGuard": "none-declared",
       "key": "client-route|client/src/App.tsx|/showroom/:username#0",
-      "source": "client/src/App.tsx:758",
+      "source": "client/src/App.tsx:764",
       "owner": "core-platform"
     },
     {
@@ -5586,7 +5650,7 @@
       "redirectTargets": [],
       "environmentGuard": "none-declared",
       "key": "client-route|client/src/App.tsx|/showrooms#0",
-      "source": "client/src/App.tsx:757",
+      "source": "client/src/App.tsx:763",
       "owner": "core-platform"
     },
     {
@@ -5624,7 +5688,7 @@
       "redirectTargets": [],
       "environmentGuard": "none-declared",
       "key": "client-route|client/src/App.tsx|/signup#0",
-      "source": "client/src/App.tsx:752",
+      "source": "client/src/App.tsx:758",
       "owner": "core-platform"
     },
     {
@@ -5662,7 +5726,7 @@
       "redirectTargets": [],
       "environmentGuard": "none-declared",
       "key": "client-route|client/src/App.tsx|/sports-card-grading-uk#0",
-      "source": "client/src/App.tsx:718",
+      "source": "client/src/App.tsx:724",
       "owner": "core-platform"
     },
     {
@@ -5694,7 +5758,7 @@
       "redirectTargets": [],
       "environmentGuard": "none-declared",
       "key": "client-route|client/src/App.tsx|/staff/login#0",
-      "source": "client/src/App.tsx:489",
+      "source": "client/src/App.tsx:495",
       "owner": "core-platform"
     },
     {
@@ -5726,7 +5790,7 @@
       "redirectTargets": [],
       "environmentGuard": "none-declared",
       "key": "client-route|client/src/App.tsx|/staff#0",
-      "source": "client/src/App.tsx:492",
+      "source": "client/src/App.tsx:498",
       "owner": "core-platform"
     },
     {
@@ -5758,7 +5822,7 @@
       "redirectTargets": [],
       "environmentGuard": "none-declared",
       "key": "client-route|client/src/App.tsx|/standard#0",
-      "source": "client/src/App.tsx:666",
+      "source": "client/src/App.tsx:672",
       "owner": "core-platform"
     },
     {
@@ -5796,7 +5860,7 @@
       "redirectTargets": [],
       "environmentGuard": "none-declared",
       "key": "client-route|client/src/App.tsx|/stolen-card-protection#0",
-      "source": "client/src/App.tsx:723",
+      "source": "client/src/App.tsx:729",
       "owner": "core-platform"
     },
     {
@@ -5834,7 +5898,7 @@
       "redirectTargets": [],
       "environmentGuard": "none-declared",
       "key": "client-route|client/src/App.tsx|/submit/success#0",
-      "source": "client/src/App.tsx:700",
+      "source": "client/src/App.tsx:706",
       "owner": "core-platform"
     },
     {
@@ -5872,7 +5936,7 @@
       "redirectTargets": [],
       "environmentGuard": "none-declared",
       "key": "client-route|client/src/App.tsx|/submit#0",
-      "source": "client/src/App.tsx:699",
+      "source": "client/src/App.tsx:705",
       "owner": "core-platform"
     },
     {
@@ -5910,7 +5974,7 @@
       "redirectTargets": [],
       "environmentGuard": "none-declared",
       "key": "client-route|client/src/App.tsx|/tcg-grading-uk#0",
-      "source": "client/src/App.tsx:715",
+      "source": "client/src/App.tsx:721",
       "owner": "core-platform"
     },
     {
@@ -5948,7 +6012,7 @@
       "redirectTargets": [],
       "environmentGuard": "none-declared",
       "key": "client-route|client/src/App.tsx|/tcg#0",
-      "source": "client/src/App.tsx:698",
+      "source": "client/src/App.tsx:704",
       "owner": "core-platform"
     },
     {
@@ -5980,7 +6044,7 @@
       "redirectTargets": [],
       "environmentGuard": "none-declared",
       "key": "client-route|client/src/App.tsx|/technology#0",
-      "source": "client/src/App.tsx:684",
+      "source": "client/src/App.tsx:690",
       "owner": "core-platform"
     },
     {
@@ -6018,7 +6082,7 @@
       "redirectTargets": [],
       "environmentGuard": "none-declared",
       "key": "client-route|client/src/App.tsx|/terms-and-conditions#0",
-      "source": "client/src/App.tsx:702",
+      "source": "client/src/App.tsx:708",
       "owner": "core-platform"
     },
     {
@@ -6050,7 +6114,7 @@
       "redirectTargets": [],
       "environmentGuard": "none-declared",
       "key": "client-route|client/src/App.tsx|/tools/estimate#0",
-      "source": "client/src/App.tsx:681",
+      "source": "client/src/App.tsx:687",
       "owner": "core-platform"
     },
     {
@@ -6088,7 +6152,7 @@
       "redirectTargets": [],
       "environmentGuard": "none-declared",
       "key": "client-route|client/src/App.tsx|/track#0",
-      "source": "client/src/App.tsx:701",
+      "source": "client/src/App.tsx:707",
       "owner": "core-platform"
     },
     {
@@ -6126,7 +6190,7 @@
       "redirectTargets": [],
       "environmentGuard": "none-declared",
       "key": "client-route|client/src/App.tsx|/trading-card-grading-uk#0",
-      "source": "client/src/App.tsx:711",
+      "source": "client/src/App.tsx:717",
       "owner": "core-platform"
     },
     {
@@ -6164,7 +6228,7 @@
       "redirectTargets": [],
       "environmentGuard": "none-declared",
       "key": "client-route|client/src/App.tsx|/transfer/accept#0",
-      "source": "client/src/App.tsx:727",
+      "source": "client/src/App.tsx:733",
       "owner": "core-platform"
     },
     {
@@ -6202,7 +6266,7 @@
       "redirectTargets": [],
       "environmentGuard": "none-declared",
       "key": "client-route|client/src/App.tsx|/transfer/claim-by-code#0",
-      "source": "client/src/App.tsx:728",
+      "source": "client/src/App.tsx:734",
       "owner": "core-platform"
     },
     {
@@ -6240,7 +6304,7 @@
       "redirectTargets": [],
       "environmentGuard": "none-declared",
       "key": "client-route|client/src/App.tsx|/transfer#0",
-      "source": "client/src/App.tsx:726",
+      "source": "client/src/App.tsx:732",
       "owner": "core-platform"
     },
     {
@@ -6272,7 +6336,7 @@
       "redirectTargets": [],
       "environmentGuard": "none-declared",
       "key": "client-route|client/src/App.tsx|/upload/:certId/:imageType#0",
-      "source": "client/src/App.tsx:670",
+      "source": "client/src/App.tsx:676",
       "owner": "core-platform"
     },
     {
@@ -6304,7 +6368,7 @@
       "redirectTargets": [],
       "environmentGuard": "none-declared",
       "key": "client-route|client/src/App.tsx|/vault-club#0",
-      "source": "client/src/App.tsx:677",
+      "source": "client/src/App.tsx:683",
       "owner": "core-platform"
     },
     {
@@ -6342,7 +6406,7 @@
       "redirectTargets": [],
       "environmentGuard": "none-declared",
       "key": "client-route|client/src/App.tsx|/vault-reports/about#0",
-      "source": "client/src/App.tsx:744",
+      "source": "client/src/App.tsx:750",
       "owner": "core-platform"
     },
     {
@@ -6380,7 +6444,7 @@
       "redirectTargets": [],
       "environmentGuard": "none-declared",
       "key": "client-route|client/src/App.tsx|/vault-reports/how-to-read#0",
-      "source": "client/src/App.tsx:745",
+      "source": "client/src/App.tsx:751",
       "owner": "core-platform"
     },
     {
@@ -6412,7 +6476,7 @@
       "redirectTargets": [],
       "environmentGuard": "none-declared",
       "key": "client-route|client/src/App.tsx|/vault/:certId#0",
-      "source": "client/src/App.tsx:674",
+      "source": "client/src/App.tsx:680",
       "owner": "core-platform"
     },
     {
@@ -6450,7 +6514,7 @@
       "redirectTargets": [],
       "environmentGuard": "none-declared",
       "key": "client-route|client/src/App.tsx|/verify-email#0",
-      "source": "client/src/App.tsx:755",
+      "source": "client/src/App.tsx:761",
       "owner": "core-platform"
     },
     {
@@ -6482,7 +6546,7 @@
       "redirectTargets": [],
       "environmentGuard": "none-declared",
       "key": "client-route|client/src/App.tsx|/verify#0",
-      "source": "client/src/App.tsx:678",
+      "source": "client/src/App.tsx:684",
       "owner": "core-platform"
     },
     {
@@ -6520,7 +6584,7 @@
       "redirectTargets": [],
       "environmentGuard": "none-declared",
       "key": "client-route|client/src/App.tsx|/why-mintvault#0",
-      "source": "client/src/App.tsx:692",
+      "source": "client/src/App.tsx:698",
       "owner": "core-platform"
     },
     {
@@ -6558,7 +6622,7 @@
       "redirectTargets": [],
       "environmentGuard": "none-declared",
       "key": "client-route|client/src/App.tsx|/yugioh-card-grading-uk#0",
-      "source": "client/src/App.tsx:716",
+      "source": "client/src/App.tsx:722",
       "owner": "core-platform"
     },
     {
@@ -6607,7 +6671,7 @@
       ],
       "environmentGuard": "none-declared",
       "key": "client-route|client/src/App.tsx|<pathless>#0",
-      "source": "client/src/App.tsx:434",
+      "source": "client/src/App.tsx:440",
       "owner": "core-platform"
     },
     {
@@ -6626,7 +6690,7 @@
       "redirectTargets": [],
       "environmentGuard": "none-declared",
       "key": "client-route|client/src/App.tsx|<pathless>#1",
-      "source": "client/src/App.tsx:686",
+      "source": "client/src/App.tsx:692",
       "owner": "core-platform"
     },
     {
@@ -6664,7 +6728,7 @@
       "redirectTargets": [],
       "environmentGuard": "none-declared",
       "key": "client-route|client/src/App.tsx|<pathless>#2",
-      "source": "client/src/App.tsx:759",
+      "source": "client/src/App.tsx:765",
       "owner": "core-platform"
     },
     {
@@ -9967,7 +10031,7 @@
       "id": "endpoint:/pricing",
       "pricingKind": "transport",
       "key": "pricing-authority|client/src/App.tsx|endpoint:/pricing#0",
-      "source": "client/src/App.tsx:676",
+      "source": "client/src/App.tsx:682",
       "owner": "core-platform"
     },
     {
@@ -10591,7 +10655,7 @@
       "id": "endpoint:/api/partner/service-tiers",
       "pricingKind": "transport",
       "key": "pricing-authority|client/src/lib/partner-api.ts|endpoint:/api/partner/service-tiers#0",
-      "source": "client/src/lib/partner-api.ts:424",
+      "source": "client/src/lib/partner-api.ts:485",
       "disposition": "known-legacy",
       "finding": "ARCH-AUTHORITY-001",
       "legacyExpiry": "the bounded-context repair that assigns explicit authority"
@@ -14456,7 +14520,7 @@
       "id": "literal:$1",
       "pricingKind": "currency-bearing-literal",
       "key": "pricing-authority|scripts/ci/partner-browser-fixture.ts|literal:$1#0",
-      "source": "scripts/ci/partner-browser-fixture.ts:96",
+      "source": "scripts/ci/partner-browser-fixture.ts:97",
       "owner": "engineering-test-platform"
     },
     {
@@ -14464,7 +14528,7 @@
       "id": "literal:$1",
       "pricingKind": "currency-bearing-literal",
       "key": "pricing-authority|scripts/ci/partner-browser-fixture.ts|literal:$1#1",
-      "source": "scripts/ci/partner-browser-fixture.ts:100",
+      "source": "scripts/ci/partner-browser-fixture.ts:101",
       "owner": "engineering-test-platform"
     },
     {
@@ -14472,7 +14536,7 @@
       "id": "literal:$1",
       "pricingKind": "currency-bearing-literal",
       "key": "pricing-authority|scripts/ci/partner-browser-fixture.ts|literal:$1#2",
-      "source": "scripts/ci/partner-browser-fixture.ts:105",
+      "source": "scripts/ci/partner-browser-fixture.ts:106",
       "owner": "engineering-test-platform"
     },
     {
@@ -14480,7 +14544,7 @@
       "id": "literal:$1",
       "pricingKind": "currency-bearing-literal",
       "key": "pricing-authority|scripts/ci/partner-browser-fixture.ts|literal:$1#3",
-      "source": "scripts/ci/partner-browser-fixture.ts:109",
+      "source": "scripts/ci/partner-browser-fixture.ts:110",
       "owner": "engineering-test-platform"
     },
     {
@@ -14488,7 +14552,31 @@
       "id": "literal:$1",
       "pricingKind": "currency-bearing-literal",
       "key": "pricing-authority|scripts/ci/partner-browser-fixture.ts|literal:$1#4",
-      "source": "scripts/ci/partner-browser-fixture.ts:113",
+      "source": "scripts/ci/partner-browser-fixture.ts:114",
+      "owner": "engineering-test-platform"
+    },
+    {
+      "category": "pricing-authority",
+      "id": "literal:$1",
+      "pricingKind": "currency-bearing-literal",
+      "key": "pricing-authority|scripts/ci/partner-browser-fixture.ts|literal:$1#5",
+      "source": "scripts/ci/partner-browser-fixture.ts:135",
+      "owner": "engineering-test-platform"
+    },
+    {
+      "category": "pricing-authority",
+      "id": "literal:$1",
+      "pricingKind": "currency-bearing-literal",
+      "key": "pricing-authority|scripts/ci/partner-browser-fixture.ts|literal:$1#6",
+      "source": "scripts/ci/partner-browser-fixture.ts:140",
+      "owner": "engineering-test-platform"
+    },
+    {
+      "category": "pricing-authority",
+      "id": "literal:$1",
+      "pricingKind": "currency-bearing-literal",
+      "key": "pricing-authority|scripts/ci/partner-browser-fixture.ts|literal:$1#7",
+      "source": "scripts/ci/partner-browser-fixture.ts:154",
       "owner": "engineering-test-platform"
     },
     {
@@ -14500,6 +14588,14 @@
       "disposition": "known-legacy",
       "finding": "ARCH-AUTHORITY-001",
       "legacyExpiry": "the bounded-context repair that assigns explicit authority"
+    },
+    {
+      "category": "pricing-authority",
+      "id": "literal:£75.00",
+      "pricingKind": "currency-bearing-literal",
+      "key": "pricing-authority|scripts/command-centre-mobile-layout-check.mjs|literal:£75.00#0",
+      "source": "scripts/command-centre-mobile-layout-check.mjs:284",
+      "owner": "engineering-test-platform"
     },
     {
       "category": "pricing-authority",
@@ -22855,7 +22951,7 @@
       "id": "literal:$1",
       "pricingKind": "currency-bearing-literal",
       "key": "pricing-authority|server/partner/team-service.ts|literal:$1#0",
-      "source": "server/partner/team-service.ts:122",
+      "source": "server/partner/team-service.ts:113",
       "owner": "partner-platform"
     },
     {
@@ -22863,7 +22959,7 @@
       "id": "literal:$1",
       "pricingKind": "currency-bearing-literal",
       "key": "pricing-authority|server/partner/team-service.ts|literal:$1#1",
-      "source": "server/partner/team-service.ts:122",
+      "source": "server/partner/team-service.ts:113",
       "owner": "partner-platform"
     },
     {
@@ -22871,7 +22967,7 @@
       "id": "literal:$1",
       "pricingKind": "currency-bearing-literal",
       "key": "pricing-authority|server/partner/team-service.ts|literal:$1#2",
-      "source": "server/partner/team-service.ts:200",
+      "source": "server/partner/team-service.ts:191",
       "owner": "partner-platform"
     },
     {
@@ -22879,7 +22975,7 @@
       "id": "literal:$1",
       "pricingKind": "currency-bearing-literal",
       "key": "pricing-authority|server/partner/team-service.ts|literal:$1#3",
-      "source": "server/partner/team-service.ts:315",
+      "source": "server/partner/team-service.ts:306",
       "owner": "partner-platform"
     },
     {
@@ -22887,7 +22983,7 @@
       "id": "literal:$1",
       "pricingKind": "currency-bearing-literal",
       "key": "pricing-authority|server/partner/team-service.ts|literal:$1#4",
-      "source": "server/partner/team-service.ts:337",
+      "source": "server/partner/team-service.ts:328",
       "owner": "partner-platform"
     },
     {
@@ -22895,7 +22991,7 @@
       "id": "literal:$1",
       "pricingKind": "currency-bearing-literal",
       "key": "pricing-authority|server/partner/team-service.ts|literal:$1#5",
-      "source": "server/partner/team-service.ts:342",
+      "source": "server/partner/team-service.ts:333",
       "owner": "partner-platform"
     },
     {
@@ -22903,7 +22999,7 @@
       "id": "literal:$1",
       "pricingKind": "currency-bearing-literal",
       "key": "pricing-authority|server/partner/team-service.ts|literal:$1#6",
-      "source": "server/partner/team-service.ts:408",
+      "source": "server/partner/team-service.ts:399",
       "owner": "partner-platform"
     },
     {
@@ -22911,7 +23007,7 @@
       "id": "literal:$2",
       "pricingKind": "currency-bearing-literal",
       "key": "pricing-authority|server/partner/team-service.ts|literal:$2#0",
-      "source": "server/partner/team-service.ts:193",
+      "source": "server/partner/team-service.ts:184",
       "owner": "partner-platform"
     },
     {
@@ -22919,7 +23015,7 @@
       "id": "literal:$2",
       "pricingKind": "currency-bearing-literal",
       "key": "pricing-authority|server/partner/team-service.ts|literal:$2#1",
-      "source": "server/partner/team-service.ts:212",
+      "source": "server/partner/team-service.ts:203",
       "owner": "partner-platform"
     },
     {
@@ -22927,7 +23023,7 @@
       "id": "literal:$2",
       "pricingKind": "currency-bearing-literal",
       "key": "pricing-authority|server/partner/team-service.ts|literal:$2#2",
-      "source": "server/partner/team-service.ts:380",
+      "source": "server/partner/team-service.ts:371",
       "owner": "partner-platform"
     },
     {
@@ -29170,7 +29266,7 @@
       "roleKind": "capability-consumer",
       "declaration": "<anonymous>",
       "key": "role-authority|client/src/App.tsx|capability:partner.cards.assess#0",
-      "source": "client/src/App.tsx:385",
+      "source": "client/src/App.tsx:386",
       "owner": "core-platform"
     },
     {
@@ -29179,7 +29275,7 @@
       "roleKind": "capability-consumer",
       "declaration": "<anonymous>",
       "key": "role-authority|client/src/App.tsx|capability:partner.location.view#0",
-      "source": "client/src/App.tsx:420",
+      "source": "client/src/App.tsx:426",
       "owner": "core-platform"
     },
     {
@@ -29188,7 +29284,25 @@
       "roleKind": "capability-consumer",
       "declaration": "<anonymous>",
       "key": "role-authority|client/src/App.tsx|capability:partner.orders.view#0",
-      "source": "client/src/App.tsx:405",
+      "source": "client/src/App.tsx:406",
+      "owner": "core-platform"
+    },
+    {
+      "category": "role-authority",
+      "id": "capability:partner.orders.view",
+      "roleKind": "capability-consumer",
+      "declaration": "<anonymous>",
+      "key": "role-authority|client/src/App.tsx|capability:partner.orders.view#1",
+      "source": "client/src/App.tsx:411",
+      "owner": "core-platform"
+    },
+    {
+      "category": "role-authority",
+      "id": "capability:partner.orders.view",
+      "roleKind": "capability-consumer",
+      "declaration": "<anonymous>",
+      "key": "role-authority|client/src/App.tsx|capability:partner.orders.view#2",
+      "source": "client/src/App.tsx:416",
       "owner": "core-platform"
     },
     {
@@ -29197,16 +29311,7 @@
       "roleKind": "capability-consumer",
       "declaration": "<anonymous>",
       "key": "role-authority|client/src/App.tsx|capability:partner.supplies.view#0",
-      "source": "client/src/App.tsx:410",
-      "owner": "core-platform"
-    },
-    {
-      "category": "role-authority",
-      "id": "capability:partner.supplies.view",
-      "roleKind": "capability-consumer",
-      "declaration": "<anonymous>",
-      "key": "role-authority|client/src/App.tsx|capability:partner.supplies.view#1",
-      "source": "client/src/App.tsx:415",
+      "source": "client/src/App.tsx:421",
       "owner": "core-platform"
     },
     {
@@ -29304,7 +29409,7 @@
       "roleKind": "capability-consumer",
       "declaration": "permission",
       "key": "role-authority|client/src/components/partner/partner-shell.tsx|capability:partner.location.view#0",
-      "source": "client/src/components/partner/partner-shell.tsx:67",
+      "source": "client/src/components/partner/partner-shell.tsx:73",
       "owner": "partner-platform"
     },
     {
@@ -29331,7 +29436,25 @@
       "roleKind": "capability-consumer",
       "declaration": "permission",
       "key": "role-authority|client/src/components/partner/partner-shell.tsx|capability:partner.orders.view#2",
-      "source": "client/src/components/partner/partner-shell.tsx:65",
+      "source": "client/src/components/partner/partner-shell.tsx:63",
+      "owner": "partner-platform"
+    },
+    {
+      "category": "role-authority",
+      "id": "capability:partner.orders.view",
+      "roleKind": "capability-consumer",
+      "declaration": "permission",
+      "key": "role-authority|client/src/components/partner/partner-shell.tsx|capability:partner.orders.view#3",
+      "source": "client/src/components/partner/partner-shell.tsx:64",
+      "owner": "partner-platform"
+    },
+    {
+      "category": "role-authority",
+      "id": "capability:partner.orders.view",
+      "roleKind": "capability-consumer",
+      "declaration": "permission",
+      "key": "role-authority|client/src/components/partner/partner-shell.tsx|capability:partner.orders.view#4",
+      "source": "client/src/components/partner/partner-shell.tsx:71",
       "owner": "partner-platform"
     },
     {
@@ -29339,8 +29462,8 @@
       "id": "capability:partner.orders.view",
       "roleKind": "capability-consumer",
       "declaration": "<anonymous>",
-      "key": "role-authority|client/src/components/partner/partner-shell.tsx|capability:partner.orders.view#3",
-      "source": "client/src/components/partner/partner-shell.tsx:130",
+      "key": "role-authority|client/src/components/partner/partner-shell.tsx|capability:partner.orders.view#5",
+      "source": "client/src/components/partner/partner-shell.tsx:137",
       "owner": "partner-platform"
     },
     {
@@ -29349,16 +29472,7 @@
       "roleKind": "capability-consumer",
       "declaration": "permission",
       "key": "role-authority|client/src/components/partner/partner-shell.tsx|capability:partner.supplies.view#0",
-      "source": "client/src/components/partner/partner-shell.tsx:63",
-      "owner": "partner-platform"
-    },
-    {
-      "category": "role-authority",
-      "id": "capability:partner.supplies.view",
-      "roleKind": "capability-consumer",
-      "declaration": "permission",
-      "key": "role-authority|client/src/components/partner/partner-shell.tsx|capability:partner.supplies.view#1",
-      "source": "client/src/components/partner/partner-shell.tsx:64",
+      "source": "client/src/components/partner/partner-shell.tsx:69",
       "owner": "partner-platform"
     },
     {
@@ -29367,7 +29481,7 @@
       "roleKind": "capability-consumer",
       "declaration": "permission",
       "key": "role-authority|client/src/components/partner/partner-shell.tsx|capability:partner.users.view#0",
-      "source": "client/src/components/partner/partner-shell.tsx:66",
+      "source": "client/src/components/partner/partner-shell.tsx:72",
       "owner": "partner-platform"
     },
     {
@@ -29381,44 +29495,11 @@
     },
     {
       "category": "role-authority",
-      "id": "role:ADMIN",
-      "roleKind": "definition-or-mapping",
-      "declaration": "PartnerTeamRole",
-      "key": "role-authority|client/src/lib/partner-api.ts|role:ADMIN#0",
-      "source": "client/src/lib/partner-api.ts:370",
-      "disposition": "known-legacy",
-      "finding": "ARCH-AUTHORITY-001",
-      "legacyExpiry": "the bounded-context repair that assigns explicit authority"
-    },
-    {
-      "category": "role-authority",
       "id": "role:FINANCE_VIEWER",
       "roleKind": "definition-or-mapping",
       "declaration": "PartnerTeamDisplayRole",
       "key": "role-authority|client/src/lib/partner-api.ts|role:FINANCE_VIEWER#0",
-      "source": "client/src/lib/partner-api.ts:371",
-      "disposition": "known-legacy",
-      "finding": "ARCH-AUTHORITY-001",
-      "legacyExpiry": "the bounded-context repair that assigns explicit authority"
-    },
-    {
-      "category": "role-authority",
-      "id": "role:GRADER",
-      "roleKind": "definition-or-mapping",
-      "declaration": "PartnerTeamRole",
-      "key": "role-authority|client/src/lib/partner-api.ts|role:GRADER#0",
-      "source": "client/src/lib/partner-api.ts:370",
-      "disposition": "known-legacy",
-      "finding": "ARCH-AUTHORITY-001",
-      "legacyExpiry": "the bounded-context repair that assigns explicit authority"
-    },
-    {
-      "category": "role-authority",
-      "id": "role:OWNER",
-      "roleKind": "definition-or-mapping",
-      "declaration": "PartnerTeamRole",
-      "key": "role-authority|client/src/lib/partner-api.ts|role:OWNER#0",
-      "source": "client/src/lib/partner-api.ts:370",
+      "source": "client/src/lib/partner-api.ts:432",
       "disposition": "known-legacy",
       "finding": "ARCH-AUTHORITY-001",
       "legacyExpiry": "the bounded-context repair that assigns explicit authority"
@@ -29429,18 +29510,7 @@
       "roleKind": "definition-or-mapping",
       "declaration": "changeRole",
       "key": "role-authority|client/src/lib/partner-api.ts|role:POST#0",
-      "source": "client/src/lib/partner-api.ts:407",
-      "disposition": "known-legacy",
-      "finding": "ARCH-AUTHORITY-001",
-      "legacyExpiry": "the bounded-context repair that assigns explicit authority"
-    },
-    {
-      "category": "role-authority",
-      "id": "role:STAFF",
-      "roleKind": "definition-or-mapping",
-      "declaration": "PartnerTeamRole",
-      "key": "role-authority|client/src/lib/partner-api.ts|role:STAFF#0",
-      "source": "client/src/lib/partner-api.ts:370",
+      "source": "client/src/lib/partner-api.ts:468",
       "disposition": "known-legacy",
       "finding": "ARCH-AUTHORITY-001",
       "legacyExpiry": "the bounded-context repair that assigns explicit authority"
@@ -29451,7 +29521,7 @@
       "roleKind": "definition-or-mapping",
       "declaration": "PartnerTeamDisplayRole",
       "key": "role-authority|client/src/lib/partner-api.ts|role:TRAINEE#0",
-      "source": "client/src/lib/partner-api.ts:371",
+      "source": "client/src/lib/partner-api.ts:432",
       "disposition": "known-legacy",
       "finding": "ARCH-AUTHORITY-001",
       "legacyExpiry": "the bounded-context repair that assigns explicit authority"
@@ -29462,7 +29532,7 @@
       "roleKind": "definition-or-mapping",
       "declaration": "PartnerTeamDisplayRole",
       "key": "role-authority|client/src/lib/partner-api.ts|role:UNASSIGNED#0",
-      "source": "client/src/lib/partner-api.ts:371",
+      "source": "client/src/lib/partner-api.ts:432",
       "disposition": "known-legacy",
       "finding": "ARCH-AUTHORITY-001",
       "legacyExpiry": "the bounded-context repair that assigns explicit authority"
@@ -29871,11 +29941,29 @@
     },
     {
       "category": "role-authority",
+      "id": "capability:partner.credits.purchase",
+      "roleKind": "capability-consumer",
+      "declaration": "canPurchase",
+      "key": "role-authority|client/src/pages/partner/supplies.tsx|capability:partner.credits.purchase#0",
+      "source": "client/src/pages/partner/supplies.tsx:125",
+      "owner": "partner-platform"
+    },
+    {
+      "category": "role-authority",
+      "id": "capability:partner.orders.submit",
+      "roleKind": "capability-consumer",
+      "declaration": "canPurchase",
+      "key": "role-authority|client/src/pages/partner/supplies.tsx|capability:partner.orders.submit#0",
+      "source": "client/src/pages/partner/supplies.tsx:125",
+      "owner": "partner-platform"
+    },
+    {
+      "category": "role-authority",
       "id": "capability:partner.sessions.revoke",
       "roleKind": "capability-consumer",
       "declaration": "canRevokeSessions",
       "key": "role-authority|client/src/pages/partner/users.tsx|capability:partner.sessions.revoke#0",
-      "source": "client/src/pages/partner/users.tsx:67",
+      "source": "client/src/pages/partner/users.tsx:52",
       "owner": "partner-platform"
     },
     {
@@ -29884,61 +29972,7 @@
       "roleKind": "capability-consumer",
       "declaration": "canManage",
       "key": "role-authority|client/src/pages/partner/users.tsx|capability:partner.users.manage#0",
-      "source": "client/src/pages/partner/users.tsx:66",
-      "owner": "partner-platform"
-    },
-    {
-      "category": "role-authority",
-      "id": "role:ADMIN",
-      "roleKind": "definition-or-mapping",
-      "declaration": "value",
-      "key": "role-authority|client/src/pages/partner/users.tsx|role:ADMIN#0",
-      "source": "client/src/pages/partner/users.tsx:25",
-      "owner": "partner-platform"
-    },
-    {
-      "category": "role-authority",
-      "id": "role:ADMIN",
-      "roleKind": "definition-or-mapping",
-      "declaration": "<anonymous>",
-      "key": "role-authority|client/src/pages/partner/users.tsx|role:ADMIN#1",
-      "source": "client/src/pages/partner/users.tsx:55",
-      "owner": "partner-platform"
-    },
-    {
-      "category": "role-authority",
-      "id": "role:GRADER",
-      "roleKind": "definition-or-mapping",
-      "declaration": "value",
-      "key": "role-authority|client/src/pages/partner/users.tsx|role:GRADER#0",
-      "source": "client/src/pages/partner/users.tsx:26",
-      "owner": "partner-platform"
-    },
-    {
-      "category": "role-authority",
-      "id": "role:GRADER",
-      "roleKind": "definition-or-mapping",
-      "declaration": "<anonymous>",
-      "key": "role-authority|client/src/pages/partner/users.tsx|role:GRADER#1",
-      "source": "client/src/pages/partner/users.tsx:55",
-      "owner": "partner-platform"
-    },
-    {
-      "category": "role-authority",
-      "id": "role:OWNER",
-      "roleKind": "definition-or-mapping",
-      "declaration": "value",
-      "key": "role-authority|client/src/pages/partner/users.tsx|role:OWNER#0",
-      "source": "client/src/pages/partner/users.tsx:24",
-      "owner": "partner-platform"
-    },
-    {
-      "category": "role-authority",
-      "id": "role:OWNER",
-      "roleKind": "definition-or-mapping",
-      "declaration": "<anonymous>",
-      "key": "role-authority|client/src/pages/partner/users.tsx|role:OWNER#1",
-      "source": "client/src/pages/partner/users.tsx:55",
+      "source": "client/src/pages/partner/users.tsx:51",
       "owner": "partner-platform"
     },
     {
@@ -29946,8 +29980,8 @@
       "id": "role:OWNER",
       "roleKind": "definition-or-mapping",
       "declaration": "isOwner",
-      "key": "role-authority|client/src/pages/partner/users.tsx|role:OWNER#2",
-      "source": "client/src/pages/partner/users.tsx:78",
+      "key": "role-authority|client/src/pages/partner/users.tsx|role:OWNER#0",
+      "source": "client/src/pages/partner/users.tsx:63",
       "owner": "partner-platform"
     },
     {
@@ -29955,8 +29989,8 @@
       "id": "role:OWNER",
       "roleKind": "definition-or-mapping",
       "declaration": "permittedRoles",
-      "key": "role-authority|client/src/pages/partner/users.tsx|role:OWNER#3",
-      "source": "client/src/pages/partner/users.tsx:79",
+      "key": "role-authority|client/src/pages/partner/users.tsx|role:OWNER#1",
+      "source": "client/src/pages/partner/users.tsx:64",
       "owner": "partner-platform"
     },
     {
@@ -29964,62 +29998,44 @@
       "id": "role:OWNER",
       "roleKind": "definition-or-mapping",
       "declaration": "isTargetOwner",
+      "key": "role-authority|client/src/pages/partner/users.tsx|role:OWNER#2",
+      "source": "client/src/pages/partner/users.tsx:158",
+      "owner": "partner-platform"
+    },
+    {
+      "category": "role-authority",
+      "id": "role:OWNER",
+      "roleKind": "definition-or-mapping",
+      "declaration": "<anonymous>",
+      "key": "role-authority|client/src/pages/partner/users.tsx|role:OWNER#3",
+      "source": "client/src/pages/partner/users.tsx:404",
+      "owner": "partner-platform"
+    },
+    {
+      "category": "role-authority",
+      "id": "role:OWNER",
+      "roleKind": "definition-or-mapping",
+      "declaration": "<anonymous>",
       "key": "role-authority|client/src/pages/partner/users.tsx|role:OWNER#4",
-      "source": "client/src/pages/partner/users.tsx:173",
-      "owner": "partner-platform"
-    },
-    {
-      "category": "role-authority",
-      "id": "role:OWNER",
-      "roleKind": "definition-or-mapping",
-      "declaration": "<anonymous>",
-      "key": "role-authority|client/src/pages/partner/users.tsx|role:OWNER#5",
-      "source": "client/src/pages/partner/users.tsx:411",
-      "owner": "partner-platform"
-    },
-    {
-      "category": "role-authority",
-      "id": "role:OWNER",
-      "roleKind": "definition-or-mapping",
-      "declaration": "<anonymous>",
-      "key": "role-authority|client/src/pages/partner/users.tsx|role:OWNER#6",
-      "source": "client/src/pages/partner/users.tsx:475",
+      "source": "client/src/pages/partner/users.tsx:468",
       "owner": "partner-platform"
     },
     {
       "category": "role-authority",
       "id": "role:STAFF",
       "roleKind": "definition-or-mapping",
-      "declaration": "value",
+      "declaration": "role",
       "key": "role-authority|client/src/pages/partner/users.tsx|role:STAFF#0",
-      "source": "client/src/pages/partner/users.tsx:27",
+      "source": "client/src/pages/partner/users.tsx:50",
       "owner": "partner-platform"
     },
     {
       "category": "role-authority",
       "id": "role:STAFF",
       "roleKind": "definition-or-mapping",
-      "declaration": "<anonymous>",
+      "declaration": "role",
       "key": "role-authority|client/src/pages/partner/users.tsx|role:STAFF#1",
-      "source": "client/src/pages/partner/users.tsx:55",
-      "owner": "partner-platform"
-    },
-    {
-      "category": "role-authority",
-      "id": "role:STAFF",
-      "roleKind": "definition-or-mapping",
-      "declaration": "role",
-      "key": "role-authority|client/src/pages/partner/users.tsx|role:STAFF#2",
-      "source": "client/src/pages/partner/users.tsx:65",
-      "owner": "partner-platform"
-    },
-    {
-      "category": "role-authority",
-      "id": "role:STAFF",
-      "roleKind": "definition-or-mapping",
-      "declaration": "role",
-      "key": "role-authority|client/src/pages/partner/users.tsx|role:STAFF#3",
-      "source": "client/src/pages/partner/users.tsx:91",
+      "source": "client/src/pages/partner/users.tsx:76",
       "owner": "partner-platform"
     },
     {
@@ -30105,7 +30121,7 @@
       "roleKind": "definition-or-mapping",
       "declaration": "runtimeRole",
       "key": "role-authority|scripts/ci/partner-browser-fixture.ts|role:hex#0",
-      "source": "scripts/ci/partner-browser-fixture.ts:86",
+      "source": "scripts/ci/partner-browser-fixture.ts:87",
       "owner": "engineering-test-platform"
     },
     {
@@ -30893,6 +30909,24 @@
       "disposition": "known-legacy",
       "finding": "ARCH-AUTHORITY-001",
       "legacyExpiry": "the bounded-context repair that assigns explicit authority"
+    },
+    {
+      "category": "role-authority",
+      "id": "role:finance",
+      "roleKind": "definition-or-mapping",
+      "declaration": "PARTNER_BROWSER_PROOF_CHECKS",
+      "key": "role-authority|scripts/ci/run-disposable-integration.mjs|role:finance#0",
+      "source": "scripts/ci/run-disposable-integration.mjs:48",
+      "owner": "engineering-test-platform"
+    },
+    {
+      "category": "role-authority",
+      "id": "role:owner",
+      "roleKind": "definition-or-mapping",
+      "declaration": "PARTNER_BROWSER_PROOF_CHECKS",
+      "key": "role-authority|scripts/ci/run-disposable-integration.mjs|role:owner#0",
+      "source": "scripts/ci/run-disposable-integration.mjs:47",
+      "owner": "engineering-test-platform"
     },
     {
       "category": "role-authority",
@@ -34485,7 +34519,7 @@
       "roleKind": "capability-consumer",
       "declaration": "<anonymous>",
       "key": "role-authority|server/partner/supplies-routes.ts|capability:partner.supplies.submit#0",
-      "source": "server/partner/supplies-routes.ts:42",
+      "source": "server/partner/supplies-routes.ts:44",
       "owner": "partner-platform"
     },
     {
@@ -34494,7 +34528,16 @@
       "roleKind": "capability-consumer",
       "declaration": "<anonymous>",
       "key": "role-authority|server/partner/supplies-routes.ts|capability:partner.supplies.submit#1",
-      "source": "server/partner/supplies-routes.ts:60",
+      "source": "server/partner/supplies-routes.ts:85",
+      "owner": "partner-platform"
+    },
+    {
+      "category": "role-authority",
+      "id": "capability:partner.supplies.submit",
+      "roleKind": "capability-consumer",
+      "declaration": "<anonymous>",
+      "key": "role-authority|server/partner/supplies-routes.ts|capability:partner.supplies.submit#2",
+      "source": "server/partner/supplies-routes.ts:93",
       "owner": "partner-platform"
     },
     {
@@ -34503,7 +34546,7 @@
       "roleKind": "capability-consumer",
       "declaration": "<anonymous>",
       "key": "role-authority|server/partner/supplies-routes.ts|capability:partner.supplies.view#0",
-      "source": "server/partner/supplies-routes.ts:38",
+      "source": "server/partner/supplies-routes.ts:40",
       "owner": "partner-platform"
     },
     {
@@ -34512,7 +34555,7 @@
       "roleKind": "capability-consumer",
       "declaration": "<anonymous>",
       "key": "role-authority|server/partner/supplies-routes.ts|capability:partner.supplies.view#1",
-      "source": "server/partner/supplies-routes.ts:50",
+      "source": "server/partner/supplies-routes.ts:52",
       "owner": "partner-platform"
     },
     {
@@ -34575,7 +34618,7 @@
       "roleKind": "definition-or-mapping",
       "declaration": "PARTNER_MANAGER",
       "key": "role-authority|server/partner/team-service.ts|role:ADMIN#0",
-      "source": "server/partner/team-service.ts:23",
+      "source": "server/partner/team-service.ts:14",
       "owner": "partner-platform"
     },
     {
@@ -34584,16 +34627,7 @@
       "roleKind": "definition-or-mapping",
       "declaration": "MVGS_ASSESSMENT_TECHNICIAN",
       "key": "role-authority|server/partner/team-service.ts|role:GRADER#0",
-      "source": "server/partner/team-service.ts:24",
-      "owner": "partner-platform"
-    },
-    {
-      "category": "role-authority",
-      "id": "role:MVGS_ASSESSMENT_TECHNICIAN",
-      "roleKind": "definition-or-mapping",
-      "declaration": "GRADER",
-      "key": "role-authority|server/partner/team-service.ts|role:MVGS_ASSESSMENT_TECHNICIAN#0",
-      "source": "server/partner/team-service.ts:12",
+      "source": "server/partner/team-service.ts:15",
       "owner": "partner-platform"
     },
     {
@@ -34601,8 +34635,8 @@
       "id": "role:MVGS_ASSESSMENT_TECHNICIAN",
       "roleKind": "definition-or-mapping",
       "declaration": "PORTAL_ROLE_PRECEDENCE",
-      "key": "role-authority|server/partner/team-service.ts|role:MVGS_ASSESSMENT_TECHNICIAN#1",
-      "source": "server/partner/team-service.ts:36",
+      "key": "role-authority|server/partner/team-service.ts|role:MVGS_ASSESSMENT_TECHNICIAN#0",
+      "source": "server/partner/team-service.ts:27",
       "owner": "partner-platform"
     },
     {
@@ -34611,16 +34645,7 @@
       "roleKind": "definition-or-mapping",
       "declaration": "PARTNER_OWNER",
       "key": "role-authority|server/partner/team-service.ts|role:OWNER#0",
-      "source": "server/partner/team-service.ts:22",
-      "owner": "partner-platform"
-    },
-    {
-      "category": "role-authority",
-      "id": "role:PARTNER_MANAGER",
-      "roleKind": "definition-or-mapping",
-      "declaration": "ADMIN",
-      "key": "role-authority|server/partner/team-service.ts|role:PARTNER_MANAGER#0",
-      "source": "server/partner/team-service.ts:11",
+      "source": "server/partner/team-service.ts:13",
       "owner": "partner-platform"
     },
     {
@@ -34628,8 +34653,8 @@
       "id": "role:PARTNER_MANAGER",
       "roleKind": "definition-or-mapping",
       "declaration": "PORTAL_ROLE_PRECEDENCE",
-      "key": "role-authority|server/partner/team-service.ts|role:PARTNER_MANAGER#1",
-      "source": "server/partner/team-service.ts:35",
+      "key": "role-authority|server/partner/team-service.ts|role:PARTNER_MANAGER#0",
+      "source": "server/partner/team-service.ts:26",
       "owner": "partner-platform"
     },
     {
@@ -34637,8 +34662,8 @@
       "id": "role:PARTNER_MANAGER",
       "roleKind": "definition-or-mapping",
       "declaration": "isAdmin",
-      "key": "role-authority|server/partner/team-service.ts|role:PARTNER_MANAGER#2",
-      "source": "server/partner/team-service.ts:153",
+      "key": "role-authority|server/partner/team-service.ts|role:PARTNER_MANAGER#1",
+      "source": "server/partner/team-service.ts:144",
       "owner": "partner-platform"
     },
     {
@@ -34646,17 +34671,8 @@
       "id": "role:PARTNER_MANAGER",
       "roleKind": "definition-or-mapping",
       "declaration": "<anonymous>",
-      "key": "role-authority|server/partner/team-service.ts|role:PARTNER_MANAGER#3",
-      "source": "server/partner/team-service.ts:355",
-      "owner": "partner-platform"
-    },
-    {
-      "category": "role-authority",
-      "id": "role:PARTNER_OWNER",
-      "roleKind": "definition-or-mapping",
-      "declaration": "OWNER",
-      "key": "role-authority|server/partner/team-service.ts|role:PARTNER_OWNER#0",
-      "source": "server/partner/team-service.ts:10",
+      "key": "role-authority|server/partner/team-service.ts|role:PARTNER_MANAGER#2",
+      "source": "server/partner/team-service.ts:346",
       "owner": "partner-platform"
     },
     {
@@ -34664,26 +34680,17 @@
       "id": "role:PARTNER_OWNER",
       "roleKind": "definition-or-mapping",
       "declaration": "PORTAL_ROLE_PRECEDENCE",
+      "key": "role-authority|server/partner/team-service.ts|role:PARTNER_OWNER#0",
+      "source": "server/partner/team-service.ts:25",
+      "owner": "partner-platform"
+    },
+    {
+      "category": "role-authority",
+      "id": "role:PARTNER_OWNER",
+      "roleKind": "definition-or-mapping",
+      "declaration": "<anonymous>",
       "key": "role-authority|server/partner/team-service.ts|role:PARTNER_OWNER#1",
-      "source": "server/partner/team-service.ts:34",
-      "owner": "partner-platform"
-    },
-    {
-      "category": "role-authority",
-      "id": "role:PARTNER_OWNER",
-      "roleKind": "definition-or-mapping",
-      "declaration": "<anonymous>",
-      "key": "role-authority|server/partner/team-service.ts|role:PARTNER_OWNER#10",
-      "source": "server/partner/team-service.ts:358",
-      "owner": "partner-platform"
-    },
-    {
-      "category": "role-authority",
-      "id": "role:PARTNER_OWNER",
-      "roleKind": "definition-or-mapping",
-      "declaration": "<anonymous>",
-      "key": "role-authority|server/partner/team-service.ts|role:PARTNER_OWNER#2",
-      "source": "server/partner/team-service.ts:138",
+      "source": "server/partner/team-service.ts:129",
       "owner": "partner-platform"
     },
     {
@@ -34691,8 +34698,8 @@
       "id": "role:PARTNER_OWNER",
       "roleKind": "definition-or-mapping",
       "declaration": "isOwner",
-      "key": "role-authority|server/partner/team-service.ts|role:PARTNER_OWNER#3",
-      "source": "server/partner/team-service.ts:152",
+      "key": "role-authority|server/partner/team-service.ts|role:PARTNER_OWNER#2",
+      "source": "server/partner/team-service.ts:143",
       "owner": "partner-platform"
     },
     {
@@ -34700,8 +34707,17 @@
       "id": "role:PARTNER_OWNER",
       "roleKind": "definition-or-mapping",
       "declaration": "targetIsOwner",
+      "key": "role-authority|server/partner/team-service.ts|role:PARTNER_OWNER#3",
+      "source": "server/partner/team-service.ts:147",
+      "owner": "partner-platform"
+    },
+    {
+      "category": "role-authority",
+      "id": "role:PARTNER_OWNER",
+      "roleKind": "definition-or-mapping",
+      "declaration": "<anonymous>",
       "key": "role-authority|server/partner/team-service.ts|role:PARTNER_OWNER#4",
-      "source": "server/partner/team-service.ts:156",
+      "source": "server/partner/team-service.ts:148",
       "owner": "partner-platform"
     },
     {
@@ -34710,7 +34726,7 @@
       "roleKind": "definition-or-mapping",
       "declaration": "<anonymous>",
       "key": "role-authority|server/partner/team-service.ts|role:PARTNER_OWNER#5",
-      "source": "server/partner/team-service.ts:157",
+      "source": "server/partner/team-service.ts:152",
       "owner": "partner-platform"
     },
     {
@@ -34719,7 +34735,7 @@
       "roleKind": "definition-or-mapping",
       "declaration": "<anonymous>",
       "key": "role-authority|server/partner/team-service.ts|role:PARTNER_OWNER#6",
-      "source": "server/partner/team-service.ts:161",
+      "source": "server/partner/team-service.ts:156",
       "owner": "partner-platform"
     },
     {
@@ -34728,7 +34744,7 @@
       "roleKind": "definition-or-mapping",
       "declaration": "<anonymous>",
       "key": "role-authority|server/partner/team-service.ts|role:PARTNER_OWNER#7",
-      "source": "server/partner/team-service.ts:165",
+      "source": "server/partner/team-service.ts:346",
       "owner": "partner-platform"
     },
     {
@@ -34737,7 +34753,7 @@
       "roleKind": "definition-or-mapping",
       "declaration": "<anonymous>",
       "key": "role-authority|server/partner/team-service.ts|role:PARTNER_OWNER#8",
-      "source": "server/partner/team-service.ts:355",
+      "source": "server/partner/team-service.ts:349",
       "owner": "partner-platform"
     },
     {
@@ -34746,16 +34762,7 @@
       "roleKind": "definition-or-mapping",
       "declaration": "<anonymous>",
       "key": "role-authority|server/partner/team-service.ts|role:PARTNER_OWNER#9",
-      "source": "server/partner/team-service.ts:358",
-      "owner": "partner-platform"
-    },
-    {
-      "category": "role-authority",
-      "id": "role:PARTNER_RECEPTION",
-      "roleKind": "definition-or-mapping",
-      "declaration": "STAFF",
-      "key": "role-authority|server/partner/team-service.ts|role:PARTNER_RECEPTION#0",
-      "source": "server/partner/team-service.ts:13",
+      "source": "server/partner/team-service.ts:349",
       "owner": "partner-platform"
     },
     {
@@ -34763,8 +34770,8 @@
       "id": "role:PARTNER_RECEPTION",
       "roleKind": "definition-or-mapping",
       "declaration": "PORTAL_ROLE_PRECEDENCE",
-      "key": "role-authority|server/partner/team-service.ts|role:PARTNER_RECEPTION#1",
-      "source": "server/partner/team-service.ts:38",
+      "key": "role-authority|server/partner/team-service.ts|role:PARTNER_RECEPTION#0",
+      "source": "server/partner/team-service.ts:29",
       "owner": "partner-platform"
     },
     {
@@ -34772,8 +34779,8 @@
       "id": "role:PARTNER_RECEPTION",
       "roleKind": "definition-or-mapping",
       "declaration": "roleCode",
-      "key": "role-authority|server/partner/team-service.ts|role:PARTNER_RECEPTION#2",
-      "source": "server/partner/team-service.ts:372",
+      "key": "role-authority|server/partner/team-service.ts|role:PARTNER_RECEPTION#1",
+      "source": "server/partner/team-service.ts:363",
       "owner": "partner-platform"
     },
     {
@@ -34782,7 +34789,7 @@
       "roleKind": "definition-or-mapping",
       "declaration": "<anonymous>",
       "key": "role-authority|server/partner/team-service.ts|role:PARTNER_ROLE_NOT_CONFIGURED#0",
-      "source": "server/partner/team-service.ts:96",
+      "source": "server/partner/team-service.ts:87",
       "owner": "partner-platform"
     },
     {
@@ -34791,7 +34798,7 @@
       "roleKind": "definition-or-mapping",
       "declaration": "<anonymous>",
       "key": "role-authority|server/partner/team-service.ts|role:PARTNER_UNAVAILABLE#0",
-      "source": "server/partner/team-service.ts:367",
+      "source": "server/partner/team-service.ts:358",
       "owner": "partner-platform"
     },
     {
@@ -34800,7 +34807,7 @@
       "roleKind": "definition-or-mapping",
       "declaration": "<anonymous>",
       "key": "role-authority|server/partner/team-service.ts|role:PARTNER_USER_NOT_FOUND#0",
-      "source": "server/partner/team-service.ts:116",
+      "source": "server/partner/team-service.ts:107",
       "owner": "partner-platform"
     },
     {
@@ -34809,7 +34816,7 @@
       "roleKind": "definition-or-mapping",
       "declaration": "<anonymous>",
       "key": "role-authority|server/partner/team-service.ts|role:PARTNER_USER_NOT_FOUND#1",
-      "source": "server/partner/team-service.ts:453",
+      "source": "server/partner/team-service.ts:444",
       "owner": "partner-platform"
     },
     {
@@ -34818,16 +34825,7 @@
       "roleKind": "definition-or-mapping",
       "declaration": "SCANNER_OPERATOR",
       "key": "role-authority|server/partner/team-service.ts|role:SCANNER_OPERATOR#0",
-      "source": "server/partner/team-service.ts:16",
-      "owner": "partner-platform"
-    },
-    {
-      "category": "role-authority",
-      "id": "role:SCANNER_OPERATOR",
-      "roleKind": "definition-or-mapping",
-      "declaration": "SCANNER_OPERATOR",
-      "key": "role-authority|server/partner/team-service.ts|role:SCANNER_OPERATOR#1",
-      "source": "server/partner/team-service.ts:26",
+      "source": "server/partner/team-service.ts:17",
       "owner": "partner-platform"
     },
     {
@@ -34835,8 +34833,8 @@
       "id": "role:SCANNER_OPERATOR",
       "roleKind": "definition-or-mapping",
       "declaration": "PORTAL_ROLE_PRECEDENCE",
-      "key": "role-authority|server/partner/team-service.ts|role:SCANNER_OPERATOR#2",
-      "source": "server/partner/team-service.ts:37",
+      "key": "role-authority|server/partner/team-service.ts|role:SCANNER_OPERATOR#1",
+      "source": "server/partner/team-service.ts:28",
       "owner": "partner-platform"
     },
     {
@@ -34845,7 +34843,7 @@
       "roleKind": "definition-or-mapping",
       "declaration": "PARTNER_RECEPTION",
       "key": "role-authority|server/partner/team-service.ts|role:STAFF#0",
-      "source": "server/partner/team-service.ts:25",
+      "source": "server/partner/team-service.ts:16",
       "owner": "partner-platform"
     },
     {
@@ -35954,6 +35952,96 @@
     },
     {
       "category": "role-authority",
+      "id": "role:ADMIN",
+      "roleKind": "definition-or-mapping",
+      "declaration": "value",
+      "key": "role-authority|shared/partner-team-roles.ts|role:ADMIN#0",
+      "source": "shared/partner-team-roles.ts:14",
+      "owner": "partner-platform"
+    },
+    {
+      "category": "role-authority",
+      "id": "role:GRADER",
+      "roleKind": "definition-or-mapping",
+      "declaration": "value",
+      "key": "role-authority|shared/partner-team-roles.ts|role:GRADER#0",
+      "source": "shared/partner-team-roles.ts:15",
+      "owner": "partner-platform"
+    },
+    {
+      "category": "role-authority",
+      "id": "role:MVGS_ASSESSMENT_TECHNICIAN",
+      "roleKind": "definition-or-mapping",
+      "declaration": "GRADER",
+      "key": "role-authority|shared/partner-team-roles.ts|role:MVGS_ASSESSMENT_TECHNICIAN#0",
+      "source": "shared/partner-team-roles.ts:5",
+      "owner": "partner-platform"
+    },
+    {
+      "category": "role-authority",
+      "id": "role:OWNER",
+      "roleKind": "definition-or-mapping",
+      "declaration": "value",
+      "key": "role-authority|shared/partner-team-roles.ts|role:OWNER#0",
+      "source": "shared/partner-team-roles.ts:13",
+      "owner": "partner-platform"
+    },
+    {
+      "category": "role-authority",
+      "id": "role:PARTNER_MANAGER",
+      "roleKind": "definition-or-mapping",
+      "declaration": "ADMIN",
+      "key": "role-authority|shared/partner-team-roles.ts|role:PARTNER_MANAGER#0",
+      "source": "shared/partner-team-roles.ts:4",
+      "owner": "partner-platform"
+    },
+    {
+      "category": "role-authority",
+      "id": "role:PARTNER_OWNER",
+      "roleKind": "definition-or-mapping",
+      "declaration": "OWNER",
+      "key": "role-authority|shared/partner-team-roles.ts|role:PARTNER_OWNER#0",
+      "source": "shared/partner-team-roles.ts:3",
+      "owner": "partner-platform"
+    },
+    {
+      "category": "role-authority",
+      "id": "role:PARTNER_RECEPTION",
+      "roleKind": "definition-or-mapping",
+      "declaration": "STAFF",
+      "key": "role-authority|shared/partner-team-roles.ts|role:PARTNER_RECEPTION#0",
+      "source": "shared/partner-team-roles.ts:6",
+      "owner": "partner-platform"
+    },
+    {
+      "category": "role-authority",
+      "id": "role:SCANNER_OPERATOR",
+      "roleKind": "definition-or-mapping",
+      "declaration": "SCANNER_OPERATOR",
+      "key": "role-authority|shared/partner-team-roles.ts|role:SCANNER_OPERATOR#0",
+      "source": "shared/partner-team-roles.ts:7",
+      "owner": "partner-platform"
+    },
+    {
+      "category": "role-authority",
+      "id": "role:SCANNER_OPERATOR",
+      "roleKind": "definition-or-mapping",
+      "declaration": "value",
+      "key": "role-authority|shared/partner-team-roles.ts|role:SCANNER_OPERATOR#1",
+      "source": "shared/partner-team-roles.ts:17",
+      "owner": "partner-platform"
+    },
+    {
+      "category": "role-authority",
+      "id": "role:STAFF",
+      "roleKind": "definition-or-mapping",
+      "declaration": "value",
+      "key": "role-authority|shared/partner-team-roles.ts|role:STAFF#0",
+      "source": "shared/partner-team-roles.ts:16",
+      "owner": "partner-platform"
+    },
+    {
+      "category": "role-authority",
       "id": "role:admin",
       "roleKind": "definition-or-mapping",
       "declaration": "PrintRole",
@@ -36902,7 +36990,7 @@
       "actor": "public-or-handler-enforced",
       "capabilities": [],
       "key": "route-middleware|server/partner/supplies-routes.ts|server/partner/supplies-routes.ts#partnerSuppliesRouter:router:r@/:(_req, res, next) => { res.setHeader(\"Cache-Control\", \"private, no-store\"); res.setHeader(\"Vary\", \"Cookie\"); next(); }#0",
-      "source": "server/partner/supplies-routes.ts:29",
+      "source": "server/partner/supplies-routes.ts:31",
       "owner": "partner-platform"
     },
     {
@@ -36917,7 +37005,7 @@
         "requirePartnerAuth"
       ],
       "key": "route-middleware|server/partner/supplies-routes.ts|server/partner/supplies-routes.ts#partnerSuppliesRouter:router:r@/:requirePartnerAuth#0",
-      "source": "server/partner/supplies-routes.ts:34",
+      "source": "server/partner/supplies-routes.ts:36",
       "owner": "partner-platform"
     },
     {
@@ -59882,7 +59970,8 @@
         "server/partner/team-service.ts#ensureCanRemoveOwner",
         "server/partner/team-service.ts#loadTarget",
         "server/partner/team-service.ts#requirePortalTeamRole",
-        "server/partner/team-service.ts#roleIdFor"
+        "server/partner/team-service.ts#roleIdFor",
+        "shared/partner-team-roles.ts#isPortalTeamRole"
       ],
       "providerEffects": [
         "delegated-or-none"
@@ -60002,7 +60091,8 @@
         "server/partner/team-service.ts#ensureCanRemoveOwner",
         "server/partner/team-service.ts#loadTarget",
         "server/partner/team-service.ts#requirePortalTeamRole",
-        "server/partner/team-service.ts#roleIdFor"
+        "server/partner/team-service.ts#roleIdFor",
+        "shared/partner-team-roles.ts#isPortalTeamRole"
       ],
       "providerEffects": [
         "delegated-or-none"
@@ -60350,7 +60440,8 @@
         "server/partner/team-service.ts#normaliseEmail",
         "server/partner/team-service.ts#requirePortalTeamRole",
         "server/partner/team-service.ts#roleIdFor",
-        "server/partner/team-service.ts#sha256"
+        "server/partner/team-service.ts#sha256",
+        "shared/partner-team-roles.ts#isPortalTeamRole"
       ],
       "providerEffects": [
         "provider-adapter:client:resend",
@@ -60481,7 +60572,8 @@
         "server/partner/team-service.ts#normaliseEmail",
         "server/partner/team-service.ts#requirePortalTeamRole",
         "server/partner/team-service.ts#roleIdFor",
-        "server/partner/team-service.ts#sha256"
+        "server/partner/team-service.ts#sha256",
+        "shared/partner-team-roles.ts#isPortalTeamRole"
       ],
       "providerEffects": [
         "provider-adapter:client:resend",
@@ -67504,7 +67596,7 @@
       ],
       "retirementState": "active",
       "key": "server-route|server/partner/supplies-routes.ts|GET /api/partner/supplies/catalogue#0",
-      "source": "server/partner/supplies-routes.ts:38",
+      "source": "server/partner/supplies-routes.ts:40",
       "owner": "partner-platform",
       "commandOwner": "server/partner/supplies-routes.ts#partnerSuppliesRouter",
       "delegatedCommands": [
@@ -67576,7 +67668,7 @@
       ],
       "retirementState": "active",
       "key": "server-route|server/partner/supplies-routes.ts|GET /api/partner/supplies/catalogue#1",
-      "source": "server/partner/supplies-routes.ts:38",
+      "source": "server/partner/supplies-routes.ts:40",
       "owner": "partner-platform",
       "commandOwner": "server/partner/supplies-routes.ts#partnerSuppliesRouter",
       "delegatedCommands": [
@@ -67641,7 +67733,7 @@
       ],
       "retirementState": "active",
       "key": "server-route|server/partner/supplies-routes.ts|GET /api/partner/supplies/delivery#0",
-      "source": "server/partner/supplies-routes.ts:42",
+      "source": "server/partner/supplies-routes.ts:44",
       "owner": "partner-platform",
       "commandOwner": "server/partner/supplies-routes.ts#partnerSuppliesRouter",
       "delegatedCommands": [
@@ -67738,7 +67830,7 @@
       ],
       "retirementState": "active",
       "key": "server-route|server/partner/supplies-routes.ts|GET /api/partner/supplies/delivery#1",
-      "source": "server/partner/supplies-routes.ts:42",
+      "source": "server/partner/supplies-routes.ts:44",
       "owner": "partner-platform",
       "commandOwner": "server/partner/supplies-routes.ts#partnerSuppliesRouter",
       "delegatedCommands": [
@@ -67775,10 +67867,10 @@
     },
     {
       "category": "server-route",
-      "id": "GET /api/partner/supplies/orders",
+      "id": "GET /api/partner/supplies/requests",
       "method": "GET",
-      "declaredPath": "/supplies/orders",
-      "effectivePath": "/api/partner/supplies/orders",
+      "declaredPath": "/supplies/requests",
+      "effectivePath": "/api/partner/supplies/requests",
       "registrar": "server/partner/supplies-routes.ts#partnerSuppliesRouter:router:r",
       "registrationOrder": [
         4,
@@ -67827,8 +67919,8 @@
         "inline-or-unclassified"
       ],
       "retirementState": "active",
-      "key": "server-route|server/partner/supplies-routes.ts|GET /api/partner/supplies/orders#0",
-      "source": "server/partner/supplies-routes.ts:50",
+      "key": "server-route|server/partner/supplies-routes.ts|GET /api/partner/supplies/requests#0",
+      "source": "server/partner/supplies-routes.ts:52",
       "owner": "partner-platform",
       "commandOwner": "server/partner/supplies-routes.ts#partnerSuppliesRouter",
       "delegatedCommands": [
@@ -67857,10 +67949,10 @@
     },
     {
       "category": "server-route",
-      "id": "GET /api/partner/supplies/orders",
+      "id": "GET /api/partner/supplies/requests",
       "method": "GET",
-      "declaredPath": "/supplies/orders",
-      "effectivePath": "/api/partner/supplies/orders",
+      "declaredPath": "/supplies/requests",
+      "effectivePath": "/api/partner/supplies/requests",
       "registrar": "server/partner/supplies-routes.ts#partnerSuppliesRouter:router:r",
       "registrationOrder": [
         27,
@@ -67916,8 +68008,8 @@
         "inline-or-unclassified"
       ],
       "retirementState": "active",
-      "key": "server-route|server/partner/supplies-routes.ts|GET /api/partner/supplies/orders#1",
-      "source": "server/partner/supplies-routes.ts:50",
+      "key": "server-route|server/partner/supplies-routes.ts|GET /api/partner/supplies/requests#1",
+      "source": "server/partner/supplies-routes.ts:52",
       "owner": "partner-platform",
       "commandOwner": "server/partner/supplies-routes.ts#partnerSuppliesRouter",
       "delegatedCommands": [
@@ -67955,7 +68047,7 @@
         4,
         0,
         10,
-        5
+        6
       ],
       "mountChain": [
         "<root:server/partner/app.ts#createPartnerApp:app>",
@@ -67994,7 +68086,7 @@
         "requireNotViewOnly",
         "requireNotSensitiveFrozen",
         "partnerSubmissionMutationLimiter",
-        "async (req, res) => { const idempotencyKey = req.get(\"Idempotency-Key\")?.trim() ?? \"\"; try { const created = await createSuppliesOrder(req.partner!, { items: req.body?.items, no..."
+        "createRequest"
       ],
       "requestSchemas": [
         "inline-or-unclassified"
@@ -68004,7 +68096,7 @@
       ],
       "retirementState": "active",
       "key": "server-route|server/partner/supplies-routes.ts|POST /api/partner/supplies/orders#0",
-      "source": "server/partner/supplies-routes.ts:58",
+      "source": "server/partner/supplies-routes.ts:91",
       "owner": "partner-platform",
       "commandOwner": "server/partner/supplies-routes.ts#partnerSuppliesRouter",
       "delegatedCommands": [
@@ -68043,6 +68135,7 @@
         "server/partner/session.ts#requireNotSensitiveFrozen",
         "server/partner/session.ts#requireNotViewOnly",
         "server/partner/session.ts#requirePartnerCapability",
+        "server/partner/supplies-routes.ts#createRequest",
         "server/partner/supplies-routes.ts#sendError",
         "server/partner/supplies-service.ts#assertSuppliesSchemaAvailable",
         "server/partner/supplies-service.ts#attemptNewSuppliesOrderNotification",
@@ -68089,6 +68182,281 @@
         8,
         0,
         10,
+        6
+      ],
+      "mountChain": [
+        "<root:server/index.ts#<module>:app>",
+        "<root:server/index.ts#<module>:app>->server/routes.ts#registerRoutes:param:app",
+        "server/routes.ts#registerRoutes:param:app->server/partner/mount.ts#mountPartnerPortal:param:app",
+        "server/partner/mount.ts#mountPartnerPortal:param:app->server/partner/mount.ts#partnerPortalRouter:router:r",
+        "server/partner/mount.ts#partnerPortalRouter:router:r->server/partner/supplies-routes.ts#partnerSuppliesRouter:router:r"
+      ],
+      "handlerContext": "server/partner/supplies-routes.ts#partnerSuppliesRouter",
+      "actor": "partner",
+      "capabilities": [
+        "requireDefinerModel",
+        "requireNoEmergencyStop",
+        "requireNotSensitiveFrozen",
+        "requireNotViewOnly",
+        "requirePartnerAuth",
+        "requirePartnerCapability",
+        "requirePartnerRuntimeConfig",
+        "requirePortalEnabled",
+        "requireSchemaContract"
+      ],
+      "middleware": [
+        "(req, res, next) => { if (req.path === \"/health\") return next(); if (req.path.startsWith(\"/api/\")) return next(); const host = (req.headers.host || \"\").toLowerCase(); // Skip re...",
+        "helmet({ contentSecurityPolicy: { directives: { defaultSrc: [\"'self'\"], scriptSrc: process.env.NODE_ENV === \"production\" ? [\"'self'\", \"https://js.stripe.com\"] : [\"'self'\", \"'uns...",
+        "requestBodyMemoryAdmission",
+        "express.json({ // Source inventory found no base64/file JSON consumer. Large media uses // bounded multipart or direct object staging, so global JSON is capped at 1 MiB. limit: ...",
+        "express.urlencoded({ extended: false })",
+        "session({ store: new PgStore({ pool: sessionPool, createTableIfMissing: false, }), secret: (() => { const s = process.env.SESSION_SECRET; if (!s && process.env.NODE_ENV === \"pro...",
+        "createRequestLogger(log)",
+        "csrfOriginCheck",
+        "requirePartnerRuntimeConfig",
+        "requireDefinerModel",
+        "requireNoEmergencyStop",
+        "requirePortalEnabled",
+        "requireSchemaContract",
+        "partnerSessionMiddleware",
+        "(_req, res, next) => { res.setHeader(\"Cache-Control\", \"private, no-store\"); res.setHeader(\"Vary\", \"Cookie\"); next(); }",
+        "requirePartnerAuth"
+      ],
+      "routeLocalMiddleware": [
+        "requirePartnerCapability(\"partner.supplies.submit\")",
+        "requireNotViewOnly",
+        "requireNotSensitiveFrozen",
+        "partnerSubmissionMutationLimiter",
+        "createRequest"
+      ],
+      "requestSchemas": [
+        "inline-or-unclassified"
+      ],
+      "responseSchemas": [
+        "inline-or-unclassified"
+      ],
+      "retirementState": "active",
+      "key": "server-route|server/partner/supplies-routes.ts|POST /api/partner/supplies/orders#1",
+      "source": "server/partner/supplies-routes.ts:91",
+      "owner": "partner-platform",
+      "commandOwner": "server/partner/supplies-routes.ts#partnerSuppliesRouter",
+      "delegatedCommands": [
+        "server/email.ts#baseHtml",
+        "server/email.ts#escapeHtmlForEmail",
+        "server/email.ts#getFromEmail",
+        "server/email.ts#getResend",
+        "server/email.ts#safe",
+        "server/email.ts#sendPartnerSuppliesOrderNotification",
+        "server/email.ts#sendViaResend",
+        "server/growth-runtime-telemetry.ts#recordApplicationOutcome",
+        "server/growth-runtime-telemetry.ts#trim",
+        "server/lib/auth-security.ts#redactSensitive",
+        "server/lib/database-environment-guard.ts#assertMintVaultDatabaseEnvironmentSafety",
+        "server/lib/database-environment-guard.ts#classifyMintVaultRuntimeEnvironment",
+        "server/lib/database-environment-guard.ts#fingerprintIdentity",
+        "server/lib/database-environment-guard.ts#mintVaultDatabaseFingerprint",
+        "server/lib/database-environment-guard.ts#mintVaultDatabaseIdentity",
+        "server/lib/database-environment-guard.ts#normalizeDatabaseHostname",
+        "server/lib/database-environment-guard.ts#normalizeFingerprint",
+        "server/lib/postgres-transport-security.ts#parsePostgresTransport",
+        "server/lib/postgres-transport-security.ts#securePostgresPoolConnection",
+        "server/partner/audit.ts#redactDetails",
+        "server/partner/audit.ts#writePartnerAudit",
+        "server/partner/db.ts#assertPartnerAccountingDatabaseTopology",
+        "server/partner/db.ts#assertTenantContext",
+        "server/partner/db.ts#databaseIdentity",
+        "server/partner/db.ts#getAdminPool",
+        "server/partner/db.ts#getPool",
+        "server/partner/db.ts#normalizePartnerDatabaseHostname",
+        "server/partner/db.ts#partnerAdminQuery",
+        "server/partner/db.ts#resolvePartnerAdminDatabaseUrl",
+        "server/partner/db.ts#withPartnerAdminTransaction",
+        "server/partner/db.ts#withTenant",
+        "server/partner/rate-limit.ts#partnerSubmissionMutationLimiter",
+        "server/partner/session.ts#requireNotSensitiveFrozen",
+        "server/partner/session.ts#requireNotViewOnly",
+        "server/partner/session.ts#requirePartnerCapability",
+        "server/partner/supplies-routes.ts#createRequest",
+        "server/partner/supplies-routes.ts#sendError",
+        "server/partner/supplies-service.ts#assertSuppliesSchemaAvailable",
+        "server/partner/supplies-service.ts#attemptNewSuppliesOrderNotification",
+        "server/partner/supplies-service.ts#claimDueNotifications",
+        "server/partner/supplies-service.ts#create",
+        "server/partner/supplies-service.ts#createSuppliesOrder",
+        "server/partner/supplies-service.ts#fingerprint",
+        "server/partner/supplies-service.ts#loadOrderInTenant",
+        "server/partner/supplies-service.ts#mapOrder",
+        "server/partner/supplies-service.ts#markNotificationFailed",
+        "server/partner/supplies-service.ts#markNotificationSent",
+        "server/partner/supplies-service.ts#normalizeCreateInput",
+        "server/partner/supplies-service.ts#normalizeItems",
+        "server/partner/supplies-service.ts#normalizeNotes",
+        "server/partner/supplies-service.ts#normalizeStaleUncertainNotifications",
+        "server/partner/supplies-service.ts#notificationFailureCode",
+        "server/partner/supplies-service.ts#postcodeFromAddress",
+        "server/partner/supplies-service.ts#processPartnerSuppliesNotificationBatch",
+        "server/partner/supplies-service.ts#resolveDeliverySnapshot",
+        "server/partner/supplies-service.ts#schemaRelationsPresent",
+        "server/partner/supplies-service.ts#suppliesSchemaAvailableToAdmin",
+        "shared/partner-delivery-address.ts#field",
+        "shared/partner-delivery-address.ts#formatPartnerDeliveryAddress",
+        "shared/partner-delivery-address.ts#isValidPartnerPostcode",
+        "shared/partner-delivery-address.ts#normalisePartnerDeliveryAddress",
+        "shared/partner-delivery-address.ts#normalisePartnerPostcode",
+        "shared/partner-operational-contact.ts#hasValidPartnerOperationalContact",
+        "shared/partner-operational-contact.ts#normalisePartnerOperationalEmail"
+      ],
+      "providerEffects": [
+        "provider-adapter:client:resend",
+        "provider-adapter:resend:resend.emails.send"
+      ]
+    },
+    {
+      "category": "server-route",
+      "id": "POST /api/partner/supplies/requests",
+      "method": "POST",
+      "declaredPath": "/supplies/requests",
+      "effectivePath": "/api/partner/supplies/requests",
+      "registrar": "server/partner/supplies-routes.ts#partnerSuppliesRouter:router:r",
+      "registrationOrder": [
+        4,
+        0,
+        10,
+        5
+      ],
+      "mountChain": [
+        "<root:server/partner/app.ts#createPartnerApp:app>",
+        "<root:server/partner/app.ts#createPartnerApp:app>->server/partner/mount.ts#mountPartnerPortal:param:app",
+        "server/partner/mount.ts#mountPartnerPortal:param:app->server/partner/mount.ts#partnerPortalRouter:router:r",
+        "server/partner/mount.ts#partnerPortalRouter:router:r->server/partner/supplies-routes.ts#partnerSuppliesRouter:router:r"
+      ],
+      "handlerContext": "server/partner/supplies-routes.ts#partnerSuppliesRouter",
+      "actor": "partner",
+      "capabilities": [
+        "requireDefinerModel",
+        "requireNoEmergencyStop",
+        "requireNotSensitiveFrozen",
+        "requireNotViewOnly",
+        "requirePartnerAuth",
+        "requirePartnerCapability",
+        "requirePartnerRuntimeConfig",
+        "requirePortalEnabled",
+        "requireSchemaContract"
+      ],
+      "middleware": [
+        "requestBodyMemoryAdmission",
+        "express.json({ limit: \"1mb\" })",
+        "(_req, res, next) => { if (!partnerDbConfigured()) { res.status(503).json({ error: \"partner portal unavailable\" }); return; } next(); }",
+        "requirePartnerRuntimeConfig",
+        "requireDefinerModel",
+        "requireNoEmergencyStop",
+        "requirePortalEnabled",
+        "requireSchemaContract",
+        "partnerSessionMiddleware",
+        "(_req, res, next) => { res.setHeader(\"Cache-Control\", \"private, no-store\"); res.setHeader(\"Vary\", \"Cookie\"); next(); }",
+        "requirePartnerAuth"
+      ],
+      "routeLocalMiddleware": [
+        "requirePartnerCapability(\"partner.supplies.submit\")",
+        "requireNotViewOnly",
+        "requireNotSensitiveFrozen",
+        "partnerSubmissionMutationLimiter",
+        "createRequest"
+      ],
+      "requestSchemas": [
+        "inline-or-unclassified"
+      ],
+      "responseSchemas": [
+        "inline-or-unclassified"
+      ],
+      "retirementState": "active",
+      "key": "server-route|server/partner/supplies-routes.ts|POST /api/partner/supplies/requests#0",
+      "source": "server/partner/supplies-routes.ts:83",
+      "owner": "partner-platform",
+      "commandOwner": "server/partner/supplies-routes.ts#partnerSuppliesRouter",
+      "delegatedCommands": [
+        "server/email.ts#baseHtml",
+        "server/email.ts#escapeHtmlForEmail",
+        "server/email.ts#getFromEmail",
+        "server/email.ts#getResend",
+        "server/email.ts#safe",
+        "server/email.ts#sendPartnerSuppliesOrderNotification",
+        "server/email.ts#sendViaResend",
+        "server/growth-runtime-telemetry.ts#recordApplicationOutcome",
+        "server/growth-runtime-telemetry.ts#trim",
+        "server/lib/auth-security.ts#redactSensitive",
+        "server/lib/database-environment-guard.ts#assertMintVaultDatabaseEnvironmentSafety",
+        "server/lib/database-environment-guard.ts#classifyMintVaultRuntimeEnvironment",
+        "server/lib/database-environment-guard.ts#fingerprintIdentity",
+        "server/lib/database-environment-guard.ts#mintVaultDatabaseFingerprint",
+        "server/lib/database-environment-guard.ts#mintVaultDatabaseIdentity",
+        "server/lib/database-environment-guard.ts#normalizeDatabaseHostname",
+        "server/lib/database-environment-guard.ts#normalizeFingerprint",
+        "server/lib/postgres-transport-security.ts#parsePostgresTransport",
+        "server/lib/postgres-transport-security.ts#securePostgresPoolConnection",
+        "server/partner/audit.ts#redactDetails",
+        "server/partner/audit.ts#writePartnerAudit",
+        "server/partner/db.ts#assertPartnerAccountingDatabaseTopology",
+        "server/partner/db.ts#assertTenantContext",
+        "server/partner/db.ts#databaseIdentity",
+        "server/partner/db.ts#getAdminPool",
+        "server/partner/db.ts#getPool",
+        "server/partner/db.ts#normalizePartnerDatabaseHostname",
+        "server/partner/db.ts#partnerAdminQuery",
+        "server/partner/db.ts#resolvePartnerAdminDatabaseUrl",
+        "server/partner/db.ts#withPartnerAdminTransaction",
+        "server/partner/db.ts#withTenant",
+        "server/partner/rate-limit.ts#partnerSubmissionMutationLimiter",
+        "server/partner/session.ts#requireNotSensitiveFrozen",
+        "server/partner/session.ts#requireNotViewOnly",
+        "server/partner/session.ts#requirePartnerCapability",
+        "server/partner/supplies-routes.ts#createRequest",
+        "server/partner/supplies-routes.ts#sendError",
+        "server/partner/supplies-service.ts#assertSuppliesSchemaAvailable",
+        "server/partner/supplies-service.ts#attemptNewSuppliesOrderNotification",
+        "server/partner/supplies-service.ts#claimDueNotifications",
+        "server/partner/supplies-service.ts#create",
+        "server/partner/supplies-service.ts#createSuppliesOrder",
+        "server/partner/supplies-service.ts#fingerprint",
+        "server/partner/supplies-service.ts#loadOrderInTenant",
+        "server/partner/supplies-service.ts#mapOrder",
+        "server/partner/supplies-service.ts#markNotificationFailed",
+        "server/partner/supplies-service.ts#markNotificationSent",
+        "server/partner/supplies-service.ts#normalizeCreateInput",
+        "server/partner/supplies-service.ts#normalizeItems",
+        "server/partner/supplies-service.ts#normalizeNotes",
+        "server/partner/supplies-service.ts#normalizeStaleUncertainNotifications",
+        "server/partner/supplies-service.ts#notificationFailureCode",
+        "server/partner/supplies-service.ts#postcodeFromAddress",
+        "server/partner/supplies-service.ts#processPartnerSuppliesNotificationBatch",
+        "server/partner/supplies-service.ts#resolveDeliverySnapshot",
+        "server/partner/supplies-service.ts#schemaRelationsPresent",
+        "server/partner/supplies-service.ts#suppliesSchemaAvailableToAdmin",
+        "shared/partner-delivery-address.ts#field",
+        "shared/partner-delivery-address.ts#formatPartnerDeliveryAddress",
+        "shared/partner-delivery-address.ts#isValidPartnerPostcode",
+        "shared/partner-delivery-address.ts#normalisePartnerDeliveryAddress",
+        "shared/partner-delivery-address.ts#normalisePartnerPostcode",
+        "shared/partner-operational-contact.ts#hasValidPartnerOperationalContact",
+        "shared/partner-operational-contact.ts#normalisePartnerOperationalEmail"
+      ],
+      "providerEffects": [
+        "provider-adapter:client:resend",
+        "provider-adapter:resend:resend.emails.send"
+      ]
+    },
+    {
+      "category": "server-route",
+      "id": "POST /api/partner/supplies/requests",
+      "method": "POST",
+      "declaredPath": "/supplies/requests",
+      "effectivePath": "/api/partner/supplies/requests",
+      "registrar": "server/partner/supplies-routes.ts#partnerSuppliesRouter:router:r",
+      "registrationOrder": [
+        27,
+        8,
+        0,
+        10,
         5
       ],
       "mountChain": [
@@ -68134,7 +68502,7 @@
         "requireNotViewOnly",
         "requireNotSensitiveFrozen",
         "partnerSubmissionMutationLimiter",
-        "async (req, res) => { const idempotencyKey = req.get(\"Idempotency-Key\")?.trim() ?? \"\"; try { const created = await createSuppliesOrder(req.partner!, { items: req.body?.items, no..."
+        "createRequest"
       ],
       "requestSchemas": [
         "inline-or-unclassified"
@@ -68143,8 +68511,8 @@
         "inline-or-unclassified"
       ],
       "retirementState": "active",
-      "key": "server-route|server/partner/supplies-routes.ts|POST /api/partner/supplies/orders#1",
-      "source": "server/partner/supplies-routes.ts:58",
+      "key": "server-route|server/partner/supplies-routes.ts|POST /api/partner/supplies/requests#1",
+      "source": "server/partner/supplies-routes.ts:83",
       "owner": "partner-platform",
       "commandOwner": "server/partner/supplies-routes.ts#partnerSuppliesRouter",
       "delegatedCommands": [
@@ -68183,6 +68551,7 @@
         "server/partner/session.ts#requireNotSensitiveFrozen",
         "server/partner/session.ts#requireNotViewOnly",
         "server/partner/session.ts#requirePartnerCapability",
+        "server/partner/supplies-routes.ts#createRequest",
         "server/partner/supplies-routes.ts#sendError",
         "server/partner/supplies-service.ts#assertSuppliesSchemaAvailable",
         "server/partner/supplies-service.ts#attemptNewSuppliesOrderNotification",
@@ -119503,7 +119872,7 @@
       "id": "provider-use:AdminSessionProvider",
       "principalKind": "provider-consumer",
       "key": "session-principal|client/src/App.tsx|provider-use:AdminSessionProvider#0",
-      "source": "client/src/App.tsx:818",
+      "source": "client/src/App.tsx:824",
       "owner": "core-platform"
     },
     {
@@ -119511,7 +119880,7 @@
       "id": "provider-use:PartnerSessionProvider",
       "principalKind": "provider-consumer",
       "key": "session-principal|client/src/App.tsx|provider-use:PartnerSessionProvider#0",
-      "source": "client/src/App.tsx:338",
+      "source": "client/src/App.tsx:339",
       "owner": "core-platform"
     },
     {
@@ -120154,7 +120523,7 @@
       "cacheHashAuthority": "client/src/lib/queryClient.ts#scopedQueryHash",
       "runtimePrincipalBinding": "email+isSuperAdmin",
       "key": "session-principal|client/src/components/partner/partner-shell.tsx|cache-key:[\"/api/partner/locations\"]#0",
-      "source": "client/src/components/partner/partner-shell.tsx:310",
+      "source": "client/src/components/partner/partner-shell.tsx:317",
       "owner": "partner-platform"
     },
     {
@@ -120167,7 +120536,7 @@
       "cacheHashAuthority": "client/src/lib/queryClient.ts#scopedQueryHash",
       "runtimePrincipalBinding": "email+isSuperAdmin",
       "key": "session-principal|client/src/components/partner/partner-shell.tsx|cache-key:[\"/api/partner/session\"]#0",
-      "source": "client/src/components/partner/partner-shell.tsx:90",
+      "source": "client/src/components/partner/partner-shell.tsx:97",
       "owner": "partner-platform"
     },
     {
@@ -125222,6 +125591,19 @@
     },
     {
       "category": "session-principal",
+      "id": "cache-key:[\"/api/partner/supplies/requests\"]",
+      "keyAuthority": "[\"/api/partner/supplies/requests\"]",
+      "principalBinding": "principal-not-declared-in-key",
+      "adminCacheScope": "principal-partitioned-when-admin-active",
+      "cacheClassificationAuthority": "client/src/lib/queryClient.ts#isAdminProtectedQueryKey",
+      "cacheHashAuthority": "client/src/lib/queryClient.ts#scopedQueryHash",
+      "runtimePrincipalBinding": "email+isSuperAdmin",
+      "key": "session-principal|client/src/pages/partner/supplies-orders.tsx|cache-key:[\"/api/partner/supplies/requests\"]#0",
+      "source": "client/src/pages/partner/supplies-orders.tsx:96",
+      "owner": "partner-platform"
+    },
+    {
+      "category": "session-principal",
       "id": "cache-key:[\"/api/partner/supplies/products\"]",
       "keyAuthority": "[\"/api/partner/supplies/products\"]",
       "principalBinding": "principal-not-declared-in-key",
@@ -125230,7 +125612,7 @@
       "cacheHashAuthority": "client/src/lib/queryClient.ts#scopedQueryHash",
       "runtimePrincipalBinding": "email+isSuperAdmin",
       "key": "session-principal|client/src/pages/partner/supplies.tsx|cache-key:[\"/api/partner/supplies/products\"]#0",
-      "source": "client/src/pages/partner/supplies.tsx:134",
+      "source": "client/src/pages/partner/supplies.tsx:139",
       "owner": "partner-platform"
     },
     {
@@ -125243,7 +125625,7 @@
       "cacheHashAuthority": "client/src/lib/queryClient.ts#scopedQueryHash",
       "runtimePrincipalBinding": "email+isSuperAdmin",
       "key": "session-principal|client/src/pages/partner/users.tsx|cache-key:[\"/api/partner/users\"]#0",
-      "source": "client/src/pages/partner/users.tsx:70",
+      "source": "client/src/pages/partner/users.tsx:55",
       "owner": "partner-platform"
     },
     {
@@ -125256,7 +125638,7 @@
       "cacheHashAuthority": "client/src/lib/queryClient.ts#scopedQueryHash",
       "runtimePrincipalBinding": "email+isSuperAdmin",
       "key": "session-principal|client/src/pages/partner/users.tsx|cache-key:[\"/api/partner/users\"]#1",
-      "source": "client/src/pages/partner/users.tsx:82",
+      "source": "client/src/pages/partner/users.tsx:67",
       "owner": "partner-platform"
     },
     {
@@ -130714,7 +131096,7 @@
       "effect": "read",
       "access": "sql",
       "key": "table-access|scripts/ci/partner-browser-fixture.ts|read:public.partner_organisations#0",
-      "source": "scripts/ci/partner-browser-fixture.ts:141",
+      "source": "scripts/ci/partner-browser-fixture.ts:175",
       "owner": "engineering-test-platform"
     },
     {
@@ -130723,7 +131105,7 @@
       "effect": "read",
       "access": "sql",
       "key": "table-access|scripts/ci/partner-browser-fixture.ts|read:public.partner_roles#0",
-      "source": "scripts/ci/partner-browser-fixture.ts:108",
+      "source": "scripts/ci/partner-browser-fixture.ts:109",
       "owner": "engineering-test-platform"
     },
     {
@@ -130732,7 +131114,7 @@
       "effect": "read",
       "access": "sql",
       "key": "table-access|scripts/ci/partner-browser-fixture.ts|read:public.partner_roles#1",
-      "source": "scripts/ci/partner-browser-fixture.ts:108",
+      "source": "scripts/ci/partner-browser-fixture.ts:109",
       "owner": "engineering-test-platform"
     },
     {
@@ -130741,7 +131123,7 @@
       "effect": "read",
       "access": "sql",
       "key": "table-access|scripts/ci/partner-browser-fixture.ts|read:public.partner_roles#2",
-      "source": "scripts/ci/partner-browser-fixture.ts:108",
+      "source": "scripts/ci/partner-browser-fixture.ts:109",
       "owner": "engineering-test-platform"
     },
     {
@@ -130750,7 +131132,7 @@
       "effect": "read",
       "access": "sql",
       "key": "table-access|scripts/ci/partner-browser-fixture.ts|read:public.pg_roles#0",
-      "source": "scripts/ci/partner-browser-fixture.ts:136",
+      "source": "scripts/ci/partner-browser-fixture.ts:170",
       "owner": "engineering-test-platform"
     },
     {
@@ -130768,7 +131150,7 @@
       "effect": "unclassified",
       "access": "sql-unclassified",
       "key": "table-access|scripts/ci/partner-browser-fixture.ts|unclassified:\"BEGIN\"#0",
-      "source": "scripts/ci/partner-browser-fixture.ts:94",
+      "source": "scripts/ci/partner-browser-fixture.ts:95",
       "owner": "engineering-test-platform"
     },
     {
@@ -130777,7 +131159,7 @@
       "effect": "unclassified",
       "access": "sql-unclassified",
       "key": "table-access|scripts/ci/partner-browser-fixture.ts|unclassified:\"COMMIT\"#0",
-      "source": "scripts/ci/partner-browser-fixture.ts:125",
+      "source": "scripts/ci/partner-browser-fixture.ts:159",
       "owner": "engineering-test-platform"
     },
     {
@@ -130786,7 +131168,7 @@
       "effect": "unclassified",
       "access": "sql-unclassified",
       "key": "table-access|scripts/ci/partner-browser-fixture.ts|unclassified:\"ROLLBACK\"#0",
-      "source": "scripts/ci/partner-browser-fixture.ts:152",
+      "source": "scripts/ci/partner-browser-fixture.ts:186",
       "owner": "engineering-test-platform"
     },
     {
@@ -130804,7 +131186,7 @@
       "effect": "unclassified",
       "access": "sql-unclassified",
       "key": "table-access|scripts/ci/partner-browser-fixture.ts|unclassified:`CREATE ROLE ${runtimeRole} LOGIN PASSWORD '${runtimePassword}' NOSUPERUSER NOCREATEDB NOCREATEROLE NOBYPASSRLS`#0",
-      "source": "scripts/ci/partner-browser-fixture.ts:89",
+      "source": "scripts/ci/partner-browser-fixture.ts:90",
       "owner": "engineering-test-platform"
     },
     {
@@ -130813,7 +131195,7 @@
       "effect": "unclassified",
       "access": "sql-unclassified",
       "key": "table-access|scripts/ci/partner-browser-fixture.ts|unclassified:`GRANT partner_runtime TO ${runtimeRole}`#0",
-      "source": "scripts/ci/partner-browser-fixture.ts:92",
+      "source": "scripts/ci/partner-browser-fixture.ts:93",
       "owner": "engineering-test-platform"
     },
     {
@@ -130822,7 +131204,7 @@
       "effect": "write",
       "access": "sql",
       "key": "table-access|scripts/ci/partner-browser-fixture.ts|write:public.partner_feature_flags#0",
-      "source": "scripts/ci/partner-browser-fixture.ts:120",
+      "source": "scripts/ci/partner-browser-fixture.ts:121",
       "owner": "engineering-test-platform"
     },
     {
@@ -130831,7 +131213,7 @@
       "effect": "write",
       "access": "sql",
       "key": "table-access|scripts/ci/partner-browser-fixture.ts|write:public.partner_feature_flags#1",
-      "source": "scripts/ci/partner-browser-fixture.ts:120",
+      "source": "scripts/ci/partner-browser-fixture.ts:121",
       "owner": "engineering-test-platform"
     },
     {
@@ -130840,7 +131222,7 @@
       "effect": "write",
       "access": "sql",
       "key": "table-access|scripts/ci/partner-browser-fixture.ts|write:public.partner_locations#0",
-      "source": "scripts/ci/partner-browser-fixture.ts:99",
+      "source": "scripts/ci/partner-browser-fixture.ts:100",
       "owner": "engineering-test-platform"
     },
     {
@@ -130849,7 +131231,52 @@
       "effect": "write",
       "access": "sql",
       "key": "table-access|scripts/ci/partner-browser-fixture.ts|write:public.partner_organisations#0",
-      "source": "scripts/ci/partner-browser-fixture.ts:95",
+      "source": "scripts/ci/partner-browser-fixture.ts:96",
+      "owner": "engineering-test-platform"
+    },
+    {
+      "category": "table-access",
+      "id": "write:public.partner_supplies_order_items",
+      "effect": "write",
+      "access": "sql",
+      "key": "table-access|scripts/ci/partner-browser-fixture.ts|write:public.partner_supplies_order_items#0",
+      "source": "scripts/ci/partner-browser-fixture.ts:153",
+      "owner": "engineering-test-platform"
+    },
+    {
+      "category": "table-access",
+      "id": "write:public.partner_supplies_orders",
+      "effect": "write",
+      "access": "sql",
+      "key": "table-access|scripts/ci/partner-browser-fixture.ts|write:public.partner_supplies_orders#0",
+      "source": "scripts/ci/partner-browser-fixture.ts:145",
+      "owner": "engineering-test-platform"
+    },
+    {
+      "category": "table-access",
+      "id": "write:public.partner_supply_order_items",
+      "effect": "write",
+      "access": "sql",
+      "key": "table-access|scripts/ci/partner-browser-fixture.ts|write:public.partner_supply_order_items#0",
+      "source": "scripts/ci/partner-browser-fixture.ts:139",
+      "owner": "engineering-test-platform"
+    },
+    {
+      "category": "table-access",
+      "id": "write:public.partner_supply_orders",
+      "effect": "write",
+      "access": "sql",
+      "key": "table-access|scripts/ci/partner-browser-fixture.ts|write:public.partner_supply_orders#0",
+      "source": "scripts/ci/partner-browser-fixture.ts:127",
+      "owner": "engineering-test-platform"
+    },
+    {
+      "category": "table-access",
+      "id": "write:public.partner_supply_payments",
+      "effect": "write",
+      "access": "sql",
+      "key": "table-access|scripts/ci/partner-browser-fixture.ts|write:public.partner_supply_payments#0",
+      "source": "scripts/ci/partner-browser-fixture.ts:134",
       "owner": "engineering-test-platform"
     },
     {
@@ -130858,7 +131285,7 @@
       "effect": "write",
       "access": "sql",
       "key": "table-access|scripts/ci/partner-browser-fixture.ts|write:public.partner_user_locations#0",
-      "source": "scripts/ci/partner-browser-fixture.ts:113",
+      "source": "scripts/ci/partner-browser-fixture.ts:114",
       "owner": "engineering-test-platform"
     },
     {
@@ -130867,7 +131294,7 @@
       "effect": "write",
       "access": "sql",
       "key": "table-access|scripts/ci/partner-browser-fixture.ts|write:public.partner_user_locations#1",
-      "source": "scripts/ci/partner-browser-fixture.ts:113",
+      "source": "scripts/ci/partner-browser-fixture.ts:114",
       "owner": "engineering-test-platform"
     },
     {
@@ -130876,7 +131303,7 @@
       "effect": "write",
       "access": "sql",
       "key": "table-access|scripts/ci/partner-browser-fixture.ts|write:public.partner_user_locations#2",
-      "source": "scripts/ci/partner-browser-fixture.ts:113",
+      "source": "scripts/ci/partner-browser-fixture.ts:114",
       "owner": "engineering-test-platform"
     },
     {
@@ -130885,7 +131312,7 @@
       "effect": "write",
       "access": "sql",
       "key": "table-access|scripts/ci/partner-browser-fixture.ts|write:public.partner_user_roles#0",
-      "source": "scripts/ci/partner-browser-fixture.ts:108",
+      "source": "scripts/ci/partner-browser-fixture.ts:109",
       "owner": "engineering-test-platform"
     },
     {
@@ -130894,7 +131321,7 @@
       "effect": "write",
       "access": "sql",
       "key": "table-access|scripts/ci/partner-browser-fixture.ts|write:public.partner_user_roles#1",
-      "source": "scripts/ci/partner-browser-fixture.ts:108",
+      "source": "scripts/ci/partner-browser-fixture.ts:109",
       "owner": "engineering-test-platform"
     },
     {
@@ -130903,7 +131330,7 @@
       "effect": "write",
       "access": "sql",
       "key": "table-access|scripts/ci/partner-browser-fixture.ts|write:public.partner_user_roles#2",
-      "source": "scripts/ci/partner-browser-fixture.ts:108",
+      "source": "scripts/ci/partner-browser-fixture.ts:109",
       "owner": "engineering-test-platform"
     },
     {
@@ -130912,7 +131339,7 @@
       "effect": "write",
       "access": "sql",
       "key": "table-access|scripts/ci/partner-browser-fixture.ts|write:public.partner_users#0",
-      "source": "scripts/ci/partner-browser-fixture.ts:104",
+      "source": "scripts/ci/partner-browser-fixture.ts:105",
       "owner": "engineering-test-platform"
     },
     {
@@ -130921,7 +131348,7 @@
       "effect": "write",
       "access": "sql",
       "key": "table-access|scripts/ci/partner-browser-fixture.ts|write:public.partner_users#1",
-      "source": "scripts/ci/partner-browser-fixture.ts:104",
+      "source": "scripts/ci/partner-browser-fixture.ts:105",
       "owner": "engineering-test-platform"
     },
     {
@@ -130930,7 +131357,7 @@
       "effect": "write",
       "access": "sql",
       "key": "table-access|scripts/ci/partner-browser-fixture.ts|write:public.partner_users#2",
-      "source": "scripts/ci/partner-browser-fixture.ts:104",
+      "source": "scripts/ci/partner-browser-fixture.ts:105",
       "owner": "engineering-test-platform"
     },
     {
@@ -148852,7 +149279,7 @@
       "effect": "read",
       "access": "sql",
       "key": "table-access|server/partner/team-service.ts|read:public.partner_invitations#0",
-      "source": "server/partner/team-service.ts:262",
+      "source": "server/partner/team-service.ts:253",
       "owner": "partner-platform"
     },
     {
@@ -148861,7 +149288,7 @@
       "effect": "read",
       "access": "sql",
       "key": "table-access|server/partner/team-service.ts|read:public.partner_roles#0",
-      "source": "server/partner/team-service.ts:84",
+      "source": "server/partner/team-service.ts:75",
       "owner": "partner-platform"
     },
     {
@@ -148870,7 +149297,7 @@
       "effect": "read",
       "access": "sql",
       "key": "table-access|server/partner/team-service.ts|read:public.partner_roles#1",
-      "source": "server/partner/team-service.ts:95",
+      "source": "server/partner/team-service.ts:86",
       "owner": "partner-platform"
     },
     {
@@ -148879,7 +149306,7 @@
       "effect": "read",
       "access": "sql",
       "key": "table-access|server/partner/team-service.ts|read:public.partner_roles#2",
-      "source": "server/partner/team-service.ts:101",
+      "source": "server/partner/team-service.ts:92",
       "owner": "partner-platform"
     },
     {
@@ -148888,7 +149315,7 @@
       "effect": "read",
       "access": "sql",
       "key": "table-access|server/partner/team-service.ts|read:public.partner_roles#3",
-      "source": "server/partner/team-service.ts:121",
+      "source": "server/partner/team-service.ts:112",
       "owner": "partner-platform"
     },
     {
@@ -148897,7 +149324,7 @@
       "effect": "read",
       "access": "sql",
       "key": "table-access|server/partner/team-service.ts|read:public.partner_roles#4",
-      "source": "server/partner/team-service.ts:262",
+      "source": "server/partner/team-service.ts:253",
       "owner": "partner-platform"
     },
     {
@@ -148906,7 +149333,7 @@
       "effect": "read",
       "access": "sql",
       "key": "table-access|server/partner/team-service.ts|read:public.partner_user_roles#0",
-      "source": "server/partner/team-service.ts:84",
+      "source": "server/partner/team-service.ts:75",
       "owner": "partner-platform"
     },
     {
@@ -148915,7 +149342,7 @@
       "effect": "read",
       "access": "sql",
       "key": "table-access|server/partner/team-service.ts|read:public.partner_user_roles#1",
-      "source": "server/partner/team-service.ts:101",
+      "source": "server/partner/team-service.ts:92",
       "owner": "partner-platform"
     },
     {
@@ -148924,7 +149351,7 @@
       "effect": "read",
       "access": "sql",
       "key": "table-access|server/partner/team-service.ts|read:public.partner_user_roles#2",
-      "source": "server/partner/team-service.ts:121",
+      "source": "server/partner/team-service.ts:112",
       "owner": "partner-platform"
     },
     {
@@ -148933,7 +149360,7 @@
       "effect": "read",
       "access": "sql",
       "key": "table-access|server/partner/team-service.ts|read:public.partner_user_roles#3",
-      "source": "server/partner/team-service.ts:262",
+      "source": "server/partner/team-service.ts:253",
       "owner": "partner-platform"
     },
     {
@@ -148942,7 +149369,7 @@
       "effect": "read",
       "access": "sql",
       "key": "table-access|server/partner/team-service.ts|read:public.partner_users#0",
-      "source": "server/partner/team-service.ts:101",
+      "source": "server/partner/team-service.ts:92",
       "owner": "partner-platform"
     },
     {
@@ -148951,7 +149378,7 @@
       "effect": "read",
       "access": "sql",
       "key": "table-access|server/partner/team-service.ts|read:public.partner_users#1",
-      "source": "server/partner/team-service.ts:121",
+      "source": "server/partner/team-service.ts:112",
       "owner": "partner-platform"
     },
     {
@@ -148960,7 +149387,7 @@
       "effect": "read",
       "access": "sql",
       "key": "table-access|server/partner/team-service.ts|read:public.partner_users#2",
-      "source": "server/partner/team-service.ts:262",
+      "source": "server/partner/team-service.ts:253",
       "owner": "partner-platform"
     },
     {
@@ -148969,7 +149396,7 @@
       "effect": "read",
       "access": "sql",
       "key": "table-access|server/partner/team-service.ts|read:public.partner_users#3",
-      "source": "server/partner/team-service.ts:315",
+      "source": "server/partner/team-service.ts:306",
       "owner": "partner-platform"
     },
     {
@@ -148978,7 +149405,7 @@
       "effect": "write",
       "access": "sql",
       "key": "table-access|server/partner/team-service.ts|write:public.partner_invitations#0",
-      "source": "server/partner/team-service.ts:192",
+      "source": "server/partner/team-service.ts:183",
       "owner": "partner-platform"
     },
     {
@@ -148987,7 +149414,7 @@
       "effect": "write",
       "access": "sql",
       "key": "table-access|server/partner/team-service.ts|write:public.partner_invitations#1",
-      "source": "server/partner/team-service.ts:199",
+      "source": "server/partner/team-service.ts:190",
       "owner": "partner-platform"
     },
     {
@@ -148996,7 +149423,7 @@
       "effect": "write",
       "access": "sql",
       "key": "table-access|server/partner/team-service.ts|write:public.partner_invitations#2",
-      "source": "server/partner/team-service.ts:212",
+      "source": "server/partner/team-service.ts:203",
       "owner": "partner-platform"
     },
     {
@@ -149005,7 +149432,7 @@
       "effect": "write",
       "access": "sql",
       "key": "table-access|server/partner/team-service.ts|write:public.partner_invitations#3",
-      "source": "server/partner/team-service.ts:246",
+      "source": "server/partner/team-service.ts:237",
       "owner": "partner-platform"
     },
     {
@@ -149014,7 +149441,7 @@
       "effect": "write",
       "access": "sql",
       "key": "table-access|server/partner/team-service.ts|write:public.partner_invitations#4",
-      "source": "server/partner/team-service.ts:253",
+      "source": "server/partner/team-service.ts:244",
       "owner": "partner-platform"
     },
     {
@@ -149023,7 +149450,7 @@
       "effect": "write",
       "access": "sql",
       "key": "table-access|server/partner/team-service.ts|write:public.partner_invitations#5",
-      "source": "server/partner/team-service.ts:379",
+      "source": "server/partner/team-service.ts:370",
       "owner": "partner-platform"
     },
     {
@@ -149032,7 +149459,7 @@
       "effect": "write",
       "access": "sql",
       "key": "table-access|server/partner/team-service.ts|write:public.partner_sessions#0",
-      "source": "server/partner/team-service.ts:416",
+      "source": "server/partner/team-service.ts:407",
       "owner": "partner-platform"
     },
     {
@@ -149041,7 +149468,7 @@
       "effect": "write",
       "access": "sql",
       "key": "table-access|server/partner/team-service.ts|write:public.partner_sessions#1",
-      "source": "server/partner/team-service.ts:454",
+      "source": "server/partner/team-service.ts:445",
       "owner": "partner-platform"
     },
     {
@@ -149050,7 +149477,7 @@
       "effect": "write",
       "access": "sql",
       "key": "table-access|server/partner/team-service.ts|write:public.partner_sessions#2",
-      "source": "server/partner/team-service.ts:477",
+      "source": "server/partner/team-service.ts:468",
       "owner": "partner-platform"
     },
     {
@@ -149059,7 +149486,7 @@
       "effect": "write",
       "access": "sql",
       "key": "table-access|server/partner/team-service.ts|write:public.partner_user_roles#0",
-      "source": "server/partner/team-service.ts:342",
+      "source": "server/partner/team-service.ts:333",
       "owner": "partner-platform"
     },
     {
@@ -149068,7 +149495,7 @@
       "effect": "write",
       "access": "sql",
       "key": "table-access|server/partner/team-service.ts|write:public.partner_user_roles#1",
-      "source": "server/partner/team-service.ts:407",
+      "source": "server/partner/team-service.ts:398",
       "owner": "partner-platform"
     },
     {
@@ -149077,7 +149504,7 @@
       "effect": "write",
       "access": "sql",
       "key": "table-access|server/partner/team-service.ts|write:public.partner_user_roles#2",
-      "source": "server/partner/team-service.ts:408",
+      "source": "server/partner/team-service.ts:399",
       "owner": "partner-platform"
     },
     {
@@ -149086,7 +149513,7 @@
       "effect": "write",
       "access": "sql",
       "key": "table-access|server/partner/team-service.ts|write:public.partner_users#0",
-      "source": "server/partner/team-service.ts:336",
+      "source": "server/partner/team-service.ts:327",
       "owner": "partner-platform"
     },
     {
@@ -149095,7 +149522,7 @@
       "effect": "write",
       "access": "sql",
       "key": "table-access|server/partner/team-service.ts|write:public.partner_users#1",
-      "source": "server/partner/team-service.ts:413",
+      "source": "server/partner/team-service.ts:404",
       "owner": "partner-platform"
     },
     {
@@ -149104,7 +149531,7 @@
       "effect": "write",
       "access": "sql",
       "key": "table-access|server/partner/team-service.ts|write:public.partner_users#2",
-      "source": "server/partner/team-service.ts:447",
+      "source": "server/partner/team-service.ts:438",
       "owner": "partner-platform"
     },
     {
@@ -161500,7 +161927,7 @@
       "delay": "graceMs",
       "lifecycle": "untracked",
       "key": "timer|scripts/ci/run-disposable-integration.mjs|setTimeout:() => { if (settled || !kill(\"SIGKILL\") || settled) return; timer = setTimeout(() => terminationUnknown(new Error(\"child did not close after SIGKILL\")), 5000); timer.unref(); }#0",
-      "source": "scripts/ci/run-disposable-integration.mjs:408",
+      "source": "scripts/ci/run-disposable-integration.mjs:415",
       "owner": "engineering-test-platform"
     },
     {
@@ -161510,7 +161937,7 @@
       "delay": "60_000",
       "lifecycle": "untracked",
       "key": "timer|scripts/ci/run-disposable-integration.mjs|setTimeout:() => { timedOut = true; controller.abort(); }#0",
-      "source": "scripts/ci/run-disposable-integration.mjs:525",
+      "source": "scripts/ci/run-disposable-integration.mjs:532",
       "owner": "engineering-test-platform"
     },
     {
@@ -161520,7 +161947,7 @@
       "delay": "180_000",
       "lifecycle": "untracked",
       "key": "timer|scripts/ci/run-disposable-integration.mjs|setTimeout:() => { timedOut = true; controller.abort(); }#1",
-      "source": "scripts/ci/run-disposable-integration.mjs:553",
+      "source": "scripts/ci/run-disposable-integration.mjs:560",
       "owner": "engineering-test-platform"
     },
     {
@@ -161530,7 +161957,7 @@
       "delay": "wait",
       "lifecycle": "untracked",
       "key": "timer|scripts/ci/run-disposable-integration.mjs|setTimeout:() => finish(false)#0",
-      "source": "scripts/ci/run-disposable-integration.mjs:353",
+      "source": "scripts/ci/run-disposable-integration.mjs:360",
       "owner": "engineering-test-platform"
     },
     {
@@ -161540,7 +161967,7 @@
       "delay": "20_000",
       "lifecycle": "untracked",
       "key": "timer|scripts/ci/run-disposable-integration.mjs|setTimeout:() => startup.abort(new Error(\"owned MinIO startup timed out\"))#0",
-      "source": "scripts/ci/run-disposable-integration.mjs:161",
+      "source": "scripts/ci/run-disposable-integration.mjs:168",
       "owner": "engineering-test-platform"
     },
     {
@@ -161550,7 +161977,7 @@
       "delay": "5000",
       "lifecycle": "untracked",
       "key": "timer|scripts/ci/run-disposable-integration.mjs|setTimeout:() => terminationUnknown(new Error(\"child did not close after SIGKILL\"))#0",
-      "source": "scripts/ci/run-disposable-integration.mjs:410",
+      "source": "scripts/ci/run-disposable-integration.mjs:417",
       "owner": "engineering-test-platform"
     },
     {
@@ -161560,7 +161987,7 @@
       "delay": "wait",
       "lifecycle": "untracked",
       "key": "timer|scripts/ci/run-disposable-integration.mjs|setTimeout:next#0",
-      "source": "scripts/ci/run-disposable-integration.mjs:359",
+      "source": "scripts/ci/run-disposable-integration.mjs:366",
       "owner": "engineering-test-platform"
     },
     {
@@ -161570,7 +161997,7 @@
       "delay": "15_000",
       "lifecycle": "untracked",
       "key": "timer|scripts/command-centre-mobile-layout-check.mjs|setTimeout:() => { pending.delete(id); reject(new Error(`CDP ${method} timed out`)); }#0",
-      "source": "scripts/command-centre-mobile-layout-check.mjs:400",
+      "source": "scripts/command-centre-mobile-layout-check.mjs:466",
       "owner": "engineering-test-platform"
     },
     {
@@ -161580,7 +162007,7 @@
       "delay": "10_000",
       "lifecycle": "untracked",
       "key": "timer|scripts/command-centre-mobile-layout-check.mjs|setTimeout:() => { socket.terminate(); reject(new Error(\"CDP connection timed out\")); }#0",
-      "source": "scripts/command-centre-mobile-layout-check.mjs:372",
+      "source": "scripts/command-centre-mobile-layout-check.mjs:438",
       "owner": "engineering-test-platform"
     },
     {
@@ -161590,7 +162017,7 @@
       "delay": "10_000",
       "lifecycle": "untracked",
       "key": "timer|scripts/command-centre-mobile-layout-check.mjs|setTimeout:() => reject(new Error(`Chrome did not expose CDP for ${label}`))#0",
-      "source": "scripts/command-centre-mobile-layout-check.mjs:349",
+      "source": "scripts/command-centre-mobile-layout-check.mjs:415",
       "owner": "engineering-test-platform"
     },
     {
@@ -161610,7 +162037,7 @@
       "delay": "20",
       "lifecycle": "untracked",
       "key": "timer|scripts/command-centre-mobile-layout-check.mjs|setTimeout:resolve#1",
-      "source": "scripts/command-centre-mobile-layout-check.mjs:441",
+      "source": "scripts/command-centre-mobile-layout-check.mjs:507",
       "owner": "engineering-test-platform"
     },
     {
