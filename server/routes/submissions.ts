@@ -519,7 +519,14 @@ async function completeEstimateEffect(
 ): Promise<void> {
   if (row.estimate_completed_at) return;
   const tier = String(submission.serviceTier || submission.service_tier || "standard").toLowerCase();
-  const workingDays = ({ standard: 20, priority: 10, express: 5 } as Record<string, number>)[tier] ?? 20;
+  const purchasedDays = submission.turnaroundDays ?? submission.turnaround_days;
+  if (purchasedDays != null && (!Number.isInteger(purchasedDays) || purchasedDays <= 0)) {
+    throw new PermanentPaymentFulfilmentError("invalid purchased turnaround snapshot");
+  }
+  // New purchases retain the configured numeric promise even after tier edits.
+  // Pre-snapshot orders keep their historical fallback; never consult live prices here.
+  const workingDays =
+    purchasedDays ?? ({ standard: 20, priority: 10, express: 5 } as Record<string, number>)[tier] ?? 20;
   const target = new Date(row.paid_at);
   let added = 0;
   while (added < workingDays) {
@@ -1299,7 +1306,7 @@ export function registerSubmissionRoutes(app: Express): void {
       const highValueFlag = declaredValuePerCard > 3000 || totalDeclaredValue > 7500;
       const requiresManualApproval = totalDeclaredValue > 7500;
 
-      const turnaroundDays = tierData.turnaround ? parseInt(tierData.turnaround) : null;
+      const turnaroundDays = dbTier.turnaroundDays;
 
       const clientIp = req.ip || req.socket?.remoteAddress || "unknown";
 

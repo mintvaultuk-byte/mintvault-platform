@@ -1976,6 +1976,7 @@
         "shared/schema.ts",
         "server/routes/admin-config.ts",
         "server/routes/public.ts",
+        "server/routes/submissions.ts",
         "server/storage.ts",
         "server/seo-config.ts",
         "client/src/lib/pricing-projection.ts",
@@ -2693,7 +2694,7 @@
       "proof_required": [
         "Real database admin mutation appears identically on public, submit, promotion, quote, charge, and receipt; static-value mutation fails"
       ],
-      "evidence": [{"ref": "pricing-recovery.md: P1 independent Sol8/8; P2a19/19; P2b25/25 source-hash-bound preview proof and Terra architecture8474; remaining P2c/P3 payment/receipt and exact candidate proof OPEN", "sha": "c26bccfca544781e335e96f08361bc13d8cfb377", "observer": "Sol h1c_lifecycle independent; Terra h1b_runner topology"}],
+      "evidence": [{"ref": "pricing-recovery.md: P1/P2a/P2b/P2c/P2d locally verified; P3 source-hash-bound independent18/18 and clean106/106 HTTP-to-receipt, baseline two turnaround failures plus held-out invalid snapshot fixed. Architecture8313. Exact candidate/hosted/full-browser/final hostile remain OPEN", "sha": "43ca275757e93cc981e9d0091fc4d62c6003dc0d", "observer": "Sol h1c_lifecycle independent; Terra h1b_runner topology"}],
       "invalidated_by": ["Candidate SHA", "tier data", "projection", "promotion", "quote", "payment", "receipt"],
       "vetoes_release": true
     },

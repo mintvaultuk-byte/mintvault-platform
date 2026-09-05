@@ -1,5 +1,74 @@
 # Commercial pricing recovery — existing ARCH-PRICING-001
 
+## P3 HTTP-to-receipt wave — current
+
+Baseline `43ca275757e93cc981e9d0091fc4d62c6003dc0d` pushed to existing draft PR336.
+Preflight CRITICAL/HOSTILE; root sole writer. Exact initial write manifest:
+`tests/pricing-postgres.test.ts` only, plus this packet/task/proof ledger and existing
+architecture snapshot inventories if necessary. Extend its helper-owned PostgreSQL
+fixture using the existing Command Centre normal password/PIN login seed pattern
+and grading-payment-retry outbox migration0117 on the fresh cluster only. Mount
+actual Auth/AdminConfig/Public/Submission routes with real session middleware;
+no session-stamp bypass. Existing Stripe-client seam and outbound email/optional
+attribution adapters are deterministic doubles; storage/quote/discount/PDF-token/
+payment fulfilment remain real. Process-local generated test credentials only.
+
+Prove Admin price/day edits and audit, active/promo/no-promo/inactive projections,
+quote→provider-create totals and identity, persisted draft/paid snapshots, durable
+receipt, success projection and replay. Earlier in-flight/paid price/day/totals
+must remain unchanged after later Admin edits. Include completion estimate parity
+with the purchased turnaround, not today's tier configuration. No paid provider,
+shared migration/deployment or restricted security investigation. Test-only rollback
+to43ca leaves all real records unchanged; any reproduced product defect gets an
+exact added manifest and changed-surface independent proof before repair.
+
+P3 reproduced extension of existing HIGH ARCH-PRICING-001: real paid order bought
+23 working days but completion estimate used20 (Oct2 instead ofOct7, same paid_at).
+Other-service row has9 days/custom label but new checkout persists NULL turnaround.
+Two product tests red/three existing green after fixture isolation corrected;
+the earlier capacity failure was test-order contamination, not a product defect.
+Add exact production scope `server/routes/submissions.ts`: only checkout's
+turnaround source and completeEstimateEffect's purchased-day selection. Persist
+dbTier.turnaroundDays directly; valid positive integer purchased snapshot drives
+estimate, with the existing legacy mapping retained only when no usable snapshot
+exists. Do not reprice or rewrite old rows/dates; COALESCE/replay/transactions stay
+unchanged. Existing retry test proves missing-snapshot legacy behavior. No claim,
+credit, ownership, provider amount or grading algorithm modification. Rollback
+these two source selections together; stored rows/receipts remain untouched.
+
+Independent Sol held-out refinement: a persisted zero-day snapshot must not be
+treated as missing and silently replaced with a legacy promise. Root reproduced
+this synthetic invalid-data case red. Within the same completeEstimateEffect
+manifest, missing/null retains legacy fallback; non-null invalid uses the existing
+PermanentPaymentFulfilmentError/manual-reconciliation state without inventing an
+estimate or erasing paid status. No new state, migration or repair of stored data.
+Custom-label reholder now also proves paid +9 days and replay after live tier edit.
+
+P3 final local proof: independent Sol18/18 (pricing PostgreSQL6 + existing payment
+retry12), clean exact-lock six-suite106/106, zero skips. Normal Admin password/PIN
+and real HTTP tier update/audit, public/promo/no-promo/inactive, quote/charge and
+success receipt all exercised against ownedPG17.10. Synthetic Stripe/email only;
+prices, identity, paid amounts, purchased days and receipt history stay server-owned.
+The two baseline turnaround cases and independent invalid-zero case ran red before
+repair. Final clean build3366modules PASS. TypeScript/scoped lint/test ratchet and
+normal architecture receipts below bind this two-selection production change.
+P1–P3 repairs are locally FIXED_WIP; exact-candidate, hosted CI, full browser and
+final hostile/release/security gates remain distinct and OPEN. No deployment.
+
+Final P3 control receipts: TypeScript PASS, scoped lint0errors/41pre-existing
+submissions warnings; tests ratchet345 unchanged. Normal architecture8313/pricing1579
+PASS; only the existing turnaround expression and source locations changed, no
+policy/legacy enrollment changes. Graphify code-only refreshed15247nodes/34136edges;
+partial AST extraction warnings retained, actual source/TypeScript authoritative.
+Parent101/nested34 structurally valid, NOT READY. Postflight preserves existing
+managed-CLAUDE/npm-egress/dirty/protected-review failures and graph warning; no waiver.
+
+Final independent P3 SHA-256:
+```text
+af4247f93e1dc16185371a80dfb8d6bc4ea3c08bacdf7f74c0bf8eadc36febab server/routes/submissions.ts
+bf6e43c711dc33e53ac51ee47e7f71292364a94dc63c3dd30002dda483ebfab1 tests/pricing-postgres.test.ts
+```
+
 ## P2d editorial wave — locally verified checkpoint
 
 P2c checkpoint c5ccf599, same feature branch. P2d preflight CRITICAL/HOSTILE.

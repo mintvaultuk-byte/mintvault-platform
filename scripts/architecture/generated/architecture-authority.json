@@ -21388,7 +21388,7 @@
       "id": "endpoint:/api/create-payment-intent",
       "pricingKind": "transport",
       "key": "pricing-authority|server/routes/submissions.ts|endpoint:/api/create-payment-intent#0",
-      "source": "server/routes/submissions.ts:1057",
+      "source": "server/routes/submissions.ts:1064",
       "owner": "commerce-platform"
     },
     {
@@ -21396,7 +21396,7 @@
       "id": "endpoint:/api/grading/quote",
       "pricingKind": "transport",
       "key": "pricing-authority|server/routes/submissions.ts|endpoint:/api/grading/quote#0",
-      "source": "server/routes/submissions.ts:1019",
+      "source": "server/routes/submissions.ts:1026",
       "owner": "commerce-platform"
     },
     {
@@ -21413,7 +21413,7 @@
       "pricingKind": "source-or-projection",
       "expression": "quote",
       "key": "pricing-authority|server/routes/submissions.ts|value:{\n        vcTier,\n        vcStatus,\n        vcPercent,\n        bulkPercent,\n        promoPercent,\n        promoId,\n        promoStackingMode,\n        effectiveDiscountAmount,\n        effectiveDiscountPercent,\n        discountType,\n        discountedSubtotal,\n        promoApplied,\n        creditApplied,\n        creditAmountPence,\n        creditTypeApplied,\n        shipping,\n        totalInsuranceFee,\n        insuranceSurchargePerCard,\n        shippingLabel,\n        total,\n        promoCodeApplied,\n        promoCodeId,\n        promoCode: appliedPromoCode,\n        promoCodePercent,\n      }#0",
-      "source": "server/routes/submissions.ts:1270",
+      "source": "server/routes/submissions.ts:1277",
       "owner": "commerce-platform"
     },
     {
@@ -21422,7 +21422,7 @@
       "pricingKind": "source-or-projection",
       "expression": "effectiveDiscountAmount",
       "key": "pricing-authority|server/routes/submissions.ts|value:amount_pence#0",
-      "source": "server/routes/submissions.ts:1410",
+      "source": "server/routes/submissions.ts:1417",
       "owner": "commerce-platform"
     },
     {
@@ -21431,7 +21431,7 @@
       "pricingKind": "source-or-projection",
       "expression": "effectiveDiscountAmount",
       "key": "pricing-authority|server/routes/submissions.ts|value:amount_pence#1",
-      "source": "server/routes/submissions.ts:1550",
+      "source": "server/routes/submissions.ts:1557",
       "owner": "commerce-platform"
     },
     {
@@ -21440,7 +21440,7 @@
       "pricingKind": "source-or-projection",
       "expression": "creditAmountPence",
       "key": "pricing-authority|server/routes/submissions.ts|value:amount_pence#2",
-      "source": "server/routes/submissions.ts:1556",
+      "source": "server/routes/submissions.ts:1563",
       "owner": "commerce-platform"
     },
     {
@@ -21449,7 +21449,7 @@
       "pricingKind": "source-or-projection",
       "expression": "total",
       "key": "pricing-authority|server/routes/submissions.ts|value:amount#0",
-      "source": "server/routes/submissions.ts:1425",
+      "source": "server/routes/submissions.ts:1432",
       "owner": "commerce-platform"
     },
     {
@@ -21467,7 +21467,7 @@
       "pricingKind": "source-or-projection",
       "expression": "piAmount",
       "key": "pricing-authority|server/routes/submissions.ts|value:amountPence#1",
-      "source": "server/routes/submissions.ts:872",
+      "source": "server/routes/submissions.ts:879",
       "owner": "commerce-platform"
     },
     {
@@ -21476,7 +21476,7 @@
       "pricingKind": "source-or-projection",
       "expression": "total",
       "key": "pricing-authority|server/routes/submissions.ts|value:amountTotal#0",
-      "source": "server/routes/submissions.ts:1313",
+      "source": "server/routes/submissions.ts:1320",
       "owner": "commerce-platform"
     },
     {
@@ -21494,7 +21494,7 @@
       "pricingKind": "source-or-projection",
       "expression": "meta.creditAmountPence ?? null",
       "key": "pricing-authority|server/routes/submissions.ts|value:creditAmountPence#1",
-      "source": "server/routes/submissions.ts:648",
+      "source": "server/routes/submissions.ts:655",
       "owner": "commerce-platform"
     },
     {
@@ -21503,7 +21503,7 @@
       "pricingKind": "source-or-projection",
       "expression": "String(creditAmountPence)",
       "key": "pricing-authority|server/routes/submissions.ts|value:creditAmountPence#2",
-      "source": "server/routes/submissions.ts:1462",
+      "source": "server/routes/submissions.ts:1469",
       "owner": "commerce-platform"
     },
     {
@@ -21512,7 +21512,7 @@
       "pricingKind": "source-or-projection",
       "expression": "effectiveDiscountPercent > 0 ? { type: discountType, percent: effectiveDiscountPercent, amount_pence: effectiveDiscountAmount, } : null",
       "key": "pricing-authority|server/routes/submissions.ts|value:discount#0",
-      "source": "server/routes/submissions.ts:1545",
+      "source": "server/routes/submissions.ts:1552",
       "owner": "commerce-platform"
     },
     {
@@ -21521,7 +21521,7 @@
       "pricingKind": "source-or-projection",
       "expression": "String(effectiveDiscountAmount)",
       "key": "pricing-authority|server/routes/submissions.ts|value:discountAmount#0",
-      "source": "server/routes/submissions.ts:1434",
+      "source": "server/routes/submissions.ts:1441",
       "owner": "commerce-platform"
     },
     {
@@ -21530,7 +21530,7 @@
       "pricingKind": "source-or-projection",
       "expression": "String(effectiveDiscountPercent)",
       "key": "pricing-authority|server/routes/submissions.ts|value:discountPercent#0",
-      "source": "server/routes/submissions.ts:1433",
+      "source": "server/routes/submissions.ts:1440",
       "owner": "commerce-platform"
     },
     {
@@ -21539,7 +21539,7 @@
       "pricingKind": "source-or-projection",
       "expression": "discountType || \"none\"",
       "key": "pricing-authority|server/routes/submissions.ts|value:discountType#0",
-      "source": "server/routes/submissions.ts:1435",
+      "source": "server/routes/submissions.ts:1442",
       "owner": "commerce-platform"
     },
     {
@@ -21548,7 +21548,7 @@
       "pricingKind": "source-or-projection",
       "expression": "discountedSubtotal",
       "key": "pricing-authority|server/routes/submissions.ts|value:gradingCost#0",
-      "source": "server/routes/submissions.ts:1325",
+      "source": "server/routes/submissions.ts:1332",
       "owner": "commerce-platform"
     },
     {
@@ -21557,7 +21557,7 @@
       "pricingKind": "source-or-projection",
       "expression": "parseInt(submission.gradingCost || submission.grading_cost || \"0\", 10)",
       "key": "pricing-authority|server/routes/submissions.ts|value:gradingCost#1",
-      "source": "server/routes/submissions.ts:1786",
+      "source": "server/routes/submissions.ts:1793",
       "owner": "commerce-platform"
     },
     {
@@ -21566,7 +21566,7 @@
       "pricingKind": "source-or-projection",
       "expression": "totalInsuranceFee",
       "key": "pricing-authority|server/routes/submissions.ts|value:insuranceFee#0",
-      "source": "server/routes/submissions.ts:1327",
+      "source": "server/routes/submissions.ts:1334",
       "owner": "commerce-platform"
     },
     {
@@ -21575,7 +21575,7 @@
       "pricingKind": "source-or-projection",
       "expression": "String(totalInsuranceFee)",
       "key": "pricing-authority|server/routes/submissions.ts|value:insuranceFee#1",
-      "source": "server/routes/submissions.ts:1456",
+      "source": "server/routes/submissions.ts:1463",
       "owner": "commerce-platform"
     },
     {
@@ -21584,7 +21584,7 @@
       "pricingKind": "source-or-projection",
       "expression": "parseInt(submission.insuranceFee || submission.insurance_fee || \"0\", 10)",
       "key": "pricing-authority|server/routes/submissions.ts|value:insuranceFee#2",
-      "source": "server/routes/submissions.ts:1787",
+      "source": "server/routes/submissions.ts:1794",
       "owner": "commerce-platform"
     },
     {
@@ -21593,7 +21593,7 @@
       "pricingKind": "source-or-projection",
       "expression": "tierData.pricePerCard",
       "key": "pricing-authority|server/routes/submissions.ts|value:pricePerCard#0",
-      "source": "server/routes/submissions.ts:1042",
+      "source": "server/routes/submissions.ts:1049",
       "owner": "commerce-platform"
     },
     {
@@ -21602,7 +21602,7 @@
       "pricingKind": "source-or-projection",
       "expression": "tierData.pricePerCard",
       "key": "pricing-authority|server/routes/submissions.ts|value:pricePerCard#1",
-      "source": "server/routes/submissions.ts:1233",
+      "source": "server/routes/submissions.ts:1240",
       "owner": "commerce-platform"
     },
     {
@@ -21611,7 +21611,7 @@
       "pricingKind": "source-or-projection",
       "expression": "tierData.pricePerCard",
       "key": "pricing-authority|server/routes/submissions.ts|value:pricePerCardAtPurchase#0",
-      "source": "server/routes/submissions.ts:1326",
+      "source": "server/routes/submissions.ts:1333",
       "owner": "commerce-platform"
     },
     {
@@ -21620,7 +21620,7 @@
       "pricingKind": "source-or-projection",
       "expression": "shipping",
       "key": "pricing-authority|server/routes/submissions.ts|value:shippingCost#0",
-      "source": "server/routes/submissions.ts:1323",
+      "source": "server/routes/submissions.ts:1330",
       "owner": "commerce-platform"
     },
     {
@@ -21629,7 +21629,7 @@
       "pricingKind": "source-or-projection",
       "expression": "parseInt(submission.shippingCost || submission.shipping_cost || \"0\", 10)",
       "key": "pricing-authority|server/routes/submissions.ts|value:shippingCost#1",
-      "source": "server/routes/submissions.ts:1784",
+      "source": "server/routes/submissions.ts:1791",
       "owner": "commerce-platform"
     },
     {
@@ -21638,7 +21638,7 @@
       "pricingKind": "source-or-projection",
       "expression": "submission.totalPrice || null",
       "key": "pricing-authority|server/routes/submissions.ts|value:totalPrice#0",
-      "source": "server/routes/submissions.ts:1686",
+      "source": "server/routes/submissions.ts:1693",
       "owner": "commerce-platform"
     },
     {
@@ -21647,16 +21647,16 @@
       "pricingKind": "source-or-projection",
       "expression": "submission.totalPrice || submission.total_price || \"0\"",
       "key": "pricing-authority|server/routes/submissions.ts|value:totalPrice#1",
-      "source": "server/routes/submissions.ts:1783",
+      "source": "server/routes/submissions.ts:1790",
       "owner": "commerce-platform"
     },
     {
       "category": "pricing-authority",
       "id": "value:turnaroundDays",
       "pricingKind": "source-or-projection",
-      "expression": "tierData.turnaround ? parseInt(tierData.turnaround) : null",
+      "expression": "dbTier.turnaroundDays",
       "key": "pricing-authority|server/routes/submissions.ts|value:turnaroundDays#0",
-      "source": "server/routes/submissions.ts:1302",
+      "source": "server/routes/submissions.ts:1309",
       "owner": "commerce-platform"
     },
     {
@@ -21665,7 +21665,7 @@
       "pricingKind": "source-or-projection",
       "expression": "submission.turnaroundDays || null",
       "key": "pricing-authority|server/routes/submissions.ts|value:turnaroundDays#1",
-      "source": "server/routes/submissions.ts:1728",
+      "source": "server/routes/submissions.ts:1735",
       "owner": "commerce-platform"
     },
     {
@@ -21674,7 +21674,7 @@
       "pricingKind": "source-or-projection",
       "expression": "submission.turnaroundDays || submission.turnaround_days",
       "key": "pricing-authority|server/routes/submissions.ts|value:turnaroundDays#2",
-      "source": "server/routes/submissions.ts:1780",
+      "source": "server/routes/submissions.ts:1787",
       "owner": "commerce-platform"
     },
     {
@@ -26614,7 +26614,7 @@
       "id": "stripe:stripe.paymentIntents.create",
       "effect": "sdk-operation",
       "key": "provider-adapter|server/routes/submissions.ts|stripe:stripe.paymentIntents.create#0",
-      "source": "server/routes/submissions.ts:1424",
+      "source": "server/routes/submissions.ts:1431",
       "owner": "commerce-platform"
     },
     {
@@ -26622,7 +26622,7 @@
       "id": "stripe:stripe.paymentIntents.retrieve",
       "effect": "sdk-operation",
       "key": "provider-adapter|server/routes/submissions.ts|stripe:stripe.paymentIntents.retrieve#0",
-      "source": "server/routes/submissions.ts:1588",
+      "source": "server/routes/submissions.ts:1595",
       "owner": "commerce-platform"
     },
     {
@@ -105068,7 +105068,7 @@
       ],
       "retirementState": "active",
       "key": "server-route|server/routes/submissions.ts|GET /api/submissions/:submissionId/packing-slip#0",
-      "source": "server/routes/submissions.ts:1743",
+      "source": "server/routes/submissions.ts:1750",
       "owner": "commerce-platform",
       "commandOwner": "server/routes/submissions.ts#registerSubmissionRoutes",
       "delegatedCommands": [
@@ -105128,7 +105128,7 @@
       ],
       "retirementState": "active",
       "key": "server-route|server/routes/submissions.ts|GET /api/submissions/:submissionId/shipping-label#0",
-      "source": "server/routes/submissions.ts:1809",
+      "source": "server/routes/submissions.ts:1816",
       "owner": "commerce-platform",
       "commandOwner": "server/routes/submissions.ts#registerSubmissionRoutes",
       "delegatedCommands": [
@@ -105185,7 +105185,7 @@
       ],
       "retirementState": "active",
       "key": "server-route|server/routes/submissions.ts|GET /api/submissions/:submissionId/success#0",
-      "source": "server/routes/submissions.ts:1631",
+      "source": "server/routes/submissions.ts:1638",
       "owner": "commerce-platform",
       "commandOwner": "server/routes/submissions.ts#registerSubmissionRoutes",
       "delegatedCommands": [
@@ -105242,7 +105242,7 @@
       ],
       "retirementState": "active",
       "key": "server-route|server/routes/submissions.ts|GET /api/submissions/:submissionId#0",
-      "source": "server/routes/submissions.ts:1651",
+      "source": "server/routes/submissions.ts:1658",
       "owner": "commerce-platform",
       "commandOwner": "server/routes/submissions.ts#registerSubmissionRoutes",
       "delegatedCommands": [
@@ -105295,7 +105295,7 @@
       ],
       "retirementState": "active",
       "key": "server-route|server/routes/submissions.ts|POST /api/confirm-payment#0",
-      "source": "server/routes/submissions.ts:1567",
+      "source": "server/routes/submissions.ts:1574",
       "owner": "commerce-platform",
       "commandOwner": "server/routes/submissions.ts#registerSubmissionRoutes",
       "delegatedCommands": [
@@ -105384,7 +105384,7 @@
       ],
       "retirementState": "active",
       "key": "server-route|server/routes/submissions.ts|POST /api/create-payment-intent#0",
-      "source": "server/routes/submissions.ts:1057",
+      "source": "server/routes/submissions.ts:1064",
       "owner": "commerce-platform",
       "commandOwner": "server/routes/submissions.ts#registerSubmissionRoutes",
       "delegatedCommands": [
@@ -105465,7 +105465,7 @@
       ],
       "retirementState": "active",
       "key": "server-route|server/routes/submissions.ts|POST /api/grading/quote#0",
-      "source": "server/routes/submissions.ts:1019",
+      "source": "server/routes/submissions.ts:1026",
       "owner": "commerce-platform",
       "commandOwner": "server/routes/submissions.ts#registerSubmissionRoutes",
       "delegatedCommands": [
@@ -105527,7 +105527,7 @@
       ],
       "retirementState": "active",
       "key": "server-route|server/routes/submissions.ts|POST /api/submissions/:submissionId/track#0",
-      "source": "server/routes/submissions.ts:1694",
+      "source": "server/routes/submissions.ts:1701",
       "owner": "commerce-platform",
       "commandOwner": "server/routes/submissions.ts#registerSubmissionRoutes",
       "delegatedCommands": [
@@ -152132,7 +152132,7 @@
       "effect": "read",
       "access": "sql",
       "key": "table-access|server/routes/submissions.ts|read:public.grading_payment_fulfilments#1",
-      "source": "server/routes/submissions.ts:531",
+      "source": "server/routes/submissions.ts:538",
       "owner": "commerce-platform"
     },
     {
@@ -152141,7 +152141,7 @@
       "effect": "read",
       "access": "sql",
       "key": "table-access|server/routes/submissions.ts|read:public.grading_payment_fulfilments#2",
-      "source": "server/routes/submissions.ts:564",
+      "source": "server/routes/submissions.ts:571",
       "owner": "commerce-platform"
     },
     {
@@ -152150,7 +152150,7 @@
       "effect": "read",
       "access": "sql",
       "key": "table-access|server/routes/submissions.ts|read:public.grading_payment_fulfilments#3",
-      "source": "server/routes/submissions.ts:676",
+      "source": "server/routes/submissions.ts:683",
       "owner": "commerce-platform"
     },
     {
@@ -152159,7 +152159,7 @@
       "effect": "read",
       "access": "sql",
       "key": "table-access|server/routes/submissions.ts|read:public.grading_payment_fulfilments#4",
-      "source": "server/routes/submissions.ts:723",
+      "source": "server/routes/submissions.ts:730",
       "owner": "commerce-platform"
     },
     {
@@ -152168,7 +152168,7 @@
       "effect": "read",
       "access": "sql",
       "key": "table-access|server/routes/submissions.ts|read:public.grading_payment_fulfilments#5",
-      "source": "server/routes/submissions.ts:909",
+      "source": "server/routes/submissions.ts:916",
       "owner": "commerce-platform"
     },
     {
@@ -152177,7 +152177,7 @@
       "effect": "read",
       "access": "sql",
       "key": "table-access|server/routes/submissions.ts|read:public.grading_payment_fulfilments#6",
-      "source": "server/routes/submissions.ts:951",
+      "source": "server/routes/submissions.ts:958",
       "owner": "commerce-platform"
     },
     {
@@ -152186,7 +152186,7 @@
       "effect": "read",
       "access": "sql",
       "key": "table-access|server/routes/submissions.ts|read:public.grading_payment_fulfilments#7",
-      "source": "server/routes/submissions.ts:975",
+      "source": "server/routes/submissions.ts:982",
       "owner": "commerce-platform"
     },
     {
@@ -152213,7 +152213,7 @@
       "effect": "read",
       "access": "sql",
       "key": "table-access|server/routes/submissions.ts|read:public.member_credits#2",
-      "source": "server/routes/submissions.ts:601",
+      "source": "server/routes/submissions.ts:608",
       "owner": "commerce-platform"
     },
     {
@@ -152222,7 +152222,7 @@
       "effect": "read",
       "access": "sql",
       "key": "table-access|server/routes/submissions.ts|read:public.member_credits#3",
-      "source": "server/routes/submissions.ts:618",
+      "source": "server/routes/submissions.ts:625",
       "owner": "commerce-platform"
     },
     {
@@ -152231,7 +152231,7 @@
       "effect": "read",
       "access": "sql",
       "key": "table-access|server/routes/submissions.ts|read:public.member_credits#4",
-      "source": "server/routes/submissions.ts:632",
+      "source": "server/routes/submissions.ts:639",
       "owner": "commerce-platform"
     },
     {
@@ -152258,7 +152258,7 @@
       "effect": "read",
       "access": "sql",
       "key": "table-access|server/routes/submissions.ts|read:public.submissions#2",
-      "source": "server/routes/submissions.ts:881",
+      "source": "server/routes/submissions.ts:888",
       "owner": "commerce-platform"
     },
     {
@@ -152267,7 +152267,7 @@
       "effect": "read",
       "access": "sql",
       "key": "table-access|server/routes/submissions.ts|read:public.submissions#3",
-      "source": "server/routes/submissions.ts:923",
+      "source": "server/routes/submissions.ts:930",
       "owner": "commerce-platform"
     },
     {
@@ -152276,7 +152276,7 @@
       "effect": "read",
       "access": "sql",
       "key": "table-access|server/routes/submissions.ts|read:public.submissions#4",
-      "source": "server/routes/submissions.ts:951",
+      "source": "server/routes/submissions.ts:958",
       "owner": "commerce-platform"
     },
     {
@@ -152294,7 +152294,7 @@
       "effect": "read",
       "access": "sql",
       "key": "table-access|server/routes/submissions.ts|read:public.tier_capacity#1",
-      "source": "server/routes/submissions.ts:1097",
+      "source": "server/routes/submissions.ts:1104",
       "owner": "commerce-platform"
     },
     {
@@ -152303,7 +152303,7 @@
       "effect": "read",
       "access": "sql",
       "key": "table-access|server/routes/submissions.ts|read:public.users#0",
-      "source": "server/routes/submissions.ts:611",
+      "source": "server/routes/submissions.ts:618",
       "owner": "commerce-platform"
     },
     {
@@ -152312,7 +152312,7 @@
       "effect": "read",
       "access": "sql",
       "key": "table-access|server/routes/submissions.ts|read:public.users#1",
-      "source": "server/routes/submissions.ts:734",
+      "source": "server/routes/submissions.ts:741",
       "owner": "commerce-platform"
     },
     {
@@ -152321,7 +152321,7 @@
       "effect": "read",
       "access": "sql",
       "key": "table-access|server/routes/submissions.ts|read:public.users#2",
-      "source": "server/routes/submissions.ts:749",
+      "source": "server/routes/submissions.ts:756",
       "owner": "commerce-platform"
     },
     {
@@ -152330,7 +152330,7 @@
       "effect": "unclassified",
       "access": "sql-unclassified",
       "key": "table-access|server/routes/submissions.ts|unclassified:sql`SET LOCAL mintvault.admin_bypass = 'true'`#0",
-      "source": "server/routes/submissions.ts:908",
+      "source": "server/routes/submissions.ts:915",
       "owner": "commerce-platform"
     },
     {
@@ -152339,7 +152339,7 @@
       "effect": "write",
       "access": "drizzle",
       "key": "table-access|server/routes/submissions.ts|write:auditLog#0",
-      "source": "server/routes/submissions.ts:1364",
+      "source": "server/routes/submissions.ts:1371",
       "owner": "commerce-platform"
     },
     {
@@ -152348,7 +152348,7 @@
       "effect": "write",
       "access": "drizzle",
       "key": "table-access|server/routes/submissions.ts|write:auditLog#1",
-      "source": "server/routes/submissions.ts:1382",
+      "source": "server/routes/submissions.ts:1389",
       "owner": "commerce-platform"
     },
     {
@@ -152357,7 +152357,7 @@
       "effect": "write",
       "access": "drizzle",
       "key": "table-access|server/routes/submissions.ts|write:auditLog#2",
-      "source": "server/routes/submissions.ts:1395",
+      "source": "server/routes/submissions.ts:1402",
       "owner": "commerce-platform"
     },
     {
@@ -152366,7 +152366,7 @@
       "effect": "write",
       "access": "sql",
       "key": "table-access|server/routes/submissions.ts|write:public.audit_log#0",
-      "source": "server/routes/submissions.ts:652",
+      "source": "server/routes/submissions.ts:659",
       "owner": "commerce-platform"
     },
     {
@@ -152375,7 +152375,7 @@
       "effect": "write",
       "access": "sql",
       "key": "table-access|server/routes/submissions.ts|write:public.audit_log#1",
-      "source": "server/routes/submissions.ts:704",
+      "source": "server/routes/submissions.ts:711",
       "owner": "commerce-platform"
     },
     {
@@ -152402,7 +152402,7 @@
       "effect": "write",
       "access": "sql",
       "key": "table-access|server/routes/submissions.ts|write:public.grading_payment_fulfilments#10",
-      "source": "server/routes/submissions.ts:923",
+      "source": "server/routes/submissions.ts:930",
       "owner": "commerce-platform"
     },
     {
@@ -152411,7 +152411,7 @@
       "effect": "write",
       "access": "sql",
       "key": "table-access|server/routes/submissions.ts|write:public.grading_payment_fulfilments#11",
-      "source": "server/routes/submissions.ts:940",
+      "source": "server/routes/submissions.ts:947",
       "owner": "commerce-platform"
     },
     {
@@ -152420,7 +152420,7 @@
       "effect": "write",
       "access": "sql",
       "key": "table-access|server/routes/submissions.ts|write:public.grading_payment_fulfilments#2",
-      "source": "server/routes/submissions.ts:548",
+      "source": "server/routes/submissions.ts:555",
       "owner": "commerce-platform"
     },
     {
@@ -152429,7 +152429,7 @@
       "effect": "write",
       "access": "sql",
       "key": "table-access|server/routes/submissions.ts|write:public.grading_payment_fulfilments#3",
-      "source": "server/routes/submissions.ts:576",
+      "source": "server/routes/submissions.ts:583",
       "owner": "commerce-platform"
     },
     {
@@ -152438,7 +152438,7 @@
       "effect": "write",
       "access": "sql",
       "key": "table-access|server/routes/submissions.ts|write:public.grading_payment_fulfilments#4",
-      "source": "server/routes/submissions.ts:659",
+      "source": "server/routes/submissions.ts:666",
       "owner": "commerce-platform"
     },
     {
@@ -152447,7 +152447,7 @@
       "effect": "write",
       "access": "sql",
       "key": "table-access|server/routes/submissions.ts|write:public.grading_payment_fulfilments#5",
-      "source": "server/routes/submissions.ts:709",
+      "source": "server/routes/submissions.ts:716",
       "owner": "commerce-platform"
     },
     {
@@ -152456,7 +152456,7 @@
       "effect": "write",
       "access": "sql",
       "key": "table-access|server/routes/submissions.ts|write:public.grading_payment_fulfilments#6",
-      "source": "server/routes/submissions.ts:758",
+      "source": "server/routes/submissions.ts:765",
       "owner": "commerce-platform"
     },
     {
@@ -152465,7 +152465,7 @@
       "effect": "write",
       "access": "sql",
       "key": "table-access|server/routes/submissions.ts|write:public.grading_payment_fulfilments#7",
-      "source": "server/routes/submissions.ts:774",
+      "source": "server/routes/submissions.ts:781",
       "owner": "commerce-platform"
     },
     {
@@ -152474,7 +152474,7 @@
       "effect": "write",
       "access": "sql",
       "key": "table-access|server/routes/submissions.ts|write:public.grading_payment_fulfilments#8",
-      "source": "server/routes/submissions.ts:793",
+      "source": "server/routes/submissions.ts:800",
       "owner": "commerce-platform"
     },
     {
@@ -152483,7 +152483,7 @@
       "effect": "write",
       "access": "sql",
       "key": "table-access|server/routes/submissions.ts|write:public.grading_payment_fulfilments#9",
-      "source": "server/routes/submissions.ts:816",
+      "source": "server/routes/submissions.ts:823",
       "owner": "commerce-platform"
     },
     {
@@ -152519,7 +152519,7 @@
       "effect": "write",
       "access": "sql",
       "key": "table-access|server/routes/submissions.ts|write:public.member_credits#3",
-      "source": "server/routes/submissions.ts:590",
+      "source": "server/routes/submissions.ts:597",
       "owner": "commerce-platform"
     },
     {
@@ -152528,7 +152528,7 @@
       "effect": "write",
       "access": "sql",
       "key": "table-access|server/routes/submissions.ts|write:public.member_credits#4",
-      "source": "server/routes/submissions.ts:618",
+      "source": "server/routes/submissions.ts:625",
       "owner": "commerce-platform"
     },
     {
@@ -152537,7 +152537,7 @@
       "effect": "write",
       "access": "sql",
       "key": "table-access|server/routes/submissions.ts|write:public.promo_codes#0",
-      "source": "server/routes/submissions.ts:689",
+      "source": "server/routes/submissions.ts:696",
       "owner": "commerce-platform"
     },
     {
@@ -152564,7 +152564,7 @@
       "effect": "write",
       "access": "sql",
       "key": "table-access|server/routes/submissions.ts|write:public.skip#2",
-      "source": "server/routes/submissions.ts:618",
+      "source": "server/routes/submissions.ts:625",
       "owner": "commerce-platform"
     },
     {
@@ -152573,7 +152573,7 @@
       "effect": "write",
       "access": "sql",
       "key": "table-access|server/routes/submissions.ts|write:public.submissions#0",
-      "source": "server/routes/submissions.ts:542",
+      "source": "server/routes/submissions.ts:549",
       "owner": "commerce-platform"
     },
     {
@@ -152582,7 +152582,7 @@
       "effect": "write",
       "access": "sql",
       "key": "table-access|server/routes/submissions.ts|write:public.submissions#1",
-      "source": "server/routes/submissions.ts:754",
+      "source": "server/routes/submissions.ts:761",
       "owner": "commerce-platform"
     },
     {
@@ -152591,7 +152591,7 @@
       "effect": "write",
       "access": "sql",
       "key": "table-access|server/routes/submissions.ts|write:public.submissions#2",
-      "source": "server/routes/submissions.ts:909",
+      "source": "server/routes/submissions.ts:916",
       "owner": "commerce-platform"
     },
     {
@@ -152600,7 +152600,7 @@
       "effect": "write",
       "access": "sql",
       "key": "table-access|server/routes/submissions.ts|write:public.users#0",
-      "source": "server/routes/submissions.ts:736",
+      "source": "server/routes/submissions.ts:743",
       "owner": "commerce-platform"
     },
     {

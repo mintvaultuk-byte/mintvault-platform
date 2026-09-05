@@ -1,5 +1,17 @@
 # Engineering proof ledger
 
+## 2026-09-05 pricing P3 — real HTTP-to-receipt proof
+
+[Pricing packet](../.claude/controlled-code-lead/tasks/repository-architecture-recovery-20260904/pricing-recovery.md)
+records two reproduced turnaround defects and the independent invalid-zero case,
+all repaired in the same pass. Actual Admin password/PIN→tier update/audit→public/
+promotion→quote→synthetic Stripe charge→durable receipt/success/replay passes.
+Purchased amounts/days survive later tier edits; invalid days retain paid state
+and require reconciliation, while missing legacy snapshots retain their fallback.
+Independent Sol18/18, final clean six-suite106/106, zero skips, final build PASS.
+No live provider or shared database/migration/deployment. Exact source hashes and
+rollback retained; immutable candidate/hosted/hostile/release gates are not closed.
+
 ## 2026-09-05 pricing P2d — editorial catalogue convergence
 
 [Pricing packet](../.claude/controlled-code-lead/tasks/repository-architecture-recovery-20260904/pricing-recovery.md)

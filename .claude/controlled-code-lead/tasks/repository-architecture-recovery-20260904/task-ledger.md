@@ -2,6 +2,15 @@
 
 ## Current checkpoint and next bounded wave
 
+Pricing P1–P3 is locally FIXED_WIP. P2d checkpoint43ca275757e93cc981e9d0091fc4d62c6003dc0d
+is pushed to draftPR336. P3 reproduced/fixed two purchased-turnaround defects plus
+one held-out invalid snapshot edge. Independent18/18, clean six-suite106/106 and
+final build pass; see pricing-recovery.md exact hashes and limitations. WIP push
+then carry forward already-implemented legacy-AI bounded proof and remaining graph
+waves; no broad audit or owner pause. Terra independently reran legacy tombstone5/5
+without product edits; its procedural graph evidence still needs reconciliation.
+43ca primary33994558016/governance33994558012/33994556032 were in progress, not green.
+
 P2c c5ccf5998148f9e4abc7fce5c0ccccc3019a8fc4 is pushed; draftPR336 exact head
 verified. P2d editorial wave independently50/50, final clean build PASS;13SEO
 pages/guides/server metadata/current-pricing links converged. Exact hashes and
