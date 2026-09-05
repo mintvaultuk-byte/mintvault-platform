@@ -1334,14 +1334,22 @@
       "agent_mode": "LEAD",
       "agent_id": "codex-lead",
       "workspace": "shared",
-      "depends_on": ["ARCH-CI-001", "REPAIR-AUTHORITY-CONTROLS"],
-      "addresses": ["ARCH-CI-001"],
+      "depends_on": [
+        "ARCH-CI-001",
+        "REPAIR-AUTHORITY-CONTROLS"
+      ],
+      "addresses": [
+        "ARCH-CI-001"
+      ],
       "write_scope": [
         ".github/workflows/ci.yml",
         "package.json",
         "package-lock.json",
         "tests/production-dependency-boundary.test.ts",
         "tests/disposable-integration-runner.test.ts",
+        "scripts/command-centre-runtime-harness.ts",
+        "scripts/command-centre-mobile-layout-check.mjs",
+        "tests/command-centre-runtime-harness.test.ts",
         "tsconfig.tests.json",
         "tsconfig.scripts.json",
         "tsconfig.architecture.json",
@@ -1354,7 +1362,8 @@
         "Isolated Partner runner, Scanner test gates (signed package proof remains Phase 5 REPAIR-SCANNER-PACKAGE), script/test typechecks, ratcheted unreachable-code proof, shipped-migration labels, non-vacuity and injected-failure proof",
         "hygiene-repair-manifest.md H1a: pinned omit-dev dependency tree excludes build-only toolchain while retaining native runtime modules; builder CSS and complete production image proof remain required",
         "hygiene-repair-manifest.md H1b: owned CI-pinned PG16/vector and PG17, process-only preparation exports, per-suite topology, non-vacuous real Partner runner and independently verified failure/cancellation cleanup; hygiene-wave-proof.md retains local results, not release closure",
-        "hygiene-repair-manifest.md H1c: exclusive owned pinned MinIO with synthetic process-only configuration, exact-identity eleven-check report, real adapter transport/integrity/conditional/replay proof, independent bounded child-close/cleanup verification and failure-blocking hosted wiring; exact-candidate hosted proof remains required"
+        "hygiene-repair-manifest.md H1c: exclusive owned pinned MinIO with synthetic process-only configuration, exact-identity eleven-check report, real adapter transport/integrity/conditional/replay proof, independent bounded child-close/cleanup verification and failure-blocking hosted wiring; exact-candidate hosted proof remains required",
+        "hygiene-repair-manifest.md H1h: finite owned Admin browser seven-check flow, synthetic env, verified close/cancellation/retention, strict report and hosted after-Build/preNode22 command. Partner browser and final exact-SHA gates remain open."
       ],
       "evidence": [
         {
@@ -1366,6 +1375,11 @@
           "ref": "hygiene-wave-proof.md H1d/e/f/g: clean tracked inventory parity; clean exact-lock Admin126/126 and operational6/6; PDF old/new declaration red-green; a6670fc4 hosted architecture/lint/type gates pass, test5 failures and image vulnerability veto remain; H1c subsequent WIP hashes and independent local11-check proof recorded separately, not candidate closure",
           "sha": "a6670fc4456e6b4185d3a735b189ef9f86f667b2",
           "observer": "codex-lead with independent scoped Luna/Terra/Sol observations"
+        },
+        {
+          "ref": "hygiene-wave-proof.md H1h: root/independent Sol/clean exact-lock real7/7, clean controls101/101, cancellation run d23aaab2 closed both PIDs/container cleanup0, delayed-close defect repaired; exact seven file hashes retained, no hosted/release closure",
+          "sha": "bc8bc3c6118f079d7843f3733bbf1a380b0a1f08",
+          "observer": "Sol h1c_lifecycle independent, codex-lead integration"
         }
       ],
       "invalidated_by": [
@@ -2487,18 +2501,35 @@
       "kind": "PROOF",
       "title": "Independently prove CI topology is complete and non-vacuous",
       "severity": "HIGH",
-      "status": "OPEN",
+      "status": "IN_PROGRESS",
       "agent_mode": "READ_ONLY",
       "agent_id": "ci-topology-verifier",
       "workspace": "read_only",
-      "depends_on": ["REPAIR-CI-TOPOLOGY"],
-      "addresses": ["ARCH-CI-001"],
+      "depends_on": [
+        "REPAIR-CI-TOPOLOGY"
+      ],
+      "addresses": [
+        "ARCH-CI-001"
+      ],
       "write_scope": [],
       "proof_required": [
         "Exact runtime invokes isolated Partner, Scanner, scripts/tests typechecks and shipped migration proof; skip and injected failure make gate red"
       ],
-      "evidence": [],
-      "invalidated_by": ["Candidate SHA", "workflow", "runner", "test inventory", "runtime", "migration inventory"],
+      "evidence": [
+        {
+          "ref": "hygiene-wave-proof.md H1h: root/independent Sol/clean exact-lock real7/7, clean controls101/101, cancellation run d23aaab2 closed both PIDs/container cleanup0, delayed-close defect repaired; exact seven file hashes retained, no hosted/release closure",
+          "sha": "bc8bc3c6118f079d7843f3733bbf1a380b0a1f08",
+          "observer": "Sol h1c_lifecycle independent, codex-lead integration"
+        }
+      ],
+      "invalidated_by": [
+        "Candidate SHA",
+        "workflow",
+        "runner",
+        "test inventory",
+        "runtime",
+        "migration inventory"
+      ],
       "vetoes_release": true
     },
     {

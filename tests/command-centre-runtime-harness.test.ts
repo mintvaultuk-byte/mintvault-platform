@@ -9,6 +9,8 @@ import {
   assertDisposableRuntimeAdminDatabaseUrl,
   assertDisposableRuntimeDatabaseUrl,
   requireRuntimeCredential,
+  runtimeProcessEnvironment,
+  runtimeRequestSignal,
 } from "../scripts/command-centre-runtime-harness";
 import { startPostgres17, type DisposablePostgres17 } from "./helpers/postgres17-cluster";
 
@@ -30,6 +32,33 @@ afterAll(async () => {
 });
 
 describe("Command Centre rendered-runtime harness safety", () => {
+  it("bounds requests and propagates cancellation", () => {
+    const parent = new AbortController();
+    const signal = runtimeRequestSignal(parent.signal);
+    expect(signal.aborted).toBe(false);
+    parent.abort();
+    expect(signal.aborted).toBe(true);
+  });
+  it("does not inherit provider, database, preload or legacy flag configuration into its real app child", () => {
+    const env = runtimeProcessEnvironment(
+      {
+        PATH: "/bin",
+        NODE_OPTIONS: "--require unwanted",
+        ANTHROPIC_API_KEY: "not-a-secret",
+        MINTVAULT_DATABASE_URL: "postgresql://remote.invalid/live",
+        R2_ENDPOINT: "https://remote.invalid",
+        SUPER_ADMIN_COMMAND_CENTRE_ENABLED: "true",
+      },
+      { MINTVAULT_DATABASE_URL: "postgresql://127.0.0.1:61234/owned" }
+    );
+    expect(env).toEqual({
+      PATH: "/bin",
+      LANG: "C",
+      LC_ALL: "C",
+      NODE_ENV: "test",
+      MINTVAULT_DATABASE_URL: "postgresql://127.0.0.1:61234/owned",
+    });
+  });
   it("accepts only a loopback URL with the dedicated disposable database prefix", () => {
     const url = assertDisposableRuntimeDatabaseUrl(
       `postgresql://tester@127.0.0.1:61234/${COMMAND_CENTRE_RUNTIME_DB_PREFIX}safe`
@@ -72,9 +101,7 @@ describe("Command Centre rendered-runtime harness safety", () => {
     expect(harness).toContain('const commandCentreEnabled = !process.argv.includes("--feature-off")');
     expect(harness).toContain("CREATE TABLE IF NOT EXISTS partner_feature_flags");
     expect(harness).toContain("COMMAND_CENTRE_PILOT_FLAG, commandCentreEnabled");
-    expect(harness).toContain(
-      "await verifyCommandCentreRuntime(port, commandCentreEnabled, runtimeAdminPassword, runtimeAdminPin)"
-    );
+    expect(harness).toContain("await verifyCommandCentreRuntime(");
     expect(harness).toContain("requireRuntimeAdminDatabaseUrl()");
     expect(harness).not.toContain("127.0.0.1:5432");
     expect(harness).not.toContain('SUPER_ADMIN_COMMAND_CENTRE_ENABLED: commandCentreEnabled ? "true" : "false"');

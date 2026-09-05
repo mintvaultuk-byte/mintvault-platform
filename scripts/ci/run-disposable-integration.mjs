@@ -25,6 +25,47 @@ export const R2_PROOF_CHECKS = Object.freeze([
   "immutable-mismatch",
   "delete-missing",
 ]);
+export const ADMIN_BROWSER_PROOF_CHECKS = Object.freeze([
+  "rendered-login",
+  "rendered-pin",
+  "rendered-command-centre",
+  "authenticated-dashboard",
+  "mobile-containment",
+  "rendered-logout",
+  "post-logout-refusal",
+]);
+export function validateAdminBrowserReport(report, token) {
+  let url;
+  try {
+    url = new URL(report?.url);
+  } catch {
+    throw new Error("invalid browser proof URL");
+  }
+  if (
+    url.protocol !== "http:" ||
+    url.hostname !== "127.0.0.1" ||
+    !url.port ||
+    url.username ||
+    url.password ||
+    url.pathname !== "/" ||
+    url.search ||
+    url.hash ||
+    report?.schemaVersion !== 1 ||
+    report.runId !== token ||
+    typeof report.browser !== "string" ||
+    !report.browser ||
+    report.passed !== ADMIN_BROWSER_PROOF_CHECKS.length ||
+    report.failed !== 0 ||
+    report.skipped !== 0 ||
+    !Array.isArray(report.checks) ||
+    report.checks.length !== ADMIN_BROWSER_PROOF_CHECKS.length ||
+    !ADMIN_BROWSER_PROOF_CHECKS.every(
+      (name, index) => report.checks[index]?.name === name && report.checks[index]?.status === "passed"
+    )
+  )
+    throw new Error("browser proof report is incomplete, failed, or does not match the owned run");
+  return report;
+}
 const PREPARATION_KEYS = new Set([
   ...MANAGED_DATABASE_ENVIRONMENT_KEYS,
   "PROJECT_CONTROL_TEST_ADMIN_URL",
@@ -267,7 +308,48 @@ export async function startDisposableServices({ driver, token = randomUUID() }) 
 export function childStatus(result) {
   return result.code === 0 ? 0 : 1;
 }
-export function runChild(args, env, spawnProcess = spawn, signal) {
+/** Await close, not only exit; uncertainty must retain the resources it uses. */
+export function stopOwnedChild(
+  child,
+  { closed = false, graceMs = 2000, killMs = 2000, initialSignal = "SIGTERM" } = {}
+) {
+  if (closed) return Promise.resolve(true);
+  return new Promise((resolve) => {
+    let settled = false,
+      timer;
+    const finish = (confirmed) => {
+      if (settled) return;
+      settled = true;
+      clearTimeout(timer);
+      if (!confirmed)
+        console.error(
+          `[owned-child] closure unconfirmed pid=${child.pid ?? "none"} exit=${child.exitCode ?? "null"} signal=${child.signalCode ?? "none"}`
+        );
+      child.removeListener("close", onClose);
+      child.removeListener("error", onError);
+      resolve(confirmed);
+    };
+    const onClose = () => finish(true),
+      onError = () => finish(false);
+    const terminate = (kind, wait, next) => {
+      try {
+        if (!child.kill(kind) && !settled) {
+          // kill(false) also occurs after process exit but before stdio close.
+          // Wait for that close within the same bound; never infer it succeeded.
+          timer = setTimeout(() => finish(false), wait);
+          return;
+        }
+      } catch {
+        return finish(false);
+      }
+      if (!settled) timer = setTimeout(next, wait);
+    };
+    child.once("close", onClose);
+    child.once("error", onError);
+    terminate(initialSignal, graceMs, () => terminate("SIGKILL", killMs, () => finish(false)));
+  });
+}
+export function runChild(args, env, spawnProcess = spawn, signal, { graceMs = 5000 } = {}) {
   return new Promise((resolve, reject) => {
     if (signal?.aborted) return resolve({ code: null });
     const child = spawnProcess(process.execPath, args, {
@@ -301,7 +383,7 @@ export function runChild(args, env, spawnProcess = spawn, signal) {
         if (settled || !kill("SIGKILL") || settled) return;
         timer = setTimeout(() => terminationUnknown(new Error("child did not close after SIGKILL")), 5000);
         timer.unref();
-      }, 5000);
+      }, graceMs);
       timer.unref();
     };
     const done = () => {
@@ -325,7 +407,8 @@ export function runChild(args, env, spawnProcess = spawn, signal) {
 export function parse(argv) {
   let context,
     prepare = false,
-    r2Proof = false;
+    r2Proof = false,
+    adminBrowserProof = false;
   const selection = [],
     targets = [];
   for (let index = 0; index < argv.length; index += 1) {
@@ -337,6 +420,9 @@ export function parse(argv) {
         if (context) throw new Error("duplicate Docker context");
         context = value;
       } else selection.push(arg, value);
+    } else if (arg === "--admin-browser-proof") {
+      if (adminBrowserProof) throw new Error("duplicate browser target");
+      adminBrowserProof = true;
     } else if (arg === "--r2-proof") {
       if (r2Proof) throw new Error("duplicate object-store target");
       r2Proof = true;
@@ -345,6 +431,11 @@ export function parse(argv) {
       targets.push(arg);
       selection.push(arg);
     } else throw new Error(`unknown argument: ${arg}`);
+  }
+  if (adminBrowserProof) {
+    if (!context || r2Proof || prepare || selection.length)
+      throw new Error("--admin-browser-proof requires only an explicit Docker context");
+    return { context, prepare: false, selection: [], adminBrowserProof: true };
   }
   if (r2Proof) {
     if (!context || prepare || selection.length) throw new Error("--r2-proof requires only an explicit Docker context");
@@ -371,7 +462,7 @@ export function preparationExports(text, serviceEnv) {
   return result;
 }
 export async function main(argv = process.argv.slice(2), deps = {}) {
-  const { context, prepare, selection, r2Proof } = parse(argv);
+  const { context, prepare, selection, r2Proof, adminBrowserProof } = parse(argv);
   const driver = deps.driver || dockerDriver(context);
   const controller = new AbortController(),
     signalSource = deps.signalSource || process;
@@ -420,6 +511,42 @@ export async function main(argv = process.argv.slice(2), deps = {}) {
     console.log(
       `[disposable-ci] owned run ${services.token}; PG16 port=${services.env.MINTVAULT_TEST_PG16_PORT}, PG17 port=${services.env.MINTVAULT_TEST_PG17_PORT}`
     );
+    if (adminBrowserProof) {
+      const reportPath = join(temp, "admin-browser-proof.json");
+      let timedOut = false;
+      const timeout = setTimeout(() => {
+        timedOut = true;
+        controller.abort();
+      }, 180_000);
+      timeout.unref();
+      let outcome;
+      try {
+        outcome = await runChild(
+          ["--import", "tsx", "scripts/command-centre-runtime-harness.ts", "--browser-proof", reportPath],
+          controlledEnvironment(process.env, {
+            MINTVAULT_COMMAND_CENTRE_RUNTIME_AUDIT: "1",
+            MINTVAULT_COMMAND_CENTRE_RUNTIME_ADMIN_URL: `postgresql://postgres:postgres@127.0.0.1:${services.env.MINTVAULT_TEST_PG17_PORT}/postgres`,
+            MINTVAULT_COMMAND_CENTRE_RUNTIME_ADMIN_PASSWORD: randomBytes(24).toString("hex"),
+            MINTVAULT_COMMAND_CENTRE_RUNTIME_ADMIN_PIN: String(10000000 + (randomBytes(4).readUInt32BE() % 90000000)),
+            MINTVAULT_BROWSER_PROOF_RUN_ID: services.token,
+          }),
+          deps.spawnProcess,
+          controller.signal,
+          { graceMs: 25_000 }
+        );
+      } finally {
+        clearTimeout(timeout);
+      }
+      if (outcome.code === 75 || outcome.code === null) {
+        const failure = new Error("browser termination could not be confirmed; retain owned services");
+        failure.retainOwnedServices = true;
+        throw failure;
+      }
+      if (signalCode || timedOut || childStatus(outcome)) return signalCode || 1;
+      const report = validateAdminBrowserReport(JSON.parse(readFileSync(reportPath, "utf8")), services.token);
+      console.log(`[disposable-ci] ${JSON.stringify(report)}`);
+      return 0;
+    }
     if (prepare) {
       const prepared = await runChild(
         ["scripts/ci/prepare-engineering-governance-db.mjs"],

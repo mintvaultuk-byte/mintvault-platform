@@ -1,5 +1,74 @@
 # Hygiene launch / first repair wave evidence
 
+## H1h — finite owned Super Admin browser proof, 2026-09-05
+
+Exact preceding image SHA bc8bc3c6 hosted CI33969351459/job101314988029:
+492 test files PASS,7413 assertions PASS/5 skipped, zero failures. Earlier image/UTC
+failures are absent; this run also has no claim assertion failure (not a token repair
+or flake-closure claim). Owned object-store, lint/type, isolated Partner matrix and
+Build steps SUCCESS. Audit HIGH gate FAILURE; image job101314988120 FAILURE. Scanner
+phase downstream of Audit is skipped, not passed. Governance33969351471 SUCCESS,
+33969347750 FAILURE. Whole primary CI remains red; restricted security lane untouched.
+
+Baseline bc8bc3c6118f079d7843f3733bbf1a380b0a1f08 plus the exact H1h manifest.
+Existing files reused; no new browser framework/package or product/auth change.
+Root and independent Sol run pinned Node20.20.2 under env-i, explicit Docker context
+colima-mintvault-remediation-20260905 and the checked-in --admin-browser-proof target.
+The runner owns CI-pinned PG16/vector+PG17; existing runtime fixture owns a prefixed
+synthetic PG17 database and actual server/index.ts. Password/PIN generated per process;
+no inherited .env/live URL/provider configuration. The browser has its own temporary
+profile and allows page requests only to the owned app origin.
+
+Real Chrome152.0.7977.76 seven-check flow: login form, PIN form, rendered Command Centre,
+actual authenticated dashboard with seeded non-terminal-submission value1, 320px layout,
+logout, and401 after logout. Root run e45a894f-4147-4e93-bc9d-4ca967188d9c at58033:
+7pass/0fail/0skip; exact-label container query empty. Independent Sol run
+e1630ea7-032d-4c77-99df-01965e203dd8:7/0/0, exact-label containers empty and both recorded
+app/Chrome PIDs absent. Clean exact-lock Vitest4.1.7 copy
+/private/tmp/mintvault-h1ef-clean.x3NRtE: four-suite101/101 (runner43, runtime17,
+topology14, architecture27), zero skips. Clean browser initially failed for missing
+dist/public/assets; required npm run build was then executed successfully (first sandbox
+IPC refusal, same-command approved retry). Final clean run569957b2-39bd-413d-903a-cf7bf2b6dddd
+at58505:7/0/0, exact-label containers empty. Lock cmp unchanged; no dependency edits.
+
+Independent review exposed finite-shutdown gaps despite initial seven green assertions.
+Root fixed bounded close-not-exit confirmation, app/Chrome unknown-closure retention,
+HTTP5s plus parent cancellation, CDP open10s/send15s, signal handling and parent grace.
+Actual cancellation run d23aaab2-3d85-4a60-b958-211da22f9263: SIGTERM at Chrome-start marker,
+exit143, no forced timeout, both PIDs absent, owned containers0, no success report.
+A subsequent normal-run close race returned75 safely: kill(false) can precede stdio close.
+Now wait for bounded close even in that case; independent held-out delayed-close proof
+and regression pass. The failed run61478bf4-8fbe-4d97-bcac-f10e2d1c4f92 retained resources;
+after confirming old app/profile processes absent, only its two labelled synthetic PG
+containers/volumes were removed. They are disposable, not recoverable product data.
+Report/profile directories /tmp/mintvault-ci-env-fR3o51 and
+/tmp/mintvault-command-centre-layout-hM4gPy were retained; no unrelated cleanup.
+
+Final scoped lint0errors/0warnings; script syntax67 modules; unchanged11-script and
+345-test diagnostic ratchets. Architecture8459/zero violations: four additional test
+timers, exact ownership for the two existing scripts,35 superseded exact legacy records
+removed (no broad exception). Existing real-Chrome CSS control still overflows885px;
+candidate is320px document/256px card/minWidth0/wrap-anywhere. CI topology requires the
+enabled failure-blocking browser command after Build and before Node22; disabled,
+optional and reordered mutations fail. Governance-only postflight still fails closed
+on managed CLAUDE drift/npm egress/dirty tree/branch protected paths; Graphify stale.
+No --accept-protected, final postflight --run, hostile/release or deployment claim.
+
+SHA256 runner fde432a39d4a07831af278fe9743d8ed28bdc8cd2bbe7495cf7d98b5a74822b6;
+runtime d41494b7be311dab403c4e52f8402ac2d59297a907fdf4c48a3f6b2180cda657;
+browser d6a4f2188b6660adf31a81620505e9446fb606a1fae7d2b247d08ee04b2bf396;
+runner test7670eb478e133f4356f63b4e304f068dfccfd7d2f1031ad6250b77163d431378;
+runtime test a4a351f12dccee0ddaac1bcaf32c37282c3ee7c05ff5911ea5398db90d65eb2b;
+CI validator51a0ad3da67f78bf24ceb17352739003c78d1787c8e43b82030a7521ce18d504;
+CI test c4e3f10cdb2078f426da68b003b8e1ad3728817db22f987d5243b2e4ad935589.
+Sol actual run used browser f649dc36...78d4; independently reviewed final lint-only
+bridge moves unknown-close throw out of finally and before report/CSS output, preserving75.
+
+Limits: Admin-only local synthetic fixture, not full production schema or Partner
+browser proof. Fixture's Partner onboarding source explicitly reports unavailable;
+not counted as proven. Real MinIO is a separate H1c proof, not asserted by this target.
+Physical hardware/current-browser pilot and final candidate/hosted/security gates remain.
+
 Baseline: `80a20611ff5e8928fd6380961ca6bd420abe4727`; local WIP, not a release candidate.
 No push, deployment, shared migration, existing worktree deletion or live configuration change.
 

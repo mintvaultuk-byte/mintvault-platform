@@ -2337,41 +2337,6 @@
       "expiresWith": "the bounded-context repair that assigns explicit authority"
     },
     {
-      "key": "pricing-authority|scripts/command-centre-runtime-harness.ts|literal:$1#0",
-      "finding": "ARCH-AUTHORITY-001",
-      "expiresWith": "the bounded-context repair that assigns explicit authority"
-    },
-    {
-      "key": "pricing-authority|scripts/command-centre-runtime-harness.ts|literal:$1#1",
-      "finding": "ARCH-AUTHORITY-001",
-      "expiresWith": "the bounded-context repair that assigns explicit authority"
-    },
-    {
-      "key": "pricing-authority|scripts/command-centre-runtime-harness.ts|literal:$1#2",
-      "finding": "ARCH-AUTHORITY-001",
-      "expiresWith": "the bounded-context repair that assigns explicit authority"
-    },
-    {
-      "key": "pricing-authority|scripts/command-centre-runtime-harness.ts|literal:$2#0",
-      "finding": "ARCH-AUTHORITY-001",
-      "expiresWith": "the bounded-context repair that assigns explicit authority"
-    },
-    {
-      "key": "pricing-authority|scripts/command-centre-runtime-harness.ts|literal:$2#1",
-      "finding": "ARCH-AUTHORITY-001",
-      "expiresWith": "the bounded-context repair that assigns explicit authority"
-    },
-    {
-      "key": "pricing-authority|scripts/command-centre-runtime-harness.ts|literal:$3#0",
-      "finding": "ARCH-AUTHORITY-001",
-      "expiresWith": "the bounded-context repair that assigns explicit authority"
-    },
-    {
-      "key": "pricing-authority|scripts/command-centre-runtime-harness.ts|literal:$4#0",
-      "finding": "ARCH-AUTHORITY-001",
-      "expiresWith": "the bounded-context repair that assigns explicit authority"
-    },
-    {
       "key": "pricing-authority|scripts/db/migrate.ts|literal:$1#0",
       "finding": "ARCH-AUTHORITY-001",
       "expiresWith": "the bounded-context repair that assigns explicit authority"
@@ -4038,31 +4003,6 @@
     },
     {
       "key": "provider-adapter|scripts/backfill-cert-metadata.ts|module:@aws-sdk/client-s3#0",
-      "finding": "ARCH-AUTHORITY-001",
-      "expiresWith": "the bounded-context repair that assigns explicit authority"
-    },
-    {
-      "key": "provider-adapter|scripts/command-centre-runtime-harness.ts|fetch:http://127.0.0.1:#0",
-      "finding": "ARCH-AUTHORITY-001",
-      "expiresWith": "the bounded-context repair that assigns explicit authority"
-    },
-    {
-      "key": "provider-adapter|scripts/command-centre-runtime-harness.ts|fetch:http://127.0.0.1:#1",
-      "finding": "ARCH-AUTHORITY-001",
-      "expiresWith": "the bounded-context repair that assigns explicit authority"
-    },
-    {
-      "key": "provider-adapter|scripts/command-centre-runtime-harness.ts|fetch:http://127.0.0.1:#2",
-      "finding": "ARCH-AUTHORITY-001",
-      "expiresWith": "the bounded-context repair that assigns explicit authority"
-    },
-    {
-      "key": "provider-adapter|scripts/command-centre-runtime-harness.ts|fetch:http://127.0.0.1:#3",
-      "finding": "ARCH-AUTHORITY-001",
-      "expiresWith": "the bounded-context repair that assigns explicit authority"
-    },
-    {
-      "key": "provider-adapter|scripts/command-centre-runtime-harness.ts|fetch:http://127.0.0.1:#4",
       "finding": "ARCH-AUTHORITY-001",
       "expiresWith": "the bounded-context repair that assigns explicit authority"
     },
@@ -9763,96 +9703,6 @@
     },
     {
       "key": "table-access|scripts/cleanup-stuck-scan-certs.ts|write:public.certificates#0",
-      "finding": "ARCH-AUTHORITY-001",
-      "expiresWith": "the bounded-context repair that assigns explicit authority"
-    },
-    {
-      "key": "table-access|scripts/command-centre-runtime-harness.ts|read:public.pg_stat_activity#0",
-      "finding": "ARCH-AUTHORITY-001",
-      "expiresWith": "the bounded-context repair that assigns explicit authority"
-    },
-    {
-      "key": "table-access|scripts/command-centre-runtime-harness.ts|unclassified:` /* The fixture owns only the relations read by the rendered Command Centre and real admin login. It deliberately does not run Drizzle: the local PostgreSQL estate lacks pgvect...#0",
-      "finding": "ARCH-AUTHORITY-001",
-      "expiresWith": "the bounded-context repair that assigns explicit authority"
-    },
-    {
-      "key": "table-access|scripts/command-centre-runtime-harness.ts|unclassified:`CREATE DATABASE ${quoteIdentifier(database)}`#0",
-      "finding": "ARCH-AUTHORITY-001",
-      "expiresWith": "the bounded-context repair that assigns explicit authority"
-    },
-    {
-      "key": "table-access|scripts/command-centre-runtime-harness.ts|unclassified:`DROP DATABASE IF EXISTS ${quoteIdentifier(database)}`#0",
-      "finding": "ARCH-AUTHORITY-001",
-      "expiresWith": "the bounded-context repair that assigns explicit authority"
-    },
-    {
-      "key": "table-access|scripts/command-centre-runtime-harness.ts|write:public.cert_counter#0",
-      "finding": "ARCH-AUTHORITY-001",
-      "expiresWith": "the bounded-context repair that assigns explicit authority"
-    },
-    {
-      "key": "table-access|scripts/command-centre-runtime-harness.ts|write:public.certificates#0",
-      "finding": "ARCH-AUTHORITY-001",
-      "expiresWith": "the bounded-context repair that assigns explicit authority"
-    },
-    {
-      "key": "table-access|scripts/command-centre-runtime-harness.ts|write:public.command_centre_runtime_audit_marker#0",
-      "finding": "ARCH-AUTHORITY-001",
-      "expiresWith": "the bounded-context repair that assigns explicit authority"
-    },
-    {
-      "key": "table-access|scripts/command-centre-runtime-harness.ts|write:public.partner_connector_records#0",
-      "finding": "ARCH-AUTHORITY-001",
-      "expiresWith": "the bounded-context repair that assigns explicit authority"
-    },
-    {
-      "key": "table-access|scripts/command-centre-runtime-harness.ts|write:public.partner_feature_flags#0",
-      "finding": "ARCH-AUTHORITY-001",
-      "expiresWith": "the bounded-context repair that assigns explicit authority"
-    },
-    {
-      "key": "table-access|scripts/command-centre-runtime-harness.ts|write:public.partner_organisations#0",
-      "finding": "ARCH-AUTHORITY-001",
-      "expiresWith": "the bounded-context repair that assigns explicit authority"
-    },
-    {
-      "key": "table-access|scripts/command-centre-runtime-harness.ts|write:public.partner_security_events#0",
-      "finding": "ARCH-AUTHORITY-001",
-      "expiresWith": "the bounded-context repair that assigns explicit authority"
-    },
-    {
-      "key": "table-access|scripts/command-centre-runtime-harness.ts|write:public.partner_stations#0",
-      "finding": "ARCH-AUTHORITY-001",
-      "expiresWith": "the bounded-context repair that assigns explicit authority"
-    },
-    {
-      "key": "table-access|scripts/command-centre-runtime-harness.ts|write:public.partner_submissions#0",
-      "finding": "ARCH-AUTHORITY-001",
-      "expiresWith": "the bounded-context repair that assigns explicit authority"
-    },
-    {
-      "key": "table-access|scripts/command-centre-runtime-harness.ts|write:public.partner_users#0",
-      "finding": "ARCH-AUTHORITY-001",
-      "expiresWith": "the bounded-context repair that assigns explicit authority"
-    },
-    {
-      "key": "table-access|scripts/command-centre-runtime-harness.ts|write:public.print_batches#0",
-      "finding": "ARCH-AUTHORITY-001",
-      "expiresWith": "the bounded-context repair that assigns explicit authority"
-    },
-    {
-      "key": "table-access|scripts/command-centre-runtime-harness.ts|write:public.submissions#0",
-      "finding": "ARCH-AUTHORITY-001",
-      "expiresWith": "the bounded-context repair that assigns explicit authority"
-    },
-    {
-      "key": "table-access|scripts/command-centre-runtime-harness.ts|write:public.transfer_verifications#0",
-      "finding": "ARCH-AUTHORITY-001",
-      "expiresWith": "the bounded-context repair that assigns explicit authority"
-    },
-    {
-      "key": "table-access|scripts/command-centre-runtime-harness.ts|write:public.users#0",
       "finding": "ARCH-AUTHORITY-001",
       "expiresWith": "the bounded-context repair that assigns explicit authority"
     },
@@ -15883,31 +15733,6 @@
     },
     {
       "key": "table|shared/vq-schema.ts|public.vq_sets#0",
-      "finding": "ARCH-AUTHORITY-001",
-      "expiresWith": "the bounded-context repair that assigns explicit authority"
-    },
-    {
-      "key": "timer|scripts/command-centre-mobile-layout-check.mjs|setTimeout:() => { child.kill(\"SIGKILL\"); resolve(); }#0",
-      "finding": "ARCH-AUTHORITY-001",
-      "expiresWith": "the bounded-context repair that assigns explicit authority"
-    },
-    {
-      "key": "timer|scripts/command-centre-mobile-layout-check.mjs|setTimeout:() => reject(new Error(`Chrome did not expose CDP for ${label}`))#0",
-      "finding": "ARCH-AUTHORITY-001",
-      "expiresWith": "the bounded-context repair that assigns explicit authority"
-    },
-    {
-      "key": "timer|scripts/command-centre-mobile-layout-check.mjs|setTimeout:resolve#0",
-      "finding": "ARCH-AUTHORITY-001",
-      "expiresWith": "the bounded-context repair that assigns explicit authority"
-    },
-    {
-      "key": "timer|scripts/command-centre-runtime-harness.ts|setTimeout:() => resolve(false)#0",
-      "finding": "ARCH-AUTHORITY-001",
-      "expiresWith": "the bounded-context repair that assigns explicit authority"
-    },
-    {
-      "key": "timer|scripts/command-centre-runtime-harness.ts|setTimeout:resolve#0",
       "finding": "ARCH-AUTHORITY-001",
       "expiresWith": "the bounded-context repair that assigns explicit authority"
     },

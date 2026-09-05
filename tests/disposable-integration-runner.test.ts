@@ -14,6 +14,9 @@ import {
   validateR2ProofReport,
   MINIO_IMAGE,
   R2_PROOF_CHECKS,
+  ADMIN_BROWSER_PROOF_CHECKS,
+  validateAdminBrowserReport,
+  stopOwnedChild,
 } from "../scripts/ci/run-disposable-integration.mjs";
 import { objectProofEnvironment } from "../scripts/ci/run-r2-object-store-proof.mjs";
 
@@ -53,6 +56,105 @@ function fakeDriver({ failSecondStart = false, unowned = false } = {}) {
 }
 
 describe("disposable integration runner", () => {
+  it("awaits delayed close when kill returns false after process exit", async () => {
+    const child = new EventEmitter() as EventEmitter & { kill: (signal: string) => boolean };
+    child.kill = () => {
+      queueMicrotask(() => child.emit("close", 0));
+      return false;
+    };
+    expect(await stopOwnedChild(child, { graceMs: 20, killMs: 20 })).toBe(true);
+  });
+  it("confirms synchronous owned-child close without leaving a late kill timer", async () => {
+    const child = new EventEmitter() as EventEmitter & { kill: (signal: string) => boolean };
+    child.kill = () => {
+      child.emit("close", 0);
+      return true;
+    };
+    expect(await stopOwnedChild(child, { graceMs: 1, killMs: 1 })).toBe(true);
+    expect(child.listenerCount("close")).toBe(0);
+  });
+  it.each(["denied", "silent", "throws"])("retains resources when owned-child termination is %s", async (failure) => {
+    const child = new EventEmitter() as EventEmitter & { kill: (signal: string) => boolean };
+    const signals: string[] = [];
+    child.kill = (signal) => {
+      signals.push(signal);
+      if (failure === "throws") throw new Error("denied");
+      return failure !== "denied";
+    };
+    expect(await stopOwnedChild(child, { graceMs: 1, killMs: 1 })).toBe(false);
+    expect(signals).toEqual(failure === "silent" ? ["SIGTERM", "SIGKILL"] : ["SIGTERM"]);
+    expect(child.listenerCount("close")).toBe(0);
+  });
+  it("does not equate exit with close or release services before delayed close", async () => {
+    const child = new EventEmitter() as EventEmitter & { kill: (signal: string) => boolean };
+    child.kill = () => {
+      queueMicrotask(() => child.emit("exit", 0));
+      return true;
+    };
+    expect(await stopOwnedChild(child, { graceMs: 1, killMs: 1 })).toBe(false);
+  });
+  it("has one exclusive fixed Admin browser target, not arbitrary commands or inherited service selection", () => {
+    expect(parse(["--docker-context", "owned", "--admin-browser-proof"])).toEqual({
+      context: "owned",
+      prepare: false,
+      selection: [],
+      adminBrowserProof: true,
+    });
+    for (const args of [["--r2-proof"], ["--prepare"], ["--all"], ["tests/a.test.ts"], ["--admin-browser-proof"]])
+      expect(() => parse(["--docker-context", "owned", "--admin-browser-proof", ...args])).toThrow();
+  });
+  it("rejects missing, skipped, stale or foreign browser reports", () => {
+    const report = {
+      schemaVersion: 1,
+      runId: "owned-run",
+      url: "http://127.0.0.1:41003/",
+      browser: "Chrome/test",
+      passed: 7,
+      failed: 0,
+      skipped: 0,
+      checks: ADMIN_BROWSER_PROOF_CHECKS.map((name: string) => ({ name, status: "passed" })),
+    };
+    expect(validateAdminBrowserReport(report, "owned-run")).toBe(report);
+    for (const delta of [
+      { runId: "stale" },
+      { skipped: 1 },
+      { failed: 1 },
+      { passed: 0 },
+      { checks: [] },
+      { url: "https://remote.invalid/" },
+      { url: "http://127.0.0.1/" },
+      { browser: "" },
+      { checks: report.checks.slice(1) },
+    ])
+      expect(() => validateAdminBrowserReport({ ...report, ...delta }, "owned-run")).toThrow();
+  });
+  it.each([0, 1, 75])(
+    "Admin browser child status %i is not accepted without proof and unknown closure retains services",
+    async (code) => {
+      const driver = fakeDriver();
+      const fakeSpawn = (_command: string, args: string[], options: { env: Record<string, string> }) => {
+        expect(args.slice(0, 4)).toEqual([
+          "--import",
+          "tsx",
+          "scripts/command-centre-runtime-harness.ts",
+          "--browser-proof",
+        ]);
+        expect(options.env.MINTVAULT_COMMAND_CENTRE_RUNTIME_ADMIN_URL).toBe(
+          "postgresql://postgres:postgres@127.0.0.1:41002/postgres"
+        );
+        expect(options.env.MINTVAULT_COMMAND_CENTRE_RUNTIME_ADMIN_PIN).toMatch(/^\d{8}$/);
+        expect(options.env).not.toHaveProperty("STRIPE_SECRET_KEY");
+        const child = new EventEmitter();
+        queueMicrotask(() => child.emit("close", code));
+        return child;
+      };
+      const run = main(["--docker-context", "owned", "--admin-browser-proof"], { driver, spawnProcess: fakeSpawn });
+      if (code === 0) await expect(run).rejects.toThrow("ENOENT");
+      else if (code === 75) await expect(run).rejects.toThrow("retain owned services");
+      else expect(await run).toBe(1);
+      expect(driver.removed).toHaveLength(code === 75 ? 0 : 2);
+    }
+  );
   it("scrubs inherited credentials while preserving only process essentials", () => {
     const env = controlledEnvironment({
       PATH: "/bin",

@@ -1,5 +1,16 @@
 # Engineering proof ledger
 
+## 2026-09-05 H1h local Super Admin browser wiring
+
+[Exact runs, commands, hashes and recovery evidence](../.claude/controlled-code-lead/tasks/repository-architecture-recovery-20260904/hygiene-wave-proof.md):
+owned real Chrome/app/PG flow7/7 on root, independent Sol and clean exact-lock copy;
+clean four-suite101/101, zero skips. Actual cancellation closes app/browser and leaves
+zero owned containers without a success report. Independent shutdown findings repaired,
+delayed-close regression added; scoped lint0/0 and unchanged type ratchets pass.
+Existing CSS proof retained; CI command now required after Build/preNode22 with negative
+topology controls. Admin-only synthetic proof: Partner/browser/full-schema and hosted
+candidate gates remain open. No production/staging/shared database/provider access.
+
 ## 2026-09-05 WAA-IMAGE-001/002 local repair
 
 [Image packet, exact hashes and recovery limitations](../.claude/controlled-code-lead/tasks/white-ace-assurance-repository-20260904/task-ledger.md):

@@ -688,6 +688,9 @@ jobs:
       - name: Build
         run: npm run build
 
+      - name: Owned Super Admin browser proof
+        run: node scripts/ci/run-disposable-integration.mjs --docker-context default --admin-browser-proof
+
       - name: Audit (high severity)
         run: npm audit --audit-level=high
 

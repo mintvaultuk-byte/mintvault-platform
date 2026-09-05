@@ -43,6 +43,22 @@ const realCiInput = () => ({
 });
 
 describe("hosted CI proof topology", () => {
+  it("requires enabled failure-blocking Admin browser proof after Build on Node20", () => {
+    const command = "node scripts/ci/run-disposable-integration.mjs --docker-context default --admin-browser-proof";
+    for (const replacement of [
+      "run: echo omitted",
+      `if: false\n        run: ${command}`,
+      `continue-on-error: true\n        run: ${command}`,
+    ]) {
+      const input = realCiInput();
+      input.workflow = input.workflow.replace(`run: ${command}`, replacement);
+      expect(validateCiTopology(input)).toContain(`workflow does not execute ${command}`);
+    }
+    const input = realCiInput();
+    const block = `      - name: Owned Super Admin browser proof\n        run: ${command}\n`;
+    input.workflow = input.workflow.replace(block, "").replace("      - name: Build", `${block}\n      - name: Build`);
+    expect(validateCiTopology(input)).toContain("Admin browser proof must run after Build and before Node 22");
+  });
   it("requires real object-store proof to remain enabled and failure-blocking", () => {
     const command = "node scripts/ci/run-disposable-integration.mjs --docker-context default --r2-proof";
     for (const replacement of [

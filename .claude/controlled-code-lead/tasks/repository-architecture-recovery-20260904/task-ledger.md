@@ -2,6 +2,19 @@
 
 ## Current checkpoint and next bounded wave
 
+Current H1h wave: baseline/image checkpoint bc8bc3c6118f079d7843f3733bbf1a380b0a1f08
+pushed non-force to same-repository draft PR336. A push trust check initially refused;
+read-only origin/PR owner/ADMIN-permission verification established exact destination,
+then the identical command was approved. No workaround or changed destination.
+Primary CI33969351459 terminal FAILURE at Audit; governance33969351471 SUCCESS and
+33969347750 FAILURE. Keep the independent security veto; no audit suppression/reroute.
+H1h owned local Admin browser7/7 on root/independent/clean copy; clean controls101/101;
+real cancellation/recovery and exact hashes in hygiene-wave-proof.md. Scoped lint0/0,
+type ratchets unchanged. Checkpoint/push this finite test-wiring wave, then continue
+realistic Partner browser bootstrap and remaining approved product/CI graph packets.
+Continuous Goal ACTIVE, heartbeat PAUSED, release NOT READY; no owner acknowledgement
+needed for the next in-scope wave. Preserve unrelated docs/planning/vault-worlds.
+
 Image-core continuation supersedes the pre-edit paragraph below: owner-approved root
 repair now locally FIXED, root route185/185, clean exact-lock and independent235/235;
 four independent mutations fail and exact restoration passes. White Ace task-ledger

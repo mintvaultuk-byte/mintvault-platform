@@ -1,5 +1,49 @@
 # Hygiene repair manifest — authorized launch
 
+## H1h — finite local Super Admin browser proof (current packet)
+
+Baseline bc8bc3c6118f079d7843f3733bbf1a380b0a1f08. Image checkpoint pushed to the
+verified existing same-repository draft PR336; CI33969351459 and governance33969351471/
+33969347750 pending. This continues REPAIR-CI-TOPOLOGY, not a new product/auth review.
+Terra read-only substrate discovery confirms existing Command Centre synthetic fixture,
+actual server/index.ts startup and Chrome CDP layout script. Root is sole writer.
+
+Exact scope: scripts/ci/run-disposable-integration.mjs, scripts/command-centre-runtime-
+harness.ts, scripts/command-centre-mobile-layout-check.mjs, tests/disposable-integration-
+runner.test.ts, tests/command-centre-runtime-harness.test.ts; exact architecture metadata
+registration/generated coordinates if required. Reuse existing files; no new framework,
+dependency, runtime endpoint, token investigation or auth-policy change.
+
+Add a fixed exclusive --admin-browser-proof target. Own CI-pinned PG services and use
+only their generated PG17 maintenance URL; existing harness creates/drops its prefixed
+synthetic database. Scrub inherited child environment. Browser uses a new temporary
+profile, actual login/PIN forms, rendered Command Centre, actual dashboard response,
+320px viewport and real logout/refusal; reject incomplete/mismatched proof reports.
+Await browser and app termination before database/container cleanup. Failure/nonzero,
+missing report and signal cannot pass. No .env or inherited product/provider URLs.
+Keep the existing CSS regression mode and runtime signal tests intact.
+
+Proof: existing lifecycle tests plus negative target/report/environment controls,
+real local Chrome+app+owned PG run, independent changed-surface verification. This is
+Admin-only fixture proof; Partner realistic-RBAC/migration/bootstrap and browser flows
+are a subsequent distinct packet, not passed by this one. Owned MinIO eleven-check
+proof remains separately established; no object-backed or production-schema claim here.
+No hosted browser gate is closed before local proof and explicit CI wiring.
+
+Rollback: revert only this test-wiring diff. Stop only children/resources created by
+the exact run after identity verification; preserve unknown-termination resources and
+report location. No shared migration, external provider, deployment or user-data cleanup.
+
+H1h integration amendment: assign only the two existing Command Centre test scripts
+to engineering-test-platform in architecture/authority-policy.json and remove their
+now-obsolete exact legacy records; regenerate topology, never broad-exempt scripts.
+Wire the fixed command after the existing Node20 Build in .github/workflows/ci.yml,
+and require its enabled/non-optional post-build/pre-Scanner position in
+scripts/ci/verify-ci-topology.mjs with tests/ci-proof-topology.test.ts mutations.
+Independent Sol identified app close/HTTP/CDP/signal termination gaps; repair with
+bounded shared close confirmation, per-request cancellation and code75 retention
+through both parent layers. No skipped/hung proof may trigger successful cleanup.
+
 Baseline: `80a20611ff5e8928fd6380961ca6bd420abe4727`.
 Lead: Astra / codex-lead. Shared workspace: Lead is sole writer.
 All nine lane dispositions are retained in hygiene-reports.md; dispatch validation

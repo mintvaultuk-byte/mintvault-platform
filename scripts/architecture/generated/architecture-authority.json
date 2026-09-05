@@ -18,7 +18,7 @@
     "session-principal": 585,
     "table": 360,
     "table-access": 3184,
-    "timer": 93
+    "timer": 97
   },
   "records": [
     {
@@ -14466,70 +14466,56 @@
       "id": "literal:$1",
       "pricingKind": "currency-bearing-literal",
       "key": "pricing-authority|scripts/command-centre-runtime-harness.ts|literal:$1#0",
-      "source": "scripts/command-centre-runtime-harness.ts:195",
-      "disposition": "known-legacy",
-      "finding": "ARCH-AUTHORITY-001",
-      "legacyExpiry": "the bounded-context repair that assigns explicit authority"
+      "source": "scripts/command-centre-runtime-harness.ts:203",
+      "owner": "engineering-test-platform"
     },
     {
       "category": "pricing-authority",
       "id": "literal:$1",
       "pricingKind": "currency-bearing-literal",
       "key": "pricing-authority|scripts/command-centre-runtime-harness.ts|literal:$1#1",
-      "source": "scripts/command-centre-runtime-harness.ts:228",
-      "disposition": "known-legacy",
-      "finding": "ARCH-AUTHORITY-001",
-      "legacyExpiry": "the bounded-context repair that assigns explicit authority"
+      "source": "scripts/command-centre-runtime-harness.ts:236",
+      "owner": "engineering-test-platform"
     },
     {
       "category": "pricing-authority",
       "id": "literal:$1",
       "pricingKind": "currency-bearing-literal",
       "key": "pricing-authority|scripts/command-centre-runtime-harness.ts|literal:$1#2",
-      "source": "scripts/command-centre-runtime-harness.ts:258",
-      "disposition": "known-legacy",
-      "finding": "ARCH-AUTHORITY-001",
-      "legacyExpiry": "the bounded-context repair that assigns explicit authority"
+      "source": "scripts/command-centre-runtime-harness.ts:272",
+      "owner": "engineering-test-platform"
     },
     {
       "category": "pricing-authority",
       "id": "literal:$2",
       "pricingKind": "currency-bearing-literal",
       "key": "pricing-authority|scripts/command-centre-runtime-harness.ts|literal:$2#0",
-      "source": "scripts/command-centre-runtime-harness.ts:195",
-      "disposition": "known-legacy",
-      "finding": "ARCH-AUTHORITY-001",
-      "legacyExpiry": "the bounded-context repair that assigns explicit authority"
+      "source": "scripts/command-centre-runtime-harness.ts:203",
+      "owner": "engineering-test-platform"
     },
     {
       "category": "pricing-authority",
       "id": "literal:$2",
       "pricingKind": "currency-bearing-literal",
       "key": "pricing-authority|scripts/command-centre-runtime-harness.ts|literal:$2#1",
-      "source": "scripts/command-centre-runtime-harness.ts:228",
-      "disposition": "known-legacy",
-      "finding": "ARCH-AUTHORITY-001",
-      "legacyExpiry": "the bounded-context repair that assigns explicit authority"
+      "source": "scripts/command-centre-runtime-harness.ts:236",
+      "owner": "engineering-test-platform"
     },
     {
       "category": "pricing-authority",
       "id": "literal:$3",
       "pricingKind": "currency-bearing-literal",
       "key": "pricing-authority|scripts/command-centre-runtime-harness.ts|literal:$3#0",
-      "source": "scripts/command-centre-runtime-harness.ts:195",
-      "disposition": "known-legacy",
-      "finding": "ARCH-AUTHORITY-001",
-      "legacyExpiry": "the bounded-context repair that assigns explicit authority"
+      "source": "scripts/command-centre-runtime-harness.ts:203",
+      "owner": "engineering-test-platform"
     },
     {
       "category": "pricing-authority",
       "id": "literal:$4",
       "pricingKind": "currency-bearing-literal",
       "key": "pricing-authority|scripts/command-centre-runtime-harness.ts|literal:$4#0",
-      "source": "scripts/command-centre-runtime-harness.ts:195",
-      "disposition": "known-legacy",
-      "finding": "ARCH-AUTHORITY-001",
-      "legacyExpiry": "the bounded-context repair that assigns explicit authority"
+      "source": "scripts/command-centre-runtime-harness.ts:203",
+      "owner": "engineering-test-platform"
     },
     {
       "category": "pricing-authority",
@@ -26228,24 +26214,22 @@
       "effect": "http-fetch",
       "urlAuthority": "http://127.0.0.1:<dynamic:port>/health",
       "httpMethod": "GET",
-      "timeoutSignal": "not-declared",
+      "timeoutSignal": "runtimeRequestSignal(signal)",
       "idempotencyEvidence": "not-declared",
-      "optionsAuthority": "default-fetch-options",
+      "optionsAuthority": "<dynamic:{ signal: runtimeRequestSignal(signal) }>",
       "callsiteAuthorities": [
         {
-          "source": "scripts/command-centre-runtime-harness.ts:419",
+          "source": "scripts/command-centre-runtime-harness.ts:454",
           "urlAuthority": "http://127.0.0.1:<dynamic:port>/health",
           "httpMethod": "GET",
-          "timeoutSignal": "not-declared",
+          "timeoutSignal": "runtimeRequestSignal(signal)",
           "idempotencyEvidence": "not-declared",
-          "optionsAuthority": "default-fetch-options"
+          "optionsAuthority": "<dynamic:{ signal: runtimeRequestSignal(signal) }>"
         }
       ],
       "key": "provider-adapter|scripts/command-centre-runtime-harness.ts|fetch:http://127.0.0.1:#0",
-      "source": "scripts/command-centre-runtime-harness.ts:242",
-      "disposition": "known-legacy",
-      "finding": "ARCH-AUTHORITY-001",
-      "legacyExpiry": "the bounded-context repair that assigns explicit authority"
+      "source": "scripts/command-centre-runtime-harness.ts:256",
+      "owner": "engineering-test-platform"
     },
     {
       "category": "provider-adapter",
@@ -26253,24 +26237,22 @@
       "effect": "http-fetch",
       "urlAuthority": "http://127.0.0.1:<dynamic:port>/api/admin/command/dashboard",
       "httpMethod": "GET",
-      "timeoutSignal": "not-declared",
+      "timeoutSignal": "runtimeRequestSignal(signal)",
       "idempotencyEvidence": "not-declared",
-      "optionsAuthority": "default-fetch-options",
+      "optionsAuthority": "<dynamic:{ signal: runtimeRequestSignal(signal) }>",
       "callsiteAuthorities": [
         {
-          "source": "scripts/command-centre-runtime-harness.ts:420",
+          "source": "scripts/command-centre-runtime-harness.ts:455",
           "urlAuthority": "http://127.0.0.1:<dynamic:port>/api/admin/command/dashboard",
           "httpMethod": "GET",
-          "timeoutSignal": "not-declared",
+          "timeoutSignal": "runtimeRequestSignal(signal)",
           "idempotencyEvidence": "not-declared",
-          "optionsAuthority": "default-fetch-options"
+          "optionsAuthority": "<dynamic:{ signal: runtimeRequestSignal(signal) }>"
         }
       ],
       "key": "provider-adapter|scripts/command-centre-runtime-harness.ts|fetch:http://127.0.0.1:#1",
-      "source": "scripts/command-centre-runtime-harness.ts:282",
-      "disposition": "known-legacy",
-      "finding": "ARCH-AUTHORITY-001",
-      "legacyExpiry": "the bounded-context repair that assigns explicit authority"
+      "source": "scripts/command-centre-runtime-harness.ts:297",
+      "owner": "engineering-test-platform"
     },
     {
       "category": "provider-adapter",
@@ -26278,24 +26260,22 @@
       "effect": "http-fetch",
       "urlAuthority": "http://127.0.0.1:<dynamic:port>/api/admin/login",
       "httpMethod": "POST",
-      "timeoutSignal": "not-declared",
+      "timeoutSignal": "runtimeRequestSignal(signal)",
       "idempotencyEvidence": "not-declared",
-      "optionsAuthority": "<dynamic:{ method: \"POST\", headers: { \"content-type\": \"application/json\" }, body: JSON.stringify({ password }), }>",
+      "optionsAuthority": "<dynamic:{ signal: runtimeRequestSignal(signal), method: \"POST\", headers: { \"content-type\": \"application/json\" }, body: JSON.stringify({ password }), }>",
       "callsiteAuthorities": [
         {
-          "source": "scripts/command-centre-runtime-harness.ts:420",
+          "source": "scripts/command-centre-runtime-harness.ts:455",
           "urlAuthority": "http://127.0.0.1:<dynamic:port>/api/admin/login",
           "httpMethod": "POST",
-          "timeoutSignal": "not-declared",
+          "timeoutSignal": "runtimeRequestSignal(signal)",
           "idempotencyEvidence": "not-declared",
-          "optionsAuthority": "<dynamic:{ method: \"POST\", headers: { \"content-type\": \"application/json\" }, body: JSON.stringify({ password }), }>"
+          "optionsAuthority": "<dynamic:{ signal: runtimeRequestSignal(signal), method: \"POST\", headers: { \"content-type\": \"application/json\" }, body: JSON.stringify({ password }), }>"
         }
       ],
       "key": "provider-adapter|scripts/command-centre-runtime-harness.ts|fetch:http://127.0.0.1:#2",
-      "source": "scripts/command-centre-runtime-harness.ts:289",
-      "disposition": "known-legacy",
-      "finding": "ARCH-AUTHORITY-001",
-      "legacyExpiry": "the bounded-context repair that assigns explicit authority"
+      "source": "scripts/command-centre-runtime-harness.ts:304",
+      "owner": "engineering-test-platform"
     },
     {
       "category": "provider-adapter",
@@ -26303,24 +26283,22 @@
       "effect": "http-fetch",
       "urlAuthority": "http://127.0.0.1:<dynamic:port>/api/admin/pin",
       "httpMethod": "POST",
-      "timeoutSignal": "not-declared",
+      "timeoutSignal": "runtimeRequestSignal(signal)",
       "idempotencyEvidence": "not-declared",
-      "optionsAuthority": "<dynamic:{ method: \"POST\", headers: { \"content-type\": \"application/json\", cookie: pendingCookie }, body: JSON.stringify({ pin }), }>",
+      "optionsAuthority": "<dynamic:{ signal: runtimeRequestSignal(signal), method: \"POST\", headers: { \"content-type\": \"application/json\", cookie: pendingCookie }, body: JSON.stringify({ pin }), }>",
       "callsiteAuthorities": [
         {
-          "source": "scripts/command-centre-runtime-harness.ts:420",
+          "source": "scripts/command-centre-runtime-harness.ts:455",
           "urlAuthority": "http://127.0.0.1:<dynamic:port>/api/admin/pin",
           "httpMethod": "POST",
-          "timeoutSignal": "not-declared",
+          "timeoutSignal": "runtimeRequestSignal(signal)",
           "idempotencyEvidence": "not-declared",
-          "optionsAuthority": "<dynamic:{ method: \"POST\", headers: { \"content-type\": \"application/json\", cookie: pendingCookie }, body: JSON.stringify({ pin }), }>"
+          "optionsAuthority": "<dynamic:{ signal: runtimeRequestSignal(signal), method: \"POST\", headers: { \"content-type\": \"application/json\", cookie: pendingCookie }, body: JSON.stringify({ pin }), }>"
         }
       ],
       "key": "provider-adapter|scripts/command-centre-runtime-harness.ts|fetch:http://127.0.0.1:#3",
-      "source": "scripts/command-centre-runtime-harness.ts:296",
-      "disposition": "known-legacy",
-      "finding": "ARCH-AUTHORITY-001",
-      "legacyExpiry": "the bounded-context repair that assigns explicit authority"
+      "source": "scripts/command-centre-runtime-harness.ts:312",
+      "owner": "engineering-test-platform"
     },
     {
       "category": "provider-adapter",
@@ -26328,24 +26306,22 @@
       "effect": "http-fetch",
       "urlAuthority": "http://127.0.0.1:<dynamic:port>/api/admin/command/dashboard",
       "httpMethod": "GET",
-      "timeoutSignal": "not-declared",
+      "timeoutSignal": "runtimeRequestSignal(signal)",
       "idempotencyEvidence": "not-declared",
-      "optionsAuthority": "<dynamic:{ headers: { cookie: authenticatedCookie }, }>",
+      "optionsAuthority": "<dynamic:{ signal: runtimeRequestSignal(signal), headers: { cookie: authenticatedCookie }, }>",
       "callsiteAuthorities": [
         {
-          "source": "scripts/command-centre-runtime-harness.ts:420",
+          "source": "scripts/command-centre-runtime-harness.ts:455",
           "urlAuthority": "http://127.0.0.1:<dynamic:port>/api/admin/command/dashboard",
           "httpMethod": "GET",
-          "timeoutSignal": "not-declared",
+          "timeoutSignal": "runtimeRequestSignal(signal)",
           "idempotencyEvidence": "not-declared",
-          "optionsAuthority": "<dynamic:{ headers: { cookie: authenticatedCookie }, }>"
+          "optionsAuthority": "<dynamic:{ signal: runtimeRequestSignal(signal), headers: { cookie: authenticatedCookie }, }>"
         }
       ],
       "key": "provider-adapter|scripts/command-centre-runtime-harness.ts|fetch:http://127.0.0.1:#4",
-      "source": "scripts/command-centre-runtime-harness.ts:303",
-      "disposition": "known-legacy",
-      "finding": "ARCH-AUTHORITY-001",
-      "legacyExpiry": "the bounded-context repair that assigns explicit authority"
+      "source": "scripts/command-centre-runtime-harness.ts:320",
+      "owner": "engineering-test-platform"
     },
     {
       "category": "provider-adapter",
@@ -130661,10 +130637,8 @@
       "effect": "read",
       "access": "sql",
       "key": "table-access|scripts/command-centre-runtime-harness.ts|read:public.pg_stat_activity#0",
-      "source": "scripts/command-centre-runtime-harness.ts:257",
-      "disposition": "known-legacy",
-      "finding": "ARCH-AUTHORITY-001",
-      "legacyExpiry": "the bounded-context repair that assigns explicit authority"
+      "source": "scripts/command-centre-runtime-harness.ts:271",
+      "owner": "engineering-test-platform"
     },
     {
       "category": "table-access",
@@ -130672,10 +130646,8 @@
       "effect": "unclassified",
       "access": "sql-unclassified",
       "key": "table-access|scripts/command-centre-runtime-harness.ts|unclassified:` /* The fixture owns only the relations read by the rendered Command Centre and real admin login. It deliberately does not run Drizzle: the local PostgreSQL estate lacks pgvect...#0",
-      "source": "scripts/command-centre-runtime-harness.ts:126",
-      "disposition": "known-legacy",
-      "finding": "ARCH-AUTHORITY-001",
-      "legacyExpiry": "the bounded-context repair that assigns explicit authority"
+      "source": "scripts/command-centre-runtime-harness.ts:134",
+      "owner": "engineering-test-platform"
     },
     {
       "category": "table-access",
@@ -130683,10 +130655,8 @@
       "effect": "unclassified",
       "access": "sql-unclassified",
       "key": "table-access|scripts/command-centre-runtime-harness.ts|unclassified:`CREATE DATABASE ${quoteIdentifier(database)}`#0",
-      "source": "scripts/command-centre-runtime-harness.ts:375",
-      "disposition": "known-legacy",
-      "finding": "ARCH-AUTHORITY-001",
-      "legacyExpiry": "the bounded-context repair that assigns explicit authority"
+      "source": "scripts/command-centre-runtime-harness.ts:404",
+      "owner": "engineering-test-platform"
     },
     {
       "category": "table-access",
@@ -130694,10 +130664,8 @@
       "effect": "unclassified",
       "access": "sql-unclassified",
       "key": "table-access|scripts/command-centre-runtime-harness.ts|unclassified:`DROP DATABASE IF EXISTS ${quoteIdentifier(database)}`#0",
-      "source": "scripts/command-centre-runtime-harness.ts:261",
-      "disposition": "known-legacy",
-      "finding": "ARCH-AUTHORITY-001",
-      "legacyExpiry": "the bounded-context repair that assigns explicit authority"
+      "source": "scripts/command-centre-runtime-harness.ts:275",
+      "owner": "engineering-test-platform"
     },
     {
       "category": "table-access",
@@ -130705,10 +130673,8 @@
       "effect": "write",
       "access": "sql",
       "key": "table-access|scripts/command-centre-runtime-harness.ts|write:public.cert_counter#0",
-      "source": "scripts/command-centre-runtime-harness.ts:199",
-      "disposition": "known-legacy",
-      "finding": "ARCH-AUTHORITY-001",
-      "legacyExpiry": "the bounded-context repair that assigns explicit authority"
+      "source": "scripts/command-centre-runtime-harness.ts:207",
+      "owner": "engineering-test-platform"
     },
     {
       "category": "table-access",
@@ -130716,10 +130682,8 @@
       "effect": "write",
       "access": "sql",
       "key": "table-access|scripts/command-centre-runtime-harness.ts|write:public.certificates#0",
-      "source": "scripts/command-centre-runtime-harness.ts:206",
-      "disposition": "known-legacy",
-      "finding": "ARCH-AUTHORITY-001",
-      "legacyExpiry": "the bounded-context repair that assigns explicit authority"
+      "source": "scripts/command-centre-runtime-harness.ts:214",
+      "owner": "engineering-test-platform"
     },
     {
       "category": "table-access",
@@ -130727,10 +130691,8 @@
       "effect": "write",
       "access": "sql",
       "key": "table-access|scripts/command-centre-runtime-harness.ts|write:public.command_centre_runtime_audit_marker#0",
-      "source": "scripts/command-centre-runtime-harness.ts:218",
-      "disposition": "known-legacy",
-      "finding": "ARCH-AUTHORITY-001",
-      "legacyExpiry": "the bounded-context repair that assigns explicit authority"
+      "source": "scripts/command-centre-runtime-harness.ts:226",
+      "owner": "engineering-test-platform"
     },
     {
       "category": "table-access",
@@ -130738,10 +130700,8 @@
       "effect": "write",
       "access": "sql",
       "key": "table-access|scripts/command-centre-runtime-harness.ts|write:public.partner_connector_records#0",
-      "source": "scripts/command-centre-runtime-harness.ts:218",
-      "disposition": "known-legacy",
-      "finding": "ARCH-AUTHORITY-001",
-      "legacyExpiry": "the bounded-context repair that assigns explicit authority"
+      "source": "scripts/command-centre-runtime-harness.ts:226",
+      "owner": "engineering-test-platform"
     },
     {
       "category": "table-access",
@@ -130749,10 +130709,8 @@
       "effect": "write",
       "access": "sql",
       "key": "table-access|scripts/command-centre-runtime-harness.ts|write:public.partner_feature_flags#0",
-      "source": "scripts/command-centre-runtime-harness.ts:227",
-      "disposition": "known-legacy",
-      "finding": "ARCH-AUTHORITY-001",
-      "legacyExpiry": "the bounded-context repair that assigns explicit authority"
+      "source": "scripts/command-centre-runtime-harness.ts:235",
+      "owner": "engineering-test-platform"
     },
     {
       "category": "table-access",
@@ -130760,10 +130718,8 @@
       "effect": "write",
       "access": "sql",
       "key": "table-access|scripts/command-centre-runtime-harness.ts|write:public.partner_organisations#0",
-      "source": "scripts/command-centre-runtime-harness.ts:218",
-      "disposition": "known-legacy",
-      "finding": "ARCH-AUTHORITY-001",
-      "legacyExpiry": "the bounded-context repair that assigns explicit authority"
+      "source": "scripts/command-centre-runtime-harness.ts:226",
+      "owner": "engineering-test-platform"
     },
     {
       "category": "table-access",
@@ -130771,10 +130727,8 @@
       "effect": "write",
       "access": "sql",
       "key": "table-access|scripts/command-centre-runtime-harness.ts|write:public.partner_security_events#0",
-      "source": "scripts/command-centre-runtime-harness.ts:218",
-      "disposition": "known-legacy",
-      "finding": "ARCH-AUTHORITY-001",
-      "legacyExpiry": "the bounded-context repair that assigns explicit authority"
+      "source": "scripts/command-centre-runtime-harness.ts:226",
+      "owner": "engineering-test-platform"
     },
     {
       "category": "table-access",
@@ -130782,10 +130736,8 @@
       "effect": "write",
       "access": "sql",
       "key": "table-access|scripts/command-centre-runtime-harness.ts|write:public.partner_stations#0",
-      "source": "scripts/command-centre-runtime-harness.ts:218",
-      "disposition": "known-legacy",
-      "finding": "ARCH-AUTHORITY-001",
-      "legacyExpiry": "the bounded-context repair that assigns explicit authority"
+      "source": "scripts/command-centre-runtime-harness.ts:226",
+      "owner": "engineering-test-platform"
     },
     {
       "category": "table-access",
@@ -130793,10 +130745,8 @@
       "effect": "write",
       "access": "sql",
       "key": "table-access|scripts/command-centre-runtime-harness.ts|write:public.partner_submissions#0",
-      "source": "scripts/command-centre-runtime-harness.ts:218",
-      "disposition": "known-legacy",
-      "finding": "ARCH-AUTHORITY-001",
-      "legacyExpiry": "the bounded-context repair that assigns explicit authority"
+      "source": "scripts/command-centre-runtime-harness.ts:226",
+      "owner": "engineering-test-platform"
     },
     {
       "category": "table-access",
@@ -130804,10 +130754,8 @@
       "effect": "write",
       "access": "sql",
       "key": "table-access|scripts/command-centre-runtime-harness.ts|write:public.partner_users#0",
-      "source": "scripts/command-centre-runtime-harness.ts:218",
-      "disposition": "known-legacy",
-      "finding": "ARCH-AUTHORITY-001",
-      "legacyExpiry": "the bounded-context repair that assigns explicit authority"
+      "source": "scripts/command-centre-runtime-harness.ts:226",
+      "owner": "engineering-test-platform"
     },
     {
       "category": "table-access",
@@ -130815,10 +130763,8 @@
       "effect": "write",
       "access": "sql",
       "key": "table-access|scripts/command-centre-runtime-harness.ts|write:public.print_batches#0",
-      "source": "scripts/command-centre-runtime-harness.ts:211",
-      "disposition": "known-legacy",
-      "finding": "ARCH-AUTHORITY-001",
-      "legacyExpiry": "the bounded-context repair that assigns explicit authority"
+      "source": "scripts/command-centre-runtime-harness.ts:219",
+      "owner": "engineering-test-platform"
     },
     {
       "category": "table-access",
@@ -130826,10 +130772,8 @@
       "effect": "write",
       "access": "sql",
       "key": "table-access|scripts/command-centre-runtime-harness.ts|write:public.submissions#0",
-      "source": "scripts/command-centre-runtime-harness.ts:200",
-      "disposition": "known-legacy",
-      "finding": "ARCH-AUTHORITY-001",
-      "legacyExpiry": "the bounded-context repair that assigns explicit authority"
+      "source": "scripts/command-centre-runtime-harness.ts:208",
+      "owner": "engineering-test-platform"
     },
     {
       "category": "table-access",
@@ -130837,10 +130781,8 @@
       "effect": "write",
       "access": "sql",
       "key": "table-access|scripts/command-centre-runtime-harness.ts|write:public.transfer_verifications#0",
-      "source": "scripts/command-centre-runtime-harness.ts:214",
-      "disposition": "known-legacy",
-      "finding": "ARCH-AUTHORITY-001",
-      "legacyExpiry": "the bounded-context repair that assigns explicit authority"
+      "source": "scripts/command-centre-runtime-harness.ts:222",
+      "owner": "engineering-test-platform"
     },
     {
       "category": "table-access",
@@ -130848,10 +130790,8 @@
       "effect": "write",
       "access": "sql",
       "key": "table-access|scripts/command-centre-runtime-harness.ts|write:public.users#0",
-      "source": "scripts/command-centre-runtime-harness.ts:194",
-      "disposition": "known-legacy",
-      "finding": "ARCH-AUTHORITY-001",
-      "legacyExpiry": "the bounded-context repair that assigns explicit authority"
+      "source": "scripts/command-centre-runtime-harness.ts:202",
+      "owner": "engineering-test-platform"
     },
     {
       "category": "table-access",
@@ -161211,10 +161151,10 @@
       "category": "timer",
       "id": "setTimeout:() => { if (settled || !kill(\"SIGKILL\") || settled) return; timer = setTimeout(() => terminationUnknown(new Error(\"child did not close after SIGKILL\")), 5000); timer.unref(); }",
       "timerKind": "one-shot-unclassified",
-      "delay": "5000",
+      "delay": "graceMs",
       "lifecycle": "untracked",
       "key": "timer|scripts/ci/run-disposable-integration.mjs|setTimeout:() => { if (settled || !kill(\"SIGKILL\") || settled) return; timer = setTimeout(() => terminationUnknown(new Error(\"child did not close after SIGKILL\")), 5000); timer.unref(); }#0",
-      "source": "scripts/ci/run-disposable-integration.mjs:300",
+      "source": "scripts/ci/run-disposable-integration.mjs:382",
       "owner": "engineering-test-platform"
     },
     {
@@ -161224,7 +161164,27 @@
       "delay": "60_000",
       "lifecycle": "untracked",
       "key": "timer|scripts/ci/run-disposable-integration.mjs|setTimeout:() => { timedOut = true; controller.abort(); }#0",
-      "source": "scripts/ci/run-disposable-integration.mjs:398",
+      "source": "scripts/ci/run-disposable-integration.mjs:489",
+      "owner": "engineering-test-platform"
+    },
+    {
+      "category": "timer",
+      "id": "setTimeout:() => { timedOut = true; controller.abort(); }",
+      "timerKind": "watchdog",
+      "delay": "180_000",
+      "lifecycle": "untracked",
+      "key": "timer|scripts/ci/run-disposable-integration.mjs|setTimeout:() => { timedOut = true; controller.abort(); }#1",
+      "source": "scripts/ci/run-disposable-integration.mjs:517",
+      "owner": "engineering-test-platform"
+    },
+    {
+      "category": "timer",
+      "id": "setTimeout:() => finish(false)",
+      "timerKind": "one-shot-unclassified",
+      "delay": "wait",
+      "lifecycle": "untracked",
+      "key": "timer|scripts/ci/run-disposable-integration.mjs|setTimeout:() => finish(false)#0",
+      "source": "scripts/ci/run-disposable-integration.mjs:339",
       "owner": "engineering-test-platform"
     },
     {
@@ -161234,7 +161194,7 @@
       "delay": "20_000",
       "lifecycle": "untracked",
       "key": "timer|scripts/ci/run-disposable-integration.mjs|setTimeout:() => startup.abort(new Error(\"owned MinIO startup timed out\"))#0",
-      "source": "scripts/ci/run-disposable-integration.mjs:106",
+      "source": "scripts/ci/run-disposable-integration.mjs:147",
       "owner": "engineering-test-platform"
     },
     {
@@ -161244,20 +161204,38 @@
       "delay": "5000",
       "lifecycle": "untracked",
       "key": "timer|scripts/ci/run-disposable-integration.mjs|setTimeout:() => terminationUnknown(new Error(\"child did not close after SIGKILL\"))#0",
-      "source": "scripts/ci/run-disposable-integration.mjs:302",
+      "source": "scripts/ci/run-disposable-integration.mjs:384",
       "owner": "engineering-test-platform"
     },
     {
       "category": "timer",
-      "id": "setTimeout:() => { child.kill(\"SIGKILL\"); resolve(); }",
+      "id": "setTimeout:next",
       "timerKind": "one-shot-unclassified",
-      "delay": "2_000",
+      "delay": "wait",
       "lifecycle": "untracked",
-      "key": "timer|scripts/command-centre-mobile-layout-check.mjs|setTimeout:() => { child.kill(\"SIGKILL\"); resolve(); }#0",
-      "source": "scripts/command-centre-mobile-layout-check.mjs:133",
-      "disposition": "known-legacy",
-      "finding": "ARCH-AUTHORITY-001",
-      "legacyExpiry": "the bounded-context repair that assigns explicit authority"
+      "key": "timer|scripts/ci/run-disposable-integration.mjs|setTimeout:next#0",
+      "source": "scripts/ci/run-disposable-integration.mjs:345",
+      "owner": "engineering-test-platform"
+    },
+    {
+      "category": "timer",
+      "id": "setTimeout:() => { pending.delete(id); reject(new Error(`CDP ${method} timed out`)); }",
+      "timerKind": "one-shot-unclassified",
+      "delay": "15_000",
+      "lifecycle": "untracked",
+      "key": "timer|scripts/command-centre-mobile-layout-check.mjs|setTimeout:() => { pending.delete(id); reject(new Error(`CDP ${method} timed out`)); }#0",
+      "source": "scripts/command-centre-mobile-layout-check.mjs:273",
+      "owner": "engineering-test-platform"
+    },
+    {
+      "category": "timer",
+      "id": "setTimeout:() => { socket.terminate(); reject(new Error(\"CDP connection timed out\")); }",
+      "timerKind": "one-shot-unclassified",
+      "delay": "10_000",
+      "lifecycle": "untracked",
+      "key": "timer|scripts/command-centre-mobile-layout-check.mjs|setTimeout:() => { socket.terminate(); reject(new Error(\"CDP connection timed out\")); }#0",
+      "source": "scripts/command-centre-mobile-layout-check.mjs:245",
+      "owner": "engineering-test-platform"
     },
     {
       "category": "timer",
@@ -161266,10 +161244,18 @@
       "delay": "10_000",
       "lifecycle": "untracked",
       "key": "timer|scripts/command-centre-mobile-layout-check.mjs|setTimeout:() => reject(new Error(`Chrome did not expose CDP for ${label}`))#0",
-      "source": "scripts/command-centre-mobile-layout-check.mjs:74",
-      "disposition": "known-legacy",
-      "finding": "ARCH-AUTHORITY-001",
-      "legacyExpiry": "the bounded-context repair that assigns explicit authority"
+      "source": "scripts/command-centre-mobile-layout-check.mjs:222",
+      "owner": "engineering-test-platform"
+    },
+    {
+      "category": "timer",
+      "id": "setTimeout:resolve",
+      "timerKind": "one-shot-unclassified",
+      "delay": "100",
+      "lifecycle": "untracked",
+      "key": "timer|scripts/command-centre-mobile-layout-check.mjs|setTimeout:resolve#0",
+      "source": "scripts/command-centre-mobile-layout-check.mjs:85",
+      "owner": "engineering-test-platform"
     },
     {
       "category": "timer",
@@ -161277,23 +161263,9 @@
       "timerKind": "one-shot-unclassified",
       "delay": "20",
       "lifecycle": "untracked",
-      "key": "timer|scripts/command-centre-mobile-layout-check.mjs|setTimeout:resolve#0",
-      "source": "scripts/command-centre-mobile-layout-check.mjs:125",
-      "disposition": "known-legacy",
-      "finding": "ARCH-AUTHORITY-001",
-      "legacyExpiry": "the bounded-context repair that assigns explicit authority"
-    },
-    {
-      "category": "timer",
-      "id": "setTimeout:() => resolve(false)",
-      "timerKind": "one-shot-unclassified",
-      "delay": "10_000",
-      "lifecycle": "untracked",
-      "key": "timer|scripts/command-centre-runtime-harness.ts|setTimeout:() => resolve(false)#0",
-      "source": "scripts/command-centre-runtime-harness.ts:360",
-      "disposition": "known-legacy",
-      "finding": "ARCH-AUTHORITY-001",
-      "legacyExpiry": "the bounded-context repair that assigns explicit authority"
+      "key": "timer|scripts/command-centre-mobile-layout-check.mjs|setTimeout:resolve#1",
+      "source": "scripts/command-centre-mobile-layout-check.mjs:314",
+      "owner": "engineering-test-platform"
     },
     {
       "category": "timer",
@@ -161302,10 +161274,8 @@
       "delay": "250",
       "lifecycle": "untracked",
       "key": "timer|scripts/command-centre-runtime-harness.ts|setTimeout:resolve#0",
-      "source": "scripts/command-centre-runtime-harness.ts:247",
-      "disposition": "known-legacy",
-      "finding": "ARCH-AUTHORITY-001",
-      "legacyExpiry": "the bounded-context repair that assigns explicit authority"
+      "source": "scripts/command-centre-runtime-harness.ts:261",
+      "owner": "engineering-test-platform"
     },
     {
       "category": "timer",
