@@ -2,6 +2,7 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { act, createElement, type ComponentType, type ReactNode } from "react";
 import { createRoot, type Root } from "react-dom/client";
+import { renderToStaticMarkup } from "react-dom/server";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 
 // Decorative animation/layout and the external payment SDK are not price authority.
@@ -26,6 +27,12 @@ vi.mock("@stripe/react-stripe-js", () => ({
 import Home from "../client/src/pages/home";
 import Pricing from "../client/src/pages/pricing";
 import Submit from "../client/src/pages/submit";
+import HomeV2 from "../client/src/pages/home-v2-integrated";
+import HomeV3 from "../client/src/pages/home-v3";
+import HomeV4 from "../client/src/pages/home-v4";
+import PricingV2 from "../client/src/pages/pricing-v2";
+import PricingDemo from "../client/src/pages/pricing-demo";
+import PricingAnimated from "../client/src/components/ui/pricing-animated";
 import { TierPriceWithPromo } from "../client/src/components/v2/promo-display";
 
 const live = {
@@ -42,6 +49,29 @@ const live = {
   capacityPausedUntil: null,
   capacityMessage: null,
 };
+
+describe("price-free preview routes", () => {
+  for (const [label, component] of [
+    ["Home V2", HomeV2], ["Home V3", HomeV3], ["Home V4", HomeV4],
+    ["Pricing V2", PricingV2], ["Pricing demo", PricingDemo], ["Animated pricing", PricingAnimated],
+  ] as const) {
+    it(`${label} sends visitors to current pricing without a duplicate grading catalogue`, () => {
+      // Preview content has no live quote state. Render the real component tree
+      // without running its continuous decorative scroll/animation effects.
+      container = document.createElement("div");
+      container.innerHTML = renderToStaticMarkup(createElement(component));
+      const links = [...container.querySelectorAll<HTMLAnchorElement>('a[href="/pricing"]')];
+      expect(links.some((link) => /current grading prices/i.test(link.textContent ?? ""))).toBe(true);
+      const text = (container.textContent ?? "").replace(/\s+/g, " ");
+      expect(text).not.toMatch(/£\s*(?:19|25|45)(?![\d,.])|(?:40|45|21|15|5)[- ](?:working )?day|three tiers/i);
+      expect(text).not.toContain("Most chosen");
+      if (label.startsWith("Home") || label === "Pricing V2") {
+        expect(text).toContain("centering, corners, edges, surface");
+        expect(text).toContain("9.99");
+      }
+    });
+  }
+});
 let root: Root | undefined;
 let client: QueryClient;
 let container: HTMLDivElement;

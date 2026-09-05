@@ -8,7 +8,7 @@
     "migration": 169,
     "migration-lineage": 6,
     "object-writer": 89,
-    "pricing-authority": 1764,
+    "pricing-authority": 1740,
     "provider-adapter": 135,
     "role-authority": 733,
     "route-middleware": 61,
@@ -10123,36 +10123,11 @@
     },
     {
       "category": "pricing-authority",
-      "id": "value:price",
-      "pricingKind": "source-or-projection",
-      "expression": "19",
-      "key": "pricing-authority|client/src/components/ui/pricing-animated.tsx|value:price#0",
-      "source": "client/src/components/ui/pricing-animated.tsx:17",
-      "disposition": "known-legacy",
-      "finding": "ARCH-AUTHORITY-001",
-      "legacyExpiry": "the bounded-context repair that assigns explicit authority"
-    },
-    {
-      "category": "pricing-authority",
-      "id": "value:price",
-      "pricingKind": "source-or-projection",
-      "expression": "25",
-      "key": "pricing-authority|client/src/components/ui/pricing-animated.tsx|value:price#1",
-      "source": "client/src/components/ui/pricing-animated.tsx:33",
-      "disposition": "known-legacy",
-      "finding": "ARCH-AUTHORITY-001",
-      "legacyExpiry": "the bounded-context repair that assigns explicit authority"
-    },
-    {
-      "category": "pricing-authority",
-      "id": "value:price",
-      "pricingKind": "source-or-projection",
-      "expression": "45",
-      "key": "pricing-authority|client/src/components/ui/pricing-animated.tsx|value:price#2",
-      "source": "client/src/components/ui/pricing-animated.tsx:50",
-      "disposition": "known-legacy",
-      "finding": "ARCH-AUTHORITY-001",
-      "legacyExpiry": "the bounded-context repair that assigns explicit authority"
+      "id": "endpoint:/pricing",
+      "pricingKind": "transport",
+      "key": "pricing-authority|client/src/components/ui/pricing-animated.tsx|endpoint:/pricing#0",
+      "source": "client/src/components/ui/pricing-animated.tsx:76",
+      "owner": "commerce-platform"
     },
     {
       "category": "pricing-authority",
@@ -10160,43 +10135,8 @@
       "pricingKind": "source-or-projection",
       "expression": "useRef<HTMLDivElement>(null)",
       "key": "pricing-authority|client/src/components/ui/pricing-animated.tsx|value:pricingRef#0",
-      "source": "client/src/components/ui/pricing-animated.tsx:66",
-      "disposition": "known-legacy",
-      "finding": "ARCH-AUTHORITY-001",
-      "legacyExpiry": "the bounded-context repair that assigns explicit authority"
-    },
-    {
-      "category": "pricing-authority",
-      "id": "value:turnaround",
-      "pricingKind": "source-or-projection",
-      "expression": "\"40 working days\"",
-      "key": "pricing-authority|client/src/components/ui/pricing-animated.tsx|value:turnaround#0",
-      "source": "client/src/components/ui/pricing-animated.tsx:18",
-      "disposition": "known-legacy",
-      "finding": "ARCH-AUTHORITY-001",
-      "legacyExpiry": "the bounded-context repair that assigns explicit authority"
-    },
-    {
-      "category": "pricing-authority",
-      "id": "value:turnaround",
-      "pricingKind": "source-or-projection",
-      "expression": "\"15 working days\"",
-      "key": "pricing-authority|client/src/components/ui/pricing-animated.tsx|value:turnaround#1",
-      "source": "client/src/components/ui/pricing-animated.tsx:34",
-      "disposition": "known-legacy",
-      "finding": "ARCH-AUTHORITY-001",
-      "legacyExpiry": "the bounded-context repair that assigns explicit authority"
-    },
-    {
-      "category": "pricing-authority",
-      "id": "value:turnaround",
-      "pricingKind": "source-or-projection",
-      "expression": "\"5 working days\"",
-      "key": "pricing-authority|client/src/components/ui/pricing-animated.tsx|value:turnaround#2",
-      "source": "client/src/components/ui/pricing-animated.tsx:51",
-      "disposition": "known-legacy",
-      "finding": "ARCH-AUTHORITY-001",
-      "legacyExpiry": "the bounded-context repair that assigns explicit authority"
+      "source": "client/src/components/ui/pricing-animated.tsx:10",
+      "owner": "commerce-platform"
     },
     {
       "category": "pricing-authority",
@@ -11378,312 +11318,123 @@
     },
     {
       "category": "pricing-authority",
-      "id": "literal:£10,000",
-      "pricingKind": "currency-bearing-literal",
-      "key": "pricing-authority|client/src/pages/home-v2-integrated.tsx|literal:£10,000#0",
-      "source": "client/src/pages/home-v2-integrated.tsx:984",
-      "disposition": "known-legacy",
-      "finding": "ARCH-AUTHORITY-001",
-      "legacyExpiry": "the bounded-context repair that assigns explicit authority"
-    },
-    {
-      "category": "pricing-authority",
-      "id": "literal:£19",
-      "pricingKind": "currency-bearing-jsx",
-      "key": "pricing-authority|client/src/pages/home-v2-integrated.tsx|literal:£19#0",
+      "id": "endpoint:/pricing",
+      "pricingKind": "transport",
+      "key": "pricing-authority|client/src/pages/home-v2-integrated.tsx|endpoint:/pricing#0",
       "source": "client/src/pages/home-v2-integrated.tsx:535",
-      "disposition": "known-legacy",
-      "finding": "ARCH-AUTHORITY-001",
-      "legacyExpiry": "the bounded-context repair that assigns explicit authority"
+      "owner": "commerce-platform"
     },
     {
       "category": "pricing-authority",
-      "id": "literal:£19",
-      "pricingKind": "currency-bearing-jsx",
-      "key": "pricing-authority|client/src/pages/home-v2-integrated.tsx|literal:£19#1",
-      "source": "client/src/pages/home-v2-integrated.tsx:1620",
-      "disposition": "known-legacy",
-      "finding": "ARCH-AUTHORITY-001",
-      "legacyExpiry": "the bounded-context repair that assigns explicit authority"
+      "id": "endpoint:/pricing",
+      "pricingKind": "transport",
+      "key": "pricing-authority|client/src/pages/home-v2-integrated.tsx|endpoint:/pricing#1",
+      "source": "client/src/pages/home-v2-integrated.tsx:975",
+      "owner": "commerce-platform"
     },
     {
       "category": "pricing-authority",
-      "id": "literal:£2,500",
-      "pricingKind": "currency-bearing-literal",
-      "key": "pricing-authority|client/src/pages/home-v2-integrated.tsx|literal:£2,500#0",
-      "source": "client/src/pages/home-v2-integrated.tsx:983",
-      "disposition": "known-legacy",
-      "finding": "ARCH-AUTHORITY-001",
-      "legacyExpiry": "the bounded-context repair that assigns explicit authority"
-    },
-    {
-      "category": "pricing-authority",
-      "id": "literal:£500",
-      "pricingKind": "currency-bearing-literal",
-      "key": "pricing-authority|client/src/pages/home-v2-integrated.tsx|literal:£500#0",
-      "source": "client/src/pages/home-v2-integrated.tsx:982",
-      "disposition": "known-legacy",
-      "finding": "ARCH-AUTHORITY-001",
-      "legacyExpiry": "the bounded-context repair that assigns explicit authority"
+      "id": "endpoint:/pricing",
+      "pricingKind": "transport",
+      "key": "pricing-authority|client/src/pages/home-v2-integrated.tsx|endpoint:/pricing#2",
+      "source": "client/src/pages/home-v2-integrated.tsx:1517",
+      "owner": "commerce-platform"
     },
     {
       "category": "pricing-authority",
       "id": "literal:£9.99",
       "pricingKind": "currency-bearing-jsx",
       "key": "pricing-authority|client/src/pages/home-v2-integrated.tsx|literal:£9.99#0",
-      "source": "client/src/pages/home-v2-integrated.tsx:1298",
-      "disposition": "known-legacy",
-      "finding": "ARCH-AUTHORITY-001",
-      "legacyExpiry": "the bounded-context repair that assigns explicit authority"
+      "source": "client/src/pages/home-v2-integrated.tsx:1195",
+      "owner": "commerce-platform"
     },
     {
       "category": "pricing-authority",
       "id": "literal:£99",
       "pricingKind": "currency-bearing-jsx",
       "key": "pricing-authority|client/src/pages/home-v2-integrated.tsx|literal:£99#0",
-      "source": "client/src/pages/home-v2-integrated.tsx:1307",
-      "disposition": "known-legacy",
-      "finding": "ARCH-AUTHORITY-001",
-      "legacyExpiry": "the bounded-context repair that assigns explicit authority"
+      "source": "client/src/pages/home-v2-integrated.tsx:1204",
+      "owner": "commerce-platform"
     },
     {
       "category": "pricing-authority",
-      "id": "value:price",
-      "pricingKind": "source-or-projection",
-      "expression": "\"19\"",
-      "key": "pricing-authority|client/src/pages/home-v2-integrated.tsx|value:price#0",
-      "source": "client/src/pages/home-v2-integrated.tsx:982",
-      "disposition": "known-legacy",
-      "finding": "ARCH-AUTHORITY-001",
-      "legacyExpiry": "the bounded-context repair that assigns explicit authority"
-    },
-    {
-      "category": "pricing-authority",
-      "id": "value:price",
-      "pricingKind": "source-or-projection",
-      "expression": "\"25\"",
-      "key": "pricing-authority|client/src/pages/home-v2-integrated.tsx|value:price#1",
-      "source": "client/src/pages/home-v2-integrated.tsx:983",
-      "disposition": "known-legacy",
-      "finding": "ARCH-AUTHORITY-001",
-      "legacyExpiry": "the bounded-context repair that assigns explicit authority"
-    },
-    {
-      "category": "pricing-authority",
-      "id": "value:price",
-      "pricingKind": "source-or-projection",
-      "expression": "\"45\"",
-      "key": "pricing-authority|client/src/pages/home-v2-integrated.tsx|value:price#2",
-      "source": "client/src/pages/home-v2-integrated.tsx:984",
-      "disposition": "known-legacy",
-      "finding": "ARCH-AUTHORITY-001",
-      "legacyExpiry": "the bounded-context repair that assigns explicit authority"
-    },
-    {
-      "category": "pricing-authority",
-      "id": "literal:£10,000",
-      "pricingKind": "currency-bearing-literal",
-      "key": "pricing-authority|client/src/pages/home-v3.tsx|literal:£10,000#0",
-      "source": "client/src/pages/home-v3.tsx:804",
-      "disposition": "known-legacy",
-      "finding": "ARCH-AUTHORITY-001",
-      "legacyExpiry": "the bounded-context repair that assigns explicit authority"
-    },
-    {
-      "category": "pricing-authority",
-      "id": "literal:£19",
-      "pricingKind": "currency-bearing-jsx",
-      "key": "pricing-authority|client/src/pages/home-v3.tsx|literal:£19#0",
+      "id": "endpoint:/pricing",
+      "pricingKind": "transport",
+      "key": "pricing-authority|client/src/pages/home-v3.tsx|endpoint:/pricing#0",
       "source": "client/src/pages/home-v3.tsx:548",
-      "disposition": "known-legacy",
-      "finding": "ARCH-AUTHORITY-001",
-      "legacyExpiry": "the bounded-context repair that assigns explicit authority"
+      "owner": "commerce-platform"
     },
     {
       "category": "pricing-authority",
-      "id": "literal:£19",
-      "pricingKind": "currency-bearing-jsx",
-      "key": "pricing-authority|client/src/pages/home-v3.tsx|literal:£19#1",
-      "source": "client/src/pages/home-v3.tsx:1286",
-      "disposition": "known-legacy",
-      "finding": "ARCH-AUTHORITY-001",
-      "legacyExpiry": "the bounded-context repair that assigns explicit authority"
+      "id": "endpoint:/pricing",
+      "pricingKind": "transport",
+      "key": "pricing-authority|client/src/pages/home-v3.tsx|endpoint:/pricing#1",
+      "source": "client/src/pages/home-v3.tsx:798",
+      "owner": "commerce-platform"
     },
     {
       "category": "pricing-authority",
-      "id": "literal:£2,500",
-      "pricingKind": "currency-bearing-literal",
-      "key": "pricing-authority|client/src/pages/home-v3.tsx|literal:£2,500#0",
-      "source": "client/src/pages/home-v3.tsx:803",
-      "disposition": "known-legacy",
-      "finding": "ARCH-AUTHORITY-001",
-      "legacyExpiry": "the bounded-context repair that assigns explicit authority"
-    },
-    {
-      "category": "pricing-authority",
-      "id": "literal:£500",
-      "pricingKind": "currency-bearing-literal",
-      "key": "pricing-authority|client/src/pages/home-v3.tsx|literal:£500#0",
-      "source": "client/src/pages/home-v3.tsx:802",
-      "disposition": "known-legacy",
-      "finding": "ARCH-AUTHORITY-001",
-      "legacyExpiry": "the bounded-context repair that assigns explicit authority"
+      "id": "endpoint:/pricing",
+      "pricingKind": "transport",
+      "key": "pricing-authority|client/src/pages/home-v3.tsx|endpoint:/pricing#2",
+      "source": "client/src/pages/home-v3.tsx:1196",
+      "owner": "commerce-platform"
     },
     {
       "category": "pricing-authority",
       "id": "literal:£9.99",
       "pricingKind": "currency-bearing-jsx",
       "key": "pricing-authority|client/src/pages/home-v3.tsx|literal:£9.99#0",
-      "source": "client/src/pages/home-v3.tsx:1092",
-      "disposition": "known-legacy",
-      "finding": "ARCH-AUTHORITY-001",
-      "legacyExpiry": "the bounded-context repair that assigns explicit authority"
+      "source": "client/src/pages/home-v3.tsx:1002",
+      "owner": "commerce-platform"
     },
     {
       "category": "pricing-authority",
       "id": "literal:£99",
       "pricingKind": "currency-bearing-jsx",
       "key": "pricing-authority|client/src/pages/home-v3.tsx|literal:£99#0",
-      "source": "client/src/pages/home-v3.tsx:1100",
-      "disposition": "known-legacy",
-      "finding": "ARCH-AUTHORITY-001",
-      "legacyExpiry": "the bounded-context repair that assigns explicit authority"
+      "source": "client/src/pages/home-v3.tsx:1010",
+      "owner": "commerce-platform"
     },
     {
       "category": "pricing-authority",
-      "id": "value:price",
-      "pricingKind": "source-or-projection",
-      "expression": "\"19\"",
-      "key": "pricing-authority|client/src/pages/home-v3.tsx|value:price#0",
-      "source": "client/src/pages/home-v3.tsx:802",
-      "disposition": "known-legacy",
-      "finding": "ARCH-AUTHORITY-001",
-      "legacyExpiry": "the bounded-context repair that assigns explicit authority"
-    },
-    {
-      "category": "pricing-authority",
-      "id": "value:price",
-      "pricingKind": "source-or-projection",
-      "expression": "\"25\"",
-      "key": "pricing-authority|client/src/pages/home-v3.tsx|value:price#1",
-      "source": "client/src/pages/home-v3.tsx:803",
-      "disposition": "known-legacy",
-      "finding": "ARCH-AUTHORITY-001",
-      "legacyExpiry": "the bounded-context repair that assigns explicit authority"
-    },
-    {
-      "category": "pricing-authority",
-      "id": "value:price",
-      "pricingKind": "source-or-projection",
-      "expression": "\"45\"",
-      "key": "pricing-authority|client/src/pages/home-v3.tsx|value:price#2",
-      "source": "client/src/pages/home-v3.tsx:804",
-      "disposition": "known-legacy",
-      "finding": "ARCH-AUTHORITY-001",
-      "legacyExpiry": "the bounded-context repair that assigns explicit authority"
-    },
-    {
-      "category": "pricing-authority",
-      "id": "literal:£10,000",
-      "pricingKind": "currency-bearing-literal",
-      "key": "pricing-authority|client/src/pages/home-v4.tsx|literal:£10,000#0",
-      "source": "client/src/pages/home-v4.tsx:803",
-      "disposition": "known-legacy",
-      "finding": "ARCH-AUTHORITY-001",
-      "legacyExpiry": "the bounded-context repair that assigns explicit authority"
-    },
-    {
-      "category": "pricing-authority",
-      "id": "literal:£19",
-      "pricingKind": "currency-bearing-jsx",
-      "key": "pricing-authority|client/src/pages/home-v4.tsx|literal:£19#0",
+      "id": "endpoint:/pricing",
+      "pricingKind": "transport",
+      "key": "pricing-authority|client/src/pages/home-v4.tsx|endpoint:/pricing#0",
       "source": "client/src/pages/home-v4.tsx:547",
-      "disposition": "known-legacy",
-      "finding": "ARCH-AUTHORITY-001",
-      "legacyExpiry": "the bounded-context repair that assigns explicit authority"
+      "owner": "commerce-platform"
     },
     {
       "category": "pricing-authority",
-      "id": "literal:£19",
-      "pricingKind": "currency-bearing-jsx",
-      "key": "pricing-authority|client/src/pages/home-v4.tsx|literal:£19#1",
-      "source": "client/src/pages/home-v4.tsx:1285",
-      "disposition": "known-legacy",
-      "finding": "ARCH-AUTHORITY-001",
-      "legacyExpiry": "the bounded-context repair that assigns explicit authority"
+      "id": "endpoint:/pricing",
+      "pricingKind": "transport",
+      "key": "pricing-authority|client/src/pages/home-v4.tsx|endpoint:/pricing#1",
+      "source": "client/src/pages/home-v4.tsx:797",
+      "owner": "commerce-platform"
     },
     {
       "category": "pricing-authority",
-      "id": "literal:£2,500",
-      "pricingKind": "currency-bearing-literal",
-      "key": "pricing-authority|client/src/pages/home-v4.tsx|literal:£2,500#0",
-      "source": "client/src/pages/home-v4.tsx:802",
-      "disposition": "known-legacy",
-      "finding": "ARCH-AUTHORITY-001",
-      "legacyExpiry": "the bounded-context repair that assigns explicit authority"
-    },
-    {
-      "category": "pricing-authority",
-      "id": "literal:£500",
-      "pricingKind": "currency-bearing-literal",
-      "key": "pricing-authority|client/src/pages/home-v4.tsx|literal:£500#0",
-      "source": "client/src/pages/home-v4.tsx:801",
-      "disposition": "known-legacy",
-      "finding": "ARCH-AUTHORITY-001",
-      "legacyExpiry": "the bounded-context repair that assigns explicit authority"
+      "id": "endpoint:/pricing",
+      "pricingKind": "transport",
+      "key": "pricing-authority|client/src/pages/home-v4.tsx|endpoint:/pricing#2",
+      "source": "client/src/pages/home-v4.tsx:1195",
+      "owner": "commerce-platform"
     },
     {
       "category": "pricing-authority",
       "id": "literal:£9.99",
       "pricingKind": "currency-bearing-jsx",
       "key": "pricing-authority|client/src/pages/home-v4.tsx|literal:£9.99#0",
-      "source": "client/src/pages/home-v4.tsx:1091",
-      "disposition": "known-legacy",
-      "finding": "ARCH-AUTHORITY-001",
-      "legacyExpiry": "the bounded-context repair that assigns explicit authority"
+      "source": "client/src/pages/home-v4.tsx:1001",
+      "owner": "commerce-platform"
     },
     {
       "category": "pricing-authority",
       "id": "literal:£99",
       "pricingKind": "currency-bearing-jsx",
       "key": "pricing-authority|client/src/pages/home-v4.tsx|literal:£99#0",
-      "source": "client/src/pages/home-v4.tsx:1099",
-      "disposition": "known-legacy",
-      "finding": "ARCH-AUTHORITY-001",
-      "legacyExpiry": "the bounded-context repair that assigns explicit authority"
-    },
-    {
-      "category": "pricing-authority",
-      "id": "value:price",
-      "pricingKind": "source-or-projection",
-      "expression": "\"19\"",
-      "key": "pricing-authority|client/src/pages/home-v4.tsx|value:price#0",
-      "source": "client/src/pages/home-v4.tsx:801",
-      "disposition": "known-legacy",
-      "finding": "ARCH-AUTHORITY-001",
-      "legacyExpiry": "the bounded-context repair that assigns explicit authority"
-    },
-    {
-      "category": "pricing-authority",
-      "id": "value:price",
-      "pricingKind": "source-or-projection",
-      "expression": "\"25\"",
-      "key": "pricing-authority|client/src/pages/home-v4.tsx|value:price#1",
-      "source": "client/src/pages/home-v4.tsx:802",
-      "disposition": "known-legacy",
-      "finding": "ARCH-AUTHORITY-001",
-      "legacyExpiry": "the bounded-context repair that assigns explicit authority"
-    },
-    {
-      "category": "pricing-authority",
-      "id": "value:price",
-      "pricingKind": "source-or-projection",
-      "expression": "\"45\"",
-      "key": "pricing-authority|client/src/pages/home-v4.tsx|value:price#2",
-      "source": "client/src/pages/home-v4.tsx:803",
-      "disposition": "known-legacy",
-      "finding": "ARCH-AUTHORITY-001",
-      "legacyExpiry": "the bounded-context repair that assigns explicit authority"
+      "source": "client/src/pages/home-v4.tsx:1009",
+      "owner": "commerce-platform"
     },
     {
       "category": "pricing-authority",
@@ -11815,283 +11566,219 @@
     },
     {
       "category": "pricing-authority",
+      "id": "endpoint:/pricing",
+      "pricingKind": "transport",
+      "key": "pricing-authority|client/src/pages/pricing-v2.tsx|endpoint:/pricing#0",
+      "source": "client/src/pages/pricing-v2.tsx:495",
+      "owner": "commerce-platform"
+    },
+    {
+      "category": "pricing-authority",
+      "id": "endpoint:/pricing",
+      "pricingKind": "transport",
+      "key": "pricing-authority|client/src/pages/pricing-v2.tsx|endpoint:/pricing#1",
+      "source": "client/src/pages/pricing-v2.tsx:525",
+      "owner": "commerce-platform"
+    },
+    {
+      "category": "pricing-authority",
+      "id": "endpoint:/pricing",
+      "pricingKind": "transport",
+      "key": "pricing-authority|client/src/pages/pricing-v2.tsx|endpoint:/pricing#2",
+      "source": "client/src/pages/pricing-v2.tsx:856",
+      "owner": "commerce-platform"
+    },
+    {
+      "category": "pricing-authority",
+      "id": "endpoint:/pricing",
+      "pricingKind": "transport",
+      "key": "pricing-authority|client/src/pages/pricing-v2.tsx|endpoint:/pricing#3",
+      "source": "client/src/pages/pricing-v2.tsx:892",
+      "owner": "commerce-platform"
+    },
+    {
+      "category": "pricing-authority",
       "id": "literal:£1,500",
       "pricingKind": "currency-bearing-literal",
       "key": "pricing-authority|client/src/pages/pricing-v2.tsx|literal:£1,500#0",
-      "source": "client/src/pages/pricing-v2.tsx:715",
-      "disposition": "known-legacy",
-      "finding": "ARCH-AUTHORITY-001",
-      "legacyExpiry": "the bounded-context repair that assigns explicit authority"
+      "source": "client/src/pages/pricing-v2.tsx:551",
+      "owner": "commerce-platform"
     },
     {
       "category": "pricing-authority",
       "id": "literal:£1,500",
       "pricingKind": "currency-bearing-literal",
       "key": "pricing-authority|client/src/pages/pricing-v2.tsx|literal:£1,500#1",
-      "source": "client/src/pages/pricing-v2.tsx:825",
-      "disposition": "known-legacy",
-      "finding": "ARCH-AUTHORITY-001",
-      "legacyExpiry": "the bounded-context repair that assigns explicit authority"
+      "source": "client/src/pages/pricing-v2.tsx:661",
+      "owner": "commerce-platform"
     },
     {
       "category": "pricing-authority",
       "id": "literal:£10",
       "pricingKind": "currency-bearing-literal",
       "key": "pricing-authority|client/src/pages/pricing-v2.tsx|literal:£10#0",
-      "source": "client/src/pages/pricing-v2.tsx:717",
-      "disposition": "known-legacy",
-      "finding": "ARCH-AUTHORITY-001",
-      "legacyExpiry": "the bounded-context repair that assigns explicit authority"
+      "source": "client/src/pages/pricing-v2.tsx:553",
+      "owner": "commerce-platform"
     },
     {
       "category": "pricing-authority",
       "id": "literal:£100",
       "pricingKind": "currency-bearing-literal",
       "key": "pricing-authority|client/src/pages/pricing-v2.tsx|literal:£100#0",
-      "source": "client/src/pages/pricing-v2.tsx:1022",
-      "disposition": "known-legacy",
-      "finding": "ARCH-AUTHORITY-001",
-      "legacyExpiry": "the bounded-context repair that assigns explicit authority"
+      "source": "client/src/pages/pricing-v2.tsx:858",
+      "owner": "commerce-platform"
     },
     {
       "category": "pricing-authority",
       "id": "literal:£14.99",
       "pricingKind": "currency-bearing-literal",
       "key": "pricing-authority|client/src/pages/pricing-v2.tsx|literal:£14.99#0",
-      "source": "client/src/pages/pricing-v2.tsx:826",
-      "disposition": "known-legacy",
-      "finding": "ARCH-AUTHORITY-001",
-      "legacyExpiry": "the bounded-context repair that assigns explicit authority"
+      "source": "client/src/pages/pricing-v2.tsx:662",
+      "owner": "commerce-platform"
     },
     {
       "category": "pricing-authority",
       "id": "literal:£15",
       "pricingKind": "currency-bearing-literal",
       "key": "pricing-authority|client/src/pages/pricing-v2.tsx|literal:£15#0",
-      "source": "client/src/pages/pricing-v2.tsx:793",
-      "disposition": "known-legacy",
-      "finding": "ARCH-AUTHORITY-001",
-      "legacyExpiry": "the bounded-context repair that assigns explicit authority"
+      "source": "client/src/pages/pricing-v2.tsx:629",
+      "owner": "commerce-platform"
     },
     {
       "category": "pricing-authority",
       "id": "literal:£15",
       "pricingKind": "currency-bearing-literal",
       "key": "pricing-authority|client/src/pages/pricing-v2.tsx|literal:£15#1",
-      "source": "client/src/pages/pricing-v2.tsx:795",
-      "disposition": "known-legacy",
-      "finding": "ARCH-AUTHORITY-001",
-      "legacyExpiry": "the bounded-context repair that assigns explicit authority"
-    },
-    {
-      "category": "pricing-authority",
-      "id": "literal:£19",
-      "pricingKind": "currency-bearing-literal",
-      "key": "pricing-authority|client/src/pages/pricing-v2.tsx|literal:£19#0",
-      "source": "client/src/pages/pricing-v2.tsx:471",
-      "disposition": "known-legacy",
-      "finding": "ARCH-AUTHORITY-001",
-      "legacyExpiry": "the bounded-context repair that assigns explicit authority"
-    },
-    {
-      "category": "pricing-authority",
-      "id": "literal:£19",
-      "pricingKind": "currency-bearing-jsx",
-      "key": "pricing-authority|client/src/pages/pricing-v2.tsx|literal:£19#1",
-      "source": "client/src/pages/pricing-v2.tsx:497",
-      "disposition": "known-legacy",
-      "finding": "ARCH-AUTHORITY-001",
-      "legacyExpiry": "the bounded-context repair that assigns explicit authority"
-    },
-    {
-      "category": "pricing-authority",
-      "id": "literal:£19",
-      "pricingKind": "currency-bearing-jsx",
-      "key": "pricing-authority|client/src/pages/pricing-v2.tsx|literal:£19#2",
-      "source": "client/src/pages/pricing-v2.tsx:1056",
-      "disposition": "known-legacy",
-      "finding": "ARCH-AUTHORITY-001",
-      "legacyExpiry": "the bounded-context repair that assigns explicit authority"
+      "source": "client/src/pages/pricing-v2.tsx:631",
+      "owner": "commerce-platform"
     },
     {
       "category": "pricing-authority",
       "id": "literal:£2",
       "pricingKind": "currency-bearing-literal",
       "key": "pricing-authority|client/src/pages/pricing-v2.tsx|literal:£2#0",
-      "source": "client/src/pages/pricing-v2.tsx:715",
-      "disposition": "known-legacy",
-      "finding": "ARCH-AUTHORITY-001",
-      "legacyExpiry": "the bounded-context repair that assigns explicit authority"
+      "source": "client/src/pages/pricing-v2.tsx:551",
+      "owner": "commerce-platform"
     },
     {
       "category": "pricing-authority",
       "id": "literal:£24.99",
       "pricingKind": "currency-bearing-literal",
       "key": "pricing-authority|client/src/pages/pricing-v2.tsx|literal:£24.99#0",
-      "source": "client/src/pages/pricing-v2.tsx:827",
-      "disposition": "known-legacy",
-      "finding": "ARCH-AUTHORITY-001",
-      "legacyExpiry": "the bounded-context repair that assigns explicit authority"
-    },
-    {
-      "category": "pricing-authority",
-      "id": "literal:£25",
-      "pricingKind": "currency-bearing-literal",
-      "key": "pricing-authority|client/src/pages/pricing-v2.tsx|literal:£25#0",
-      "source": "client/src/pages/pricing-v2.tsx:470",
-      "disposition": "known-legacy",
-      "finding": "ARCH-AUTHORITY-001",
-      "legacyExpiry": "the bounded-context repair that assigns explicit authority"
+      "source": "client/src/pages/pricing-v2.tsx:663",
+      "owner": "commerce-platform"
     },
     {
       "category": "pricing-authority",
       "id": "literal:£3,000",
       "pricingKind": "currency-bearing-literal",
       "key": "pricing-authority|client/src/pages/pricing-v2.tsx|literal:£3,000#0",
-      "source": "client/src/pages/pricing-v2.tsx:716",
-      "disposition": "known-legacy",
-      "finding": "ARCH-AUTHORITY-001",
-      "legacyExpiry": "the bounded-context repair that assigns explicit authority"
+      "source": "client/src/pages/pricing-v2.tsx:552",
+      "owner": "commerce-platform"
     },
     {
       "category": "pricing-authority",
       "id": "literal:£3,000",
       "pricingKind": "currency-bearing-literal",
       "key": "pricing-authority|client/src/pages/pricing-v2.tsx|literal:£3,000#1",
-      "source": "client/src/pages/pricing-v2.tsx:826",
-      "disposition": "known-legacy",
-      "finding": "ARCH-AUTHORITY-001",
-      "legacyExpiry": "the bounded-context repair that assigns explicit authority"
+      "source": "client/src/pages/pricing-v2.tsx:662",
+      "owner": "commerce-platform"
     },
     {
       "category": "pricing-authority",
       "id": "literal:£35",
       "pricingKind": "currency-bearing-literal",
       "key": "pricing-authority|client/src/pages/pricing-v2.tsx|literal:£35#0",
-      "source": "client/src/pages/pricing-v2.tsx:794",
-      "disposition": "known-legacy",
-      "finding": "ARCH-AUTHORITY-001",
-      "legacyExpiry": "the bounded-context repair that assigns explicit authority"
+      "source": "client/src/pages/pricing-v2.tsx:630",
+      "owner": "commerce-platform"
     },
     {
       "category": "pricing-authority",
       "id": "literal:£4.99",
       "pricingKind": "currency-bearing-literal",
       "key": "pricing-authority|client/src/pages/pricing-v2.tsx|literal:£4.99#0",
-      "source": "client/src/pages/pricing-v2.tsx:824",
-      "disposition": "known-legacy",
-      "finding": "ARCH-AUTHORITY-001",
-      "legacyExpiry": "the bounded-context repair that assigns explicit authority"
-    },
-    {
-      "category": "pricing-authority",
-      "id": "literal:£45",
-      "pricingKind": "currency-bearing-literal",
-      "key": "pricing-authority|client/src/pages/pricing-v2.tsx|literal:£45#0",
-      "source": "client/src/pages/pricing-v2.tsx:472",
-      "disposition": "known-legacy",
-      "finding": "ARCH-AUTHORITY-001",
-      "legacyExpiry": "the bounded-context repair that assigns explicit authority"
+      "source": "client/src/pages/pricing-v2.tsx:660",
+      "owner": "commerce-platform"
     },
     {
       "category": "pricing-authority",
       "id": "literal:£5",
       "pricingKind": "currency-bearing-literal",
       "key": "pricing-authority|client/src/pages/pricing-v2.tsx|literal:£5#0",
-      "source": "client/src/pages/pricing-v2.tsx:716",
-      "disposition": "known-legacy",
-      "finding": "ARCH-AUTHORITY-001",
-      "legacyExpiry": "the bounded-context repair that assigns explicit authority"
+      "source": "client/src/pages/pricing-v2.tsx:552",
+      "owner": "commerce-platform"
     },
     {
       "category": "pricing-authority",
       "id": "literal:£500",
       "pricingKind": "currency-bearing-literal",
       "key": "pricing-authority|client/src/pages/pricing-v2.tsx|literal:£500#0",
-      "source": "client/src/pages/pricing-v2.tsx:714",
-      "disposition": "known-legacy",
-      "finding": "ARCH-AUTHORITY-001",
-      "legacyExpiry": "the bounded-context repair that assigns explicit authority"
+      "source": "client/src/pages/pricing-v2.tsx:550",
+      "owner": "commerce-platform"
     },
     {
       "category": "pricing-authority",
       "id": "literal:£500",
       "pricingKind": "currency-bearing-literal",
       "key": "pricing-authority|client/src/pages/pricing-v2.tsx|literal:£500#1",
-      "source": "client/src/pages/pricing-v2.tsx:824",
-      "disposition": "known-legacy",
-      "finding": "ARCH-AUTHORITY-001",
-      "legacyExpiry": "the bounded-context repair that assigns explicit authority"
+      "source": "client/src/pages/pricing-v2.tsx:660",
+      "owner": "commerce-platform"
     },
     {
       "category": "pricing-authority",
       "id": "literal:£7,500",
       "pricingKind": "currency-bearing-literal",
       "key": "pricing-authority|client/src/pages/pricing-v2.tsx|literal:£7,500#0",
-      "source": "client/src/pages/pricing-v2.tsx:717",
-      "disposition": "known-legacy",
-      "finding": "ARCH-AUTHORITY-001",
-      "legacyExpiry": "the bounded-context repair that assigns explicit authority"
+      "source": "client/src/pages/pricing-v2.tsx:553",
+      "owner": "commerce-platform"
     },
     {
       "category": "pricing-authority",
       "id": "literal:£7,500",
       "pricingKind": "currency-bearing-literal",
       "key": "pricing-authority|client/src/pages/pricing-v2.tsx|literal:£7,500#1",
-      "source": "client/src/pages/pricing-v2.tsx:827",
-      "disposition": "known-legacy",
-      "finding": "ARCH-AUTHORITY-001",
-      "legacyExpiry": "the bounded-context repair that assigns explicit authority"
+      "source": "client/src/pages/pricing-v2.tsx:663",
+      "owner": "commerce-platform"
     },
     {
       "category": "pricing-authority",
       "id": "literal:£7,500",
       "pricingKind": "currency-bearing-jsx",
       "key": "pricing-authority|client/src/pages/pricing-v2.tsx|literal:£7,500#2",
-      "source": "client/src/pages/pricing-v2.tsx:862",
-      "disposition": "known-legacy",
-      "finding": "ARCH-AUTHORITY-001",
-      "legacyExpiry": "the bounded-context repair that assigns explicit authority"
+      "source": "client/src/pages/pricing-v2.tsx:698",
+      "owner": "commerce-platform"
     },
     {
       "category": "pricing-authority",
       "id": "literal:£7.5",
       "pricingKind": "currency-bearing-literal",
       "key": "pricing-authority|client/src/pages/pricing-v2.tsx|literal:£7.5#0",
-      "source": "client/src/pages/pricing-v2.tsx:717",
-      "disposition": "known-legacy",
-      "finding": "ARCH-AUTHORITY-001",
-      "legacyExpiry": "the bounded-context repair that assigns explicit authority"
+      "source": "client/src/pages/pricing-v2.tsx:553",
+      "owner": "commerce-platform"
     },
     {
       "category": "pricing-authority",
       "id": "literal:£9.99",
       "pricingKind": "currency-bearing-literal",
       "key": "pricing-authority|client/src/pages/pricing-v2.tsx|literal:£9.99#0",
-      "source": "client/src/pages/pricing-v2.tsx:825",
-      "disposition": "known-legacy",
-      "finding": "ARCH-AUTHORITY-001",
-      "legacyExpiry": "the bounded-context repair that assigns explicit authority"
+      "source": "client/src/pages/pricing-v2.tsx:661",
+      "owner": "commerce-platform"
     },
     {
       "category": "pricing-authority",
       "id": "literal:£9.99",
       "pricingKind": "currency-bearing-jsx",
       "key": "pricing-authority|client/src/pages/pricing-v2.tsx|literal:£9.99#1",
-      "source": "client/src/pages/pricing-v2.tsx:919",
-      "disposition": "known-legacy",
-      "finding": "ARCH-AUTHORITY-001",
-      "legacyExpiry": "the bounded-context repair that assigns explicit authority"
+      "source": "client/src/pages/pricing-v2.tsx:755",
+      "owner": "commerce-platform"
     },
     {
       "category": "pricing-authority",
       "id": "literal:£99",
       "pricingKind": "currency-bearing-jsx",
       "key": "pricing-authority|client/src/pages/pricing-v2.tsx|literal:£99#0",
-      "source": "client/src/pages/pricing-v2.tsx:922",
-      "disposition": "known-legacy",
-      "finding": "ARCH-AUTHORITY-001",
-      "legacyExpiry": "the bounded-context repair that assigns explicit authority"
+      "source": "client/src/pages/pricing-v2.tsx:758",
+      "owner": "commerce-platform"
     },
     {
       "category": "pricing-authority",
@@ -12099,10 +11786,8 @@
       "pricingKind": "source-or-projection",
       "expression": "\"Included\"",
       "key": "pricing-authority|client/src/pages/pricing-v2.tsx|value:fee#0",
-      "source": "client/src/pages/pricing-v2.tsx:714",
-      "disposition": "known-legacy",
-      "finding": "ARCH-AUTHORITY-001",
-      "legacyExpiry": "the bounded-context repair that assigns explicit authority"
+      "source": "client/src/pages/pricing-v2.tsx:550",
+      "owner": "commerce-platform"
     },
     {
       "category": "pricing-authority",
@@ -12110,10 +11795,8 @@
       "pricingKind": "source-or-projection",
       "expression": "\"+£2\"",
       "key": "pricing-authority|client/src/pages/pricing-v2.tsx|value:fee#1",
-      "source": "client/src/pages/pricing-v2.tsx:715",
-      "disposition": "known-legacy",
-      "finding": "ARCH-AUTHORITY-001",
-      "legacyExpiry": "the bounded-context repair that assigns explicit authority"
+      "source": "client/src/pages/pricing-v2.tsx:551",
+      "owner": "commerce-platform"
     },
     {
       "category": "pricing-authority",
@@ -12121,10 +11804,8 @@
       "pricingKind": "source-or-projection",
       "expression": "\"+£5\"",
       "key": "pricing-authority|client/src/pages/pricing-v2.tsx|value:fee#2",
-      "source": "client/src/pages/pricing-v2.tsx:716",
-      "disposition": "known-legacy",
-      "finding": "ARCH-AUTHORITY-001",
-      "legacyExpiry": "the bounded-context repair that assigns explicit authority"
+      "source": "client/src/pages/pricing-v2.tsx:552",
+      "owner": "commerce-platform"
     },
     {
       "category": "pricing-authority",
@@ -12132,43 +11813,8 @@
       "pricingKind": "source-or-projection",
       "expression": "\"+£10\"",
       "key": "pricing-authority|client/src/pages/pricing-v2.tsx|value:fee#3",
-      "source": "client/src/pages/pricing-v2.tsx:717",
-      "disposition": "known-legacy",
-      "finding": "ARCH-AUTHORITY-001",
-      "legacyExpiry": "the bounded-context repair that assigns explicit authority"
-    },
-    {
-      "category": "pricing-authority",
-      "id": "value:priceDisplay",
-      "pricingKind": "source-or-projection",
-      "expression": "\"19\"",
-      "key": "pricing-authority|client/src/pages/pricing-v2.tsx|value:priceDisplay#0",
-      "source": "client/src/pages/pricing-v2.tsx:629",
-      "disposition": "known-legacy",
-      "finding": "ARCH-AUTHORITY-001",
-      "legacyExpiry": "the bounded-context repair that assigns explicit authority"
-    },
-    {
-      "category": "pricing-authority",
-      "id": "value:priceDisplay",
-      "pricingKind": "source-or-projection",
-      "expression": "\"25\"",
-      "key": "pricing-authority|client/src/pages/pricing-v2.tsx|value:priceDisplay#1",
-      "source": "client/src/pages/pricing-v2.tsx:644",
-      "disposition": "known-legacy",
-      "finding": "ARCH-AUTHORITY-001",
-      "legacyExpiry": "the bounded-context repair that assigns explicit authority"
-    },
-    {
-      "category": "pricing-authority",
-      "id": "value:priceDisplay",
-      "pricingKind": "source-or-projection",
-      "expression": "\"45\"",
-      "key": "pricing-authority|client/src/pages/pricing-v2.tsx|value:priceDisplay#2",
-      "source": "client/src/pages/pricing-v2.tsx:659",
-      "disposition": "known-legacy",
-      "finding": "ARCH-AUTHORITY-001",
-      "legacyExpiry": "the bounded-context repair that assigns explicit authority"
+      "source": "client/src/pages/pricing-v2.tsx:553",
+      "owner": "commerce-platform"
     },
     {
       "category": "pricing-authority",

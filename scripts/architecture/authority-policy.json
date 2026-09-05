@@ -75,6 +75,11 @@
   ],
   "scanRoots": ["server", "client/src", "shared", "scripts", "migrations", "migrations-vq", "config/components"],
   "ownerRules": [
+    { "prefix": "client/src/pages/home-v2-integrated.tsx", "owner": "commerce-platform" },
+    { "prefix": "client/src/pages/home-v3.tsx", "owner": "commerce-platform" },
+    { "prefix": "client/src/pages/home-v4.tsx", "owner": "commerce-platform" },
+    { "prefix": "client/src/pages/pricing-v2.tsx", "owner": "commerce-platform" },
+    { "prefix": "client/src/components/ui/pricing-animated.tsx", "owner": "commerce-platform" },
     { "prefix": "client/src/pages/home.tsx", "owner": "commerce-platform" },
     { "prefix": "client/src/pages/pricing.tsx", "owner": "commerce-platform" },
     { "prefix": "client/src/pages/submit.tsx", "owner": "commerce-platform" },

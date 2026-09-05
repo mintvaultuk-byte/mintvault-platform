@@ -2693,7 +2693,7 @@
       "proof_required": [
         "Real database admin mutation appears identically on public, submit, promotion, quote, charge, and receipt; static-value mutation fails"
       ],
-      "evidence": [{"ref": "pricing-recovery.md: P1 independent Sol8/8, held-out string/pence and capacity rejection; Terra architecture8520; P2/P3 entire consumer/payment/receipt proof still OPEN", "sha": "c228af1998fb770e12c93758d3737fc92c5a9009", "observer": "Sol h1c_lifecycle independent"}],
+      "evidence": [{"ref": "pricing-recovery.md: P1 independent Sol8/8; P2a19/19; P2b25/25 source-hash-bound preview proof and Terra architecture8474; remaining P2c/P3 payment/receipt and exact candidate proof OPEN", "sha": "c26bccfca544781e335e96f08361bc13d8cfb377", "observer": "Sol h1c_lifecycle independent; Terra h1b_runner topology"}],
       "invalidated_by": ["Candidate SHA", "tier data", "projection", "promotion", "quote", "payment", "receipt"],
       "vetoes_release": true
     },

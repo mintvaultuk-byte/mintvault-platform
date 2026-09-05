@@ -1,5 +1,56 @@
 # Commercial pricing recovery — existing ARCH-PRICING-001
 
+## P2b preview wave — current
+
+P2a is pushed at `c26bccfca544781e335e96f08361bc13d8cfb377` to existing draftPR336.
+Primary33992669662 and governance33992669765/33992667488 were running at dispatch.
+P1 primary33991782158 is terminal FAILURE; no hosted-green claim or security waiver.
+P2b preflight at c26 remains CRITICAL/HOSTILE. Only unrelated vault-worlds is dirty.
+
+Exact production manifest: `client/src/pages/{home-v2-integrated,home-v3,home-v4,
+pricing-v2}.tsx` and `client/src/components/ui/pricing-animated.tsx`. The existing
+`pricing-demo.tsx` wrapper is proof scope only. Replace duplicated static grading
+catalogues, hero/footer advertised rates and fixed tier-count FAQ with price-free
+links to canonical `/pricing`; preserve non-price inspection/Pristine content,
+visual shells, membership and separate ancillary sections. No second live-tier
+implementation or redesign. Extend `tests/pricing-consumers.test.ts` for these
+surfaces. Existing architecture policy/legacy/generated snapshot files may retire
+only exact obsolete keys and assign exact changed consumer ownership after
+independent verification. No new files, diagnostic baseline increase, schema,
+payment or provider mutation. Root sole writer; Terra discovery, Sol proof.
+
+Rollback these five preview files together to c26; no stored data changes. P2c
+ancillary/editorial copy and P3 API/payment/receipt parity remain mandatory.
+
+P2b proof receipt: root, independent Sol and clean exact-lock25/25, zero skips.
+Final SSR assertions first ran against clean parent preview bytes:6/6 failed on
+missing current-pricing links. The initial mounted-preview attempt timed out on
+continuous decoration and is fixture failure, not product-defect proof. SSR checks
+price/copy/navigation only; hydrated animation/layout not claimed. Sol held-out
+parent→candidate stale-signature counts7→0/7→0/7→0/10→0/6→0 across the five files.
+Terra's remaining tier-only-speed wording was repaired before final proof.
+TypeScript PASS, scoped lint0errors/9existing warnings; clean client/server build
+PASS. Normal architecture snapshot is8474 (pricing1764→1740, other counts unchanged),
+five exact commerce owner rules and72 retired legacy keys, no new baseline/adoption.
+Graphify refreshed locally15259nodes/34163edges; partial AST warnings retained,
+actual TypeScript/source/tests remain authoritative. Parent101/nested34 valid,
+NOT READY. P1 CI33991782158 terminal app/image FAILURE; c26primary33992669662
+still app-running/image-red, CodeQL/Gitleaks/dependency SUCCESS. Restricted security
+causes UNKNOWN and not investigated. This is a WIP checkpoint, not pricing closure.
+Test ratchet345 unchanged; independent Terra normal architecture8474 PASS.
+Postflight retains existing managed-CLAUDE/npm-egress/dirty/protected-review vetoes
+and graph REBUILD_REQUIRED warning, no acceptance override or completion claim.
+
+Final independent P2b SHA-256:
+```text
+c091bdb84c2207234af1aa63099d85ca795f5edfa4c4b21a99fe7df7e96bb7ce client/src/pages/home-v2-integrated.tsx
+f11cb5479cbdf82e3438d65a70b237654f94502b6934f292064bbc85fab03288 client/src/pages/home-v3.tsx
+16f81fc2f7e903a9cb582f3ffe7575ba0306402ac37f3b450f4f17d3c118dc3c client/src/pages/home-v4.tsx
+c69d1c8e2df98d6f95e93362cb2bb7f62f0f6c9042c24c6900dea27cb9468930 client/src/pages/pricing-v2.tsx
+7fbde28d8853b9525d6f6cd9d449b0bee09e684af1201a88e5955b7b1eca0ca1 client/src/components/ui/pricing-animated.tsx
+103334178412f8872e78ae54fe4293fb997c89545262648bdd88228aa809f9e3 tests/pricing-consumers.test.ts
+```
+
 ## P2a active consumer wave
 
 P1 checkpoint `3ab01241b9400869ac126584d728992b23f1ccee` pushed non-force to

@@ -2,6 +2,14 @@
 
 ## Current checkpoint and next bounded wave
 
+P2a checkpoint c26bccfca544781e335e96f08361bc13d8cfb377 is pushed to draftPR336.
+P2b preview de-duplication now independently25/25 locally proven and clean build
+PASS; see pricing-recovery.md exact manifest/hashes/limits. Root checkpoints then
+continues P2c service/editorial claims and P3 DB-to-payment/receipt. No broad audit,
+owner pause or deployment. Existing heartbeat remains ACTIVE idle-resume safeguard.
+P1 hosted CI is terminal app/image FAILURE; c26 app-running/image-red at latest
+read. Restricted security causes remain UNKNOWN; no dependent release waiver.
+
 P2a canonical pricing consumer wave is independently locally proven19/19, clean
 regressions69/69 plus expanded19/19 and final build. See pricing-recovery.md exact
 hashes, limits, rollback and CI handles. WIP checkpoint/push follows, then P2b

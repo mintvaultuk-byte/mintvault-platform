@@ -1,5 +1,15 @@
 # Engineering proof ledger
 
+## 2026-09-05 pricing P2b — duplicated preview catalogues retired
+
+[Pricing packet](../.claude/controlled-code-lead/tasks/repository-architecture-recovery-20260904/pricing-recovery.md)
+records exact c26 baseline, five-file manifest, parent6/6red, root/independentSol/
+clean25/25green, clean build and final source hashes. Six real preview component
+trees now link to canonical pricing without static grading catalogue/turnaround
+claims; non-price content and independent membership retained. SSR proof excludes
+decorative hydration. TypeScript and lint0errors pass;72 exact legacy keys retired,
+no adoption or gate relaxation. Full pricing/P3/hosted/security/hostile vetoes OPEN.
+
 ## 2026-09-05 pricing P2a — canonical consumers, not full pricing closure
 
 [Same pricing packet](../.claude/controlled-code-lead/tasks/repository-architecture-recovery-20260904/pricing-recovery.md):
