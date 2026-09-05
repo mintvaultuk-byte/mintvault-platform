@@ -75,6 +75,9 @@
   ],
   "scanRoots": ["server", "client/src", "shared", "scripts", "migrations", "migrations-vq", "config/components"],
   "ownerRules": [
+    { "prefix": "client/src/lib/pricing-projection.ts", "owner": "commerce-platform" },
+    { "prefix": "client/src/pages/admin-pricing.tsx", "owner": "commerce-platform" },
+    { "prefix": "shared/commerce.ts", "owner": "commerce-platform" },
     { "prefix": "shared/partner-team-roles.ts", "owner": "partner-platform" },
     { "prefix": "scripts/command-centre-mobile-layout-check.mjs", "owner": "engineering-test-platform" },
     { "prefix": "scripts/command-centre-runtime-harness.ts", "owner": "engineering-test-platform" },

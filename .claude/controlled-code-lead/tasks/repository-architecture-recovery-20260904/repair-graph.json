@@ -197,7 +197,7 @@
       "kind": "OWNER_GATE",
       "title": "Authorise one commercial pricing projection",
       "severity": "NONE",
-      "status": "OWNER_DECISION",
+      "status": "PROVEN",
       "agent_mode": "EXTERNAL_OWNER",
       "agent_id": "repository-owner",
       "workspace": "external",
@@ -207,7 +207,7 @@
       "proof_required": [
         "Explicit authority for grading price, turnaround, active-state, promotion, metadata, quote, charge, and receipt parity"
       ],
-      "evidence": [],
+      "evidence": [{"ref": "owner-approval-record.md; pricing-recovery.md: existing DB price authority, no price-value change, no deployment or shared migration", "sha": "c228af1998fb770e12c93758d3737fc92c5a9009", "observer": "repository-owner"}],
       "invalidated_by": ["Pricing/payment contract change", "owner decision change"],
       "vetoes_release": true
     },
@@ -1480,17 +1480,17 @@
       "kind": "OWNER_GATE",
       "title": "Approve pre-wave commercial pricing recovery packet",
       "severity": "NONE",
-      "status": "OPEN",
+      "status": "PROVEN",
       "agent_mode": "LEAD",
       "agent_id": "codex-lead",
       "workspace": "shared",
-      "depends_on": ["ARCH-PRICING-001"],
+      "depends_on": ["OWNER-PRICING"],
       "addresses": [],
       "write_scope": [],
       "proof_required": [
         "Old/new projection compatibility, cache rollback, in-flight quote/payment preservation, and immutable price receipt authority"
       ],
-      "evidence": [],
+      "evidence": [{"ref": "pricing-recovery.md: P1/P2/P3 exact manifest, compatible projection/cache rollback, immutable in-flight and paid history; recovery depends on owner authority, repair retains finding dependency", "sha": "c228af1998fb770e12c93758d3737fc92c5a9009", "observer": "codex-lead"}],
       "invalidated_by": ["Pricing contract", "cache", "quote", "payment", "recovery procedure"],
       "vetoes_release": true
     },
@@ -1958,7 +1958,7 @@
       "kind": "REPAIR",
       "title": "Establish one typed commercial pricing projection across every price-bearing surface",
       "severity": "HIGH",
-      "status": "OPEN",
+      "status": "IN_PROGRESS",
       "agent_mode": "LEAD",
       "agent_id": "codex-lead",
       "workspace": "shared",
@@ -1967,7 +1967,8 @@
         "OWNER-PRICING",
         "RECOVERY-PRICING",
         "REPAIR-CI-TOPOLOGY",
-        "REPAIR-ADMIN-CONTRACTS"
+        "REPAIR-ADMIN-CONTRACTS",
+        "REPAIR-PARTNER-CONTRACTS"
       ],
       "addresses": ["ARCH-PRICING-001"],
       "write_scope": [
@@ -1975,6 +1976,7 @@
         "shared/schema.ts",
         "server/routes/admin-config.ts",
         "server/routes/public.ts",
+        "server/storage.ts",
         "server/seo-config.ts",
         "client/src/lib/pricing-projection.ts",
         "client/src/data/guides.ts",
@@ -1994,7 +1996,13 @@
         "client/src/pages/vault-club.tsx",
         "client/src/pages/help/faq.tsx",
         "client/src/pages/seo",
-        "tests/pricing-authority.test.ts"
+        "tests/pricing-authority.test.ts",
+        "tests/pricing-postgres.test.ts",
+        "scripts/architecture/authority-policy.json",
+        "scripts/architecture/legacy-authority.json",
+        "scripts/architecture/generated/architecture-authority.json",
+        "scripts/ci/typecheck-baselines/architecture.json",
+        "scripts/ci/typecheck-baselines/tests.json"
       ],
       "proof_required": [
         "Price-bearing source inventory including journal guides, pricing animation, and certificate form; admin update propagates with promo present/absent, inactive tier, cache freshness, metadata/structured answers, public variants, submission, quote, charge, and named receipt parity"
@@ -2028,7 +2036,8 @@
         "RECOVERY-GRADING",
         "REPAIR-CI-TOPOLOGY",
         "REPAIR-ADMIN-PRINT",
-        "REPAIR-PARTNER-CONTRACTS"
+        "REPAIR-PARTNER-CONTRACTS",
+        "REPAIR-PRICING-AUTHORITY"
       ],
       "addresses": ["ARCH-LEGACY-AI-001"],
       "write_scope": [
@@ -2671,7 +2680,7 @@
       "kind": "PROOF",
       "title": "Independently prove commercial pricing parity through receipt",
       "severity": "HIGH",
-      "status": "OPEN",
+      "status": "IN_PROGRESS",
       "agent_mode": "READ_ONLY",
       "agent_id": "pricing-verifier",
       "workspace": "read_only",
@@ -2681,7 +2690,7 @@
       "proof_required": [
         "Real database admin mutation appears identically on public, submit, promotion, quote, charge, and receipt; static-value mutation fails"
       ],
-      "evidence": [],
+      "evidence": [{"ref": "pricing-recovery.md: P1 independent Sol8/8, held-out string/pence and capacity rejection; Terra architecture8520; P2/P3 entire consumer/payment/receipt proof still OPEN", "sha": "c228af1998fb770e12c93758d3737fc92c5a9009", "observer": "Sol h1c_lifecycle independent"}],
       "invalidated_by": ["Candidate SHA", "tier data", "projection", "promotion", "quote", "payment", "receipt"],
       "vetoes_release": true
     },

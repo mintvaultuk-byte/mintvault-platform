@@ -2039,18 +2039,27 @@ export class DatabaseStorage implements IStorage {
   }
 
   async updateServiceTier(id: number, data: Partial<ServiceTierRecord>): Promise<ServiceTierRecord | undefined> {
-    const setParts: ReturnType<typeof sql>[] = [sql`updated_at = NOW()`];
-    if (data.pricePerCard !== undefined) setParts.push(sql`price_per_card = ${data.pricePerCard}`);
-    if (data.turnaroundDays !== undefined) setParts.push(sql`turnaround_days = ${data.turnaroundDays}`);
-    if (data.maxValueGbp !== undefined) setParts.push(sql`max_value_gbp = ${data.maxValueGbp}`);
-    if (data.isActive !== undefined) setParts.push(sql`is_active = ${data.isActive}`);
-    if (data.features !== undefined) setParts.push(sql`features = ${data.features}`);
-
-    const result = await db.execute(
-      sql`UPDATE service_tiers SET ${sql.join(setParts, sql`, `)} WHERE id = ${id} RETURNING *`
-    );
-    if (result.rows.length === 0) return undefined;
-    return result.rows[0] as ServiceTierRecord;
+    const [updated] = await db
+      .update(serviceTiers)
+      .set({
+        updatedAt: new Date(),
+        pricePerCard: data.pricePerCard,
+        turnaroundDays: data.turnaroundDays,
+        // A changed numeric turnaround invalidates its old presentation label.
+        // Preserve intentional/custom labels on price-only and unchanged-day edits.
+        turnaroundLabel:
+          data.turnaroundDays === undefined
+            ? undefined
+            : sql`
+        CASE WHEN ${serviceTiers.turnaroundDays} IS DISTINCT FROM ${data.turnaroundDays}
+          THEN NULL ELSE ${serviceTiers.turnaroundLabel} END`,
+        maxValueGbp: data.maxValueGbp,
+        isActive: data.isActive,
+        features: data.features,
+      })
+      .where(eq(serviceTiers.id, id))
+      .returning();
+    return updated;
   }
 
   // ── Label overrides ──────────────────────────────────────────────────────────

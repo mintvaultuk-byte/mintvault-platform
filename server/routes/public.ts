@@ -3,6 +3,7 @@ import type { Express } from "express";
 import rateLimit from "express-rate-limit";
 import { z } from "zod";
 import { BUILD_STAMP, serviceTierToPricingTier } from "@shared/schema";
+import { submissionTypes } from "@shared/commerce";
 import { getActivePromotion } from "../services/promotionService";
 import { storage } from "../storage";
 import { getStripePublishableKey } from "../stripeClient";
@@ -479,10 +480,14 @@ export function registerPublicRoutes(app: Express): void {
 
   // ── Service tiers ──────────────────────────────────────────────────────────
   app.get("/api/service-tiers", async (req, res) => {
+    res.set("Cache-Control", "no-store");
     try {
-      const serviceType = req.query.serviceType as string | undefined;
+      const serviceType = req.query.serviceType ?? "grading";
+      if (typeof serviceType !== "string" || !submissionTypes.some((service) => service.id === serviceType)) {
+        return res.status(400).json({ error: "Invalid service type" });
+      }
       const tiers = await storage.getServiceTiers(serviceType);
-      const pricingData = tiers.map(serviceTierToPricingTier);
+      const pricingData = tiers.filter((tier) => tier.isActive === true).map(serviceTierToPricingTier);
 
       // Enrich with capacity status
       const capacityRows = await db.execute(
@@ -490,8 +495,8 @@ export function registerPublicRoutes(app: Express): void {
       );
       const capacityMap = new Map((capacityRows.rows as any[]).map((r) => [r.tier_id, r]));
 
-      const enriched = pricingData.map((tier: any) => {
-        const cap = capacityMap.get(tier.tierId) || capacityMap.get(tier.id);
+      const enriched = pricingData.map((tier) => {
+        const cap = capacityMap.get(tier.id);
         return {
           ...tier,
           capacityStatus: cap?.status || "open",
@@ -516,6 +521,7 @@ export function registerPublicRoutes(app: Express): void {
   // still authoritative if rounding ever diverges. A missing/broken promo simply
   // returns { promo: null } — it never errors the page.
   app.get("/api/promotions/active", async (_req, res) => {
+    res.set("Cache-Control", "no-store");
     try {
       const promo = await getActivePromotion();
       if (!promo || promo.active !== true) {

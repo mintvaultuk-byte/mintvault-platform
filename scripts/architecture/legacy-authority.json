@@ -497,76 +497,6 @@
       "expiresWith": "the bounded-context repair that assigns explicit authority"
     },
     {
-      "key": "pricing-authority|client/src/pages/admin-pricing.tsx|endpoint:/api/admin/service-tiers#0",
-      "finding": "ARCH-AUTHORITY-001",
-      "expiresWith": "the bounded-context repair that assigns explicit authority"
-    },
-    {
-      "key": "pricing-authority|client/src/pages/admin-pricing.tsx|endpoint:/api/admin/service-tiers#1",
-      "finding": "ARCH-AUTHORITY-001",
-      "expiresWith": "the bounded-context repair that assigns explicit authority"
-    },
-    {
-      "key": "pricing-authority|client/src/pages/admin-pricing.tsx|endpoint:/api/service-tiers#0",
-      "finding": "ARCH-AUTHORITY-001",
-      "expiresWith": "the bounded-context repair that assigns explicit authority"
-    },
-    {
-      "key": "pricing-authority|client/src/pages/admin-pricing.tsx|projection:£:(parseInt(editForm.pricePerCard, 10) / 100 || 0).toFixed(2)#0",
-      "finding": "ARCH-AUTHORITY-001",
-      "expiresWith": "the bounded-context repair that assigns explicit authority"
-    },
-    {
-      "key": "pricing-authority|client/src/pages/admin-pricing.tsx|projection:£:(tier.price_per_card / 100).toFixed(tier.price_per_card % 100 === 0 ? 0 : 2)#0",
-      "finding": "ARCH-AUTHORITY-001",
-      "expiresWith": "the bounded-context repair that assigns explicit authority"
-    },
-    {
-      "key": "pricing-authority|client/src/pages/admin-pricing.tsx|projection:£:tier.max_value_gbp.toLocaleString()#0",
-      "finding": "ARCH-AUTHORITY-001",
-      "expiresWith": "the bounded-context repair that assigns explicit authority"
-    },
-    {
-      "key": "pricing-authority|client/src/pages/admin-pricing.tsx|value:pricePerCard#0",
-      "finding": "ARCH-AUTHORITY-001",
-      "expiresWith": "the bounded-context repair that assigns explicit authority"
-    },
-    {
-      "key": "pricing-authority|client/src/pages/admin-pricing.tsx|value:pricePerCard#1",
-      "finding": "ARCH-AUTHORITY-001",
-      "expiresWith": "the bounded-context repair that assigns explicit authority"
-    },
-    {
-      "key": "pricing-authority|client/src/pages/admin-pricing.tsx|value:pricePerCard#2",
-      "finding": "ARCH-AUTHORITY-001",
-      "expiresWith": "the bounded-context repair that assigns explicit authority"
-    },
-    {
-      "key": "pricing-authority|client/src/pages/admin-pricing.tsx|value:pricePerCard#3",
-      "finding": "ARCH-AUTHORITY-001",
-      "expiresWith": "the bounded-context repair that assigns explicit authority"
-    },
-    {
-      "key": "pricing-authority|client/src/pages/admin-pricing.tsx|value:turnaroundDays#0",
-      "finding": "ARCH-AUTHORITY-001",
-      "expiresWith": "the bounded-context repair that assigns explicit authority"
-    },
-    {
-      "key": "pricing-authority|client/src/pages/admin-pricing.tsx|value:turnaroundDays#1",
-      "finding": "ARCH-AUTHORITY-001",
-      "expiresWith": "the bounded-context repair that assigns explicit authority"
-    },
-    {
-      "key": "pricing-authority|client/src/pages/admin-pricing.tsx|value:turnaroundDays#2",
-      "finding": "ARCH-AUTHORITY-001",
-      "expiresWith": "the bounded-context repair that assigns explicit authority"
-    },
-    {
-      "key": "pricing-authority|client/src/pages/admin-pricing.tsx|value:turnaroundDays#3",
-      "finding": "ARCH-AUTHORITY-001",
-      "expiresWith": "the bounded-context repair that assigns explicit authority"
-    },
-    {
       "key": "pricing-authority|client/src/pages/admin-submissions.tsx|import:pricingTiers#0",
       "finding": "ARCH-AUTHORITY-001",
       "expiresWith": "the bounded-context repair that assigns explicit authority"
@@ -3652,151 +3582,6 @@
       "expiresWith": "the bounded-context repair that assigns explicit authority"
     },
     {
-      "key": "pricing-authority|shared/commerce.ts|literal:£1,500#0",
-      "finding": "ARCH-AUTHORITY-001",
-      "expiresWith": "the bounded-context repair that assigns explicit authority"
-    },
-    {
-      "key": "pricing-authority|shared/commerce.ts|literal:£10#0",
-      "finding": "ARCH-AUTHORITY-001",
-      "expiresWith": "the bounded-context repair that assigns explicit authority"
-    },
-    {
-      "key": "pricing-authority|shared/commerce.ts|literal:£19#0",
-      "finding": "ARCH-AUTHORITY-001",
-      "expiresWith": "the bounded-context repair that assigns explicit authority"
-    },
-    {
-      "key": "pricing-authority|shared/commerce.ts|literal:£2#0",
-      "finding": "ARCH-AUTHORITY-001",
-      "expiresWith": "the bounded-context repair that assigns explicit authority"
-    },
-    {
-      "key": "pricing-authority|shared/commerce.ts|literal:£25#0",
-      "finding": "ARCH-AUTHORITY-001",
-      "expiresWith": "the bounded-context repair that assigns explicit authority"
-    },
-    {
-      "key": "pricing-authority|shared/commerce.ts|literal:£3,000#0",
-      "finding": "ARCH-AUTHORITY-001",
-      "expiresWith": "the bounded-context repair that assigns explicit authority"
-    },
-    {
-      "key": "pricing-authority|shared/commerce.ts|literal:£45#0",
-      "finding": "ARCH-AUTHORITY-001",
-      "expiresWith": "the bounded-context repair that assigns explicit authority"
-    },
-    {
-      "key": "pricing-authority|shared/commerce.ts|literal:£5#0",
-      "finding": "ARCH-AUTHORITY-001",
-      "expiresWith": "the bounded-context repair that assigns explicit authority"
-    },
-    {
-      "key": "pricing-authority|shared/commerce.ts|literal:£500#0",
-      "finding": "ARCH-AUTHORITY-001",
-      "expiresWith": "the bounded-context repair that assigns explicit authority"
-    },
-    {
-      "key": "pricing-authority|shared/commerce.ts|literal:£7,500#0",
-      "finding": "ARCH-AUTHORITY-001",
-      "expiresWith": "the bounded-context repair that assigns explicit authority"
-    },
-    {
-      "key": "pricing-authority|shared/commerce.ts|value:bulkDiscountTiers#0",
-      "finding": "ARCH-AUTHORITY-001",
-      "expiresWith": "the bounded-context repair that assigns explicit authority"
-    },
-    {
-      "key": "pricing-authority|shared/commerce.ts|value:discountAmount#0",
-      "finding": "ARCH-AUTHORITY-001",
-      "expiresWith": "the bounded-context repair that assigns explicit authority"
-    },
-    {
-      "key": "pricing-authority|shared/commerce.ts|value:discountedSubtotal#0",
-      "finding": "ARCH-AUTHORITY-001",
-      "expiresWith": "the bounded-context repair that assigns explicit authority"
-    },
-    {
-      "key": "pricing-authority|shared/commerce.ts|value:discountPercent#0",
-      "finding": "ARCH-AUTHORITY-001",
-      "expiresWith": "the bounded-context repair that assigns explicit authority"
-    },
-    {
-      "key": "pricing-authority|shared/commerce.ts|value:price#0",
-      "finding": "ARCH-AUTHORITY-001",
-      "expiresWith": "the bounded-context repair that assigns explicit authority"
-    },
-    {
-      "key": "pricing-authority|shared/commerce.ts|value:price#1",
-      "finding": "ARCH-AUTHORITY-001",
-      "expiresWith": "the bounded-context repair that assigns explicit authority"
-    },
-    {
-      "key": "pricing-authority|shared/commerce.ts|value:price#2",
-      "finding": "ARCH-AUTHORITY-001",
-      "expiresWith": "the bounded-context repair that assigns explicit authority"
-    },
-    {
-      "key": "pricing-authority|shared/commerce.ts|value:pricePerCard#0",
-      "finding": "ARCH-AUTHORITY-001",
-      "expiresWith": "the bounded-context repair that assigns explicit authority"
-    },
-    {
-      "key": "pricing-authority|shared/commerce.ts|value:pricePerCard#1",
-      "finding": "ARCH-AUTHORITY-001",
-      "expiresWith": "the bounded-context repair that assigns explicit authority"
-    },
-    {
-      "key": "pricing-authority|shared/commerce.ts|value:pricePerCard#2",
-      "finding": "ARCH-AUTHORITY-001",
-      "expiresWith": "the bounded-context repair that assigns explicit authority"
-    },
-    {
-      "key": "pricing-authority|shared/commerce.ts|value:pricingTiers#0",
-      "finding": "ARCH-AUTHORITY-001",
-      "expiresWith": "the bounded-context repair that assigns explicit authority"
-    },
-    {
-      "key": "pricing-authority|shared/commerce.ts|value:totalInsuranceFee#0",
-      "finding": "ARCH-AUTHORITY-001",
-      "expiresWith": "the bounded-context repair that assigns explicit authority"
-    },
-    {
-      "key": "pricing-authority|shared/commerce.ts|value:turnaround#0",
-      "finding": "ARCH-AUTHORITY-001",
-      "expiresWith": "the bounded-context repair that assigns explicit authority"
-    },
-    {
-      "key": "pricing-authority|shared/commerce.ts|value:turnaround#1",
-      "finding": "ARCH-AUTHORITY-001",
-      "expiresWith": "the bounded-context repair that assigns explicit authority"
-    },
-    {
-      "key": "pricing-authority|shared/commerce.ts|value:turnaround#2",
-      "finding": "ARCH-AUTHORITY-001",
-      "expiresWith": "the bounded-context repair that assigns explicit authority"
-    },
-    {
-      "key": "pricing-authority|shared/commerce.ts|value:turnaroundDays#0",
-      "finding": "ARCH-AUTHORITY-001",
-      "expiresWith": "the bounded-context repair that assigns explicit authority"
-    },
-    {
-      "key": "pricing-authority|shared/commerce.ts|value:turnaroundDays#1",
-      "finding": "ARCH-AUTHORITY-001",
-      "expiresWith": "the bounded-context repair that assigns explicit authority"
-    },
-    {
-      "key": "pricing-authority|shared/commerce.ts|value:turnaroundDays#2",
-      "finding": "ARCH-AUTHORITY-001",
-      "expiresWith": "the bounded-context repair that assigns explicit authority"
-    },
-    {
-      "key": "pricing-authority|shared/commerce.ts|value:VAULT_CLUB_SILVER_DISCOUNT_PERCENT#0",
-      "finding": "ARCH-AUTHORITY-001",
-      "expiresWith": "the bounded-context repair that assigns explicit authority"
-    },
-    {
       "key": "pricing-authority|shared/mvgs/v1_4/index.ts|import:mvgsTierName#0",
       "finding": "ARCH-AUTHORITY-001",
       "expiresWith": "the bounded-context repair that assigns explicit authority"
@@ -3868,11 +3653,6 @@
     },
     {
       "key": "pricing-authority|shared/schema.ts|value:priceAlertThresholdPence#0",
-      "finding": "ARCH-AUTHORITY-001",
-      "expiresWith": "the bounded-context repair that assigns explicit authority"
-    },
-    {
-      "key": "pricing-authority|shared/schema.ts|value:priceGbp#0",
       "finding": "ARCH-AUTHORITY-001",
       "expiresWith": "the bounded-context repair that assigns explicit authority"
     },
@@ -8078,21 +7858,6 @@
     },
     {
       "key": "session-principal|client/src/pages/admin-pokemon-knowledge.tsx|cache-key:[\"/api/admin/pokemon-knowledge/sets\"]#0",
-      "finding": "ARCH-AUTHORITY-001",
-      "expiresWith": "the bounded-context repair that assigns explicit authority"
-    },
-    {
-      "key": "session-principal|client/src/pages/admin-pricing.tsx|cache-key:[\"/api/admin/service-tiers\"]#0",
-      "finding": "ARCH-AUTHORITY-001",
-      "expiresWith": "the bounded-context repair that assigns explicit authority"
-    },
-    {
-      "key": "session-principal|client/src/pages/admin-pricing.tsx|cache-key:[\"/api/admin/service-tiers\"]#1",
-      "finding": "ARCH-AUTHORITY-001",
-      "expiresWith": "the bounded-context repair that assigns explicit authority"
-    },
-    {
-      "key": "session-principal|client/src/pages/admin-pricing.tsx|cache-key:[\"/api/service-tiers\"]#0",
       "finding": "ARCH-AUTHORITY-001",
       "expiresWith": "the bounded-context repair that assigns explicit authority"
     },
@@ -14852,11 +14617,6 @@
       "expiresWith": "the bounded-context repair that assigns explicit authority"
     },
     {
-      "key": "table-access|server/storage.ts|write:public.service_tiers#0",
-      "finding": "ARCH-AUTHORITY-001",
-      "expiresWith": "the bounded-context repair that assigns explicit authority"
-    },
-    {
       "key": "table-access|server/storage.ts|write:public.submission_items#0",
       "finding": "ARCH-AUTHORITY-001",
       "expiresWith": "the bounded-context repair that assigns explicit authority"
@@ -15805,6 +15565,31 @@
       "key": "timer|server/services/tcgdex.ts|setTimeout:r#0",
       "finding": "ARCH-AUTHORITY-001",
       "expiresWith": "the bounded-context repair that assigns explicit authority"
+    },
+    {
+      "key": "table-access|server/storage.ts|write:serviceTiers#0",
+      "finding": "ARCH-AUTHORITY-001",
+      "expiresWith": "the bounded-context storage/schema authority repair; same pricing method/adapter transferred in pricing-recovery.md"
+    },
+    {
+      "key": "pricing-authority|server/storage.ts|value:pricePerCard#0",
+      "finding": "ARCH-AUTHORITY-001",
+      "expiresWith": "the bounded-context storage/schema authority repair; same pricing method/adapter transferred in pricing-recovery.md"
+    },
+    {
+      "key": "pricing-authority|server/storage.ts|value:turnaroundDays#2",
+      "finding": "ARCH-AUTHORITY-001",
+      "expiresWith": "the bounded-context storage/schema authority repair; same pricing method/adapter transferred in pricing-recovery.md"
+    },
+    {
+      "key": "pricing-authority|server/storage.ts|value:turnaroundLabel#0",
+      "finding": "ARCH-AUTHORITY-001",
+      "expiresWith": "the bounded-context storage/schema authority repair; same pricing method/adapter transferred in pricing-recovery.md"
+    },
+    {
+      "key": "pricing-authority|shared/schema.ts|import:formatTierPrice#0",
+      "finding": "ARCH-AUTHORITY-001",
+      "expiresWith": "the bounded-context storage/schema authority repair; same pricing method/adapter transferred in pricing-recovery.md"
     }
   ]
 }

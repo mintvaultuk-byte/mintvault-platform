@@ -2,6 +2,7 @@ import { sql } from "drizzle-orm";
 // Type-only: erased at compile time, so this adds no runtime import edge from the
 // schema barrel to the client-safe commerce leaf.
 import type { PricingTier } from "./commerce";
+import { formatTierPrice } from "./commerce";
 // Value import: this barrel USES the category list in a table definition below.
 import { CATALOGUE_CATEGORIES } from "./vocabulary";
 import {
@@ -1949,11 +1950,10 @@ export const serviceTiers = pgTable("service_tiers", {
 export type ServiceTierRecord = typeof serviceTiers.$inferSelect;
 
 export function serviceTierToPricingTier(st: ServiceTierRecord): PricingTier {
-  const priceGbp = st.pricePerCard / 100;
   return {
     id: st.tierId,
     name: st.name,
-    price: `£${priceGbp % 1 === 0 ? priceGbp : priceGbp.toFixed(2)} per card`,
+    price: formatTierPrice(st.pricePerCard),
     pricePerCard: st.pricePerCard,
     recommendedCardValue: `Up to £${st.maxValueGbp.toLocaleString()}`,
     turnaround: st.turnaroundLabel || `${st.turnaroundDays} working days`,

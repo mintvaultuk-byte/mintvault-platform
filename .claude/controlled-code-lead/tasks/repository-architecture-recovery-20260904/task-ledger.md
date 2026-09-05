@@ -2,6 +2,28 @@
 
 ## Current checkpoint and next bounded wave
 
+Current continuation supersedes the historical goal/pause wording below: owner
+explicitly renewed continuous execution and wave-end WIP commit/push authority.
+Pricing P1 is implemented and independently8/8 locally proven, not the whole pricing
+finding. See pricing-recovery.md. OWNER/RECOVERY-PRICING PROVEN under standing approval;
+REPAIR-PRICING IN_PROGRESS; P2/P3 next. Root remains sole writer; vault-worlds untouched.
+Existing heartbeat now ACTIVE at5minutes as resume-only safeguard, preserving
+failed-runs-only policy; active waves do not wait for ticks. Backend get_goal still
+returned stale BLOCKED metadata; no status mutation or false ACTIVE backend claim.
+Primary c228CI33987565951 terminal FAILURE(Test/image); restricted causes UNKNOWN.
+No deploy/main merge/shared migration/release or security waiver.
+
+Partner checkpoint `c228af1998fb770e12c93758d3737fc92c5a9009` is now pushed
+non-force to the existing feature branch/draftPR336 (29 files;2232+/740-, including
+the generated architecture snapshot and proof files). Only unrelated vault-worlds
+remained untracked at checkpoint. New exact-SHA primaryCI33987565951 queued;
+governance33987565890/33987562442 running. No merge/deploy/provider/sharedDB change.
+Current next work is the bounded RECOVERY-PRICING packet, preserving charge and
+receipt authority. Root continues the user-directed cycle in this active turn;
+heartbeat stays paused. A fresh product get_goal read reports persisted status
+BLOCKED, contradicting the inherited summary's ACTIVE label. No goal-status
+mutation or automatic-background-continuation claim is made from this record.
+
 Partner wave on0494 is implemented and independently locally CLEAN: see
 partner-contract-recovery.md for exact file/rollback/run/hash evidence. Root145,
 clean exact-lock178, realChrome22 on root/independentSol/clean. Scope preserves

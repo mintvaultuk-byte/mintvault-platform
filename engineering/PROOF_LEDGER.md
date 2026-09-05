@@ -1,5 +1,17 @@
 # Engineering proof ledger
 
+## 2026-09-05 pricing P1 — foundation verified; full pricing finding remains open
+
+[Pricing recovery packet](../.claude/controlled-code-lead/tasks/repository-architecture-recovery-20260904/pricing-recovery.md)
+binds baseline c228af1998fb770e12c93758d3737fc92c5a9009, approval, scope and rollback.
+Admin render1 + owned PostgreSQL/HTTP3 reproduced red. Root and independent Sol8/8
+now pass, including camel rows, current turnaround, active service selection,
+no-store, cache failure and two held-out malformed-price/capacity cases. Independent
+Terra verifies normal architecture gate8520 records with exact enrollment only.
+P2 all price-bearing consumers and P3 Admin→quote→charge→receipt are NOT proven;
+ARCH-PRICING-001/hosted CI/security/final hostile gates remain open. No live credentials,
+shared database/migration, external payment or deployment used.
+
 ## 2026-09-05 Partner contracts — local repair proof, not release closure
 
 [Exact recovery, runs, hashes and limits](../.claude/controlled-code-lead/tasks/repository-architecture-recovery-20260904/partner-contract-recovery.md):

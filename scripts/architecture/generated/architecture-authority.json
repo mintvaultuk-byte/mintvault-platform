@@ -8,14 +8,14 @@
     "migration": 169,
     "migration-lineage": 6,
     "object-writer": 89,
-    "pricing-authority": 1778,
+    "pricing-authority": 1785,
     "provider-adapter": 135,
     "role-authority": 733,
     "route-middleware": 61,
     "route-mount": 69,
     "schema-object": 3,
     "server-route": 989,
-    "session-principal": 586,
+    "session-principal": 588,
     "table": 360,
     "table-access": 3214,
     "timer": 97
@@ -10664,6 +10664,30 @@
       "category": "pricing-authority",
       "id": "endpoint:/api/service-tiers",
       "pricingKind": "transport",
+      "key": "pricing-authority|client/src/lib/pricing-projection.ts|endpoint:/api/service-tiers#0",
+      "source": "client/src/lib/pricing-projection.ts:45",
+      "owner": "commerce-platform"
+    },
+    {
+      "category": "pricing-authority",
+      "id": "import:formatTierPrice",
+      "pricingKind": "projection-import",
+      "key": "pricing-authority|client/src/lib/pricing-projection.ts|import:formatTierPrice#0",
+      "source": "client/src/lib/pricing-projection.ts:2",
+      "owner": "commerce-platform"
+    },
+    {
+      "category": "pricing-authority",
+      "id": "import:LivePricingTier",
+      "pricingKind": "projection-import",
+      "key": "pricing-authority|client/src/lib/pricing-projection.ts|import:LivePricingTier#0",
+      "source": "client/src/lib/pricing-projection.ts:2",
+      "owner": "commerce-platform"
+    },
+    {
+      "category": "pricing-authority",
+      "id": "endpoint:/api/service-tiers",
+      "pricingKind": "transport",
       "key": "pricing-authority|client/src/lib/queryClient.ts|endpoint:/api/service-tiers#0",
       "source": "client/src/lib/queryClient.ts:195",
       "owner": "identity-platform"
@@ -10673,30 +10697,32 @@
       "id": "endpoint:/api/admin/service-tiers",
       "pricingKind": "transport",
       "key": "pricing-authority|client/src/pages/admin-pricing.tsx|endpoint:/api/admin/service-tiers#0",
-      "source": "client/src/pages/admin-pricing.tsx:31",
-      "disposition": "known-legacy",
-      "finding": "ARCH-AUTHORITY-001",
-      "legacyExpiry": "the bounded-context repair that assigns explicit authority"
+      "source": "client/src/pages/admin-pricing.tsx:23",
+      "owner": "commerce-platform"
     },
     {
       "category": "pricing-authority",
       "id": "endpoint:/api/admin/service-tiers",
       "pricingKind": "transport",
       "key": "pricing-authority|client/src/pages/admin-pricing.tsx|endpoint:/api/admin/service-tiers#1",
-      "source": "client/src/pages/admin-pricing.tsx:39",
-      "disposition": "known-legacy",
-      "finding": "ARCH-AUTHORITY-001",
-      "legacyExpiry": "the bounded-context repair that assigns explicit authority"
+      "source": "client/src/pages/admin-pricing.tsx:37",
+      "owner": "commerce-platform"
     },
     {
       "category": "pricing-authority",
       "id": "endpoint:/api/service-tiers",
       "pricingKind": "transport",
       "key": "pricing-authority|client/src/pages/admin-pricing.tsx|endpoint:/api/service-tiers#0",
-      "source": "client/src/pages/admin-pricing.tsx:40",
-      "disposition": "known-legacy",
-      "finding": "ARCH-AUTHORITY-001",
-      "legacyExpiry": "the bounded-context repair that assigns explicit authority"
+      "source": "client/src/pages/admin-pricing.tsx:38",
+      "owner": "commerce-platform"
+    },
+    {
+      "category": "pricing-authority",
+      "id": "import:ServiceTierAdminRow",
+      "pricingKind": "projection-import",
+      "key": "pricing-authority|client/src/pages/admin-pricing.tsx|import:ServiceTierAdminRow#0",
+      "source": "client/src/pages/admin-pricing.tsx:4",
+      "owner": "commerce-platform"
     },
     {
       "category": "pricing-authority",
@@ -10704,32 +10730,26 @@
       "pricingKind": "currency-bearing-jsx-expression",
       "expression": "(parseInt(editForm.pricePerCard, 10) / 100 || 0).toFixed(2)",
       "key": "pricing-authority|client/src/pages/admin-pricing.tsx|projection:£:(parseInt(editForm.pricePerCard, 10) / 100 || 0).toFixed(2)#0",
-      "source": "client/src/pages/admin-pricing.tsx:146",
-      "disposition": "known-legacy",
-      "finding": "ARCH-AUTHORITY-001",
-      "legacyExpiry": "the bounded-context repair that assigns explicit authority"
+      "source": "client/src/pages/admin-pricing.tsx:147",
+      "owner": "commerce-platform"
     },
     {
       "category": "pricing-authority",
-      "id": "projection:£:(tier.price_per_card / 100).toFixed(tier.price_per_card % 100 === 0 ? 0 : 2)",
+      "id": "projection:£:(tier.pricePerCard / 100).toFixed(tier.pricePerCard % 100 === 0 ? 0 : 2)",
       "pricingKind": "currency-bearing-jsx-expression",
-      "expression": "(tier.price_per_card / 100).toFixed(tier.price_per_card % 100 === 0 ? 0 : 2)",
-      "key": "pricing-authority|client/src/pages/admin-pricing.tsx|projection:£:(tier.price_per_card / 100).toFixed(tier.price_per_card % 100 === 0 ? 0 : 2)#0",
-      "source": "client/src/pages/admin-pricing.tsx:230",
-      "disposition": "known-legacy",
-      "finding": "ARCH-AUTHORITY-001",
-      "legacyExpiry": "the bounded-context repair that assigns explicit authority"
+      "expression": "(tier.pricePerCard / 100).toFixed(tier.pricePerCard % 100 === 0 ? 0 : 2)",
+      "key": "pricing-authority|client/src/pages/admin-pricing.tsx|projection:£:(tier.pricePerCard / 100).toFixed(tier.pricePerCard % 100 === 0 ? 0 : 2)#0",
+      "source": "client/src/pages/admin-pricing.tsx:231",
+      "owner": "commerce-platform"
     },
     {
       "category": "pricing-authority",
-      "id": "projection:£:tier.max_value_gbp.toLocaleString()",
+      "id": "projection:£:tier.maxValueGbp.toLocaleString()",
       "pricingKind": "currency-bearing-jsx-expression",
-      "expression": "tier.max_value_gbp.toLocaleString()",
-      "key": "pricing-authority|client/src/pages/admin-pricing.tsx|projection:£:tier.max_value_gbp.toLocaleString()#0",
-      "source": "client/src/pages/admin-pricing.tsx:223",
-      "disposition": "known-legacy",
-      "finding": "ARCH-AUTHORITY-001",
-      "legacyExpiry": "the bounded-context repair that assigns explicit authority"
+      "expression": "tier.maxValueGbp.toLocaleString()",
+      "key": "pricing-authority|client/src/pages/admin-pricing.tsx|projection:£:tier.maxValueGbp.toLocaleString()#0",
+      "source": "client/src/pages/admin-pricing.tsx:224",
+      "owner": "commerce-platform"
     },
     {
       "category": "pricing-authority",
@@ -10737,21 +10757,17 @@
       "pricingKind": "source-or-projection",
       "expression": "\"\"",
       "key": "pricing-authority|client/src/pages/admin-pricing.tsx|value:pricePerCard#0",
-      "source": "client/src/pages/admin-pricing.tsx:28",
-      "disposition": "known-legacy",
-      "finding": "ARCH-AUTHORITY-001",
-      "legacyExpiry": "the bounded-context repair that assigns explicit authority"
+      "source": "client/src/pages/admin-pricing.tsx:16",
+      "owner": "commerce-platform"
     },
     {
       "category": "pricing-authority",
       "id": "value:pricePerCard",
       "pricingKind": "source-or-projection",
-      "expression": "String(tier.price_per_card)",
+      "expression": "String(tier.pricePerCard)",
       "key": "pricing-authority|client/src/pages/admin-pricing.tsx|value:pricePerCard#1",
-      "source": "client/src/pages/admin-pricing.tsx:50",
-      "disposition": "known-legacy",
-      "finding": "ARCH-AUTHORITY-001",
-      "legacyExpiry": "the bounded-context repair that assigns explicit authority"
+      "source": "client/src/pages/admin-pricing.tsx:49",
+      "owner": "commerce-platform"
     },
     {
       "category": "pricing-authority",
@@ -10759,10 +10775,8 @@
       "pricingKind": "source-or-projection",
       "expression": "parseInt(editForm.pricePerCard, 10)",
       "key": "pricing-authority|client/src/pages/admin-pricing.tsx|value:pricePerCard#2",
-      "source": "client/src/pages/admin-pricing.tsx:62",
-      "disposition": "known-legacy",
-      "finding": "ARCH-AUTHORITY-001",
-      "legacyExpiry": "the bounded-context repair that assigns explicit authority"
+      "source": "client/src/pages/admin-pricing.tsx:61",
+      "owner": "commerce-platform"
     },
     {
       "category": "pricing-authority",
@@ -10770,10 +10784,8 @@
       "pricingKind": "source-or-projection",
       "expression": "e.target.value",
       "key": "pricing-authority|client/src/pages/admin-pricing.tsx|value:pricePerCard#3",
-      "source": "client/src/pages/admin-pricing.tsx:140",
-      "disposition": "known-legacy",
-      "finding": "ARCH-AUTHORITY-001",
-      "legacyExpiry": "the bounded-context repair that assigns explicit authority"
+      "source": "client/src/pages/admin-pricing.tsx:141",
+      "owner": "commerce-platform"
     },
     {
       "category": "pricing-authority",
@@ -10781,21 +10793,17 @@
       "pricingKind": "source-or-projection",
       "expression": "\"\"",
       "key": "pricing-authority|client/src/pages/admin-pricing.tsx|value:turnaroundDays#0",
-      "source": "client/src/pages/admin-pricing.tsx:28",
-      "disposition": "known-legacy",
-      "finding": "ARCH-AUTHORITY-001",
-      "legacyExpiry": "the bounded-context repair that assigns explicit authority"
+      "source": "client/src/pages/admin-pricing.tsx:16",
+      "owner": "commerce-platform"
     },
     {
       "category": "pricing-authority",
       "id": "value:turnaroundDays",
       "pricingKind": "source-or-projection",
-      "expression": "String(tier.turnaround_days)",
+      "expression": "String(tier.turnaroundDays)",
       "key": "pricing-authority|client/src/pages/admin-pricing.tsx|value:turnaroundDays#1",
-      "source": "client/src/pages/admin-pricing.tsx:51",
-      "disposition": "known-legacy",
-      "finding": "ARCH-AUTHORITY-001",
-      "legacyExpiry": "the bounded-context repair that assigns explicit authority"
+      "source": "client/src/pages/admin-pricing.tsx:50",
+      "owner": "commerce-platform"
     },
     {
       "category": "pricing-authority",
@@ -10803,10 +10811,8 @@
       "pricingKind": "source-or-projection",
       "expression": "parseInt(editForm.turnaroundDays, 10)",
       "key": "pricing-authority|client/src/pages/admin-pricing.tsx|value:turnaroundDays#2",
-      "source": "client/src/pages/admin-pricing.tsx:63",
-      "disposition": "known-legacy",
-      "finding": "ARCH-AUTHORITY-001",
-      "legacyExpiry": "the bounded-context repair that assigns explicit authority"
+      "source": "client/src/pages/admin-pricing.tsx:62",
+      "owner": "commerce-platform"
     },
     {
       "category": "pricing-authority",
@@ -10814,10 +10820,8 @@
       "pricingKind": "source-or-projection",
       "expression": "e.target.value",
       "key": "pricing-authority|client/src/pages/admin-pricing.tsx|value:turnaroundDays#3",
-      "source": "client/src/pages/admin-pricing.tsx:156",
-      "disposition": "known-legacy",
-      "finding": "ARCH-AUTHORITY-001",
-      "legacyExpiry": "the bounded-context repair that assigns explicit authority"
+      "source": "client/src/pages/admin-pricing.tsx:157",
+      "owner": "commerce-platform"
     },
     {
       "category": "pricing-authority",
@@ -23469,7 +23473,7 @@
       "id": "endpoint:/api/service-tiers",
       "pricingKind": "transport",
       "key": "pricing-authority|server/routes/public.ts|endpoint:/api/service-tiers#0",
-      "source": "server/routes/public.ts:481",
+      "source": "server/routes/public.ts:482",
       "disposition": "known-legacy",
       "finding": "ARCH-AUTHORITY-001",
       "legacyExpiry": "the bounded-context repair that assigns explicit authority"
@@ -23490,7 +23494,7 @@
       "pricingKind": "source-or-projection",
       "expression": "original - Math.round((original * pct) / 100)",
       "key": "pricing-authority|server/routes/public.ts|value:discountedPrice#0",
-      "source": "server/routes/public.ts:543",
+      "source": "server/routes/public.ts:549",
       "disposition": "known-legacy",
       "finding": "ARCH-AUTHORITY-001",
       "legacyExpiry": "the bounded-context repair that assigns explicit authority"
@@ -23501,7 +23505,7 @@
       "pricingKind": "source-or-projection",
       "expression": "original",
       "key": "pricing-authority|server/routes/public.ts|value:originalPrice#0",
-      "source": "server/routes/public.ts:544",
+      "source": "server/routes/public.ts:550",
       "disposition": "known-legacy",
       "finding": "ARCH-AUTHORITY-001",
       "legacyExpiry": "the bounded-context repair that assigns explicit authority"
@@ -23512,7 +23516,7 @@
       "pricingKind": "source-or-projection",
       "expression": "new Map<string, number>()",
       "key": "pricing-authority|server/routes/public.ts|value:priceByTier#0",
-      "source": "server/routes/public.ts:527",
+      "source": "server/routes/public.ts:533",
       "disposition": "known-legacy",
       "finding": "ARCH-AUTHORITY-001",
       "legacyExpiry": "the bounded-context repair that assigns explicit authority"
@@ -23521,9 +23525,9 @@
       "category": "pricing-authority",
       "id": "value:pricingData",
       "pricingKind": "source-or-projection",
-      "expression": "tiers.map(serviceTierToPricingTier)",
+      "expression": "tiers.filter((tier) => tier.isActive === true).map(serviceTierToPricingTier)",
       "key": "pricing-authority|server/routes/public.ts|value:pricingData#0",
-      "source": "server/routes/public.ts:485",
+      "source": "server/routes/public.ts:490",
       "disposition": "known-legacy",
       "finding": "ARCH-AUTHORITY-001",
       "legacyExpiry": "the bounded-context repair that assigns explicit authority"
@@ -24747,6 +24751,17 @@
     },
     {
       "category": "pricing-authority",
+      "id": "value:pricePerCard",
+      "pricingKind": "source-or-projection",
+      "expression": "data.pricePerCard",
+      "key": "pricing-authority|server/storage.ts|value:pricePerCard#0",
+      "source": "server/storage.ts:2046",
+      "disposition": "known-legacy",
+      "finding": "ARCH-AUTHORITY-001",
+      "legacyExpiry": "the bounded-context storage/schema authority repair; same pricing method/adapter transferred in pricing-recovery.md"
+    },
+    {
+      "category": "pricing-authority",
       "id": "value:returnPostageCost",
       "pricingKind": "source-or-projection",
       "expression": "row.return_postage_cost",
@@ -24784,7 +24799,7 @@
       "pricingKind": "source-or-projection",
       "expression": "row.total_amount",
       "key": "pricing-authority|server/storage.ts|value:totalAmount#0",
-      "source": "server/storage.ts:2761",
+      "source": "server/storage.ts:2770",
       "disposition": "known-legacy",
       "finding": "ARCH-AUTHORITY-001",
       "legacyExpiry": "the bounded-context repair that assigns explicit authority"
@@ -24832,6 +24847,28 @@
       "disposition": "known-legacy",
       "finding": "ARCH-AUTHORITY-001",
       "legacyExpiry": "the bounded-context repair that assigns explicit authority"
+    },
+    {
+      "category": "pricing-authority",
+      "id": "value:turnaroundDays",
+      "pricingKind": "source-or-projection",
+      "expression": "data.turnaroundDays",
+      "key": "pricing-authority|server/storage.ts|value:turnaroundDays#2",
+      "source": "server/storage.ts:2047",
+      "disposition": "known-legacy",
+      "finding": "ARCH-AUTHORITY-001",
+      "legacyExpiry": "the bounded-context storage/schema authority repair; same pricing method/adapter transferred in pricing-recovery.md"
+    },
+    {
+      "category": "pricing-authority",
+      "id": "value:turnaroundLabel",
+      "pricingKind": "source-or-projection",
+      "expression": "data.turnaroundDays === undefined ? undefined : sql` CASE WHEN ${serviceTiers.turnaroundDays} IS DISTINCT FROM ${data.turnaroundDays} THEN NULL ELSE ${serviceTiers.turnaroundLab...",
+      "key": "pricing-authority|server/storage.ts|value:turnaroundLabel#0",
+      "source": "server/storage.ts:2050",
+      "disposition": "known-legacy",
+      "finding": "ARCH-AUTHORITY-001",
+      "legacyExpiry": "the bounded-context storage/schema authority repair; same pricing method/adapter transferred in pricing-recovery.md"
     },
     {
       "category": "pricing-authority",
@@ -25553,100 +25590,80 @@
       "id": "literal:£1,500",
       "pricingKind": "currency-bearing-literal",
       "key": "pricing-authority|shared/commerce.ts|literal:£1,500#0",
-      "source": "shared/commerce.ts:171",
-      "disposition": "known-legacy",
-      "finding": "ARCH-AUTHORITY-001",
-      "legacyExpiry": "the bounded-context repair that assigns explicit authority"
+      "source": "shared/commerce.ts:200",
+      "owner": "commerce-platform"
     },
     {
       "category": "pricing-authority",
       "id": "literal:£10",
       "pricingKind": "currency-bearing-literal",
       "key": "pricing-authority|shared/commerce.ts|literal:£10#0",
-      "source": "shared/commerce.ts:193",
-      "disposition": "known-legacy",
-      "finding": "ARCH-AUTHORITY-001",
-      "legacyExpiry": "the bounded-context repair that assigns explicit authority"
+      "source": "shared/commerce.ts:222",
+      "owner": "commerce-platform"
     },
     {
       "category": "pricing-authority",
       "id": "literal:£19",
       "pricingKind": "currency-bearing-literal",
       "key": "pricing-authority|shared/commerce.ts|literal:£19#0",
-      "source": "shared/commerce.ts:238",
-      "disposition": "known-legacy",
-      "finding": "ARCH-AUTHORITY-001",
-      "legacyExpiry": "the bounded-context repair that assigns explicit authority"
+      "source": "shared/commerce.ts:267",
+      "owner": "commerce-platform"
     },
     {
       "category": "pricing-authority",
       "id": "literal:£2",
       "pricingKind": "currency-bearing-literal",
       "key": "pricing-authority|shared/commerce.ts|literal:£2#0",
-      "source": "shared/commerce.ts:191",
-      "disposition": "known-legacy",
-      "finding": "ARCH-AUTHORITY-001",
-      "legacyExpiry": "the bounded-context repair that assigns explicit authority"
+      "source": "shared/commerce.ts:220",
+      "owner": "commerce-platform"
     },
     {
       "category": "pricing-authority",
       "id": "literal:£25",
       "pricingKind": "currency-bearing-literal",
       "key": "pricing-authority|shared/commerce.ts|literal:£25#0",
-      "source": "shared/commerce.ts:255",
-      "disposition": "known-legacy",
-      "finding": "ARCH-AUTHORITY-001",
-      "legacyExpiry": "the bounded-context repair that assigns explicit authority"
+      "source": "shared/commerce.ts:284",
+      "owner": "commerce-platform"
     },
     {
       "category": "pricing-authority",
       "id": "literal:£3,000",
       "pricingKind": "currency-bearing-literal",
       "key": "pricing-authority|shared/commerce.ts|literal:£3,000#0",
-      "source": "shared/commerce.ts:172",
-      "disposition": "known-legacy",
-      "finding": "ARCH-AUTHORITY-001",
-      "legacyExpiry": "the bounded-context repair that assigns explicit authority"
+      "source": "shared/commerce.ts:201",
+      "owner": "commerce-platform"
     },
     {
       "category": "pricing-authority",
       "id": "literal:£45",
       "pricingKind": "currency-bearing-literal",
       "key": "pricing-authority|shared/commerce.ts|literal:£45#0",
-      "source": "shared/commerce.ts:272",
-      "disposition": "known-legacy",
-      "finding": "ARCH-AUTHORITY-001",
-      "legacyExpiry": "the bounded-context repair that assigns explicit authority"
+      "source": "shared/commerce.ts:301",
+      "owner": "commerce-platform"
     },
     {
       "category": "pricing-authority",
       "id": "literal:£5",
       "pricingKind": "currency-bearing-literal",
       "key": "pricing-authority|shared/commerce.ts|literal:£5#0",
-      "source": "shared/commerce.ts:192",
-      "disposition": "known-legacy",
-      "finding": "ARCH-AUTHORITY-001",
-      "legacyExpiry": "the bounded-context repair that assigns explicit authority"
+      "source": "shared/commerce.ts:221",
+      "owner": "commerce-platform"
     },
     {
       "category": "pricing-authority",
       "id": "literal:£500",
       "pricingKind": "currency-bearing-literal",
       "key": "pricing-authority|shared/commerce.ts|literal:£500#0",
-      "source": "shared/commerce.ts:170",
-      "disposition": "known-legacy",
-      "finding": "ARCH-AUTHORITY-001",
-      "legacyExpiry": "the bounded-context repair that assigns explicit authority"
+      "source": "shared/commerce.ts:199",
+      "owner": "commerce-platform"
     },
     {
       "category": "pricing-authority",
       "id": "literal:£7,500",
       "pricingKind": "currency-bearing-literal",
       "key": "pricing-authority|shared/commerce.ts|literal:£7,500#0",
-      "source": "shared/commerce.ts:173",
-      "disposition": "known-legacy",
-      "finding": "ARCH-AUTHORITY-001",
-      "legacyExpiry": "the bounded-context repair that assigns explicit authority"
+      "source": "shared/commerce.ts:202",
+      "owner": "commerce-platform"
     },
     {
       "category": "pricing-authority",
@@ -25654,10 +25671,8 @@
       "pricingKind": "source-or-projection",
       "expression": "[ { minQty: 1, maxQty: 9, percent: 0, label: \"1–9 cards\" }, { minQty: 10, maxQty: 24, percent: 5, label: \"10–24 cards\" }, { minQty: 25, maxQty: 49, percent: 7.5, label: \"25–49 c...",
       "key": "pricing-authority|shared/commerce.ts|value:bulkDiscountTiers#0",
-      "source": "shared/commerce.ts:133",
-      "disposition": "known-legacy",
-      "finding": "ARCH-AUTHORITY-001",
-      "legacyExpiry": "the bounded-context repair that assigns explicit authority"
+      "source": "shared/commerce.ts:162",
+      "owner": "commerce-platform"
     },
     {
       "category": "pricing-authority",
@@ -25665,10 +25680,8 @@
       "pricingKind": "source-or-projection",
       "expression": "Math.round((subtotal * discountPercent) / 100)",
       "key": "pricing-authority|shared/commerce.ts|value:discountAmount#0",
-      "source": "shared/commerce.ts:206",
-      "disposition": "known-legacy",
-      "finding": "ARCH-AUTHORITY-001",
-      "legacyExpiry": "the bounded-context repair that assigns explicit authority"
+      "source": "shared/commerce.ts:235",
+      "owner": "commerce-platform"
     },
     {
       "category": "pricing-authority",
@@ -25676,10 +25689,8 @@
       "pricingKind": "source-or-projection",
       "expression": "subtotal - discountAmount",
       "key": "pricing-authority|shared/commerce.ts|value:discountedSubtotal#0",
-      "source": "shared/commerce.ts:207",
-      "disposition": "known-legacy",
-      "finding": "ARCH-AUTHORITY-001",
-      "legacyExpiry": "the bounded-context repair that assigns explicit authority"
+      "source": "shared/commerce.ts:236",
+      "owner": "commerce-platform"
     },
     {
       "category": "pricing-authority",
@@ -25687,10 +25698,8 @@
       "pricingKind": "source-or-projection",
       "expression": "getBulkDiscountPercent(quantity)",
       "key": "pricing-authority|shared/commerce.ts|value:discountPercent#0",
-      "source": "shared/commerce.ts:205",
-      "disposition": "known-legacy",
-      "finding": "ARCH-AUTHORITY-001",
-      "legacyExpiry": "the bounded-context repair that assigns explicit authority"
+      "source": "shared/commerce.ts:234",
+      "owner": "commerce-platform"
     },
     {
       "category": "pricing-authority",
@@ -25698,10 +25707,8 @@
       "pricingKind": "source-or-projection",
       "expression": "\"£19 per card\"",
       "key": "pricing-authority|shared/commerce.ts|value:price#0",
-      "source": "shared/commerce.ts:238",
-      "disposition": "known-legacy",
-      "finding": "ARCH-AUTHORITY-001",
-      "legacyExpiry": "the bounded-context repair that assigns explicit authority"
+      "source": "shared/commerce.ts:267",
+      "owner": "commerce-platform"
     },
     {
       "category": "pricing-authority",
@@ -25709,10 +25716,8 @@
       "pricingKind": "source-or-projection",
       "expression": "\"£25 per card\"",
       "key": "pricing-authority|shared/commerce.ts|value:price#1",
-      "source": "shared/commerce.ts:255",
-      "disposition": "known-legacy",
-      "finding": "ARCH-AUTHORITY-001",
-      "legacyExpiry": "the bounded-context repair that assigns explicit authority"
+      "source": "shared/commerce.ts:284",
+      "owner": "commerce-platform"
     },
     {
       "category": "pricing-authority",
@@ -25720,10 +25725,8 @@
       "pricingKind": "source-or-projection",
       "expression": "\"£45 per card\"",
       "key": "pricing-authority|shared/commerce.ts|value:price#2",
-      "source": "shared/commerce.ts:272",
-      "disposition": "known-legacy",
-      "finding": "ARCH-AUTHORITY-001",
-      "legacyExpiry": "the bounded-context repair that assigns explicit authority"
+      "source": "shared/commerce.ts:301",
+      "owner": "commerce-platform"
     },
     {
       "category": "pricing-authority",
@@ -25731,10 +25734,8 @@
       "pricingKind": "source-or-projection",
       "expression": "1900",
       "key": "pricing-authority|shared/commerce.ts|value:pricePerCard#0",
-      "source": "shared/commerce.ts:239",
-      "disposition": "known-legacy",
-      "finding": "ARCH-AUTHORITY-001",
-      "legacyExpiry": "the bounded-context repair that assigns explicit authority"
+      "source": "shared/commerce.ts:268",
+      "owner": "commerce-platform"
     },
     {
       "category": "pricing-authority",
@@ -25742,10 +25743,8 @@
       "pricingKind": "source-or-projection",
       "expression": "2500",
       "key": "pricing-authority|shared/commerce.ts|value:pricePerCard#1",
-      "source": "shared/commerce.ts:256",
-      "disposition": "known-legacy",
-      "finding": "ARCH-AUTHORITY-001",
-      "legacyExpiry": "the bounded-context repair that assigns explicit authority"
+      "source": "shared/commerce.ts:285",
+      "owner": "commerce-platform"
     },
     {
       "category": "pricing-authority",
@@ -25753,10 +25752,8 @@
       "pricingKind": "source-or-projection",
       "expression": "4500",
       "key": "pricing-authority|shared/commerce.ts|value:pricePerCard#2",
-      "source": "shared/commerce.ts:273",
-      "disposition": "known-legacy",
-      "finding": "ARCH-AUTHORITY-001",
-      "legacyExpiry": "the bounded-context repair that assigns explicit authority"
+      "source": "shared/commerce.ts:302",
+      "owner": "commerce-platform"
     },
     {
       "category": "pricing-authority",
@@ -25764,10 +25761,8 @@
       "pricingKind": "source-or-projection",
       "expression": "[ { id: \"standard\", name: \"VAULT QUEUE\", price: \"£19 per card\", pricePerCard: 1900, recommendedCardValue: \"Any value\", turnaround: \"40 working days\", turnaroundDays: 40, feature...",
       "key": "pricing-authority|shared/commerce.ts|value:pricingTiers#0",
-      "source": "shared/commerce.ts:234",
-      "disposition": "known-legacy",
-      "finding": "ARCH-AUTHORITY-001",
-      "legacyExpiry": "the bounded-context repair that assigns explicit authority"
+      "source": "shared/commerce.ts:263",
+      "owner": "commerce-platform"
     },
     {
       "category": "pricing-authority",
@@ -25775,10 +25770,8 @@
       "pricingKind": "source-or-projection",
       "expression": "insuranceSurchargePerCard * quantity",
       "key": "pricing-authority|shared/commerce.ts|value:totalInsuranceFee#0",
-      "source": "shared/commerce.ts:215",
-      "disposition": "known-legacy",
-      "finding": "ARCH-AUTHORITY-001",
-      "legacyExpiry": "the bounded-context repair that assigns explicit authority"
+      "source": "shared/commerce.ts:244",
+      "owner": "commerce-platform"
     },
     {
       "category": "pricing-authority",
@@ -25786,10 +25779,8 @@
       "pricingKind": "source-or-projection",
       "expression": "\"40 working days\"",
       "key": "pricing-authority|shared/commerce.ts|value:turnaround#0",
-      "source": "shared/commerce.ts:241",
-      "disposition": "known-legacy",
-      "finding": "ARCH-AUTHORITY-001",
-      "legacyExpiry": "the bounded-context repair that assigns explicit authority"
+      "source": "shared/commerce.ts:270",
+      "owner": "commerce-platform"
     },
     {
       "category": "pricing-authority",
@@ -25797,10 +25788,8 @@
       "pricingKind": "source-or-projection",
       "expression": "\"15 working days\"",
       "key": "pricing-authority|shared/commerce.ts|value:turnaround#1",
-      "source": "shared/commerce.ts:258",
-      "disposition": "known-legacy",
-      "finding": "ARCH-AUTHORITY-001",
-      "legacyExpiry": "the bounded-context repair that assigns explicit authority"
+      "source": "shared/commerce.ts:287",
+      "owner": "commerce-platform"
     },
     {
       "category": "pricing-authority",
@@ -25808,10 +25797,8 @@
       "pricingKind": "source-or-projection",
       "expression": "\"5 working days\"",
       "key": "pricing-authority|shared/commerce.ts|value:turnaround#2",
-      "source": "shared/commerce.ts:275",
-      "disposition": "known-legacy",
-      "finding": "ARCH-AUTHORITY-001",
-      "legacyExpiry": "the bounded-context repair that assigns explicit authority"
+      "source": "shared/commerce.ts:304",
+      "owner": "commerce-platform"
     },
     {
       "category": "pricing-authority",
@@ -25819,10 +25806,8 @@
       "pricingKind": "source-or-projection",
       "expression": "40",
       "key": "pricing-authority|shared/commerce.ts|value:turnaroundDays#0",
-      "source": "shared/commerce.ts:242",
-      "disposition": "known-legacy",
-      "finding": "ARCH-AUTHORITY-001",
-      "legacyExpiry": "the bounded-context repair that assigns explicit authority"
+      "source": "shared/commerce.ts:271",
+      "owner": "commerce-platform"
     },
     {
       "category": "pricing-authority",
@@ -25830,10 +25815,8 @@
       "pricingKind": "source-or-projection",
       "expression": "15",
       "key": "pricing-authority|shared/commerce.ts|value:turnaroundDays#1",
-      "source": "shared/commerce.ts:259",
-      "disposition": "known-legacy",
-      "finding": "ARCH-AUTHORITY-001",
-      "legacyExpiry": "the bounded-context repair that assigns explicit authority"
+      "source": "shared/commerce.ts:288",
+      "owner": "commerce-platform"
     },
     {
       "category": "pricing-authority",
@@ -25841,10 +25824,8 @@
       "pricingKind": "source-or-projection",
       "expression": "5",
       "key": "pricing-authority|shared/commerce.ts|value:turnaroundDays#2",
-      "source": "shared/commerce.ts:276",
-      "disposition": "known-legacy",
-      "finding": "ARCH-AUTHORITY-001",
-      "legacyExpiry": "the bounded-context repair that assigns explicit authority"
+      "source": "shared/commerce.ts:305",
+      "owner": "commerce-platform"
     },
     {
       "category": "pricing-authority",
@@ -25852,10 +25833,8 @@
       "pricingKind": "source-or-projection",
       "expression": "10",
       "key": "pricing-authority|shared/commerce.ts|value:VAULT_CLUB_SILVER_DISCOUNT_PERCENT#0",
-      "source": "shared/commerce.ts:151",
-      "disposition": "known-legacy",
-      "finding": "ARCH-AUTHORITY-001",
-      "legacyExpiry": "the bounded-context repair that assigns explicit authority"
+      "source": "shared/commerce.ts:180",
+      "owner": "commerce-platform"
     },
     {
       "category": "pricing-authority",
@@ -25889,6 +25868,16 @@
     },
     {
       "category": "pricing-authority",
+      "id": "import:formatTierPrice",
+      "pricingKind": "projection-import",
+      "key": "pricing-authority|shared/schema.ts|import:formatTierPrice#0",
+      "source": "shared/schema.ts:5",
+      "disposition": "known-legacy",
+      "finding": "ARCH-AUTHORITY-001",
+      "legacyExpiry": "the bounded-context storage/schema authority repair; same pricing method/adapter transferred in pricing-recovery.md"
+    },
+    {
+      "category": "pricing-authority",
       "id": "import:PricingTier",
       "pricingKind": "projection-import",
       "key": "pricing-authority|shared/schema.ts|import:PricingTier#0",
@@ -25914,7 +25903,7 @@
       "pricingKind": "source-or-projection",
       "expression": "integer(\"average_price_pence\")",
       "key": "pricing-authority|shared/schema.ts|value:averagePricePence#0",
-      "source": "shared/schema.ts:1925",
+      "source": "shared/schema.ts:1926",
       "disposition": "known-legacy",
       "finding": "ARCH-AUTHORITY-001",
       "legacyExpiry": "the bounded-context repair that assigns explicit authority"
@@ -25925,7 +25914,7 @@
       "pricingKind": "source-or-projection",
       "expression": "numeric(\"cost_gbp\", { precision: 8, scale: 5 })",
       "key": "pricing-authority|shared/schema.ts|value:costGbp#0",
-      "source": "shared/schema.ts:1191",
+      "source": "shared/schema.ts:1192",
       "disposition": "known-legacy",
       "finding": "ARCH-AUTHORITY-001",
       "legacyExpiry": "the bounded-context repair that assigns explicit authority"
@@ -25947,7 +25936,7 @@
       "pricingKind": "source-or-projection",
       "expression": "numeric(\"cost_usd\", { precision: 10, scale: 5 })",
       "key": "pricing-authority|shared/schema.ts|value:costUsd#0",
-      "source": "shared/schema.ts:1602",
+      "source": "shared/schema.ts:1603",
       "disposition": "known-legacy",
       "finding": "ARCH-AUTHORITY-001",
       "legacyExpiry": "the bounded-context repair that assigns explicit authority"
@@ -25958,7 +25947,7 @@
       "pricingKind": "source-or-projection",
       "expression": "pgTable(\"ebay_price_cache\", { id: serial(\"id\").primaryKey(), cardKey: text(\"card_key\").notNull().unique(), cardName: text(\"card_name\").notNull(), cardNumber: text(\"card_number\")...",
       "key": "pricing-authority|shared/schema.ts|value:ebayPriceCache#0",
-      "source": "shared/schema.ts:1919",
+      "source": "shared/schema.ts:1920",
       "disposition": "known-legacy",
       "finding": "ARCH-AUTHORITY-001",
       "legacyExpiry": "the bounded-context repair that assigns explicit authority"
@@ -25969,7 +25958,7 @@
       "pricingKind": "source-or-projection",
       "expression": "numeric(\"estimated_cost_usd\", { precision: 10, scale: 4 })",
       "key": "pricing-authority|shared/schema.ts|value:estimatedCostUsd#0",
-      "source": "shared/schema.ts:1128",
+      "source": "shared/schema.ts:1129",
       "disposition": "known-legacy",
       "finding": "ARCH-AUTHORITY-001",
       "legacyExpiry": "the bounded-context repair that assigns explicit authority"
@@ -25980,7 +25969,7 @@
       "pricingKind": "source-or-projection",
       "expression": "integer(\"grading_cost\").default(0)",
       "key": "pricing-authority|shared/schema.ts|value:gradingCost#0",
-      "source": "shared/schema.ts:271",
+      "source": "shared/schema.ts:272",
       "disposition": "known-legacy",
       "finding": "ARCH-AUTHORITY-001",
       "legacyExpiry": "the bounded-context repair that assigns explicit authority"
@@ -25991,7 +25980,7 @@
       "pricingKind": "source-or-projection",
       "expression": "decimal(\"payment_amount\", { precision: 10, scale: 2 })",
       "key": "pricing-authority|shared/schema.ts|value:paymentAmount#0",
-      "source": "shared/schema.ts:249",
+      "source": "shared/schema.ts:250",
       "disposition": "known-legacy",
       "finding": "ARCH-AUTHORITY-001",
       "legacyExpiry": "the bounded-context repair that assigns explicit authority"
@@ -26000,7 +25989,7 @@
       "category": "pricing-authority",
       "id": "value:price",
       "pricingKind": "source-or-projection",
-      "expression": "`£${priceGbp % 1 === 0 ? priceGbp : priceGbp.toFixed(2)} per card`",
+      "expression": "formatTierPrice(st.pricePerCard)",
       "key": "pricing-authority|shared/schema.ts|value:price#0",
       "source": "shared/schema.ts:1956",
       "disposition": "known-legacy",
@@ -26014,17 +26003,6 @@
       "expression": "integer(\"price_alert_threshold_pence\")",
       "key": "pricing-authority|shared/schema.ts|value:priceAlertThresholdPence#0",
       "source": "shared/schema.ts:2240",
-      "disposition": "known-legacy",
-      "finding": "ARCH-AUTHORITY-001",
-      "legacyExpiry": "the bounded-context repair that assigns explicit authority"
-    },
-    {
-      "category": "pricing-authority",
-      "id": "value:priceGbp",
-      "pricingKind": "source-or-projection",
-      "expression": "st.pricePerCard / 100",
-      "key": "pricing-authority|shared/schema.ts|value:priceGbp#0",
-      "source": "shared/schema.ts:1952",
       "disposition": "known-legacy",
       "finding": "ARCH-AUTHORITY-001",
       "legacyExpiry": "the bounded-context repair that assigns explicit authority"
@@ -26057,7 +26035,7 @@
       "pricingKind": "source-or-projection",
       "expression": "decimal(\"price_per_card\", { precision: 10, scale: 2 }).notNull()",
       "key": "pricing-authority|shared/schema.ts|value:pricePerCard#0",
-      "source": "shared/schema.ts:461",
+      "source": "shared/schema.ts:462",
       "disposition": "known-legacy",
       "finding": "ARCH-AUTHORITY-001",
       "legacyExpiry": "the bounded-context repair that assigns explicit authority"
@@ -26068,7 +26046,7 @@
       "pricingKind": "source-or-projection",
       "expression": "integer(\"price_per_card\").notNull()",
       "key": "pricing-authority|shared/schema.ts|value:pricePerCard#1",
-      "source": "shared/schema.ts:1938",
+      "source": "shared/schema.ts:1939",
       "disposition": "known-legacy",
       "finding": "ARCH-AUTHORITY-001",
       "legacyExpiry": "the bounded-context repair that assigns explicit authority"
@@ -26101,7 +26079,7 @@
       "pricingKind": "source-or-projection",
       "expression": "integer(\"return_postage_cost\")",
       "key": "pricing-authority|shared/schema.ts|value:returnPostageCost#0",
-      "source": "shared/schema.ts:307",
+      "source": "shared/schema.ts:308",
       "disposition": "known-legacy",
       "finding": "ARCH-AUTHORITY-001",
       "legacyExpiry": "the bounded-context repair that assigns explicit authority"
@@ -26112,7 +26090,7 @@
       "pricingKind": "source-or-projection",
       "expression": "integer(\"shipping_cost\").default(0)",
       "key": "pricing-authority|shared/schema.ts|value:shippingCost#0",
-      "source": "shared/schema.ts:269",
+      "source": "shared/schema.ts:270",
       "disposition": "known-legacy",
       "finding": "ARCH-AUTHORITY-001",
       "legacyExpiry": "the bounded-context repair that assigns explicit authority"
@@ -26145,7 +26123,7 @@
       "pricingKind": "source-or-projection",
       "expression": "decimal(\"total_price\", { precision: 10, scale: 2 }).notNull().default(\"0\")",
       "key": "pricing-authority|shared/schema.ts|value:totalPrice#0",
-      "source": "shared/schema.ts:245",
+      "source": "shared/schema.ts:246",
       "disposition": "known-legacy",
       "finding": "ARCH-AUTHORITY-001",
       "legacyExpiry": "the bounded-context repair that assigns explicit authority"
@@ -26167,7 +26145,7 @@
       "pricingKind": "source-or-projection",
       "expression": "integer(\"turnaround_days\")",
       "key": "pricing-authority|shared/schema.ts|value:turnaroundDays#0",
-      "source": "shared/schema.ts:268",
+      "source": "shared/schema.ts:269",
       "disposition": "known-legacy",
       "finding": "ARCH-AUTHORITY-001",
       "legacyExpiry": "the bounded-context repair that assigns explicit authority"
@@ -26178,7 +26156,7 @@
       "pricingKind": "source-or-projection",
       "expression": "integer(\"turnaround_days\").notNull()",
       "key": "pricing-authority|shared/schema.ts|value:turnaroundDays#1",
-      "source": "shared/schema.ts:1939",
+      "source": "shared/schema.ts:1940",
       "disposition": "known-legacy",
       "finding": "ARCH-AUTHORITY-001",
       "legacyExpiry": "the bounded-context repair that assigns explicit authority"
@@ -26200,7 +26178,7 @@
       "pricingKind": "source-or-projection",
       "expression": "text(\"turnaround_label\")",
       "key": "pricing-authority|shared/schema.ts|value:turnaroundLabel#0",
-      "source": "shared/schema.ts:1940",
+      "source": "shared/schema.ts:1941",
       "disposition": "known-legacy",
       "finding": "ARCH-AUTHORITY-001",
       "legacyExpiry": "the bounded-context repair that assigns explicit authority"
@@ -26211,7 +26189,7 @@
       "pricingKind": "source-or-projection",
       "expression": "integer(\"turnaround_working_days\").notNull()",
       "key": "pricing-authority|shared/schema.ts|value:turnaroundWorkingDays#0",
-      "source": "shared/schema.ts:462",
+      "source": "shared/schema.ts:463",
       "disposition": "known-legacy",
       "finding": "ARCH-AUTHORITY-001",
       "legacyExpiry": "the bounded-context repair that assigns explicit authority"
@@ -28885,7 +28863,7 @@
         }
       ],
       "key": "provider-adapter|server/routes/public.ts|fetch:https://api.pokemontcg.io#0",
-      "source": "server/routes/public.ts:656",
+      "source": "server/routes/public.ts:662",
       "disposition": "known-legacy",
       "finding": "ARCH-AUTHORITY-001",
       "legacyExpiry": "the bounded-context repair that assigns explicit authority"
@@ -35644,7 +35622,7 @@
       "roleKind": "definition-or-mapping",
       "declaration": "role",
       "key": "role-authority|server/storage.ts|role:incoming#0",
-      "source": "server/storage.ts:3205",
+      "source": "server/storage.ts:3214",
       "disposition": "known-legacy",
       "finding": "ARCH-AUTHORITY-001",
       "legacyExpiry": "the bounded-context repair that assigns explicit authority"
@@ -35655,7 +35633,7 @@
       "roleKind": "definition-or-mapping",
       "declaration": "role",
       "key": "role-authority|server/storage.ts|role:incoming#1",
-      "source": "server/storage.ts:3349",
+      "source": "server/storage.ts:3358",
       "disposition": "known-legacy",
       "finding": "ARCH-AUTHORITY-001",
       "legacyExpiry": "the bounded-context repair that assigns explicit authority"
@@ -35666,7 +35644,7 @@
       "roleKind": "definition-or-mapping",
       "declaration": "role",
       "key": "role-authority|server/storage.ts|role:incoming#2",
-      "source": "server/storage.ts:3507",
+      "source": "server/storage.ts:3516",
       "disposition": "known-legacy",
       "finding": "ARCH-AUTHORITY-001",
       "legacyExpiry": "the bounded-context repair that assigns explicit authority"
@@ -35677,7 +35655,7 @@
       "roleKind": "definition-or-mapping",
       "declaration": "role",
       "key": "role-authority|server/storage.ts|role:incoming#3",
-      "source": "server/storage.ts:3642",
+      "source": "server/storage.ts:3651",
       "disposition": "known-legacy",
       "finding": "ARCH-AUTHORITY-001",
       "legacyExpiry": "the bounded-context repair that assigns explicit authority"
@@ -35688,7 +35666,7 @@
       "roleKind": "definition-or-mapping",
       "declaration": "role",
       "key": "role-authority|server/storage.ts|role:incoming#4",
-      "source": "server/storage.ts:3867",
+      "source": "server/storage.ts:3876",
       "disposition": "known-legacy",
       "finding": "ARCH-AUTHORITY-001",
       "legacyExpiry": "the bounded-context repair that assigns explicit authority"
@@ -35699,7 +35677,7 @@
       "roleKind": "definition-or-mapping",
       "declaration": "role",
       "key": "role-authority|server/storage.ts|role:outgoing#0",
-      "source": "server/storage.ts:3204",
+      "source": "server/storage.ts:3213",
       "disposition": "known-legacy",
       "finding": "ARCH-AUTHORITY-001",
       "legacyExpiry": "the bounded-context repair that assigns explicit authority"
@@ -35710,7 +35688,7 @@
       "roleKind": "definition-or-mapping",
       "declaration": "role",
       "key": "role-authority|server/storage.ts|role:outgoing#1",
-      "source": "server/storage.ts:3348",
+      "source": "server/storage.ts:3357",
       "disposition": "known-legacy",
       "finding": "ARCH-AUTHORITY-001",
       "legacyExpiry": "the bounded-context repair that assigns explicit authority"
@@ -35721,7 +35699,7 @@
       "roleKind": "definition-or-mapping",
       "declaration": "role",
       "key": "role-authority|server/storage.ts|role:outgoing#2",
-      "source": "server/storage.ts:3506",
+      "source": "server/storage.ts:3515",
       "disposition": "known-legacy",
       "finding": "ARCH-AUTHORITY-001",
       "legacyExpiry": "the bounded-context repair that assigns explicit authority"
@@ -35732,7 +35710,7 @@
       "roleKind": "definition-or-mapping",
       "declaration": "role",
       "key": "role-authority|server/storage.ts|role:outgoing#3",
-      "source": "server/storage.ts:3641",
+      "source": "server/storage.ts:3650",
       "disposition": "known-legacy",
       "finding": "ARCH-AUTHORITY-001",
       "legacyExpiry": "the bounded-context repair that assigns explicit authority"
@@ -35743,7 +35721,7 @@
       "roleKind": "definition-or-mapping",
       "declaration": "role",
       "key": "role-authority|server/storage.ts|role:outgoing#4",
-      "source": "server/storage.ts:3866",
+      "source": "server/storage.ts:3875",
       "disposition": "known-legacy",
       "finding": "ARCH-AUTHORITY-001",
       "legacyExpiry": "the bounded-context repair that assigns explicit authority"
@@ -36145,7 +36123,7 @@
       "roleKind": "definition-or-mapping",
       "declaration": "actorRole",
       "key": "role-authority|shared/schema.ts|role:actor_role#0",
-      "source": "shared/schema.ts:1706",
+      "source": "shared/schema.ts:1707",
       "disposition": "known-legacy",
       "finding": "ARCH-AUTHORITY-001",
       "legacyExpiry": "the bounded-context repair that assigns explicit authority"
@@ -36156,7 +36134,7 @@
       "roleKind": "definition-or-mapping",
       "declaration": "actor",
       "key": "role-authority|shared/schema.ts|role:actor#0",
-      "source": "shared/schema.ts:1584",
+      "source": "shared/schema.ts:1585",
       "disposition": "known-legacy",
       "finding": "ARCH-AUTHORITY-001",
       "legacyExpiry": "the bounded-context repair that assigns explicit authority"
@@ -36167,7 +36145,7 @@
       "roleKind": "definition-or-mapping",
       "declaration": "actor",
       "key": "role-authority|shared/schema.ts|role:actor#1",
-      "source": "shared/schema.ts:1604",
+      "source": "shared/schema.ts:1605",
       "disposition": "known-legacy",
       "finding": "ARCH-AUTHORITY-001",
       "legacyExpiry": "the bounded-context repair that assigns explicit authority"
@@ -36178,7 +36156,7 @@
       "roleKind": "definition-or-mapping",
       "declaration": "actor",
       "key": "role-authority|shared/schema.ts|role:actor#2",
-      "source": "shared/schema.ts:1704",
+      "source": "shared/schema.ts:1705",
       "disposition": "known-legacy",
       "finding": "ARCH-AUTHORITY-001",
       "legacyExpiry": "the bounded-context repair that assigns explicit authority"
@@ -36200,7 +36178,7 @@
       "roleKind": "definition-or-mapping",
       "declaration": "createdByRole",
       "key": "role-authority|shared/schema.ts|role:created_by_role#0",
-      "source": "shared/schema.ts:1674",
+      "source": "shared/schema.ts:1675",
       "disposition": "known-legacy",
       "finding": "ARCH-AUTHORITY-001",
       "legacyExpiry": "the bounded-context repair that assigns explicit authority"
@@ -36211,7 +36189,7 @@
       "roleKind": "definition-or-mapping",
       "declaration": "role",
       "key": "role-authority|shared/schema.ts|role:customer#0",
-      "source": "shared/schema.ts:81",
+      "source": "shared/schema.ts:82",
       "disposition": "known-legacy",
       "finding": "ARCH-AUTHORITY-001",
       "legacyExpiry": "the bounded-context repair that assigns explicit authority"
@@ -36222,7 +36200,7 @@
       "roleKind": "definition-or-mapping",
       "declaration": "role",
       "key": "role-authority|shared/schema.ts|role:role#0",
-      "source": "shared/schema.ts:81",
+      "source": "shared/schema.ts:82",
       "disposition": "known-legacy",
       "finding": "ARCH-AUTHORITY-001",
       "legacyExpiry": "the bounded-context repair that assigns explicit authority"
@@ -101939,7 +101917,7 @@
       ],
       "retirementState": "active",
       "key": "server-route|server/routes/public.ts|GET /api/admin/legal/:slug#0",
-      "source": "server/routes/public.ts:399",
+      "source": "server/routes/public.ts:400",
       "disposition": "known-legacy",
       "finding": "ARCH-AUTHORITY-001",
       "legacyExpiry": "the bounded-context repair that assigns explicit authority",
@@ -101997,7 +101975,7 @@
       ],
       "retirementState": "active",
       "key": "server-route|server/routes/public.ts|GET /api/config/public-flags#0",
-      "source": "server/routes/public.ts:35",
+      "source": "server/routes/public.ts:36",
       "disposition": "known-legacy",
       "finding": "ARCH-AUTHORITY-001",
       "legacyExpiry": "the bounded-context repair that assigns explicit authority",
@@ -102066,7 +102044,7 @@
       ],
       "retirementState": "active",
       "key": "server-route|server/routes/public.ts|GET /api/featured-certificates#0",
-      "source": "server/routes/public.ts:425",
+      "source": "server/routes/public.ts:426",
       "disposition": "known-legacy",
       "finding": "ARCH-AUTHORITY-001",
       "legacyExpiry": "the bounded-context repair that assigns explicit authority",
@@ -102124,7 +102102,7 @@
       ],
       "retirementState": "active",
       "key": "server-route|server/routes/public.ts|GET /api/healthz#0",
-      "source": "server/routes/public.ts:30",
+      "source": "server/routes/public.ts:31",
       "disposition": "known-legacy",
       "finding": "ARCH-AUTHORITY-001",
       "legacyExpiry": "the bounded-context repair that assigns explicit authority",
@@ -102175,7 +102153,7 @@
       ],
       "retirementState": "active",
       "key": "server-route|server/routes/public.ts|GET /api/legal/:slug#0",
-      "source": "server/routes/public.ts:367",
+      "source": "server/routes/public.ts:368",
       "disposition": "known-legacy",
       "finding": "ARCH-AUTHORITY-001",
       "legacyExpiry": "the bounded-context repair that assigns explicit authority",
@@ -102228,7 +102206,7 @@
       ],
       "retirementState": "active",
       "key": "server-route|server/routes/public.ts|GET /api/pokemon-sets#0",
-      "source": "server/routes/public.ts:596",
+      "source": "server/routes/public.ts:602",
       "disposition": "known-legacy",
       "finding": "ARCH-AUTHORITY-001",
       "legacyExpiry": "the bounded-context repair that assigns explicit authority",
@@ -102283,7 +102261,7 @@
       ],
       "retirementState": "active",
       "key": "server-route|server/routes/public.ts|GET /api/population/certs#0",
-      "source": "server/routes/public.ts:785",
+      "source": "server/routes/public.ts:791",
       "disposition": "known-legacy",
       "finding": "ARCH-AUTHORITY-001",
       "legacyExpiry": "the bounded-context repair that assigns explicit authority",
@@ -102337,7 +102315,7 @@
       ],
       "retirementState": "active",
       "key": "server-route|server/routes/public.ts|GET /api/population#0",
-      "source": "server/routes/public.ts:691",
+      "source": "server/routes/public.ts:697",
       "disposition": "known-legacy",
       "finding": "ARCH-AUTHORITY-001",
       "legacyExpiry": "the bounded-context repair that assigns explicit authority",
@@ -102385,7 +102363,7 @@
         "csrfOriginCheck"
       ],
       "routeLocalMiddleware": [
-        "async (_req, res) => { try { const promo = await getActivePromotion(); if (!promo || promo.active !== true) { return res.json({ promo: null }); } // Build per-tier discounted pr..."
+        "async (_req, res) => { res.set(\"Cache-Control\", \"no-store\"); try { const promo = await getActivePromotion(); if (!promo || promo.active !== true) { return res.json({ promo: null..."
       ],
       "requestSchemas": [
         "inline-or-unclassified"
@@ -102395,7 +102373,7 @@
       ],
       "retirementState": "active",
       "key": "server-route|server/routes/public.ts|GET /api/promotions/active#0",
-      "source": "server/routes/public.ts:518",
+      "source": "server/routes/public.ts:523",
       "disposition": "known-legacy",
       "finding": "ARCH-AUTHORITY-001",
       "legacyExpiry": "the bounded-context repair that assigns explicit authority",
@@ -102439,7 +102417,7 @@
         "csrfOriginCheck"
       ],
       "routeLocalMiddleware": [
-        "async (req, res) => { try { const serviceType = req.query.serviceType as string | undefined; const tiers = await storage.getServiceTiers(serviceType); const pricingData = tiers...."
+        "async (req, res) => { res.set(\"Cache-Control\", \"no-store\"); try { const serviceType = req.query.serviceType ?? \"grading\"; if (typeof serviceType !== \"string\" || !submissionTypes..."
       ],
       "requestSchemas": [
         "inline-or-unclassified"
@@ -102449,7 +102427,7 @@
       ],
       "retirementState": "active",
       "key": "server-route|server/routes/public.ts|GET /api/service-tiers#0",
-      "source": "server/routes/public.ts:481",
+      "source": "server/routes/public.ts:482",
       "disposition": "known-legacy",
       "finding": "ARCH-AUTHORITY-001",
       "legacyExpiry": "the bounded-context repair that assigns explicit authority",
@@ -102502,7 +102480,7 @@
       ],
       "retirementState": "active",
       "key": "server-route|server/routes/public.ts|GET /api/stripe/publishable-key#0",
-      "source": "server/routes/public.ts:470",
+      "source": "server/routes/public.ts:471",
       "disposition": "known-legacy",
       "finding": "ARCH-AUTHORITY-001",
       "legacyExpiry": "the bounded-context repair that assigns explicit authority",
@@ -102558,7 +102536,7 @@
       ],
       "retirementState": "active",
       "key": "server-route|server/routes/public.ts|GET /api/tier-capacity#0",
-      "source": "server/routes/public.ts:579",
+      "source": "server/routes/public.ts:585",
       "disposition": "known-legacy",
       "finding": "ARCH-AUTHORITY-001",
       "legacyExpiry": "the bounded-context repair that assigns explicit authority",
@@ -102611,7 +102589,7 @@
       ],
       "retirementState": "active",
       "key": "server-route|server/routes/public.ts|GET /api/v2/homepage-stats#0",
-      "source": "server/routes/public.ts:61",
+      "source": "server/routes/public.ts:62",
       "disposition": "known-legacy",
       "finding": "ARCH-AUTHORITY-001",
       "legacyExpiry": "the bounded-context repair that assigns explicit authority",
@@ -102662,7 +102640,7 @@
       ],
       "retirementState": "active",
       "key": "server-route|server/routes/public.ts|GET /api/value-protection-tiers#0",
-      "source": "server/routes/public.ts:562",
+      "source": "server/routes/public.ts:568",
       "disposition": "known-legacy",
       "finding": "ARCH-AUTHORITY-001",
       "legacyExpiry": "the bounded-context repair that assigns explicit authority",
@@ -102713,7 +102691,7 @@
       ],
       "retirementState": "active",
       "key": "server-route|server/routes/public.ts|GET /api/version#0",
-      "source": "server/routes/public.ts:48",
+      "source": "server/routes/public.ts:49",
       "disposition": "known-legacy",
       "finding": "ARCH-AUTHORITY-001",
       "legacyExpiry": "the bounded-context repair that assigns explicit authority",
@@ -102765,7 +102743,7 @@
       ],
       "retirementState": "active",
       "key": "server-route|server/routes/public.ts|POST /api/contact#0",
-      "source": "server/routes/public.ts:179",
+      "source": "server/routes/public.ts:180",
       "disposition": "known-legacy",
       "finding": "ARCH-AUTHORITY-001",
       "legacyExpiry": "the bounded-context repair that assigns explicit authority",
@@ -102827,7 +102805,7 @@
       ],
       "retirementState": "active",
       "key": "server-route|server/routes/public.ts|POST /api/mvgs/interest#0",
-      "source": "server/routes/public.ts:343",
+      "source": "server/routes/public.ts:344",
       "disposition": "known-legacy",
       "finding": "ARCH-AUTHORITY-001",
       "legacyExpiry": "the bounded-context repair that assigns explicit authority",
@@ -102879,7 +102857,7 @@
       ],
       "retirementState": "active",
       "key": "server-route|server/routes/public.ts|POST /api/partner-applications#0",
-      "source": "server/routes/public.ts:243",
+      "source": "server/routes/public.ts:244",
       "disposition": "known-legacy",
       "finding": "ARCH-AUTHORITY-001",
       "legacyExpiry": "the bounded-context repair that assigns explicit authority",
@@ -102952,7 +102930,7 @@
       ],
       "retirementState": "active",
       "key": "server-route|server/routes/public.ts|POST /api/v2/waitlist#0",
-      "source": "server/routes/public.ts:106",
+      "source": "server/routes/public.ts:107",
       "disposition": "known-legacy",
       "finding": "ARCH-AUTHORITY-001",
       "legacyExpiry": "the bounded-context repair that assigns explicit authority",
@@ -107695,6 +107673,7 @@
         "server/stripeClient.ts#getSecretKey",
         "server/stripeClient.ts#getUncachableStripeClient",
         "server/utils/truncate-ip.ts#truncateIp",
+        "shared/commerce.ts#formatTierPrice",
         "shared/schema.ts#calculateOrderTotals",
         "shared/schema.ts#getVaultClubDiscountPercent",
         "shared/schema.ts#serviceTierToPricingTier"
@@ -107756,6 +107735,7 @@
         "server/services/promoCodeService.ts#validatePromoCode",
         "server/services/promotionService.ts#getActivePromotion",
         "server/storage.ts#DatabaseStorage.getServiceTier",
+        "shared/commerce.ts#formatTierPrice",
         "shared/schema.ts#calculateOrderTotals",
         "shared/schema.ts#getVaultClubDiscountPercent",
         "shared/schema.ts#serviceTierToPricingTier"
@@ -120742,6 +120722,19 @@
     },
     {
       "category": "session-principal",
+      "id": "cache-key:[\"/api/service-tiers\", serviceType]",
+      "keyAuthority": "[\"/api/service-tiers\", serviceType]",
+      "principalBinding": "principal-not-declared-in-key",
+      "adminCacheScope": "explicit-public-shared",
+      "cacheClassificationAuthority": "client/src/lib/queryClient.ts#isAdminProtectedQueryKey",
+      "cacheHashAuthority": "client/src/lib/queryClient.ts#scopedQueryHash",
+      "runtimePrincipalBinding": "none-public-shared",
+      "key": "session-principal|client/src/lib/pricing-projection.ts|cache-key:[\"/api/service-tiers\", serviceType]#0",
+      "source": "client/src/lib/pricing-projection.ts:45",
+      "owner": "commerce-platform"
+    },
+    {
+      "category": "session-principal",
       "id": "cache-key:[\"/api/auth/me\"]",
       "keyAuthority": "[\"/api/auth/me\"]",
       "principalBinding": "principal-not-declared-in-key",
@@ -122078,10 +122071,8 @@
       "cacheHashAuthority": "client/src/lib/queryClient.ts#scopedQueryHash",
       "runtimePrincipalBinding": "email+isSuperAdmin",
       "key": "session-principal|client/src/pages/admin-pricing.tsx|cache-key:[\"/api/admin/service-tiers\"]#0",
-      "source": "client/src/pages/admin-pricing.tsx:31",
-      "disposition": "known-legacy",
-      "finding": "ARCH-AUTHORITY-001",
-      "legacyExpiry": "the bounded-context repair that assigns explicit authority"
+      "source": "client/src/pages/admin-pricing.tsx:23",
+      "owner": "commerce-platform"
     },
     {
       "category": "session-principal",
@@ -122093,10 +122084,21 @@
       "cacheHashAuthority": "client/src/lib/queryClient.ts#scopedQueryHash",
       "runtimePrincipalBinding": "email+isSuperAdmin",
       "key": "session-principal|client/src/pages/admin-pricing.tsx|cache-key:[\"/api/admin/service-tiers\"]#1",
+      "source": "client/src/pages/admin-pricing.tsx:37",
+      "owner": "commerce-platform"
+    },
+    {
+      "category": "session-principal",
+      "id": "cache-key:[\"/api/promotions/active\"]",
+      "keyAuthority": "[\"/api/promotions/active\"]",
+      "principalBinding": "principal-not-declared-in-key",
+      "adminCacheScope": "explicit-public-shared",
+      "cacheClassificationAuthority": "client/src/lib/queryClient.ts#isAdminProtectedQueryKey",
+      "cacheHashAuthority": "client/src/lib/queryClient.ts#scopedQueryHash",
+      "runtimePrincipalBinding": "none-public-shared",
+      "key": "session-principal|client/src/pages/admin-pricing.tsx|cache-key:[\"/api/promotions/active\"]#0",
       "source": "client/src/pages/admin-pricing.tsx:39",
-      "disposition": "known-legacy",
-      "finding": "ARCH-AUTHORITY-001",
-      "legacyExpiry": "the bounded-context repair that assigns explicit authority"
+      "owner": "commerce-platform"
     },
     {
       "category": "session-principal",
@@ -122108,10 +122110,8 @@
       "cacheHashAuthority": "client/src/lib/queryClient.ts#scopedQueryHash",
       "runtimePrincipalBinding": "none-public-shared",
       "key": "session-principal|client/src/pages/admin-pricing.tsx|cache-key:[\"/api/service-tiers\"]#0",
-      "source": "client/src/pages/admin-pricing.tsx:40",
-      "disposition": "known-legacy",
-      "finding": "ARCH-AUTHORITY-001",
-      "legacyExpiry": "the bounded-context repair that assigns explicit authority"
+      "source": "client/src/pages/admin-pricing.tsx:38",
+      "owner": "commerce-platform"
     },
     {
       "category": "session-principal",
@@ -129715,7 +129715,7 @@
       "id": "public.account_magic_link_tokens",
       "authority": "drizzle",
       "key": "table|shared/schema.ts|public.account_magic_link_tokens#0",
-      "source": "shared/schema.ts:148",
+      "source": "shared/schema.ts:149",
       "disposition": "known-legacy",
       "finding": "ARCH-AUTHORITY-001",
       "legacyExpiry": "the bounded-context repair that assigns explicit authority"
@@ -129725,7 +129725,7 @@
       "id": "public.ai_predictions",
       "authority": "drizzle",
       "key": "table|shared/schema.ts|public.ai_predictions#0",
-      "source": "shared/schema.ts:1179",
+      "source": "shared/schema.ts:1180",
       "disposition": "known-legacy",
       "finding": "ARCH-AUTHORITY-001",
       "legacyExpiry": "the bounded-context repair that assigns explicit authority"
@@ -129735,7 +129735,7 @@
       "id": "public.audit_log",
       "authority": "drizzle",
       "key": "table|shared/schema.ts|public.audit_log#0",
-      "source": "shared/schema.ts:1039",
+      "source": "shared/schema.ts:1040",
       "disposition": "known-legacy",
       "finding": "ARCH-AUTHORITY-001",
       "legacyExpiry": "the bounded-context repair that assigns explicit authority"
@@ -129745,7 +129745,7 @@
       "id": "public.card_identification_corrections",
       "authority": "drizzle",
       "key": "table|shared/schema.ts|public.card_identification_corrections#0",
-      "source": "shared/schema.ts:1569",
+      "source": "shared/schema.ts:1570",
       "disposition": "known-legacy",
       "finding": "ARCH-AUTHORITY-001",
       "legacyExpiry": "the bounded-context repair that assigns explicit authority"
@@ -129755,7 +129755,7 @@
       "id": "public.card_identification_requests",
       "authority": "drizzle",
       "key": "table|shared/schema.ts|public.card_identification_requests#0",
-      "source": "shared/schema.ts:1594",
+      "source": "shared/schema.ts:1595",
       "disposition": "known-legacy",
       "finding": "ARCH-AUTHORITY-001",
       "legacyExpiry": "the bounded-context repair that assigns explicit authority"
@@ -129765,7 +129765,7 @@
       "id": "public.card_images",
       "authority": "drizzle",
       "key": "table|shared/schema.ts|public.card_images#0",
-      "source": "shared/schema.ts:995",
+      "source": "shared/schema.ts:996",
       "disposition": "known-legacy",
       "finding": "ARCH-AUTHORITY-001",
       "legacyExpiry": "the bounded-context repair that assigns explicit authority"
@@ -129775,7 +129775,7 @@
       "id": "public.card_master",
       "authority": "drizzle",
       "key": "table|shared/schema.ts|public.card_master#0",
-      "source": "shared/schema.ts:1017",
+      "source": "shared/schema.ts:1018",
       "disposition": "known-legacy",
       "finding": "ARCH-AUTHORITY-001",
       "legacyExpiry": "the bounded-context repair that assigns explicit authority"
@@ -129785,7 +129785,7 @@
       "id": "public.card_sets",
       "authority": "drizzle",
       "key": "table|shared/schema.ts|public.card_sets#0",
-      "source": "shared/schema.ts:1005",
+      "source": "shared/schema.ts:1006",
       "disposition": "known-legacy",
       "finding": "ARCH-AUTHORITY-001",
       "legacyExpiry": "the bounded-context repair that assigns explicit authority"
@@ -129795,7 +129795,7 @@
       "id": "public.cards",
       "authority": "drizzle",
       "key": "table|shared/schema.ts|public.cards#0",
-      "source": "shared/schema.ts:470",
+      "source": "shared/schema.ts:471",
       "disposition": "known-legacy",
       "finding": "ARCH-AUTHORITY-001",
       "legacyExpiry": "the bounded-context repair that assigns explicit authority"
@@ -129805,7 +129805,7 @@
       "id": "public.catalogue_items",
       "authority": "drizzle",
       "key": "table|shared/schema.ts|public.catalogue_items#0",
-      "source": "shared/schema.ts:1370",
+      "source": "shared/schema.ts:1371",
       "disposition": "known-legacy",
       "finding": "ARCH-AUTHORITY-001",
       "legacyExpiry": "the bounded-context repair that assigns explicit authority"
@@ -129815,7 +129815,7 @@
       "id": "public.cert_counter",
       "authority": "drizzle",
       "key": "table|shared/schema.ts|public.cert_counter#0",
-      "source": "shared/schema.ts:1890",
+      "source": "shared/schema.ts:1891",
       "disposition": "known-legacy",
       "finding": "ARCH-AUTHORITY-001",
       "legacyExpiry": "the bounded-context repair that assigns explicit authority"
@@ -129835,7 +129835,7 @@
       "id": "public.certificate_images",
       "authority": "drizzle",
       "key": "table|shared/schema.ts|public.certificate_images#0",
-      "source": "shared/schema.ts:987",
+      "source": "shared/schema.ts:988",
       "disposition": "known-legacy",
       "finding": "ARCH-AUTHORITY-001",
       "legacyExpiry": "the bounded-context repair that assigns explicit authority"
@@ -129845,7 +129845,7 @@
       "id": "public.certificates",
       "authority": "drizzle",
       "key": "table|shared/schema.ts|public.certificates#0",
-      "source": "shared/schema.ts:488",
+      "source": "shared/schema.ts:489",
       "disposition": "known-legacy",
       "finding": "ARCH-AUTHORITY-001",
       "legacyExpiry": "the bounded-context repair that assigns explicit authority"
@@ -129855,7 +129855,7 @@
       "id": "public.claim_verifications",
       "authority": "drizzle",
       "key": "table|shared/schema.ts|public.claim_verifications#0",
-      "source": "shared/schema.ts:1784",
+      "source": "shared/schema.ts:1785",
       "disposition": "known-legacy",
       "finding": "ARCH-AUTHORITY-001",
       "legacyExpiry": "the bounded-context repair that assigns explicit authority"
@@ -129865,7 +129865,7 @@
       "id": "public.community_posts",
       "authority": "drizzle",
       "key": "table|shared/schema.ts|public.community_posts#0",
-      "source": "shared/schema.ts:1071",
+      "source": "shared/schema.ts:1072",
       "disposition": "known-legacy",
       "finding": "ARCH-AUTHORITY-001",
       "legacyExpiry": "the bounded-context repair that assigns explicit authority"
@@ -129875,7 +129875,7 @@
       "id": "public.contact_inquiries",
       "authority": "drizzle",
       "key": "table|shared/schema.ts|public.contact_inquiries#0",
-      "source": "shared/schema.ts:179",
+      "source": "shared/schema.ts:180",
       "disposition": "known-legacy",
       "finding": "ARCH-AUTHORITY-001",
       "legacyExpiry": "the bounded-context repair that assigns explicit authority"
@@ -129885,7 +129885,7 @@
       "id": "public.customer_magic_link_tokens",
       "authority": "drizzle",
       "key": "table|shared/schema.ts|public.customer_magic_link_tokens#0",
-      "source": "shared/schema.ts:157",
+      "source": "shared/schema.ts:158",
       "disposition": "known-legacy",
       "finding": "ARCH-AUTHORITY-001",
       "legacyExpiry": "the bounded-context repair that assigns explicit authority"
@@ -129895,7 +129895,7 @@
       "id": "public.ebay_price_cache",
       "authority": "drizzle",
       "key": "table|shared/schema.ts|public.ebay_price_cache#0",
-      "source": "shared/schema.ts:1919",
+      "source": "shared/schema.ts:1920",
       "disposition": "known-legacy",
       "finding": "ARCH-AUTHORITY-001",
       "legacyExpiry": "the bounded-context repair that assigns explicit authority"
@@ -129905,7 +129905,7 @@
       "id": "public.email_verification_tokens",
       "authority": "drizzle",
       "key": "table|shared/schema.ts|public.email_verification_tokens#0",
-      "source": "shared/schema.ts:139",
+      "source": "shared/schema.ts:140",
       "disposition": "known-legacy",
       "finding": "ARCH-AUTHORITY-001",
       "legacyExpiry": "the bounded-context repair that assigns explicit authority"
@@ -129915,7 +129915,7 @@
       "id": "public.feature_overrides",
       "authority": "drizzle",
       "key": "table|shared/schema.ts|public.feature_overrides#0",
-      "source": "shared/schema.ts:1168",
+      "source": "shared/schema.ts:1169",
       "disposition": "known-legacy",
       "finding": "ARCH-AUTHORITY-001",
       "legacyExpiry": "the bounded-context repair that assigns explicit authority"
@@ -129925,7 +129925,7 @@
       "id": "public.growth_commercial_targets",
       "authority": "drizzle",
       "key": "table|shared/schema.ts|public.growth_commercial_targets#0",
-      "source": "shared/schema.ts:427",
+      "source": "shared/schema.ts:428",
       "disposition": "known-legacy",
       "finding": "ARCH-AUTHORITY-001",
       "legacyExpiry": "the bounded-context repair that assigns explicit authority"
@@ -129935,7 +129935,7 @@
       "id": "public.growth_conversion_events",
       "authority": "drizzle",
       "key": "table|shared/schema.ts|public.growth_conversion_events#0",
-      "source": "shared/schema.ts:396",
+      "source": "shared/schema.ts:397",
       "disposition": "known-legacy",
       "finding": "ARCH-AUTHORITY-001",
       "legacyExpiry": "the bounded-context repair that assigns explicit authority"
@@ -129965,7 +129965,7 @@
       "id": "public.label_overrides",
       "authority": "drizzle",
       "key": "table|shared/schema.ts|public.label_overrides#0",
-      "source": "shared/schema.ts:1630",
+      "source": "shared/schema.ts:1631",
       "disposition": "known-legacy",
       "finding": "ARCH-AUTHORITY-001",
       "legacyExpiry": "the bounded-context repair that assigns explicit authority"
@@ -129975,7 +129975,7 @@
       "id": "public.label_prints",
       "authority": "drizzle",
       "key": "table|shared/schema.ts|public.label_prints#0",
-      "source": "shared/schema.ts:1617",
+      "source": "shared/schema.ts:1618",
       "disposition": "known-legacy",
       "finding": "ARCH-AUTHORITY-001",
       "legacyExpiry": "the bounded-context repair that assigns explicit authority"
@@ -129985,7 +129985,7 @@
       "id": "public.login_attempts",
       "authority": "drizzle",
       "key": "table|shared/schema.ts|public.login_attempts#0",
-      "source": "shared/schema.ts:166",
+      "source": "shared/schema.ts:167",
       "disposition": "known-legacy",
       "finding": "ARCH-AUTHORITY-001",
       "legacyExpiry": "the bounded-context repair that assigns explicit authority"
@@ -130115,7 +130115,7 @@
       "id": "public.mvgs_interest",
       "authority": "drizzle",
       "key": "table|shared/schema.ts|public.mvgs_interest#0",
-      "source": "shared/schema.ts:1097",
+      "source": "shared/schema.ts:1098",
       "disposition": "known-legacy",
       "finding": "ARCH-AUTHORITY-001",
       "legacyExpiry": "the bounded-context repair that assigns explicit authority"
@@ -130125,7 +130125,7 @@
       "id": "public.ownership_history",
       "authority": "drizzle",
       "key": "table|shared/schema.ts|public.ownership_history#0",
-      "source": "shared/schema.ts:1769",
+      "source": "shared/schema.ts:1770",
       "disposition": "known-legacy",
       "finding": "ARCH-AUTHORITY-001",
       "legacyExpiry": "the bounded-context repair that assigns explicit authority"
@@ -130135,7 +130135,7 @@
       "id": "public.partner_applications",
       "authority": "drizzle",
       "key": "table|shared/schema.ts|public.partner_applications#0",
-      "source": "shared/schema.ts:207",
+      "source": "shared/schema.ts:208",
       "disposition": "known-legacy",
       "finding": "ARCH-AUTHORITY-001",
       "legacyExpiry": "the bounded-context repair that assigns explicit authority"
@@ -130145,7 +130145,7 @@
       "id": "public.password_reset_tokens",
       "authority": "drizzle",
       "key": "table|shared/schema.ts|public.password_reset_tokens#0",
-      "source": "shared/schema.ts:130",
+      "source": "shared/schema.ts:131",
       "disposition": "known-legacy",
       "finding": "ARCH-AUTHORITY-001",
       "legacyExpiry": "the bounded-context repair that assigns explicit authority"
@@ -130245,7 +130245,7 @@
       "id": "public.pending_set_lookups",
       "authority": "drizzle",
       "key": "table|shared/schema.ts|public.pending_set_lookups#0",
-      "source": "shared/schema.ts:1052",
+      "source": "shared/schema.ts:1053",
       "disposition": "known-legacy",
       "finding": "ARCH-AUTHORITY-001",
       "legacyExpiry": "the bounded-context repair that assigns explicit authority"
@@ -130255,7 +130255,7 @@
       "id": "public.pipeline_settings",
       "authority": "drizzle",
       "key": "table|shared/schema.ts|public.pipeline_settings#0",
-      "source": "shared/schema.ts:1110",
+      "source": "shared/schema.ts:1111",
       "disposition": "known-legacy",
       "finding": "ARCH-AUTHORITY-001",
       "legacyExpiry": "the bounded-context repair that assigns explicit authority"
@@ -130265,7 +130265,7 @@
       "id": "public.pokemon_import_runs",
       "authority": "drizzle",
       "key": "table|shared/schema.ts|public.pokemon_import_runs#0",
-      "source": "shared/schema.ts:1515",
+      "source": "shared/schema.ts:1516",
       "disposition": "known-legacy",
       "finding": "ARCH-AUTHORITY-001",
       "legacyExpiry": "the bounded-context repair that assigns explicit authority"
@@ -130275,7 +130275,7 @@
       "id": "public.pokemon_knowledge_revisions",
       "authority": "drizzle",
       "key": "table|shared/schema.ts|public.pokemon_knowledge_revisions#0",
-      "source": "shared/schema.ts:1495",
+      "source": "shared/schema.ts:1496",
       "disposition": "known-legacy",
       "finding": "ARCH-AUTHORITY-001",
       "legacyExpiry": "the bounded-context repair that assigns explicit authority"
@@ -130285,7 +130285,7 @@
       "id": "public.pokemon_review_queue",
       "authority": "drizzle",
       "key": "table|shared/schema.ts|public.pokemon_review_queue#0",
-      "source": "shared/schema.ts:1538",
+      "source": "shared/schema.ts:1539",
       "disposition": "known-legacy",
       "finding": "ARCH-AUTHORITY-001",
       "legacyExpiry": "the bounded-context repair that assigns explicit authority"
@@ -130295,7 +130295,7 @@
       "id": "public.pokemon_set_aliases",
       "authority": "drizzle",
       "key": "table|shared/schema.ts|public.pokemon_set_aliases#0",
-      "source": "shared/schema.ts:1477",
+      "source": "shared/schema.ts:1478",
       "disposition": "known-legacy",
       "finding": "ARCH-AUTHORITY-001",
       "legacyExpiry": "the bounded-context repair that assigns explicit authority"
@@ -130305,7 +130305,7 @@
       "id": "public.pokemon_set_knowledge",
       "authority": "drizzle",
       "key": "table|shared/schema.ts|public.pokemon_set_knowledge#0",
-      "source": "shared/schema.ts:1432",
+      "source": "shared/schema.ts:1433",
       "disposition": "known-legacy",
       "finding": "ARCH-AUTHORITY-001",
       "legacyExpiry": "the bounded-context repair that assigns explicit authority"
@@ -130315,7 +130315,7 @@
       "id": "public.print_batches",
       "authority": "drizzle",
       "key": "table|shared/schema.ts|public.print_batches#0",
-      "source": "shared/schema.ts:1659",
+      "source": "shared/schema.ts:1660",
       "disposition": "known-legacy",
       "finding": "ARCH-AUTHORITY-001",
       "legacyExpiry": "the bounded-context repair that assigns explicit authority"
@@ -130325,7 +130325,7 @@
       "id": "public.print_events",
       "authority": "drizzle",
       "key": "table|shared/schema.ts|public.print_events#0",
-      "source": "shared/schema.ts:1698",
+      "source": "shared/schema.ts:1699",
       "disposition": "known-legacy",
       "finding": "ARCH-AUTHORITY-001",
       "legacyExpiry": "the bounded-context repair that assigns explicit authority"
@@ -130335,7 +130335,7 @@
       "id": "public.rarity_mapping_reviews",
       "authority": "drizzle",
       "key": "table|shared/schema.ts|public.rarity_mapping_reviews#0",
-      "source": "shared/schema.ts:1318",
+      "source": "shared/schema.ts:1319",
       "disposition": "known-legacy",
       "finding": "ARCH-AUTHORITY-001",
       "legacyExpiry": "the bounded-context repair that assigns explicit authority"
@@ -130345,7 +130345,7 @@
       "id": "public.reel_analytics",
       "authority": "drizzle",
       "key": "table|shared/schema.ts|public.reel_analytics#0",
-      "source": "shared/schema.ts:1122",
+      "source": "shared/schema.ts:1123",
       "disposition": "known-legacy",
       "finding": "ARCH-AUTHORITY-001",
       "legacyExpiry": "the bounded-context repair that assigns explicit authority"
@@ -130355,7 +130355,7 @@
       "id": "public.reel_card_approvals",
       "authority": "drizzle",
       "key": "table|shared/schema.ts|public.reel_card_approvals#0",
-      "source": "shared/schema.ts:1148",
+      "source": "shared/schema.ts:1149",
       "disposition": "known-legacy",
       "finding": "ARCH-AUTHORITY-001",
       "legacyExpiry": "the bounded-context repair that assigns explicit authority"
@@ -130365,7 +130365,7 @@
       "id": "public.reprint_log",
       "authority": "drizzle",
       "key": "table|shared/schema.ts|public.reprint_log#0",
-      "source": "shared/schema.ts:1646",
+      "source": "shared/schema.ts:1647",
       "disposition": "known-legacy",
       "finding": "ARCH-AUTHORITY-001",
       "legacyExpiry": "the bounded-context repair that assigns explicit authority"
@@ -130375,7 +130375,7 @@
       "id": "public.review_delivery_attempts",
       "authority": "drizzle",
       "key": "table|shared/schema.ts|public.review_delivery_attempts#0",
-      "source": "shared/schema.ts:375",
+      "source": "shared/schema.ts:376",
       "disposition": "known-legacy",
       "finding": "ARCH-AUTHORITY-001",
       "legacyExpiry": "the bounded-context repair that assigns explicit authority"
@@ -130385,7 +130385,7 @@
       "id": "public.review_requests",
       "authority": "drizzle",
       "key": "table|shared/schema.ts|public.review_requests#0",
-      "source": "shared/schema.ts:348",
+      "source": "shared/schema.ts:349",
       "disposition": "known-legacy",
       "finding": "ARCH-AUTHORITY-001",
       "legacyExpiry": "the bounded-context repair that assigns explicit authority"
@@ -130395,7 +130395,7 @@
       "id": "public.review_suppressions",
       "authority": "drizzle",
       "key": "table|shared/schema.ts|public.review_suppressions#0",
-      "source": "shared/schema.ts:389",
+      "source": "shared/schema.ts:390",
       "disposition": "known-legacy",
       "finding": "ARCH-AUTHORITY-001",
       "legacyExpiry": "the bounded-context repair that assigns explicit authority"
@@ -130405,7 +130405,7 @@
       "id": "public.service_tiers",
       "authority": "drizzle",
       "key": "table|shared/schema.ts|public.service_tiers#0",
-      "source": "shared/schema.ts:1933",
+      "source": "shared/schema.ts:1934",
       "disposition": "known-legacy",
       "finding": "ARCH-AUTHORITY-001",
       "legacyExpiry": "the bounded-context repair that assigns explicit authority"
@@ -130415,7 +130415,7 @@
       "id": "public.stolen_reports",
       "authority": "drizzle",
       "key": "table|shared/schema.ts|public.stolen_reports#0",
-      "source": "shared/schema.ts:1900",
+      "source": "shared/schema.ts:1901",
       "disposition": "known-legacy",
       "finding": "ARCH-AUTHORITY-001",
       "legacyExpiry": "the bounded-context repair that assigns explicit authority"
@@ -130425,7 +130425,7 @@
       "id": "public.submission_acquisition",
       "authority": "drizzle",
       "key": "table|shared/schema.ts|public.submission_acquisition#0",
-      "source": "shared/schema.ts:336",
+      "source": "shared/schema.ts:337",
       "disposition": "known-legacy",
       "finding": "ARCH-AUTHORITY-001",
       "legacyExpiry": "the bounded-context repair that assigns explicit authority"
@@ -130435,7 +130435,7 @@
       "id": "public.submission_items",
       "authority": "drizzle",
       "key": "table|shared/schema.ts|public.submission_items#0",
-      "source": "shared/schema.ts:443",
+      "source": "shared/schema.ts:444",
       "disposition": "known-legacy",
       "finding": "ARCH-AUTHORITY-001",
       "legacyExpiry": "the bounded-context repair that assigns explicit authority"
@@ -130445,7 +130445,7 @@
       "id": "public.submissions",
       "authority": "drizzle",
       "key": "table|shared/schema.ts|public.submissions#0",
-      "source": "shared/schema.ts:239",
+      "source": "shared/schema.ts:240",
       "disposition": "known-legacy",
       "finding": "ARCH-AUTHORITY-001",
       "legacyExpiry": "the bounded-context repair that assigns explicit authority"
@@ -130455,7 +130455,7 @@
       "id": "public.tier_capacity",
       "authority": "drizzle",
       "key": "table|shared/schema.ts|public.tier_capacity#0",
-      "source": "shared/schema.ts:1874",
+      "source": "shared/schema.ts:1875",
       "disposition": "known-legacy",
       "finding": "ARCH-AUTHORITY-001",
       "legacyExpiry": "the bounded-context repair that assigns explicit authority"
@@ -130465,7 +130465,7 @@
       "id": "public.tiers",
       "authority": "drizzle",
       "key": "table|shared/schema.ts|public.tiers#0",
-      "source": "shared/schema.ts:458",
+      "source": "shared/schema.ts:459",
       "disposition": "known-legacy",
       "finding": "ARCH-AUTHORITY-001",
       "legacyExpiry": "the bounded-context repair that assigns explicit authority"
@@ -130475,7 +130475,7 @@
       "id": "public.transfer_verifications",
       "authority": "drizzle",
       "key": "table|shared/schema.ts|public.transfer_verifications#0",
-      "source": "shared/schema.ts:1801",
+      "source": "shared/schema.ts:1802",
       "disposition": "known-legacy",
       "finding": "ARCH-AUTHORITY-001",
       "legacyExpiry": "the bounded-context repair that assigns explicit authority"
@@ -130485,7 +130485,7 @@
       "id": "public.users",
       "authority": "drizzle",
       "key": "table|shared/schema.ts|public.users#0",
-      "source": "shared/schema.ts:73",
+      "source": "shared/schema.ts:74",
       "disposition": "known-legacy",
       "finding": "ARCH-AUTHORITY-001",
       "legacyExpiry": "the bounded-context repair that assigns explicit authority"
@@ -130495,7 +130495,7 @@
       "id": "public.waitlist_signups",
       "authority": "drizzle",
       "key": "table|shared/schema.ts|public.waitlist_signups#0",
-      "source": "shared/schema.ts:1203",
+      "source": "shared/schema.ts:1204",
       "disposition": "known-legacy",
       "finding": "ARCH-AUTHORITY-001",
       "legacyExpiry": "the bounded-context repair that assigns explicit authority"
@@ -154068,7 +154068,7 @@
       "effect": "read",
       "access": "sql",
       "key": "table-access|server/routes/public.ts|read:public.certificates#0",
-      "source": "server/routes/public.ts:66",
+      "source": "server/routes/public.ts:67",
       "disposition": "known-legacy",
       "finding": "ARCH-AUTHORITY-001",
       "legacyExpiry": "the bounded-context repair that assigns explicit authority"
@@ -154079,7 +154079,7 @@
       "effect": "read",
       "access": "sql",
       "key": "table-access|server/routes/public.ts|read:public.certificates#1",
-      "source": "server/routes/public.ts:427",
+      "source": "server/routes/public.ts:428",
       "disposition": "known-legacy",
       "finding": "ARCH-AUTHORITY-001",
       "legacyExpiry": "the bounded-context repair that assigns explicit authority"
@@ -154090,7 +154090,7 @@
       "effect": "read",
       "access": "sql",
       "key": "table-access|server/routes/public.ts|read:public.certificates#2",
-      "source": "server/routes/public.ts:705",
+      "source": "server/routes/public.ts:711",
       "disposition": "known-legacy",
       "finding": "ARCH-AUTHORITY-001",
       "legacyExpiry": "the bounded-context repair that assigns explicit authority"
@@ -154101,7 +154101,7 @@
       "effect": "read",
       "access": "sql",
       "key": "table-access|server/routes/public.ts|read:public.certificates#3",
-      "source": "server/routes/public.ts:727",
+      "source": "server/routes/public.ts:733",
       "disposition": "known-legacy",
       "finding": "ARCH-AUTHORITY-001",
       "legacyExpiry": "the bounded-context repair that assigns explicit authority"
@@ -154112,7 +154112,7 @@
       "effect": "read",
       "access": "sql",
       "key": "table-access|server/routes/public.ts|read:public.certificates#4",
-      "source": "server/routes/public.ts:805",
+      "source": "server/routes/public.ts:811",
       "disposition": "known-legacy",
       "finding": "ARCH-AUTHORITY-001",
       "legacyExpiry": "the bounded-context repair that assigns explicit authority"
@@ -154123,7 +154123,7 @@
       "effect": "read",
       "access": "sql",
       "key": "table-access|server/routes/public.ts|read:public.custom_sets#0",
-      "source": "server/routes/public.ts:607",
+      "source": "server/routes/public.ts:613",
       "disposition": "known-legacy",
       "finding": "ARCH-AUTHORITY-001",
       "legacyExpiry": "the bounded-context repair that assigns explicit authority"
@@ -154134,7 +154134,7 @@
       "effect": "read",
       "access": "sql",
       "key": "table-access|server/routes/public.ts|read:public.tcgdex_sets#0",
-      "source": "server/routes/public.ts:624",
+      "source": "server/routes/public.ts:630",
       "disposition": "known-legacy",
       "finding": "ARCH-AUTHORITY-001",
       "legacyExpiry": "the bounded-context repair that assigns explicit authority"
@@ -154145,7 +154145,7 @@
       "effect": "read",
       "access": "sql",
       "key": "table-access|server/routes/public.ts|read:public.tier_capacity#0",
-      "source": "server/routes/public.ts:488",
+      "source": "server/routes/public.ts:493",
       "disposition": "known-legacy",
       "finding": "ARCH-AUTHORITY-001",
       "legacyExpiry": "the bounded-context repair that assigns explicit authority"
@@ -154156,7 +154156,7 @@
       "effect": "read",
       "access": "sql",
       "key": "table-access|server/routes/public.ts|read:public.tier_capacity#1",
-      "source": "server/routes/public.ts:581",
+      "source": "server/routes/public.ts:587",
       "disposition": "known-legacy",
       "finding": "ARCH-AUTHORITY-001",
       "legacyExpiry": "the bounded-context repair that assigns explicit authority"
@@ -154167,7 +154167,7 @@
       "effect": "read",
       "access": "sql",
       "key": "table-access|server/routes/public.ts|read:public.value_protection_tiers#0",
-      "source": "server/routes/public.ts:564",
+      "source": "server/routes/public.ts:570",
       "disposition": "known-legacy",
       "finding": "ARCH-AUTHORITY-001",
       "legacyExpiry": "the bounded-context repair that assigns explicit authority"
@@ -154178,7 +154178,7 @@
       "effect": "unclassified",
       "access": "sql-unclassified",
       "key": "table-access|server/routes/public.ts|unclassified:query#0",
-      "source": "server/routes/public.ts:266",
+      "source": "server/routes/public.ts:267",
       "disposition": "known-legacy",
       "finding": "ARCH-AUTHORITY-001",
       "legacyExpiry": "the bounded-context repair that assigns explicit authority"
@@ -154189,7 +154189,7 @@
       "effect": "write",
       "access": "drizzle",
       "key": "table-access|server/routes/public.ts|write:mvgsInterest#0",
-      "source": "server/routes/public.ts:353",
+      "source": "server/routes/public.ts:354",
       "disposition": "known-legacy",
       "finding": "ARCH-AUTHORITY-001",
       "legacyExpiry": "the bounded-context repair that assigns explicit authority"
@@ -154200,7 +154200,7 @@
       "effect": "write",
       "access": "sql",
       "key": "table-access|server/routes/public.ts|write:public.contact_inquiries#0",
-      "source": "server/routes/public.ts:195",
+      "source": "server/routes/public.ts:196",
       "disposition": "known-legacy",
       "finding": "ARCH-AUTHORITY-001",
       "legacyExpiry": "the bounded-context repair that assigns explicit authority"
@@ -154211,7 +154211,7 @@
       "effect": "write",
       "access": "sql",
       "key": "table-access|server/routes/public.ts|write:public.contact_inquiries#1",
-      "source": "server/routes/public.ts:214",
+      "source": "server/routes/public.ts:215",
       "disposition": "known-legacy",
       "finding": "ARCH-AUTHORITY-001",
       "legacyExpiry": "the bounded-context repair that assigns explicit authority"
@@ -154222,7 +154222,7 @@
       "effect": "write",
       "access": "sql",
       "key": "table-access|server/routes/public.ts|write:public.contact_inquiries#2",
-      "source": "server/routes/public.ts:221",
+      "source": "server/routes/public.ts:222",
       "disposition": "known-legacy",
       "finding": "ARCH-AUTHORITY-001",
       "legacyExpiry": "the bounded-context repair that assigns explicit authority"
@@ -154233,7 +154233,7 @@
       "effect": "write",
       "access": "sql",
       "key": "table-access|server/routes/public.ts|write:public.partner_applications#0",
-      "source": "server/routes/public.ts:293",
+      "source": "server/routes/public.ts:294",
       "disposition": "known-legacy",
       "finding": "ARCH-AUTHORITY-001",
       "legacyExpiry": "the bounded-context repair that assigns explicit authority"
@@ -154244,7 +154244,7 @@
       "effect": "write",
       "access": "sql",
       "key": "table-access|server/routes/public.ts|write:public.partner_applications#1",
-      "source": "server/routes/public.ts:299",
+      "source": "server/routes/public.ts:300",
       "disposition": "known-legacy",
       "finding": "ARCH-AUTHORITY-001",
       "legacyExpiry": "the bounded-context repair that assigns explicit authority"
@@ -154255,7 +154255,7 @@
       "effect": "write",
       "access": "sql",
       "key": "table-access|server/routes/public.ts|write:public.partner_applications#2",
-      "source": "server/routes/public.ts:310",
+      "source": "server/routes/public.ts:311",
       "disposition": "known-legacy",
       "finding": "ARCH-AUTHORITY-001",
       "legacyExpiry": "the bounded-context repair that assigns explicit authority"
@@ -154266,7 +154266,7 @@
       "effect": "write",
       "access": "sql",
       "key": "table-access|server/routes/public.ts|write:public.waitlist_signups#0",
-      "source": "server/routes/public.ts:126",
+      "source": "server/routes/public.ts:127",
       "disposition": "known-legacy",
       "finding": "ARCH-AUTHORITY-001",
       "legacyExpiry": "the bounded-context repair that assigns explicit authority"
@@ -154277,7 +154277,7 @@
       "effect": "write",
       "access": "sql",
       "key": "table-access|server/routes/public.ts|write:public.waitlist_signups#1",
-      "source": "server/routes/public.ts:146",
+      "source": "server/routes/public.ts:147",
       "disposition": "known-legacy",
       "finding": "ARCH-AUTHORITY-001",
       "legacyExpiry": "the bounded-context repair that assigns explicit authority"
@@ -158579,7 +158579,7 @@
       "effect": "read",
       "access": "drizzle",
       "key": "table-access|server/storage.ts|read:certificates#12",
-      "source": "server/storage.ts:2116",
+      "source": "server/storage.ts:2125",
       "disposition": "known-legacy",
       "finding": "ARCH-AUTHORITY-001",
       "legacyExpiry": "the bounded-context repair that assigns explicit authority"
@@ -158590,7 +158590,7 @@
       "effect": "read",
       "access": "drizzle",
       "key": "table-access|server/storage.ts|read:certificates#13",
-      "source": "server/storage.ts:3414",
+      "source": "server/storage.ts:3423",
       "disposition": "known-legacy",
       "finding": "ARCH-AUTHORITY-001",
       "legacyExpiry": "the bounded-context repair that assigns explicit authority"
@@ -158689,7 +158689,7 @@
       "effect": "read",
       "access": "drizzle",
       "key": "table-access|server/storage.ts|read:claimVerifications#0",
-      "source": "server/storage.ts:2311",
+      "source": "server/storage.ts:2320",
       "disposition": "known-legacy",
       "finding": "ARCH-AUTHORITY-001",
       "legacyExpiry": "the bounded-context repair that assigns explicit authority"
@@ -158700,7 +158700,7 @@
       "effect": "read",
       "access": "drizzle",
       "key": "table-access|server/storage.ts|read:labelOverrides#0",
-      "source": "server/storage.ts:2059",
+      "source": "server/storage.ts:2068",
       "disposition": "known-legacy",
       "finding": "ARCH-AUTHORITY-001",
       "legacyExpiry": "the bounded-context repair that assigns explicit authority"
@@ -158755,7 +158755,7 @@
       "effect": "read",
       "access": "drizzle",
       "key": "table-access|server/storage.ts|read:labelPrints#4",
-      "source": "server/storage.ts:2122",
+      "source": "server/storage.ts:2131",
       "disposition": "known-legacy",
       "finding": "ARCH-AUTHORITY-001",
       "legacyExpiry": "the bounded-context repair that assigns explicit authority"
@@ -158766,7 +158766,7 @@
       "effect": "read",
       "access": "drizzle",
       "key": "table-access|server/storage.ts|read:ownershipHistory#0",
-      "source": "server/storage.ts:2432",
+      "source": "server/storage.ts:2441",
       "disposition": "known-legacy",
       "finding": "ARCH-AUTHORITY-001",
       "legacyExpiry": "the bounded-context repair that assigns explicit authority"
@@ -158810,7 +158810,7 @@
       "effect": "read",
       "access": "tagged-sql",
       "key": "table-access|server/storage.ts|read:public.certificates#10",
-      "source": "server/storage.ts:2598",
+      "source": "server/storage.ts:2607",
       "disposition": "known-legacy",
       "finding": "ARCH-AUTHORITY-001",
       "legacyExpiry": "the bounded-context repair that assigns explicit authority"
@@ -158821,7 +158821,7 @@
       "effect": "read",
       "access": "sql",
       "key": "table-access|server/storage.ts|read:public.certificates#11",
-      "source": "server/storage.ts:2640",
+      "source": "server/storage.ts:2649",
       "disposition": "known-legacy",
       "finding": "ARCH-AUTHORITY-001",
       "legacyExpiry": "the bounded-context repair that assigns explicit authority"
@@ -158832,7 +158832,7 @@
       "effect": "read",
       "access": "sql",
       "key": "table-access|server/storage.ts|read:public.certificates#12",
-      "source": "server/storage.ts:2784",
+      "source": "server/storage.ts:2793",
       "disposition": "known-legacy",
       "finding": "ARCH-AUTHORITY-001",
       "legacyExpiry": "the bounded-context repair that assigns explicit authority"
@@ -158843,7 +158843,7 @@
       "effect": "read",
       "access": "sql",
       "key": "table-access|server/storage.ts|read:public.certificates#13",
-      "source": "server/storage.ts:2795",
+      "source": "server/storage.ts:2804",
       "disposition": "known-legacy",
       "finding": "ARCH-AUTHORITY-001",
       "legacyExpiry": "the bounded-context repair that assigns explicit authority"
@@ -158854,7 +158854,7 @@
       "effect": "read",
       "access": "sql",
       "key": "table-access|server/storage.ts|read:public.certificates#14",
-      "source": "server/storage.ts:2886",
+      "source": "server/storage.ts:2895",
       "disposition": "known-legacy",
       "finding": "ARCH-AUTHORITY-001",
       "legacyExpiry": "the bounded-context repair that assigns explicit authority"
@@ -158865,7 +158865,7 @@
       "effect": "read",
       "access": "tagged-sql",
       "key": "table-access|server/storage.ts|read:public.certificates#15",
-      "source": "server/storage.ts:3048",
+      "source": "server/storage.ts:3057",
       "disposition": "known-legacy",
       "finding": "ARCH-AUTHORITY-001",
       "legacyExpiry": "the bounded-context repair that assigns explicit authority"
@@ -158876,7 +158876,7 @@
       "effect": "read",
       "access": "tagged-sql",
       "key": "table-access|server/storage.ts|read:public.certificates#16",
-      "source": "server/storage.ts:3193",
+      "source": "server/storage.ts:3202",
       "disposition": "known-legacy",
       "finding": "ARCH-AUTHORITY-001",
       "legacyExpiry": "the bounded-context repair that assigns explicit authority"
@@ -158887,7 +158887,7 @@
       "effect": "read",
       "access": "sql",
       "key": "table-access|server/storage.ts|read:public.certificates#17",
-      "source": "server/storage.ts:3681",
+      "source": "server/storage.ts:3690",
       "disposition": "known-legacy",
       "finding": "ARCH-AUTHORITY-001",
       "legacyExpiry": "the bounded-context repair that assigns explicit authority"
@@ -158898,7 +158898,7 @@
       "effect": "read",
       "access": "tagged-sql",
       "key": "table-access|server/storage.ts|read:public.certificates#18",
-      "source": "server/storage.ts:3847",
+      "source": "server/storage.ts:3856",
       "disposition": "known-legacy",
       "finding": "ARCH-AUTHORITY-001",
       "legacyExpiry": "the bounded-context repair that assigns explicit authority"
@@ -158942,7 +158942,7 @@
       "effect": "read",
       "access": "sql",
       "key": "table-access|server/storage.ts|read:public.certificates#5",
-      "source": "server/storage.ts:2078",
+      "source": "server/storage.ts:2087",
       "disposition": "known-legacy",
       "finding": "ARCH-AUTHORITY-001",
       "legacyExpiry": "the bounded-context repair that assigns explicit authority"
@@ -158953,7 +158953,7 @@
       "effect": "read",
       "access": "sql",
       "key": "table-access|server/storage.ts|read:public.certificates#6",
-      "source": "server/storage.ts:2096",
+      "source": "server/storage.ts:2105",
       "disposition": "known-legacy",
       "finding": "ARCH-AUTHORITY-001",
       "legacyExpiry": "the bounded-context repair that assigns explicit authority"
@@ -158964,7 +158964,7 @@
       "effect": "read",
       "access": "sql",
       "key": "table-access|server/storage.ts|read:public.certificates#7",
-      "source": "server/storage.ts:2222",
+      "source": "server/storage.ts:2231",
       "disposition": "known-legacy",
       "finding": "ARCH-AUTHORITY-001",
       "legacyExpiry": "the bounded-context repair that assigns explicit authority"
@@ -158975,7 +158975,7 @@
       "effect": "read",
       "access": "sql",
       "key": "table-access|server/storage.ts|read:public.certificates#8",
-      "source": "server/storage.ts:2256",
+      "source": "server/storage.ts:2265",
       "disposition": "known-legacy",
       "finding": "ARCH-AUTHORITY-001",
       "legacyExpiry": "the bounded-context repair that assigns explicit authority"
@@ -158986,7 +158986,7 @@
       "effect": "read",
       "access": "sql",
       "key": "table-access|server/storage.ts|read:public.certificates#9",
-      "source": "server/storage.ts:2497",
+      "source": "server/storage.ts:2506",
       "disposition": "known-legacy",
       "finding": "ARCH-AUTHORITY-001",
       "legacyExpiry": "the bounded-context repair that assigns explicit authority"
@@ -158997,7 +158997,7 @@
       "effect": "read",
       "access": "sql",
       "key": "table-access|server/storage.ts|read:public.ownership_history#0",
-      "source": "server/storage.ts:3058",
+      "source": "server/storage.ts:3067",
       "disposition": "known-legacy",
       "finding": "ARCH-AUTHORITY-001",
       "legacyExpiry": "the bounded-context repair that assigns explicit authority"
@@ -159008,7 +159008,7 @@
       "effect": "read",
       "access": "sql",
       "key": "table-access|server/storage.ts|read:public.submission_items#0",
-      "source": "server/storage.ts:2784",
+      "source": "server/storage.ts:2793",
       "disposition": "known-legacy",
       "finding": "ARCH-AUTHORITY-001",
       "legacyExpiry": "the bounded-context repair that assigns explicit authority"
@@ -159074,7 +159074,7 @@
       "effect": "read",
       "access": "sql",
       "key": "table-access|server/storage.ts|read:public.submissions#5",
-      "source": "server/storage.ts:2748",
+      "source": "server/storage.ts:2757",
       "disposition": "known-legacy",
       "finding": "ARCH-AUTHORITY-001",
       "legacyExpiry": "the bounded-context repair that assigns explicit authority"
@@ -159085,7 +159085,7 @@
       "effect": "read",
       "access": "sql",
       "key": "table-access|server/storage.ts|read:public.submissions#6",
-      "source": "server/storage.ts:2784",
+      "source": "server/storage.ts:2793",
       "disposition": "known-legacy",
       "finding": "ARCH-AUTHORITY-001",
       "legacyExpiry": "the bounded-context repair that assigns explicit authority"
@@ -159096,7 +159096,7 @@
       "effect": "read",
       "access": "sql",
       "key": "table-access|server/storage.ts|read:public.transfer_verifications#0",
-      "source": "server/storage.ts:2692",
+      "source": "server/storage.ts:2701",
       "disposition": "known-legacy",
       "finding": "ARCH-AUTHORITY-001",
       "legacyExpiry": "the bounded-context repair that assigns explicit authority"
@@ -159107,7 +159107,7 @@
       "effect": "read",
       "access": "sql",
       "key": "table-access|server/storage.ts|read:public.transfer_verifications#1",
-      "source": "server/storage.ts:3439",
+      "source": "server/storage.ts:3448",
       "disposition": "known-legacy",
       "finding": "ARCH-AUTHORITY-001",
       "legacyExpiry": "the bounded-context repair that assigns explicit authority"
@@ -159129,7 +159129,7 @@
       "effect": "read",
       "access": "sql",
       "key": "table-access|server/storage.ts|read:public.users#1",
-      "source": "server/storage.ts:3681",
+      "source": "server/storage.ts:3690",
       "disposition": "known-legacy",
       "finding": "ARCH-AUTHORITY-001",
       "legacyExpiry": "the bounded-context repair that assigns explicit authority"
@@ -159140,7 +159140,7 @@
       "effect": "read",
       "access": "sql",
       "key": "table-access|server/storage.ts|read:public.users#2",
-      "source": "server/storage.ts:4004",
+      "source": "server/storage.ts:4013",
       "disposition": "known-legacy",
       "finding": "ARCH-AUTHORITY-001",
       "legacyExpiry": "the bounded-context repair that assigns explicit authority"
@@ -159151,7 +159151,7 @@
       "effect": "read",
       "access": "drizzle",
       "key": "table-access|server/storage.ts|read:reprintLog#0",
-      "source": "server/storage.ts:2128",
+      "source": "server/storage.ts:2137",
       "disposition": "known-legacy",
       "finding": "ARCH-AUTHORITY-001",
       "legacyExpiry": "the bounded-context repair that assigns explicit authority"
@@ -159206,7 +159206,7 @@
       "effect": "read",
       "access": "drizzle",
       "key": "table-access|server/storage.ts|read:transferVerifications#0",
-      "source": "server/storage.ts:2569",
+      "source": "server/storage.ts:2578",
       "disposition": "known-legacy",
       "finding": "ARCH-AUTHORITY-001",
       "legacyExpiry": "the bounded-context repair that assigns explicit authority"
@@ -159217,7 +159217,7 @@
       "effect": "read",
       "access": "drizzle",
       "key": "table-access|server/storage.ts|read:transferVerifications#1",
-      "source": "server/storage.ts:2652",
+      "source": "server/storage.ts:2661",
       "disposition": "known-legacy",
       "finding": "ARCH-AUTHORITY-001",
       "legacyExpiry": "the bounded-context repair that assigns explicit authority"
@@ -159228,7 +159228,7 @@
       "effect": "read",
       "access": "drizzle",
       "key": "table-access|server/storage.ts|read:transferVerifications#10",
-      "source": "server/storage.ts:3543",
+      "source": "server/storage.ts:3552",
       "disposition": "known-legacy",
       "finding": "ARCH-AUTHORITY-001",
       "legacyExpiry": "the bounded-context repair that assigns explicit authority"
@@ -159239,7 +159239,7 @@
       "effect": "read",
       "access": "drizzle",
       "key": "table-access|server/storage.ts|read:transferVerifications#11",
-      "source": "server/storage.ts:3787",
+      "source": "server/storage.ts:3796",
       "disposition": "known-legacy",
       "finding": "ARCH-AUTHORITY-001",
       "legacyExpiry": "the bounded-context repair that assigns explicit authority"
@@ -159250,7 +159250,7 @@
       "effect": "read",
       "access": "drizzle",
       "key": "table-access|server/storage.ts|read:transferVerifications#12",
-      "source": "server/storage.ts:3910",
+      "source": "server/storage.ts:3919",
       "disposition": "known-legacy",
       "finding": "ARCH-AUTHORITY-001",
       "legacyExpiry": "the bounded-context repair that assigns explicit authority"
@@ -159261,7 +159261,7 @@
       "effect": "read",
       "access": "drizzle",
       "key": "table-access|server/storage.ts|read:transferVerifications#2",
-      "source": "server/storage.ts:2998",
+      "source": "server/storage.ts:3007",
       "disposition": "known-legacy",
       "finding": "ARCH-AUTHORITY-001",
       "legacyExpiry": "the bounded-context repair that assigns explicit authority"
@@ -159272,7 +159272,7 @@
       "effect": "read",
       "access": "drizzle",
       "key": "table-access|server/storage.ts|read:transferVerifications#3",
-      "source": "server/storage.ts:3103",
+      "source": "server/storage.ts:3112",
       "disposition": "known-legacy",
       "finding": "ARCH-AUTHORITY-001",
       "legacyExpiry": "the bounded-context repair that assigns explicit authority"
@@ -159283,7 +159283,7 @@
       "effect": "read",
       "access": "drizzle",
       "key": "table-access|server/storage.ts|read:transferVerifications#4",
-      "source": "server/storage.ts:3230",
+      "source": "server/storage.ts:3239",
       "disposition": "known-legacy",
       "finding": "ARCH-AUTHORITY-001",
       "legacyExpiry": "the bounded-context repair that assigns explicit authority"
@@ -159294,7 +159294,7 @@
       "effect": "read",
       "access": "drizzle",
       "key": "table-access|server/storage.ts|read:transferVerifications#5",
-      "source": "server/storage.ts:3238",
+      "source": "server/storage.ts:3247",
       "disposition": "known-legacy",
       "finding": "ARCH-AUTHORITY-001",
       "legacyExpiry": "the bounded-context repair that assigns explicit authority"
@@ -159305,7 +159305,7 @@
       "effect": "read",
       "access": "drizzle",
       "key": "table-access|server/storage.ts|read:transferVerifications#6",
-      "source": "server/storage.ts:3259",
+      "source": "server/storage.ts:3268",
       "disposition": "known-legacy",
       "finding": "ARCH-AUTHORITY-001",
       "legacyExpiry": "the bounded-context repair that assigns explicit authority"
@@ -159316,7 +159316,7 @@
       "effect": "read",
       "access": "drizzle",
       "key": "table-access|server/storage.ts|read:transferVerifications#7",
-      "source": "server/storage.ts:3271",
+      "source": "server/storage.ts:3280",
       "disposition": "known-legacy",
       "finding": "ARCH-AUTHORITY-001",
       "legacyExpiry": "the bounded-context repair that assigns explicit authority"
@@ -159327,7 +159327,7 @@
       "effect": "read",
       "access": "drizzle",
       "key": "table-access|server/storage.ts|read:transferVerifications#8",
-      "source": "server/storage.ts:3319",
+      "source": "server/storage.ts:3328",
       "disposition": "known-legacy",
       "finding": "ARCH-AUTHORITY-001",
       "legacyExpiry": "the bounded-context repair that assigns explicit authority"
@@ -159338,7 +159338,7 @@
       "effect": "read",
       "access": "drizzle",
       "key": "table-access|server/storage.ts|read:transferVerifications#9",
-      "source": "server/storage.ts:3375",
+      "source": "server/storage.ts:3384",
       "disposition": "known-legacy",
       "finding": "ARCH-AUTHORITY-001",
       "legacyExpiry": "the bounded-context repair that assigns explicit authority"
@@ -159448,7 +159448,7 @@
       "effect": "write",
       "access": "drizzle",
       "key": "table-access|server/storage.ts|write:auditLog#2",
-      "source": "server/storage.ts:3153",
+      "source": "server/storage.ts:3162",
       "disposition": "known-legacy",
       "finding": "ARCH-AUTHORITY-001",
       "legacyExpiry": "the bounded-context repair that assigns explicit authority"
@@ -159459,7 +159459,7 @@
       "effect": "write",
       "access": "drizzle",
       "key": "table-access|server/storage.ts|write:auditLog#3",
-      "source": "server/storage.ts:3471",
+      "source": "server/storage.ts:3480",
       "disposition": "known-legacy",
       "finding": "ARCH-AUTHORITY-001",
       "legacyExpiry": "the bounded-context repair that assigns explicit authority"
@@ -159547,7 +159547,7 @@
       "effect": "write",
       "access": "drizzle",
       "key": "table-access|server/storage.ts|write:claimVerifications#0",
-      "source": "server/storage.ts:2281",
+      "source": "server/storage.ts:2290",
       "disposition": "known-legacy",
       "finding": "ARCH-AUTHORITY-001",
       "legacyExpiry": "the bounded-context repair that assigns explicit authority"
@@ -159558,7 +159558,7 @@
       "effect": "write",
       "access": "drizzle",
       "key": "table-access|server/storage.ts|write:claimVerifications#1",
-      "source": "server/storage.ts:2395",
+      "source": "server/storage.ts:2404",
       "disposition": "known-legacy",
       "finding": "ARCH-AUTHORITY-001",
       "legacyExpiry": "the bounded-context repair that assigns explicit authority"
@@ -159569,7 +159569,7 @@
       "effect": "write",
       "access": "drizzle",
       "key": "table-access|server/storage.ts|write:labelOverrides#0",
-      "source": "server/storage.ts:2082",
+      "source": "server/storage.ts:2091",
       "disposition": "known-legacy",
       "finding": "ARCH-AUTHORITY-001",
       "legacyExpiry": "the bounded-context repair that assigns explicit authority"
@@ -159580,7 +159580,7 @@
       "effect": "write",
       "access": "drizzle",
       "key": "table-access|server/storage.ts|write:labelOverrides#1",
-      "source": "server/storage.ts:2100",
+      "source": "server/storage.ts:2109",
       "disposition": "known-legacy",
       "finding": "ARCH-AUTHORITY-001",
       "legacyExpiry": "the bounded-context repair that assigns explicit authority"
@@ -159613,7 +159613,7 @@
       "effect": "write",
       "access": "drizzle",
       "key": "table-access|server/storage.ts|write:ownershipHistory#0",
-      "source": "server/storage.ts:2386",
+      "source": "server/storage.ts:2395",
       "disposition": "known-legacy",
       "finding": "ARCH-AUTHORITY-001",
       "legacyExpiry": "the bounded-context repair that assigns explicit authority"
@@ -159624,7 +159624,7 @@
       "effect": "write",
       "access": "drizzle",
       "key": "table-access|server/storage.ts|write:ownershipHistory#1",
-      "source": "server/storage.ts:2481",
+      "source": "server/storage.ts:2490",
       "disposition": "known-legacy",
       "finding": "ARCH-AUTHORITY-001",
       "legacyExpiry": "the bounded-context repair that assigns explicit authority"
@@ -159635,7 +159635,7 @@
       "effect": "write",
       "access": "drizzle",
       "key": "table-access|server/storage.ts|write:ownershipHistory#2",
-      "source": "server/storage.ts:2712",
+      "source": "server/storage.ts:2721",
       "disposition": "known-legacy",
       "finding": "ARCH-AUTHORITY-001",
       "legacyExpiry": "the bounded-context repair that assigns explicit authority"
@@ -159646,7 +159646,7 @@
       "effect": "write",
       "access": "drizzle",
       "key": "table-access|server/storage.ts|write:ownershipHistory#3",
-      "source": "server/storage.ts:3486",
+      "source": "server/storage.ts:3495",
       "disposition": "known-legacy",
       "finding": "ARCH-AUTHORITY-001",
       "legacyExpiry": "the bounded-context repair that assigns explicit authority"
@@ -159745,7 +159745,7 @@
       "effect": "write",
       "access": "sql",
       "key": "table-access|server/storage.ts|write:public.certificates#10",
-      "source": "server/storage.ts:2963",
+      "source": "server/storage.ts:2972",
       "disposition": "known-legacy",
       "finding": "ARCH-AUTHORITY-001",
       "legacyExpiry": "the bounded-context repair that assigns explicit authority"
@@ -159756,7 +159756,7 @@
       "effect": "write",
       "access": "sql",
       "key": "table-access|server/storage.ts|write:public.certificates#11",
-      "source": "server/storage.ts:3295",
+      "source": "server/storage.ts:3304",
       "disposition": "known-legacy",
       "finding": "ARCH-AUTHORITY-001",
       "legacyExpiry": "the bounded-context repair that assigns explicit authority"
@@ -159767,7 +159767,7 @@
       "effect": "write",
       "access": "sql",
       "key": "table-access|server/storage.ts|write:public.certificates#12",
-      "source": "server/storage.ts:3341",
+      "source": "server/storage.ts:3350",
       "disposition": "known-legacy",
       "finding": "ARCH-AUTHORITY-001",
       "legacyExpiry": "the bounded-context repair that assigns explicit authority"
@@ -159778,7 +159778,7 @@
       "effect": "write",
       "access": "sql",
       "key": "table-access|server/storage.ts|write:public.certificates#13",
-      "source": "server/storage.ts:3451",
+      "source": "server/storage.ts:3460",
       "disposition": "known-legacy",
       "finding": "ARCH-AUTHORITY-001",
       "legacyExpiry": "the bounded-context repair that assigns explicit authority"
@@ -159789,7 +159789,7 @@
       "effect": "write",
       "access": "sql",
       "key": "table-access|server/storage.ts|write:public.certificates#14",
-      "source": "server/storage.ts:3633",
+      "source": "server/storage.ts:3642",
       "disposition": "known-legacy",
       "finding": "ARCH-AUTHORITY-001",
       "legacyExpiry": "the bounded-context repair that assigns explicit authority"
@@ -159800,7 +159800,7 @@
       "effect": "write",
       "access": "sql",
       "key": "table-access|server/storage.ts|write:public.certificates#15",
-      "source": "server/storage.ts:3741",
+      "source": "server/storage.ts:3750",
       "disposition": "known-legacy",
       "finding": "ARCH-AUTHORITY-001",
       "legacyExpiry": "the bounded-context repair that assigns explicit authority"
@@ -159811,7 +159811,7 @@
       "effect": "write",
       "access": "sql",
       "key": "table-access|server/storage.ts|write:public.certificates#16",
-      "source": "server/storage.ts:3944",
+      "source": "server/storage.ts:3953",
       "disposition": "known-legacy",
       "finding": "ARCH-AUTHORITY-001",
       "legacyExpiry": "the bounded-context repair that assigns explicit authority"
@@ -159855,7 +159855,7 @@
       "effect": "write",
       "access": "sql",
       "key": "table-access|server/storage.ts|write:public.certificates#5",
-      "source": "server/storage.ts:2187",
+      "source": "server/storage.ts:2196",
       "disposition": "known-legacy",
       "finding": "ARCH-AUTHORITY-001",
       "legacyExpiry": "the bounded-context repair that assigns explicit authority"
@@ -159866,7 +159866,7 @@
       "effect": "write",
       "access": "sql",
       "key": "table-access|server/storage.ts|write:public.certificates#6",
-      "source": "server/storage.ts:2364",
+      "source": "server/storage.ts:2373",
       "disposition": "known-legacy",
       "finding": "ARCH-AUTHORITY-001",
       "legacyExpiry": "the bounded-context repair that assigns explicit authority"
@@ -159877,7 +159877,7 @@
       "effect": "write",
       "access": "sql",
       "key": "table-access|server/storage.ts|write:public.certificates#7",
-      "source": "server/storage.ts:2468",
+      "source": "server/storage.ts:2477",
       "disposition": "known-legacy",
       "finding": "ARCH-AUTHORITY-001",
       "legacyExpiry": "the bounded-context repair that assigns explicit authority"
@@ -159888,7 +159888,7 @@
       "effect": "write",
       "access": "sql",
       "key": "table-access|server/storage.ts|write:public.certificates#8",
-      "source": "server/storage.ts:2526",
+      "source": "server/storage.ts:2535",
       "disposition": "known-legacy",
       "finding": "ARCH-AUTHORITY-001",
       "legacyExpiry": "the bounded-context repair that assigns explicit authority"
@@ -159899,7 +159899,7 @@
       "effect": "write",
       "access": "sql",
       "key": "table-access|server/storage.ts|write:public.certificates#9",
-      "source": "server/storage.ts:2697",
+      "source": "server/storage.ts:2706",
       "disposition": "known-legacy",
       "finding": "ARCH-AUTHORITY-001",
       "legacyExpiry": "the bounded-context repair that assigns explicit authority"
@@ -159910,7 +159910,7 @@
       "effect": "write",
       "access": "tagged-sql",
       "key": "table-access|server/storage.ts|write:public.of#0",
-      "source": "server/storage.ts:2598",
+      "source": "server/storage.ts:2607",
       "disposition": "known-legacy",
       "finding": "ARCH-AUTHORITY-001",
       "legacyExpiry": "the bounded-context repair that assigns explicit authority"
@@ -159921,7 +159921,7 @@
       "effect": "write",
       "access": "tagged-sql",
       "key": "table-access|server/storage.ts|write:public.of#1",
-      "source": "server/storage.ts:3048",
+      "source": "server/storage.ts:3057",
       "disposition": "known-legacy",
       "finding": "ARCH-AUTHORITY-001",
       "legacyExpiry": "the bounded-context repair that assigns explicit authority"
@@ -159932,7 +159932,7 @@
       "effect": "write",
       "access": "tagged-sql",
       "key": "table-access|server/storage.ts|write:public.of#2",
-      "source": "server/storage.ts:3193",
+      "source": "server/storage.ts:3202",
       "disposition": "known-legacy",
       "finding": "ARCH-AUTHORITY-001",
       "legacyExpiry": "the bounded-context repair that assigns explicit authority"
@@ -159943,18 +159943,7 @@
       "effect": "write",
       "access": "tagged-sql",
       "key": "table-access|server/storage.ts|write:public.of#3",
-      "source": "server/storage.ts:3847",
-      "disposition": "known-legacy",
-      "finding": "ARCH-AUTHORITY-001",
-      "legacyExpiry": "the bounded-context repair that assigns explicit authority"
-    },
-    {
-      "category": "table-access",
-      "id": "write:public.service_tiers",
-      "effect": "write",
-      "access": "sql",
-      "key": "table-access|server/storage.ts|write:public.service_tiers#0",
-      "source": "server/storage.ts:2049",
+      "source": "server/storage.ts:3856",
       "disposition": "known-legacy",
       "finding": "ARCH-AUTHORITY-001",
       "legacyExpiry": "the bounded-context repair that assigns explicit authority"
@@ -160042,7 +160031,7 @@
       "effect": "write",
       "access": "sql",
       "key": "table-access|server/storage.ts|write:public.transfer_verifications#0",
-      "source": "server/storage.ts:3578",
+      "source": "server/storage.ts:3587",
       "disposition": "known-legacy",
       "finding": "ARCH-AUTHORITY-001",
       "legacyExpiry": "the bounded-context repair that assigns explicit authority"
@@ -160053,7 +160042,7 @@
       "effect": "write",
       "access": "sql",
       "key": "table-access|server/storage.ts|write:public.transfer_verifications#1",
-      "source": "server/storage.ts:3588",
+      "source": "server/storage.ts:3597",
       "disposition": "known-legacy",
       "finding": "ARCH-AUTHORITY-001",
       "legacyExpiry": "the bounded-context repair that assigns explicit authority"
@@ -160064,7 +160053,7 @@
       "effect": "write",
       "access": "sql",
       "key": "table-access|server/storage.ts|write:public.transfer_verifications#2",
-      "source": "server/storage.ts:3601",
+      "source": "server/storage.ts:3610",
       "disposition": "known-legacy",
       "finding": "ARCH-AUTHORITY-001",
       "legacyExpiry": "the bounded-context repair that assigns explicit authority"
@@ -160075,7 +160064,7 @@
       "effect": "write",
       "access": "sql",
       "key": "table-access|server/storage.ts|write:public.users#0",
-      "source": "server/storage.ts:2399",
+      "source": "server/storage.ts:2408",
       "disposition": "known-legacy",
       "finding": "ARCH-AUTHORITY-001",
       "legacyExpiry": "the bounded-context repair that assigns explicit authority"
@@ -160086,7 +160075,7 @@
       "effect": "write",
       "access": "sql",
       "key": "table-access|server/storage.ts|write:public.users#1",
-      "source": "server/storage.ts:3993",
+      "source": "server/storage.ts:4002",
       "disposition": "known-legacy",
       "finding": "ARCH-AUTHORITY-001",
       "legacyExpiry": "the bounded-context repair that assigns explicit authority"
@@ -160097,10 +160086,21 @@
       "effect": "write",
       "access": "drizzle",
       "key": "table-access|server/storage.ts|write:reprintLog#0",
-      "source": "server/storage.ts:2107",
+      "source": "server/storage.ts:2116",
       "disposition": "known-legacy",
       "finding": "ARCH-AUTHORITY-001",
       "legacyExpiry": "the bounded-context repair that assigns explicit authority"
+    },
+    {
+      "category": "table-access",
+      "id": "write:serviceTiers",
+      "effect": "write",
+      "access": "drizzle",
+      "key": "table-access|server/storage.ts|write:serviceTiers#0",
+      "source": "server/storage.ts:2042",
+      "disposition": "known-legacy",
+      "finding": "ARCH-AUTHORITY-001",
+      "legacyExpiry": "the bounded-context storage/schema authority repair; same pricing method/adapter transferred in pricing-recovery.md"
     },
     {
       "category": "table-access",
@@ -160119,7 +160119,7 @@
       "effect": "write",
       "access": "drizzle",
       "key": "table-access|server/storage.ts|write:transferVerifications#0",
-      "source": "server/storage.ts:2533",
+      "source": "server/storage.ts:2542",
       "disposition": "known-legacy",
       "finding": "ARCH-AUTHORITY-001",
       "legacyExpiry": "the bounded-context repair that assigns explicit authority"
@@ -160130,7 +160130,7 @@
       "effect": "write",
       "access": "drizzle",
       "key": "table-access|server/storage.ts|write:transferVerifications#1",
-      "source": "server/storage.ts:2589",
+      "source": "server/storage.ts:2598",
       "disposition": "known-legacy",
       "finding": "ARCH-AUTHORITY-001",
       "legacyExpiry": "the bounded-context repair that assigns explicit authority"
@@ -160141,7 +160141,7 @@
       "effect": "write",
       "access": "drizzle",
       "key": "table-access|server/storage.ts|write:transferVerifications#10",
-      "source": "server/storage.ts:3716",
+      "source": "server/storage.ts:3725",
       "disposition": "known-legacy",
       "finding": "ARCH-AUTHORITY-001",
       "legacyExpiry": "the bounded-context repair that assigns explicit authority"
@@ -160152,7 +160152,7 @@
       "effect": "write",
       "access": "drizzle",
       "key": "table-access|server/storage.ts|write:transferVerifications#11",
-      "source": "server/storage.ts:3834",
+      "source": "server/storage.ts:3843",
       "disposition": "known-legacy",
       "finding": "ARCH-AUTHORITY-001",
       "legacyExpiry": "the bounded-context repair that assigns explicit authority"
@@ -160163,7 +160163,7 @@
       "effect": "write",
       "access": "drizzle",
       "key": "table-access|server/storage.ts|write:transferVerifications#12",
-      "source": "server/storage.ts:3931",
+      "source": "server/storage.ts:3940",
       "disposition": "known-legacy",
       "finding": "ARCH-AUTHORITY-001",
       "legacyExpiry": "the bounded-context repair that assigns explicit authority"
@@ -160174,7 +160174,7 @@
       "effect": "write",
       "access": "drizzle",
       "key": "table-access|server/storage.ts|write:transferVerifications#2",
-      "source": "server/storage.ts:2720",
+      "source": "server/storage.ts:2729",
       "disposition": "known-legacy",
       "finding": "ARCH-AUTHORITY-001",
       "legacyExpiry": "the bounded-context repair that assigns explicit authority"
@@ -160185,7 +160185,7 @@
       "effect": "write",
       "access": "drizzle",
       "key": "table-access|server/storage.ts|write:transferVerifications#3",
-      "source": "server/storage.ts:2946",
+      "source": "server/storage.ts:2955",
       "disposition": "known-legacy",
       "finding": "ARCH-AUTHORITY-001",
       "legacyExpiry": "the bounded-context repair that assigns explicit authority"
@@ -160196,7 +160196,7 @@
       "effect": "write",
       "access": "drizzle",
       "key": "table-access|server/storage.ts|write:transferVerifications#4",
-      "source": "server/storage.ts:3033",
+      "source": "server/storage.ts:3042",
       "disposition": "known-legacy",
       "finding": "ARCH-AUTHORITY-001",
       "legacyExpiry": "the bounded-context repair that assigns explicit authority"
@@ -160207,7 +160207,7 @@
       "effect": "write",
       "access": "drizzle",
       "key": "table-access|server/storage.ts|write:transferVerifications#5",
-      "source": "server/storage.ts:3147",
+      "source": "server/storage.ts:3156",
       "disposition": "known-legacy",
       "finding": "ARCH-AUTHORITY-001",
       "legacyExpiry": "the bounded-context repair that assigns explicit authority"
@@ -160218,7 +160218,7 @@
       "effect": "write",
       "access": "drizzle",
       "key": "table-access|server/storage.ts|write:transferVerifications#6",
-      "source": "server/storage.ts:3180",
+      "source": "server/storage.ts:3189",
       "disposition": "known-legacy",
       "finding": "ARCH-AUTHORITY-001",
       "legacyExpiry": "the bounded-context repair that assigns explicit authority"
@@ -160229,7 +160229,7 @@
       "effect": "write",
       "access": "drizzle",
       "key": "table-access|server/storage.ts|write:transferVerifications#7",
-      "source": "server/storage.ts:3284",
+      "source": "server/storage.ts:3293",
       "disposition": "known-legacy",
       "finding": "ARCH-AUTHORITY-001",
       "legacyExpiry": "the bounded-context repair that assigns explicit authority"
@@ -160240,7 +160240,7 @@
       "effect": "write",
       "access": "drizzle",
       "key": "table-access|server/storage.ts|write:transferVerifications#8",
-      "source": "server/storage.ts:3331",
+      "source": "server/storage.ts:3340",
       "disposition": "known-legacy",
       "finding": "ARCH-AUTHORITY-001",
       "legacyExpiry": "the bounded-context repair that assigns explicit authority"
@@ -160251,7 +160251,7 @@
       "effect": "write",
       "access": "drizzle",
       "key": "table-access|server/storage.ts|write:transferVerifications#9",
-      "source": "server/storage.ts:3496",
+      "source": "server/storage.ts:3505",
       "disposition": "known-legacy",
       "finding": "ARCH-AUTHORITY-001",
       "legacyExpiry": "the bounded-context repair that assigns explicit authority"
