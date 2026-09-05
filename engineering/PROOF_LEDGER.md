@@ -1,5 +1,15 @@
 # Engineering proof ledger
 
+## 2026-09-05 pricing P2a — canonical consumers, not full pricing closure
+
+[Same pricing packet](../.claude/controlled-code-lead/tasks/repository-architecture-recovery-20260904/pricing-recovery.md):
+Home/Pricing/Submit use live tiers; two static bulk-money tables consolidated into
+one shared policy-band component. Root/independent Sol/final clean19/19 prove current
+and unavailable/paused/new tier cases, explicit three-service switching, promo basis
+and pending/failed quote behavior. Clean69 regression tests and final build pass;
+Terra architecture8498 passes without broader ownership/gate relaxation. P2b public
+variants/SEO/guides and P3 Admin/API/payment/receipt propagation remain open.
+
 ## 2026-09-05 pricing P1 — foundation verified; full pricing finding remains open
 
 [Pricing recovery packet](../.claude/controlled-code-lead/tasks/repository-architecture-recovery-20260904/pricing-recovery.md)

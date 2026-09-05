@@ -2,6 +2,14 @@
 
 ## Current checkpoint and next bounded wave
 
+P2a canonical pricing consumer wave is independently locally proven19/19, clean
+regressions69/69 plus expanded19/19 and final build. See pricing-recovery.md exact
+hashes, limits, rollback and CI handles. WIP checkpoint/push follows, then P2b
+variants/published pricing copy and P3 full API/payment/receipt proof. No new owner
+decision needed. Existing heartbeat ACTIVE resume safeguard; no scheduled pause
+between active waves. P1 checkpoint3ab01241 is pushed to existing draftPR336;
+primary33991782158 app in progress/image red at latest read. No deployment or waiver.
+
 Current continuation supersedes the historical goal/pause wording below: owner
 explicitly renewed continuous execution and wave-end WIP commit/push authority.
 Pricing P1 is implemented and independently8/8 locally proven, not the whole pricing

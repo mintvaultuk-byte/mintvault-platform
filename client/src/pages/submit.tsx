@@ -4,8 +4,14 @@ import { useQuery, useMutation } from "@tanstack/react-query";
 import { loadStripe } from "@stripe/stripe-js";
 import { Elements, CardElement, useStripe, useElements } from "@stripe/react-stripe-js";
 import { apiRequest } from "@/lib/queryClient";
-import { pricingTiers, submissionTypes, getInsuranceTier, getInsuranceSurchargePerCard } from "@shared/commerce";
-import type { PricingTier } from "@shared/schema";
+import {
+  submissionTypes,
+  getInsuranceTier,
+  getInsuranceSurchargePerCard,
+  type PricingTier,
+  type LivePricingTier,
+} from "@shared/commerce";
+import { usePricingProjection } from "@/lib/pricing-projection";
 import {
   ArrowLeft,
   ArrowRight,
@@ -182,22 +188,16 @@ const OTHER_SERVICES_INFO = [
   {
     id: "reholder",
     name: "Reholder",
-    price: "£15 / card",
-    turnaround: "15 working days",
     desc: "New slab + VaultLock NFC chip for an existing graded card",
   },
   {
     id: "crossover",
     name: "Crossover",
-    price: "£35 / card",
-    turnaround: "15 working days",
     desc: "Grade a card from another company (PSA, BGS, etc.)",
   },
   {
     id: "authentication",
     name: "Authentication",
-    price: "£15 / card",
-    turnaround: "15 working days",
     desc: "Verify authenticity — no grade assigned",
   },
 ];
@@ -210,7 +210,7 @@ function Step1Tier({
 }: {
   state: WizardState;
   setState: (s: WizardState) => void;
-  tiers: PricingTier[];
+  tiers: LivePricingTier[];
   capacity?: Record<string, { active: number; max: number; full: boolean; forceOpen: boolean }>;
 }) {
   const typeName = submissionTypes.find((t) => t.id === state.type)?.name || state.type;
@@ -232,7 +232,7 @@ function Step1Tier({
           const isSelected = state.tier === tier.id;
           const estimatedReturn = tier.turnaroundDays ? getEstimatedReturnDate(tier.turnaroundDays) : null;
           const cap = capacity?.[tier.id];
-          const isFull = state.type === "grading" && cap?.full === true;
+          const isFull = tier.capacityStatus !== "open" || (state.type === "grading" && cap?.full === true);
           return (
             <button
               key={tier.id}
@@ -253,7 +253,7 @@ function Step1Tier({
                     <h3 className="text-[#D4AF37] font-bold text-lg tracking-wider">{tier.name}</h3>
                     {isFull && (
                       <span className="text-[10px] font-bold uppercase tracking-[0.12em] bg-red-100 text-red-600 border border-red-200 rounded px-1.5 py-0.5">
-                        Fully Booked
+                        Currently unavailable
                       </span>
                     )}
                   </div>
@@ -301,7 +301,7 @@ function Step1Tier({
             {OTHER_SERVICES_INFO.map((svc) => (
               <button
                 key={svc.id}
-                onClick={() => setState({ ...state, type: svc.id, tier: svc.id })}
+                onClick={() => setState({ ...state, type: svc.id, tier: "" })}
                 className="w-full border border-[#D4AF37]/15 hover:border-[#D4AF37]/40 rounded-xl p-3.5 text-left transition-all bg-[#FAFAF8]"
                 data-testid={`button-other-service-${svc.id}`}
               >
@@ -309,9 +309,8 @@ function Step1Tier({
                   <div>
                     <h3 className="text-[#D4AF37]/80 font-bold text-sm tracking-wider">{svc.name}</h3>
                     <p className="text-[#888888] text-xs mt-0.5">{svc.desc}</p>
-                    <p className="text-[#AAAAAA] text-xs mt-0.5">{svc.turnaround} from receipt</p>
+                    <p className="text-[#AAAAAA] text-xs mt-0.5">View current pricing and turnaround</p>
                   </div>
-                  <span className="text-[#888888] font-bold text-sm">{svc.price}</span>
                 </div>
               </button>
             ))}
@@ -864,14 +863,22 @@ type GradingQuote = {
  * Authoritative checkout quote from the server — the SAME code path
  * (computeGradingQuote → resolveGradingDiscount) the PaymentIntent uses, so the
  * displayed total equals the charged amount by construction. The wizard DISPLAYS
- * these figures; it never computes the discount or total itself. keepPreviousData
- * (placeholderData) means a new quote never flashes a wrong number while loading.
+ * these figures; it never computes the discount or total itself. Pending or failed
+ * quotes never display an amount from previous inputs.
  */
 function useGradingQuote(tier: PricingTier | undefined, state: WizardState) {
-  const tierId = tier?.id ?? state.tier;
+  const tierId = tier?.id;
   const code = (state.promoCode || "").trim();
-  return useQuery<GradingQuote>({
-    queryKey: ["/api/grading/quote", state.type, tierId, state.quantity, state.declaredValue, code.toUpperCase()],
+  const query = useQuery<GradingQuote>({
+    queryKey: [
+      "/api/grading/quote",
+      state.type,
+      tierId,
+      tier?.pricePerCard,
+      state.quantity,
+      state.declaredValue,
+      code.toUpperCase(),
+    ],
     queryFn: async () => {
       const res = await apiRequest("POST", "/api/grading/quote", {
         type: state.type,
@@ -883,9 +890,13 @@ function useGradingQuote(tier: PricingTier | undefined, state: WizardState) {
       return res.json();
     },
     enabled: !!tierId && state.quantity >= 1,
-    placeholderData: (prev) => prev,
-    staleTime: 30_000,
+    staleTime: 0,
+    refetchOnMount: "always",
+    refetchOnWindowFocus: "always",
+    refetchInterval: 60_000,
+    retry: false,
   });
+  return { ...query, data: !tierId || query.isError || query.isFetching ? undefined : query.data };
 }
 
 /** Friendly label for the discount line, from the server's resolved discountType. */
@@ -1432,6 +1443,11 @@ function Step5Payment({
     e.preventDefault();
     setError("");
 
+    if (!tier || !quote) {
+      setError("Current pricing is unavailable. Refresh your quote before paying.");
+      return;
+    }
+
     if (!stripe || !elements) {
       setError("Payment system not ready. Please try again.");
       return;
@@ -1844,17 +1860,8 @@ function SubmitWizardInner() {
   }, [state, step]);
 
   const serviceType = state.type;
-  const { data: fetchedTiers } = useQuery<PricingTier[]>({
-    queryKey: ["/api/service-tiers", serviceType],
-    queryFn: async () => {
-      const res = await fetch(`/api/service-tiers?serviceType=${serviceType}`);
-      if (!res.ok) throw new Error("Failed to fetch tiers");
-      return res.json();
-    },
-    enabled: !!serviceType,
-  });
-
-  const activeTiers = fetchedTiers || pricingTiers;
+  const pricing = usePricingProjection(serviceType, !!serviceType);
+  const activeTiers = pricing.tiers;
 
   // Capacity data — used to grey out full tiers on step 1
   const { data: capacityData } = useQuery<
@@ -1876,14 +1883,19 @@ function SubmitWizardInner() {
   }, [urlTier, activeTiers]);
 
   useEffect(() => {
-    if (state.tier && activeTiers.length > 0 && !activeTiers.some((t) => t.id === state.tier)) {
+    if (state.tier && !pricing.isPending && !pricing.isError && !activeTiers.some((t) => t.id === state.tier)) {
       setState((s) => ({ ...s, tier: "" }));
     }
-  }, [state.type, activeTiers]);
+  }, [state.type, activeTiers, pricing.isPending, pricing.isError]);
 
   const selectedTier = activeTiers.find((t) => t.id === state.tier);
+  const tierAvailable =
+    !!selectedTier &&
+    selectedTier.capacityStatus === "open" &&
+    !(serviceType === "grading" && capacityData?.[selectedTier.id]?.full);
 
   const canNext = () => {
+    if (!tierAvailable) return false;
     switch (step) {
       case 1:
         return !!state.tier;
@@ -1955,13 +1967,31 @@ function SubmitWizardInner() {
 
       <StepIndicator step={step} accentColor={gameAccentColor(state.cardItems.find((c) => c.game)?.game ?? "")} />
 
+      {activeTiers.length === 0 && (
+        <p role="status" className="text-center my-4">
+          {pricing.isPending ? "Loading current pricing…" : "Current pricing is unavailable."}
+          <button onClick={() => void pricing.refetch()} className="underline ml-2">
+            Retry
+          </button>
+        </p>
+      )}
+
+      {step > 1 && activeTiers.length > 0 && !tierAvailable && (
+        <p role="status" className="text-center my-4">
+          Your selected tier is currently unavailable.
+          <button onClick={() => setStep(1)} className="underline ml-2">
+            Choose an available service
+          </button>
+        </p>
+      )}
+
       {step === 1 && <Step1Tier state={state} setState={setState} tiers={activeTiers} capacity={capacityData} />}
       {step === 2 && <Step2Cards state={state} setState={setState} />}
       {step === 3 && (
         <Step3Review state={state} setState={setState} tier={selectedTier} vcPercent={vcPercent} vcTier={vcTier} />
       )}
       {step === 4 && <Step4Shipping state={state} setState={setState} />}
-      {step === 5 && (
+      {step === 5 && tierAvailable && (
         <Step5Payment
           state={state}
           tier={selectedTier}

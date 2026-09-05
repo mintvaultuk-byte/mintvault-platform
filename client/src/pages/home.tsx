@@ -5,14 +5,14 @@ import { ArrowRight, Shield, Cpu, MapPin, RefreshCw, CheckCheck, Clock, Zap } fr
 import { Card, CardContent, CardHeader } from "@/components/ui/card";
 import { cn } from "@/lib/utils";
 import { useActivePromo } from "@/hooks/use-active-promo";
-import { PromoBanner, TierPriceWithPromo } from "@/components/v2/promo-display";
+import { PromoBanner, TierPriceWithPromo, BulkDiscountGuide } from "@/components/v2/promo-display";
 import HeaderV2 from "@/components/v2/header-v2";
 import FooterV2 from "@/components/v2/footer-v2";
 import AmbientLayer from "@/components/v2/ambient-layer";
 import DarkSectionGlow from "@/components/v2/dark-section-glow";
 import GradientButton from "@/components/ui/gradient-button";
 import CardPopulationChart from "@/components/v2/card-population-chart";
-import { pricingTiers } from "@shared/commerce";
+import { usePricingProjection } from "@/lib/pricing-projection";
 import type { SlabShowcaseItem } from "@/components/SlabShowcase";
 
 // Code-split: Three.js + showcase only load when the hero has certs to show.
@@ -21,7 +21,7 @@ const SlabShowcase = lazy(() => import("@/components/SlabShowcase"));
 const TIER_ICONS: Record<string, { shortName: string; blurb: string; icon: React.ReactNode }> = {
   standard: {
     shortName: "Vault Queue",
-    blurb: "No rush. Full grade, NFC chip, registry listing — at the best price per card.",
+    blurb: "Full grade, NFC chip and registry listing. Current turnaround shown below.",
     icon: <Shield size={20} />,
   },
   priority: {
@@ -31,7 +31,7 @@ const TIER_ICONS: Record<string, { shortName: string; blurb: string; icon: React
   },
   express: {
     shortName: "Express",
-    blurb: "Back in under a week. For grails, auction deadlines, and holiday hand-offs.",
+    blurb: "For time-sensitive submissions. Check the current turnaround before booking.",
     icon: <Zap size={20} />,
   },
 };
@@ -217,6 +217,7 @@ function FadeIn({ children, className = "" }: { children: React.ReactNode; class
 // ── Main page ──────────────────────────────────────────────────────────────
 
 export default function HomeV2() {
+  const pricing = usePricingProjection();
   const { data: stats, error: statsError } = useQuery<HomepageStats>({
     queryKey: ["/api/v2/homepage-stats"],
     queryFn: async () => {
@@ -388,7 +389,7 @@ export default function HomeV2() {
             className="font-mono-v2 text-xs md:text-sm uppercase tracking-wider mt-2"
             style={{ color: "var(--v2-ink-mute)" }}
           >
-            From &pound;19 &middot; 40 day turnaround &middot; UK return shipping insured
+            Current tiers and turnaround below &middot; UK return shipping insured
           </p>
         </div>
 
@@ -454,7 +455,7 @@ export default function HomeV2() {
                 className="font-display italic font-medium text-3xl md:text-5xl leading-tight"
                 style={{ color: "#FFFFFF" }}
               >
-                Three tiers.
+                Service tiers.
                 <br />
                 <span className="font-display italic font-normal" style={{ color: "var(--v2-gold)" }}>
                   One standard.
@@ -470,10 +471,17 @@ export default function HomeV2() {
 
             <div className="flex justify-center">
               <div className="grid grid-cols-1 md:grid-cols-3 gap-5 md:gap-6 w-full" style={{ maxWidth: "1080px" }}>
-                {pricingTiers.map((tier) => {
-                  const d = TIER_ICONS[tier.id];
+                {pricing.tiers.length === 0 && (
+                  <p role="status" className="text-white">
+                    {pricing.isPending ? "Loading current pricing…" : "Current pricing is unavailable."}
+                    <button onClick={() => void pricing.refetch()} className="underline ml-2">
+                      Retry
+                    </button>
+                  </p>
+                )}
+                {pricing.tiers.map((tier) => {
+                  const d = TIER_ICONS[tier.id] ?? { shortName: tier.name, blurb: "", icon: <Shield size={20} /> };
                   const price = tier.pricePerCard / 100;
-                  const days = tier.turnaroundDays ?? 0;
                   const featured = tier.id === "priority";
 
                   return (
@@ -496,11 +504,11 @@ export default function HomeV2() {
                           <div className="w-10 h-10 rounded-xl bg-[#1a1400] border border-[#D4AF37]/20 flex items-center justify-center text-[#D4AF37]">
                             {d.icon}
                           </div>
-                          <h3 className="xl:text-3xl md:text-2xl text-3xl font-semibold text-white">{d.shortName}</h3>
+                          <h3 className="xl:text-3xl md:text-2xl text-3xl font-semibold text-white">{tier.name}</h3>
                         </div>
                         <p className="xl:text-sm md:text-xs text-sm text-[#888] mb-4">{d.blurb}</p>
                         <TierPriceWithPromo tierId={tier.id} fullPricePounds={price} promo={promo} />
-                        <p className="text-xs text-[#666] mt-1">{days} working day turnaround</p>
+                        <p className="text-xs text-[#666] mt-1">{tier.turnaround}</p>
                       </CardHeader>
 
                       <CardContent className="pt-0 flex flex-col flex-1">
@@ -520,11 +528,20 @@ export default function HomeV2() {
                           </ul>
                         </div>
 
-                        <Link href="/submit" className="no-underline block">
-                          <GradientButton height="52px" className="w-full">
-                            Start a submission <ArrowRight size={14} />
-                          </GradientButton>
-                        </Link>
+                        {tier.capacityStatus !== "open" ? (
+                          <p role="status" className="text-white">
+                            {tier.capacityMessage || "This tier is currently unavailable."}
+                          </p>
+                        ) : (
+                          <Link
+                            href={`/submit?type=grading&tier=${encodeURIComponent(tier.id)}`}
+                            className="no-underline block"
+                          >
+                            <GradientButton height="52px" className="w-full">
+                              Start a submission <ArrowRight size={14} />
+                            </GradientButton>
+                          </Link>
+                        )}
                       </CardContent>
                     </Card>
                   );
@@ -533,55 +550,7 @@ export default function HomeV2() {
             </div>
 
             {/* Bulk-discount tiers table — mirrors /pricing. Always visible. */}
-            <div className="mt-12 max-w-3xl mx-auto">
-              <p
-                className="font-mono-v2 text-[10px] md:text-xs uppercase tracking-[0.3em] no-text-shadow mb-3 text-center"
-                style={{ color: "#D4AF37" }}
-              >
-                Bulk discount tiers
-              </p>
-              <div className="overflow-x-auto rounded-xl border border-[#333] bg-[#0f0e0b]">
-                <table className="w-full text-sm">
-                  <thead>
-                    <tr className="border-b border-[#333]">
-                      <th className="text-left py-3 px-4 text-[10px] uppercase tracking-widest font-bold text-[#D4AF37]">
-                        Cards
-                      </th>
-                      <th className="text-right py-3 px-4 text-[10px] uppercase tracking-widest font-bold text-[#D4AF37]">
-                        Vault Queue
-                      </th>
-                      <th className="text-right py-3 px-4 text-[10px] uppercase tracking-widest font-bold text-[#D4AF37]">
-                        Standard
-                      </th>
-                      <th className="text-right py-3 px-4 text-[10px] uppercase tracking-widest font-bold text-[#D4AF37]">
-                        Express
-                      </th>
-                    </tr>
-                  </thead>
-                  <tbody>
-                    {[
-                      { qty: "10+", off: "5% off", vq: "£18.05", st: "£23.75", ex: "£42.75" },
-                      { qty: "25+", off: "7.5% off", vq: "£17.58", st: "£23.13", ex: "£41.63" },
-                      { qty: "50+", off: "10% off", vq: "£17.10", st: "£22.50", ex: "£40.50" },
-                    ].map((row) => (
-                      <tr key={row.qty} className="border-b border-[#222] last:border-b-0">
-                        <td className="py-3 px-4">
-                          <div className="text-white font-semibold">{row.qty}</div>
-                          <div className="text-[#666] text-[10px] uppercase tracking-wider">{row.off}</div>
-                        </td>
-                        <td className="py-3 px-4 text-right font-mono text-[#ccc]">{row.vq}</td>
-                        <td className="py-3 px-4 text-right font-mono text-[#ccc]">{row.st}</td>
-                        <td className="py-3 px-4 text-right font-mono text-[#ccc]">{row.ex}</td>
-                      </tr>
-                    ))}
-                  </tbody>
-                </table>
-              </div>
-              <p className="font-body text-xs md:text-sm text-center mt-3" style={{ color: "var(--v2-ink-mute)" }}>
-                Vault Club and bulk discounts are mutually exclusive — the higher discount applies. Pristine 10P upgrade
-                is excluded from bulk pricing.
-              </p>
-            </div>
+            <BulkDiscountGuide />
           </div>
         </section>
       </FadeIn>
@@ -987,7 +956,7 @@ export default function HomeV2() {
             See yourself on the registry.
           </h2>
           <p className="font-body text-sm md:text-base mb-10" style={{ color: "#ffffff" }}>
-            From &pound;19. UK-based. Insured in transit.
+            View current grading tiers above. UK-based. Insured in transit.
           </p>
           <div className="flex flex-wrap items-center justify-center gap-4 mb-6">
             <Link href="/submit" className="no-underline">

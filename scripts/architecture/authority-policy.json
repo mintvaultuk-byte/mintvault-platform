@@ -75,6 +75,11 @@
   ],
   "scanRoots": ["server", "client/src", "shared", "scripts", "migrations", "migrations-vq", "config/components"],
   "ownerRules": [
+    { "prefix": "client/src/pages/home.tsx", "owner": "commerce-platform" },
+    { "prefix": "client/src/pages/pricing.tsx", "owner": "commerce-platform" },
+    { "prefix": "client/src/pages/submit.tsx", "owner": "commerce-platform" },
+    { "prefix": "client/src/hooks/use-active-promo.ts", "owner": "commerce-platform" },
+    { "prefix": "client/src/components/v2/promo-display.tsx", "owner": "commerce-platform" },
     { "prefix": "client/src/lib/pricing-projection.ts", "owner": "commerce-platform" },
     { "prefix": "client/src/pages/admin-pricing.tsx", "owner": "commerce-platform" },
     { "prefix": "shared/commerce.ts", "owner": "commerce-platform" },

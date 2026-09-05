@@ -1,5 +1,63 @@
 # Commercial pricing recovery — existing ARCH-PRICING-001
 
+## P2a active consumer wave
+
+P1 checkpoint `3ab01241b9400869ac126584d728992b23f1ccee` pushed non-force to
+existing draftPR336. Primary CI33991782158, governance33991782076/33991778409
+started on that SHA. Full pricing finding remains IN_PROGRESS.
+
+Next bounded manifest: existing `home.tsx`, `pricing.tsx`, `submit.tsx`, the P1
+pricing hook, plus exact additions `client/src/hooks/use-active-promo.ts`,
+`client/src/components/v2/promo-display.tsx`, `tests/pricing-consumers.test.ts`.
+Canonical tier cards use live names/prices/turnaround/features/availability;
+static bulk-money tables become price-free current-quote guidance while retaining
+the shared discount bands. Preserve separate membership/add-on/insurance/shipping
+authorities. Other-service chooser advertises no hard-coded fee/turnaround and
+fetches its explicitly selected service. No static fallback or unavailable tier
+may advance the wizard; quote display must not retain a previous-input amount.
+Promo display may use server discount amounts only when their original-price
+basis matches the current tier, never independently recompute the charged amount.
+No payment service, provider call, stored history or schema mutation in this wave.
+Same snapshot/type-gate manifests apply. Variants/SEO/guides and full P3 remain next.
+
+P2a6/6 baseline tests reproduced wrong live-name/price, failure fallback, URL-selected
+unavailable tier and stale-promo basis. Root repair now10 consumer+5 foundation
+tests green. Added valid checkout reachability and pending/failed quote regressions;
+an implementation-stage missing bulk import and step5 guard mistake were fixed
+before checkpoint. Independent Sol changed-surface proof pending. Terra verifies
+exact commerce file ownership for these five client surfaces and retirement of66
+legacy keys (home13/pricing22/submit29/promo-hook1/promo-display1), no new broad
+server/schema rule or gate change. Remains one consumer-boundary repair, not a
+claim to finish all pricing surfaces or server payment/receipt parity.
+
+P2a checkpoint receipt: root and independent Sol19/19 (consumer14+foundation5),
+zero skips. Three real React Other Services clicks prove explicit URLs, price/type
+separation and required new selection. Held-out promo basis/arithmetic inputs and
+new tier IDs verified; the residual three-tier FAQ contradiction was repaired and
+tested on both public pages. Sol reports no remaining changed-surface defect or
+focused proof gap. Clean exact-lock6-suite69/69 (before three new click cases),
+then final expanded19/19; final clean client/server build PASS. Root TypeScript
+PASS; scoped lint0errors/5warnings; test ratchet345 unchanged with505 files.
+Terra normal architecture8498 PASS: pricing1785→1764/session588→587; all other
+category counts unchanged. Parent101/nested34 valid, NOT READY. Postflight's
+existing governance/egress/dirty/protected-review red remains recorded, not waived.
+P1 CI33991782158 latest observation still running its app job, image vulnerability
+gate red, dependency/Gitleaks/CodeQL green. No hosted-green or release claim.
+
+Final independently verified P2a hashes:
+```text
+e6530c5d7fe57b02ccd793c637b567f51f20403560e0c18ac615804475c55e8a client/src/pages/home.tsx
+35ba5cef66bc774f2e53280154c306163177410f3352603c3ecbd99fc385048f client/src/pages/pricing.tsx
+a871b44429dba9a2083478b20697067ec1f3cfb899338006e6c596ae1b264962 client/src/pages/submit.tsx
+16c67d0103c0c11aa845ef7384f30013949bfcc9d003a8833f04b2a60490d777 client/src/hooks/use-active-promo.ts
+5b3d55c3c7acb087dcced1724c781a66c209d2e7f5c22e7e403cefc7c4963a54 client/src/components/v2/promo-display.tsx
+67d86cbf4e8a13d37451add680989083b1d9aac6183b5cb7c3d573fed2fc5dcb tests/pricing-consumers.test.ts
+```
+
+Rollback P2a as one client code/cache-key set to P1; the P1 live API and historical
+receipts remain unchanged. Old consumer code again has stale advertisements, so
+prefer forward repair; no stored price, quote, PaymentIntent or receipt rewrite.
+
 Baseline `c228af1998fb770e12c93758d3737fc92c5a9009`, feature branch
 `fix/resource-hardening-staging-20260827`. Owner authorization is already recorded
 in `owner-approval-record.md`; root sole writer, Terra read-only caller discovery,
