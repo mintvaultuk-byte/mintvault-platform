@@ -34,7 +34,7 @@ const faqs = [
   },
   {
     question: "What is the minimum value a card should have before grading is worthwhile?",
-    answer: "As a general guideline, the raw market value of the card should be at least 3 to 5 times the grading cost for grading to make financial sense. However, many collectors grade cards for protection and personal enjoyment regardless of monetary value. Our grading starts from £19 per card.",
+    answer: "Compare the current submission quote with your card’s realistic market value and your reasons for grading. A grade or resale gain is not guaranteed. See the current pricing page for fees and available services.",
   },
 ];
 
@@ -134,7 +134,7 @@ export default function HowToGradePokemonCards() {
               Visit the MintVault <Link href="/submit" className="text-[#D4AF37] hover:underline" data-testid="link-submit">submission page</Link> to start your order. You will need to:
             </p>
             <ul className="list-disc list-inside space-y-2 text-[#d4d4d4] text-sm pl-2">
-              <li>Choose your service tier (Vault Queue, Standard, or Express)</li>
+              <li>Choose an available service tier</li>
               <li>Enter the details for each card, including the card name, set, and card number</li>
               <li>Declare the value of each card for insurance purposes</li>
               <li>Pay securely online</li>
@@ -143,7 +143,7 @@ export default function HowToGradePokemonCards() {
               After completing your submission, you will receive a confirmation with your submission reference number and our shipping address. Print or save this confirmation as you will need to include it with your cards.
             </p>
             <p>
-              Not sure which tier to choose? View our <Link href="/" className="text-[#D4AF37] hover:underline" data-testid="link-pricing">pricing page</Link> for a comparison of all service tiers, turnaround times, and features.
+              Not sure which tier to choose? View our <Link href="/pricing" className="text-[#D4AF37] hover:underline" data-testid="link-pricing">pricing page</Link> for a comparison of all service tiers, turnaround times, and features.
             </p>
           </div>
         </section>

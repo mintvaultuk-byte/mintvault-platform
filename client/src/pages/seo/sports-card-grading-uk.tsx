@@ -21,7 +21,7 @@ const faqs = [
   },
   {
     question: "How much does sports card grading cost in the UK?",
-    answer: "MintVault UK grading starts from £19 per card. Three service tiers: Vault Queue (40 working days, £19), Standard (15 working days, £25), Express (5 working days, £45). Bulk discounts apply for 10 or more cards. All prices include insured return shipping.",
+    answer: "See the current pricing page for available grading services, prices and turnaround. Your submission quote confirms applicable discounts, insurance, return shipping and the total before payment.",
   },
   {
     question: "How are sports cards graded by MintVault?",
@@ -91,20 +91,12 @@ export default function SportsCardGradingUk() {
         <section className="mb-10" data-testid="section-sports-tiers">
           <h2 className="text-2xl font-bold text-[#D4AF37] tracking-wide mb-4">Service Tiers & Pricing</h2>
           <div className="space-y-3">
-            {[
-              { tier: "Vault Queue", days: "40 working days", price: "£19/card" },
-              { tier: "Standard", days: "15 working days", price: "£25/card" },
-              { tier: "Express", days: "5 working days", price: "£45/card" },
-            ].map((t) => (
-              <div key={t.tier} className="flex items-center justify-between border border-[#D4AF37]/20 bg-[#0a0e1a]/85 backdrop-blur-sm rounded-lg px-4 py-3">
-                <span className="text-white text-sm font-medium">{t.tier}</span>
-                <span className="text-[#d4d4d4] text-sm">{t.days}</span>
-                <span className="text-[#D4AF37] font-bold text-sm">{t.price}</span>
-              </div>
-            ))}
+            <Link href="/pricing" className="block px-4 py-3 text-[#D4AF37] hover:underline">
+              View current grading prices and turnaround →
+            </Link>
           </div>
           <p className="text-[#d4d4d4] text-sm mt-3">
-            All tiers include fully insured return shipping. <Link href="/pricing" className="text-[#D4AF37] hover:underline">View full pricing</Link>.
+            Your quote confirms insurance and return shipping before payment. <Link href="/pricing" className="text-[#D4AF37] hover:underline">View full pricing</Link>.
           </p>
         </section>
 

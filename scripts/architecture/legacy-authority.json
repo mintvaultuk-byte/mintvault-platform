@@ -2,6 +2,86 @@
   "schemaVersion": 1,
   "records": [
     {
+      "key": "pricing-authority|client/src/components/cta-section.tsx|endpoint:/pricing#0",
+      "finding": "ARCH-AUTHORITY-001",
+      "expiresWith": "the bounded-context repair that assigns explicit authority"
+    },
+    {
+      "key": "pricing-authority|client/src/data/guides.ts|literal:£120#0",
+      "finding": "ARCH-AUTHORITY-001",
+      "expiresWith": "the bounded-context repair that assigns explicit authority"
+    },
+    {
+      "key": "pricing-authority|client/src/pages/seo/best-card-grading-uk.tsx|endpoint:/pricing#2",
+      "finding": "ARCH-AUTHORITY-001",
+      "expiresWith": "the bounded-context repair that assigns explicit authority"
+    },
+    {
+      "key": "pricing-authority|client/src/pages/seo/card-grading-cost-uk.tsx|endpoint:/pricing#2",
+      "finding": "ARCH-AUTHORITY-001",
+      "expiresWith": "the bounded-context repair that assigns explicit authority"
+    },
+    {
+      "key": "pricing-authority|client/src/pages/seo/card-grading-cost-uk.tsx|endpoint:/pricing#3",
+      "finding": "ARCH-AUTHORITY-001",
+      "expiresWith": "the bounded-context repair that assigns explicit authority"
+    },
+    {
+      "key": "pricing-authority|client/src/pages/seo/card-grading-near-me.tsx|endpoint:/pricing#1",
+      "finding": "ARCH-AUTHORITY-001",
+      "expiresWith": "the bounded-context repair that assigns explicit authority"
+    },
+    {
+      "key": "pricing-authority|client/src/pages/seo/card-grading-service-uk.tsx|endpoint:/pricing#0",
+      "finding": "ARCH-AUTHORITY-001",
+      "expiresWith": "the bounded-context repair that assigns explicit authority"
+    },
+    {
+      "key": "pricing-authority|client/src/pages/seo/card-grading-service-uk.tsx|endpoint:/pricing#1",
+      "finding": "ARCH-AUTHORITY-001",
+      "expiresWith": "the bounded-context repair that assigns explicit authority"
+    },
+    {
+      "key": "pricing-authority|client/src/pages/seo/how-to-grade-pokemon-cards.tsx|endpoint:/pricing#0",
+      "finding": "ARCH-AUTHORITY-001",
+      "expiresWith": "the bounded-context repair that assigns explicit authority"
+    },
+    {
+      "key": "pricing-authority|client/src/pages/seo/mtg-card-grading-uk.tsx|endpoint:/pricing#2",
+      "finding": "ARCH-AUTHORITY-001",
+      "expiresWith": "the bounded-context repair that assigns explicit authority"
+    },
+    {
+      "key": "pricing-authority|client/src/pages/seo/one-piece-card-grading-uk.tsx|endpoint:/pricing#2",
+      "finding": "ARCH-AUTHORITY-001",
+      "expiresWith": "the bounded-context repair that assigns explicit authority"
+    },
+    {
+      "key": "pricing-authority|client/src/pages/seo/pokemon-card-grading-uk.tsx|endpoint:/pricing#1",
+      "finding": "ARCH-AUTHORITY-001",
+      "expiresWith": "the bounded-context repair that assigns explicit authority"
+    },
+    {
+      "key": "pricing-authority|client/src/pages/seo/pokemon-card-grading-uk.tsx|endpoint:/pricing#2",
+      "finding": "ARCH-AUTHORITY-001",
+      "expiresWith": "the bounded-context repair that assigns explicit authority"
+    },
+    {
+      "key": "pricing-authority|client/src/pages/seo/sports-card-grading-uk.tsx|endpoint:/pricing#2",
+      "finding": "ARCH-AUTHORITY-001",
+      "expiresWith": "the bounded-context repair that assigns explicit authority"
+    },
+    {
+      "key": "pricing-authority|client/src/pages/seo/tcg-grading-uk.tsx|endpoint:/pricing#0",
+      "finding": "ARCH-AUTHORITY-001",
+      "expiresWith": "the bounded-context repair that assigns explicit authority"
+    },
+    {
+      "key": "pricing-authority|client/src/pages/seo/yugioh-card-grading-uk.tsx|endpoint:/pricing#2",
+      "finding": "ARCH-AUTHORITY-001",
+      "expiresWith": "the bounded-context repair that assigns explicit authority"
+    },
+    {
       "key": "pricing-authority|client/src/pages/pre-grade.tsx|endpoint:/pricing#0",
       "finding": "ARCH-AUTHORITY-001",
       "expiresWith": "the bounded-context repair that assigns explicit authority"
@@ -257,97 +337,12 @@
       "expiresWith": "the bounded-context repair that assigns explicit authority"
     },
     {
-      "key": "pricing-authority|client/src/data/guides.ts|literal:£1,500#0",
-      "finding": "ARCH-AUTHORITY-001",
-      "expiresWith": "the bounded-context repair that assigns explicit authority"
-    },
-    {
-      "key": "pricing-authority|client/src/data/guides.ts|literal:£10#0",
-      "finding": "ARCH-AUTHORITY-001",
-      "expiresWith": "the bounded-context repair that assigns explicit authority"
-    },
-    {
       "key": "pricing-authority|client/src/data/guides.ts|literal:£100#0",
       "finding": "ARCH-AUTHORITY-001",
       "expiresWith": "the bounded-context repair that assigns explicit authority"
     },
     {
-      "key": "pricing-authority|client/src/data/guides.ts|literal:£180.50#0",
-      "finding": "ARCH-AUTHORITY-001",
-      "expiresWith": "the bounded-context repair that assigns explicit authority"
-    },
-    {
-      "key": "pricing-authority|client/src/data/guides.ts|literal:£188.50#0",
-      "finding": "ARCH-AUTHORITY-001",
-      "expiresWith": "the bounded-context repair that assigns explicit authority"
-    },
-    {
-      "key": "pricing-authority|client/src/data/guides.ts|literal:£19#0",
-      "finding": "ARCH-AUTHORITY-001",
-      "expiresWith": "the bounded-context repair that assigns explicit authority"
-    },
-    {
-      "key": "pricing-authority|client/src/data/guides.ts|literal:£19#1",
-      "finding": "ARCH-AUTHORITY-001",
-      "expiresWith": "the bounded-context repair that assigns explicit authority"
-    },
-    {
-      "key": "pricing-authority|client/src/data/guides.ts|literal:£19#2",
-      "finding": "ARCH-AUTHORITY-001",
-      "expiresWith": "the bounded-context repair that assigns explicit authority"
-    },
-    {
-      "key": "pricing-authority|client/src/data/guides.ts|literal:£19#3",
-      "finding": "ARCH-AUTHORITY-001",
-      "expiresWith": "the bounded-context repair that assigns explicit authority"
-    },
-    {
-      "key": "pricing-authority|client/src/data/guides.ts|literal:£19#4",
-      "finding": "ARCH-AUTHORITY-001",
-      "expiresWith": "the bounded-context repair that assigns explicit authority"
-    },
-    {
-      "key": "pricing-authority|client/src/data/guides.ts|literal:£19#5",
-      "finding": "ARCH-AUTHORITY-001",
-      "expiresWith": "the bounded-context repair that assigns explicit authority"
-    },
-    {
-      "key": "pricing-authority|client/src/data/guides.ts|literal:£190#0",
-      "finding": "ARCH-AUTHORITY-001",
-      "expiresWith": "the bounded-context repair that assigns explicit authority"
-    },
-    {
-      "key": "pricing-authority|client/src/data/guides.ts|literal:£2#0",
-      "finding": "ARCH-AUTHORITY-001",
-      "expiresWith": "the bounded-context repair that assigns explicit authority"
-    },
-    {
-      "key": "pricing-authority|client/src/data/guides.ts|literal:£200–£300#0",
-      "finding": "ARCH-AUTHORITY-001",
-      "expiresWith": "the bounded-context repair that assigns explicit authority"
-    },
-    {
       "key": "pricing-authority|client/src/data/guides.ts|literal:£200#0",
-      "finding": "ARCH-AUTHORITY-001",
-      "expiresWith": "the bounded-context repair that assigns explicit authority"
-    },
-    {
-      "key": "pricing-authority|client/src/data/guides.ts|literal:£25#0",
-      "finding": "ARCH-AUTHORITY-001",
-      "expiresWith": "the bounded-context repair that assigns explicit authority"
-    },
-    {
-      "key": "pricing-authority|client/src/data/guides.ts|literal:£25#1",
-      "finding": "ARCH-AUTHORITY-001",
-      "expiresWith": "the bounded-context repair that assigns explicit authority"
-    },
-    {
-      "key": "pricing-authority|client/src/data/guides.ts|literal:£3,000#0",
-      "finding": "ARCH-AUTHORITY-001",
-      "expiresWith": "the bounded-context repair that assigns explicit authority"
-    },
-    {
-      "key": "pricing-authority|client/src/data/guides.ts|literal:£30–£50#0",
       "finding": "ARCH-AUTHORITY-001",
       "expiresWith": "the bounded-context repair that assigns explicit authority"
     },
@@ -358,26 +353,6 @@
     },
     {
       "key": "pricing-authority|client/src/data/guides.ts|literal:£30#0",
-      "finding": "ARCH-AUTHORITY-001",
-      "expiresWith": "the bounded-context repair that assigns explicit authority"
-    },
-    {
-      "key": "pricing-authority|client/src/data/guides.ts|literal:£30#1",
-      "finding": "ARCH-AUTHORITY-001",
-      "expiresWith": "the bounded-context repair that assigns explicit authority"
-    },
-    {
-      "key": "pricing-authority|client/src/data/guides.ts|literal:£30#2",
-      "finding": "ARCH-AUTHORITY-001",
-      "expiresWith": "the bounded-context repair that assigns explicit authority"
-    },
-    {
-      "key": "pricing-authority|client/src/data/guides.ts|literal:£300#0",
-      "finding": "ARCH-AUTHORITY-001",
-      "expiresWith": "the bounded-context repair that assigns explicit authority"
-    },
-    {
-      "key": "pricing-authority|client/src/data/guides.ts|literal:£45#0",
       "finding": "ARCH-AUTHORITY-001",
       "expiresWith": "the bounded-context repair that assigns explicit authority"
     },
@@ -397,42 +372,12 @@
       "expiresWith": "the bounded-context repair that assigns explicit authority"
     },
     {
-      "key": "pricing-authority|client/src/data/guides.ts|literal:£5#2",
-      "finding": "ARCH-AUTHORITY-001",
-      "expiresWith": "the bounded-context repair that assigns explicit authority"
-    },
-    {
       "key": "pricing-authority|client/src/data/guides.ts|literal:£50#0",
       "finding": "ARCH-AUTHORITY-001",
       "expiresWith": "the bounded-context repair that assigns explicit authority"
     },
     {
-      "key": "pricing-authority|client/src/data/guides.ts|literal:£500#0",
-      "finding": "ARCH-AUTHORITY-001",
-      "expiresWith": "the bounded-context repair that assigns explicit authority"
-    },
-    {
-      "key": "pricing-authority|client/src/data/guides.ts|literal:£500#1",
-      "finding": "ARCH-AUTHORITY-001",
-      "expiresWith": "the bounded-context repair that assigns explicit authority"
-    },
-    {
-      "key": "pricing-authority|client/src/data/guides.ts|literal:£7–£10#0",
-      "finding": "ARCH-AUTHORITY-001",
-      "expiresWith": "the bounded-context repair that assigns explicit authority"
-    },
-    {
-      "key": "pricing-authority|client/src/data/guides.ts|literal:£7,500#0",
-      "finding": "ARCH-AUTHORITY-001",
-      "expiresWith": "the bounded-context repair that assigns explicit authority"
-    },
-    {
       "key": "pricing-authority|client/src/data/guides.ts|literal:£750#0",
-      "finding": "ARCH-AUTHORITY-001",
-      "expiresWith": "the bounded-context repair that assigns explicit authority"
-    },
-    {
-      "key": "pricing-authority|client/src/data/guides.ts|literal:£8#0",
       "finding": "ARCH-AUTHORITY-001",
       "expiresWith": "the bounded-context repair that assigns explicit authority"
     },
@@ -712,56 +657,6 @@
       "expiresWith": "the bounded-context repair that assigns explicit authority"
     },
     {
-      "key": "pricing-authority|client/src/pages/seo/best-card-grading-uk.tsx|literal:£19#0",
-      "finding": "ARCH-AUTHORITY-001",
-      "expiresWith": "the bounded-context repair that assigns explicit authority"
-    },
-    {
-      "key": "pricing-authority|client/src/pages/seo/best-card-grading-uk.tsx|literal:£19#1",
-      "finding": "ARCH-AUTHORITY-001",
-      "expiresWith": "the bounded-context repair that assigns explicit authority"
-    },
-    {
-      "key": "pricing-authority|client/src/pages/seo/best-card-grading-uk.tsx|literal:£19#2",
-      "finding": "ARCH-AUTHORITY-001",
-      "expiresWith": "the bounded-context repair that assigns explicit authority"
-    },
-    {
-      "key": "pricing-authority|client/src/pages/seo/best-card-grading-uk.tsx|literal:£19#3",
-      "finding": "ARCH-AUTHORITY-001",
-      "expiresWith": "the bounded-context repair that assigns explicit authority"
-    },
-    {
-      "key": "pricing-authority|client/src/pages/seo/best-card-grading-uk.tsx|literal:£25#0",
-      "finding": "ARCH-AUTHORITY-001",
-      "expiresWith": "the bounded-context repair that assigns explicit authority"
-    },
-    {
-      "key": "pricing-authority|client/src/pages/seo/best-card-grading-uk.tsx|literal:£45#0",
-      "finding": "ARCH-AUTHORITY-001",
-      "expiresWith": "the bounded-context repair that assigns explicit authority"
-    },
-    {
-      "key": "pricing-authority|client/src/pages/seo/best-card-grading-uk.tsx|literal:£45#1",
-      "finding": "ARCH-AUTHORITY-001",
-      "expiresWith": "the bounded-context repair that assigns explicit authority"
-    },
-    {
-      "key": "pricing-authority|client/src/pages/seo/best-card-grading-uk.tsx|value:price#0",
-      "finding": "ARCH-AUTHORITY-001",
-      "expiresWith": "the bounded-context repair that assigns explicit authority"
-    },
-    {
-      "key": "pricing-authority|client/src/pages/seo/best-card-grading-uk.tsx|value:price#1",
-      "finding": "ARCH-AUTHORITY-001",
-      "expiresWith": "the bounded-context repair that assigns explicit authority"
-    },
-    {
-      "key": "pricing-authority|client/src/pages/seo/best-card-grading-uk.tsx|value:price#2",
-      "finding": "ARCH-AUTHORITY-001",
-      "expiresWith": "the bounded-context repair that assigns explicit authority"
-    },
-    {
       "key": "pricing-authority|client/src/pages/seo/card-grading-cost-uk.tsx|endpoint:/pricing#0",
       "finding": "ARCH-AUTHORITY-001",
       "expiresWith": "the bounded-context repair that assigns explicit authority"
@@ -777,62 +672,7 @@
       "expiresWith": "the bounded-context repair that assigns explicit authority"
     },
     {
-      "key": "pricing-authority|client/src/pages/seo/card-grading-cost-uk.tsx|literal:£186#0",
-      "finding": "ARCH-AUTHORITY-001",
-      "expiresWith": "the bounded-context repair that assigns explicit authority"
-    },
-    {
-      "key": "pricing-authority|client/src/pages/seo/card-grading-cost-uk.tsx|literal:£19#0",
-      "finding": "ARCH-AUTHORITY-001",
-      "expiresWith": "the bounded-context repair that assigns explicit authority"
-    },
-    {
-      "key": "pricing-authority|client/src/pages/seo/card-grading-cost-uk.tsx|literal:£19#1",
-      "finding": "ARCH-AUTHORITY-001",
-      "expiresWith": "the bounded-context repair that assigns explicit authority"
-    },
-    {
-      "key": "pricing-authority|client/src/pages/seo/card-grading-cost-uk.tsx|literal:£19#2",
-      "finding": "ARCH-AUTHORITY-001",
-      "expiresWith": "the bounded-context repair that assigns explicit authority"
-    },
-    {
-      "key": "pricing-authority|client/src/pages/seo/card-grading-cost-uk.tsx|literal:£19#3",
-      "finding": "ARCH-AUTHORITY-001",
-      "expiresWith": "the bounded-context repair that assigns explicit authority"
-    },
-    {
-      "key": "pricing-authority|client/src/pages/seo/card-grading-cost-uk.tsx|literal:£19#4",
-      "finding": "ARCH-AUTHORITY-001",
-      "expiresWith": "the bounded-context repair that assigns explicit authority"
-    },
-    {
-      "key": "pricing-authority|client/src/pages/seo/card-grading-cost-uk.tsx|literal:£19#5",
-      "finding": "ARCH-AUTHORITY-001",
-      "expiresWith": "the bounded-context repair that assigns explicit authority"
-    },
-    {
-      "key": "pricing-authority|client/src/pages/seo/card-grading-cost-uk.tsx|literal:£190#0",
-      "finding": "ARCH-AUTHORITY-001",
-      "expiresWith": "the bounded-context repair that assigns explicit authority"
-    },
-    {
-      "key": "pricing-authority|client/src/pages/seo/card-grading-cost-uk.tsx|literal:£20–£40#0",
-      "finding": "ARCH-AUTHORITY-001",
-      "expiresWith": "the bounded-context repair that assigns explicit authority"
-    },
-    {
       "key": "pricing-authority|client/src/pages/seo/card-grading-cost-uk.tsx|literal:£200#0",
-      "finding": "ARCH-AUTHORITY-001",
-      "expiresWith": "the bounded-context repair that assigns explicit authority"
-    },
-    {
-      "key": "pricing-authority|client/src/pages/seo/card-grading-cost-uk.tsx|literal:£25#0",
-      "finding": "ARCH-AUTHORITY-001",
-      "expiresWith": "the bounded-context repair that assigns explicit authority"
-    },
-    {
-      "key": "pricing-authority|client/src/pages/seo/card-grading-cost-uk.tsx|literal:£25#1",
       "finding": "ARCH-AUTHORITY-001",
       "expiresWith": "the bounded-context repair that assigns explicit authority"
     },
@@ -857,132 +697,7 @@
       "expiresWith": "the bounded-context repair that assigns explicit authority"
     },
     {
-      "key": "pricing-authority|client/src/pages/seo/card-grading-cost-uk.tsx|literal:£45#1",
-      "finding": "ARCH-AUTHORITY-001",
-      "expiresWith": "the bounded-context repair that assigns explicit authority"
-    },
-    {
-      "key": "pricing-authority|client/src/pages/seo/card-grading-cost-uk.tsx|literal:£45#2",
-      "finding": "ARCH-AUTHORITY-001",
-      "expiresWith": "the bounded-context repair that assigns explicit authority"
-    },
-    {
-      "key": "pricing-authority|client/src/pages/seo/card-grading-cost-uk.tsx|literal:£60#0",
-      "finding": "ARCH-AUTHORITY-001",
-      "expiresWith": "the bounded-context repair that assigns explicit authority"
-    },
-    {
-      "key": "pricing-authority|client/src/pages/seo/card-grading-cost-uk.tsx|value:price#0",
-      "finding": "ARCH-AUTHORITY-001",
-      "expiresWith": "the bounded-context repair that assigns explicit authority"
-    },
-    {
-      "key": "pricing-authority|client/src/pages/seo/card-grading-cost-uk.tsx|value:price#1",
-      "finding": "ARCH-AUTHORITY-001",
-      "expiresWith": "the bounded-context repair that assigns explicit authority"
-    },
-    {
-      "key": "pricing-authority|client/src/pages/seo/card-grading-cost-uk.tsx|value:price#2",
-      "finding": "ARCH-AUTHORITY-001",
-      "expiresWith": "the bounded-context repair that assigns explicit authority"
-    },
-    {
       "key": "pricing-authority|client/src/pages/seo/card-grading-near-me.tsx|endpoint:/pricing#0",
-      "finding": "ARCH-AUTHORITY-001",
-      "expiresWith": "the bounded-context repair that assigns explicit authority"
-    },
-    {
-      "key": "pricing-authority|client/src/pages/seo/card-grading-near-me.tsx|literal:£19#0",
-      "finding": "ARCH-AUTHORITY-001",
-      "expiresWith": "the bounded-context repair that assigns explicit authority"
-    },
-    {
-      "key": "pricing-authority|client/src/pages/seo/card-grading-near-me.tsx|literal:£19#1",
-      "finding": "ARCH-AUTHORITY-001",
-      "expiresWith": "the bounded-context repair that assigns explicit authority"
-    },
-    {
-      "key": "pricing-authority|client/src/pages/seo/card-grading-near-me.tsx|literal:£25#0",
-      "finding": "ARCH-AUTHORITY-001",
-      "expiresWith": "the bounded-context repair that assigns explicit authority"
-    },
-    {
-      "key": "pricing-authority|client/src/pages/seo/card-grading-near-me.tsx|literal:£45#0",
-      "finding": "ARCH-AUTHORITY-001",
-      "expiresWith": "the bounded-context repair that assigns explicit authority"
-    },
-    {
-      "key": "pricing-authority|client/src/pages/seo/card-grading-near-me.tsx|value:price#0",
-      "finding": "ARCH-AUTHORITY-001",
-      "expiresWith": "the bounded-context repair that assigns explicit authority"
-    },
-    {
-      "key": "pricing-authority|client/src/pages/seo/card-grading-near-me.tsx|value:price#1",
-      "finding": "ARCH-AUTHORITY-001",
-      "expiresWith": "the bounded-context repair that assigns explicit authority"
-    },
-    {
-      "key": "pricing-authority|client/src/pages/seo/card-grading-near-me.tsx|value:price#2",
-      "finding": "ARCH-AUTHORITY-001",
-      "expiresWith": "the bounded-context repair that assigns explicit authority"
-    },
-    {
-      "key": "pricing-authority|client/src/pages/seo/card-grading-service-uk.tsx|literal:£19#0",
-      "finding": "ARCH-AUTHORITY-001",
-      "expiresWith": "the bounded-context repair that assigns explicit authority"
-    },
-    {
-      "key": "pricing-authority|client/src/pages/seo/card-grading-service-uk.tsx|literal:£19#1",
-      "finding": "ARCH-AUTHORITY-001",
-      "expiresWith": "the bounded-context repair that assigns explicit authority"
-    },
-    {
-      "key": "pricing-authority|client/src/pages/seo/card-grading-service-uk.tsx|literal:£19#2",
-      "finding": "ARCH-AUTHORITY-001",
-      "expiresWith": "the bounded-context repair that assigns explicit authority"
-    },
-    {
-      "key": "pricing-authority|client/src/pages/seo/card-grading-service-uk.tsx|literal:£25#0",
-      "finding": "ARCH-AUTHORITY-001",
-      "expiresWith": "the bounded-context repair that assigns explicit authority"
-    },
-    {
-      "key": "pricing-authority|client/src/pages/seo/card-grading-service-uk.tsx|literal:£45#0",
-      "finding": "ARCH-AUTHORITY-001",
-      "expiresWith": "the bounded-context repair that assigns explicit authority"
-    },
-    {
-      "key": "pricing-authority|client/src/pages/seo/card-grading-service-uk.tsx|value:price#0",
-      "finding": "ARCH-AUTHORITY-001",
-      "expiresWith": "the bounded-context repair that assigns explicit authority"
-    },
-    {
-      "key": "pricing-authority|client/src/pages/seo/card-grading-service-uk.tsx|value:price#1",
-      "finding": "ARCH-AUTHORITY-001",
-      "expiresWith": "the bounded-context repair that assigns explicit authority"
-    },
-    {
-      "key": "pricing-authority|client/src/pages/seo/card-grading-service-uk.tsx|value:price#2",
-      "finding": "ARCH-AUTHORITY-001",
-      "expiresWith": "the bounded-context repair that assigns explicit authority"
-    },
-    {
-      "key": "pricing-authority|client/src/pages/seo/card-grading-service-uk.tsx|value:turnaround#0",
-      "finding": "ARCH-AUTHORITY-001",
-      "expiresWith": "the bounded-context repair that assigns explicit authority"
-    },
-    {
-      "key": "pricing-authority|client/src/pages/seo/card-grading-service-uk.tsx|value:turnaround#1",
-      "finding": "ARCH-AUTHORITY-001",
-      "expiresWith": "the bounded-context repair that assigns explicit authority"
-    },
-    {
-      "key": "pricing-authority|client/src/pages/seo/card-grading-service-uk.tsx|value:turnaround#2",
-      "finding": "ARCH-AUTHORITY-001",
-      "expiresWith": "the bounded-context repair that assigns explicit authority"
-    },
-    {
-      "key": "pricing-authority|client/src/pages/seo/how-to-grade-pokemon-cards.tsx|literal:£19#0",
       "finding": "ARCH-AUTHORITY-001",
       "expiresWith": "the bounded-context repair that assigns explicit authority"
     },
@@ -1002,61 +717,6 @@
       "expiresWith": "the bounded-context repair that assigns explicit authority"
     },
     {
-      "key": "pricing-authority|client/src/pages/seo/mtg-card-grading-uk.tsx|literal:£19#0",
-      "finding": "ARCH-AUTHORITY-001",
-      "expiresWith": "the bounded-context repair that assigns explicit authority"
-    },
-    {
-      "key": "pricing-authority|client/src/pages/seo/mtg-card-grading-uk.tsx|literal:£19#1",
-      "finding": "ARCH-AUTHORITY-001",
-      "expiresWith": "the bounded-context repair that assigns explicit authority"
-    },
-    {
-      "key": "pricing-authority|client/src/pages/seo/mtg-card-grading-uk.tsx|literal:£19#2",
-      "finding": "ARCH-AUTHORITY-001",
-      "expiresWith": "the bounded-context repair that assigns explicit authority"
-    },
-    {
-      "key": "pricing-authority|client/src/pages/seo/mtg-card-grading-uk.tsx|literal:£19#3",
-      "finding": "ARCH-AUTHORITY-001",
-      "expiresWith": "the bounded-context repair that assigns explicit authority"
-    },
-    {
-      "key": "pricing-authority|client/src/pages/seo/mtg-card-grading-uk.tsx|literal:£25#0",
-      "finding": "ARCH-AUTHORITY-001",
-      "expiresWith": "the bounded-context repair that assigns explicit authority"
-    },
-    {
-      "key": "pricing-authority|client/src/pages/seo/mtg-card-grading-uk.tsx|literal:£25#1",
-      "finding": "ARCH-AUTHORITY-001",
-      "expiresWith": "the bounded-context repair that assigns explicit authority"
-    },
-    {
-      "key": "pricing-authority|client/src/pages/seo/mtg-card-grading-uk.tsx|literal:£45#0",
-      "finding": "ARCH-AUTHORITY-001",
-      "expiresWith": "the bounded-context repair that assigns explicit authority"
-    },
-    {
-      "key": "pricing-authority|client/src/pages/seo/mtg-card-grading-uk.tsx|literal:£45#1",
-      "finding": "ARCH-AUTHORITY-001",
-      "expiresWith": "the bounded-context repair that assigns explicit authority"
-    },
-    {
-      "key": "pricing-authority|client/src/pages/seo/mtg-card-grading-uk.tsx|value:price#0",
-      "finding": "ARCH-AUTHORITY-001",
-      "expiresWith": "the bounded-context repair that assigns explicit authority"
-    },
-    {
-      "key": "pricing-authority|client/src/pages/seo/mtg-card-grading-uk.tsx|value:price#1",
-      "finding": "ARCH-AUTHORITY-001",
-      "expiresWith": "the bounded-context repair that assigns explicit authority"
-    },
-    {
-      "key": "pricing-authority|client/src/pages/seo/mtg-card-grading-uk.tsx|value:price#2",
-      "finding": "ARCH-AUTHORITY-001",
-      "expiresWith": "the bounded-context repair that assigns explicit authority"
-    },
-    {
       "key": "pricing-authority|client/src/pages/seo/one-piece-card-grading-uk.tsx|endpoint:/pricing#0",
       "finding": "ARCH-AUTHORITY-001",
       "expiresWith": "the bounded-context repair that assigns explicit authority"
@@ -1067,122 +727,7 @@
       "expiresWith": "the bounded-context repair that assigns explicit authority"
     },
     {
-      "key": "pricing-authority|client/src/pages/seo/one-piece-card-grading-uk.tsx|literal:£19#0",
-      "finding": "ARCH-AUTHORITY-001",
-      "expiresWith": "the bounded-context repair that assigns explicit authority"
-    },
-    {
-      "key": "pricing-authority|client/src/pages/seo/one-piece-card-grading-uk.tsx|literal:£19#1",
-      "finding": "ARCH-AUTHORITY-001",
-      "expiresWith": "the bounded-context repair that assigns explicit authority"
-    },
-    {
-      "key": "pricing-authority|client/src/pages/seo/one-piece-card-grading-uk.tsx|literal:£19#2",
-      "finding": "ARCH-AUTHORITY-001",
-      "expiresWith": "the bounded-context repair that assigns explicit authority"
-    },
-    {
-      "key": "pricing-authority|client/src/pages/seo/one-piece-card-grading-uk.tsx|literal:£25#0",
-      "finding": "ARCH-AUTHORITY-001",
-      "expiresWith": "the bounded-context repair that assigns explicit authority"
-    },
-    {
-      "key": "pricing-authority|client/src/pages/seo/one-piece-card-grading-uk.tsx|literal:£25#1",
-      "finding": "ARCH-AUTHORITY-001",
-      "expiresWith": "the bounded-context repair that assigns explicit authority"
-    },
-    {
-      "key": "pricing-authority|client/src/pages/seo/one-piece-card-grading-uk.tsx|literal:£45#0",
-      "finding": "ARCH-AUTHORITY-001",
-      "expiresWith": "the bounded-context repair that assigns explicit authority"
-    },
-    {
-      "key": "pricing-authority|client/src/pages/seo/one-piece-card-grading-uk.tsx|literal:£45#1",
-      "finding": "ARCH-AUTHORITY-001",
-      "expiresWith": "the bounded-context repair that assigns explicit authority"
-    },
-    {
-      "key": "pricing-authority|client/src/pages/seo/one-piece-card-grading-uk.tsx|value:price#0",
-      "finding": "ARCH-AUTHORITY-001",
-      "expiresWith": "the bounded-context repair that assigns explicit authority"
-    },
-    {
-      "key": "pricing-authority|client/src/pages/seo/one-piece-card-grading-uk.tsx|value:price#1",
-      "finding": "ARCH-AUTHORITY-001",
-      "expiresWith": "the bounded-context repair that assigns explicit authority"
-    },
-    {
-      "key": "pricing-authority|client/src/pages/seo/one-piece-card-grading-uk.tsx|value:price#2",
-      "finding": "ARCH-AUTHORITY-001",
-      "expiresWith": "the bounded-context repair that assigns explicit authority"
-    },
-    {
       "key": "pricing-authority|client/src/pages/seo/pokemon-card-grading-uk.tsx|endpoint:/pricing#0",
-      "finding": "ARCH-AUTHORITY-001",
-      "expiresWith": "the bounded-context repair that assigns explicit authority"
-    },
-    {
-      "key": "pricing-authority|client/src/pages/seo/pokemon-card-grading-uk.tsx|literal:£19#0",
-      "finding": "ARCH-AUTHORITY-001",
-      "expiresWith": "the bounded-context repair that assigns explicit authority"
-    },
-    {
-      "key": "pricing-authority|client/src/pages/seo/pokemon-card-grading-uk.tsx|literal:£19#1",
-      "finding": "ARCH-AUTHORITY-001",
-      "expiresWith": "the bounded-context repair that assigns explicit authority"
-    },
-    {
-      "key": "pricing-authority|client/src/pages/seo/pokemon-card-grading-uk.tsx|literal:£19#2",
-      "finding": "ARCH-AUTHORITY-001",
-      "expiresWith": "the bounded-context repair that assigns explicit authority"
-    },
-    {
-      "key": "pricing-authority|client/src/pages/seo/pokemon-card-grading-uk.tsx|literal:£25#0",
-      "finding": "ARCH-AUTHORITY-001",
-      "expiresWith": "the bounded-context repair that assigns explicit authority"
-    },
-    {
-      "key": "pricing-authority|client/src/pages/seo/pokemon-card-grading-uk.tsx|literal:£25#1",
-      "finding": "ARCH-AUTHORITY-001",
-      "expiresWith": "the bounded-context repair that assigns explicit authority"
-    },
-    {
-      "key": "pricing-authority|client/src/pages/seo/pokemon-card-grading-uk.tsx|literal:£45#0",
-      "finding": "ARCH-AUTHORITY-001",
-      "expiresWith": "the bounded-context repair that assigns explicit authority"
-    },
-    {
-      "key": "pricing-authority|client/src/pages/seo/pokemon-card-grading-uk.tsx|literal:£45#1",
-      "finding": "ARCH-AUTHORITY-001",
-      "expiresWith": "the bounded-context repair that assigns explicit authority"
-    },
-    {
-      "key": "pricing-authority|client/src/pages/seo/pokemon-card-grading-uk.tsx|value:price#0",
-      "finding": "ARCH-AUTHORITY-001",
-      "expiresWith": "the bounded-context repair that assigns explicit authority"
-    },
-    {
-      "key": "pricing-authority|client/src/pages/seo/pokemon-card-grading-uk.tsx|value:price#1",
-      "finding": "ARCH-AUTHORITY-001",
-      "expiresWith": "the bounded-context repair that assigns explicit authority"
-    },
-    {
-      "key": "pricing-authority|client/src/pages/seo/pokemon-card-grading-uk.tsx|value:price#2",
-      "finding": "ARCH-AUTHORITY-001",
-      "expiresWith": "the bounded-context repair that assigns explicit authority"
-    },
-    {
-      "key": "pricing-authority|client/src/pages/seo/pokemon-card-grading-uk.tsx|value:turnaround#0",
-      "finding": "ARCH-AUTHORITY-001",
-      "expiresWith": "the bounded-context repair that assigns explicit authority"
-    },
-    {
-      "key": "pricing-authority|client/src/pages/seo/pokemon-card-grading-uk.tsx|value:turnaround#1",
-      "finding": "ARCH-AUTHORITY-001",
-      "expiresWith": "the bounded-context repair that assigns explicit authority"
-    },
-    {
-      "key": "pricing-authority|client/src/pages/seo/pokemon-card-grading-uk.tsx|value:turnaround#2",
       "finding": "ARCH-AUTHORITY-001",
       "expiresWith": "the bounded-context repair that assigns explicit authority"
     },
@@ -1193,26 +738,6 @@
     },
     {
       "key": "pricing-authority|client/src/pages/seo/psa-alternative-uk.tsx|literal:£15#0",
-      "finding": "ARCH-AUTHORITY-001",
-      "expiresWith": "the bounded-context repair that assigns explicit authority"
-    },
-    {
-      "key": "pricing-authority|client/src/pages/seo/psa-alternative-uk.tsx|literal:£19#0",
-      "finding": "ARCH-AUTHORITY-001",
-      "expiresWith": "the bounded-context repair that assigns explicit authority"
-    },
-    {
-      "key": "pricing-authority|client/src/pages/seo/psa-alternative-uk.tsx|literal:£19#1",
-      "finding": "ARCH-AUTHORITY-001",
-      "expiresWith": "the bounded-context repair that assigns explicit authority"
-    },
-    {
-      "key": "pricing-authority|client/src/pages/seo/psa-alternative-uk.tsx|literal:£19#2",
-      "finding": "ARCH-AUTHORITY-001",
-      "expiresWith": "the bounded-context repair that assigns explicit authority"
-    },
-    {
-      "key": "pricing-authority|client/src/pages/seo/psa-alternative-uk.tsx|literal:£19#3",
       "finding": "ARCH-AUTHORITY-001",
       "expiresWith": "the bounded-context repair that assigns explicit authority"
     },
@@ -1232,137 +757,12 @@
       "expiresWith": "the bounded-context repair that assigns explicit authority"
     },
     {
-      "key": "pricing-authority|client/src/pages/seo/sports-card-grading-uk.tsx|literal:£19#0",
-      "finding": "ARCH-AUTHORITY-001",
-      "expiresWith": "the bounded-context repair that assigns explicit authority"
-    },
-    {
-      "key": "pricing-authority|client/src/pages/seo/sports-card-grading-uk.tsx|literal:£19#1",
-      "finding": "ARCH-AUTHORITY-001",
-      "expiresWith": "the bounded-context repair that assigns explicit authority"
-    },
-    {
-      "key": "pricing-authority|client/src/pages/seo/sports-card-grading-uk.tsx|literal:£19#2",
-      "finding": "ARCH-AUTHORITY-001",
-      "expiresWith": "the bounded-context repair that assigns explicit authority"
-    },
-    {
-      "key": "pricing-authority|client/src/pages/seo/sports-card-grading-uk.tsx|literal:£25#0",
-      "finding": "ARCH-AUTHORITY-001",
-      "expiresWith": "the bounded-context repair that assigns explicit authority"
-    },
-    {
-      "key": "pricing-authority|client/src/pages/seo/sports-card-grading-uk.tsx|literal:£25#1",
-      "finding": "ARCH-AUTHORITY-001",
-      "expiresWith": "the bounded-context repair that assigns explicit authority"
-    },
-    {
-      "key": "pricing-authority|client/src/pages/seo/sports-card-grading-uk.tsx|literal:£45#0",
-      "finding": "ARCH-AUTHORITY-001",
-      "expiresWith": "the bounded-context repair that assigns explicit authority"
-    },
-    {
-      "key": "pricing-authority|client/src/pages/seo/sports-card-grading-uk.tsx|literal:£45#1",
-      "finding": "ARCH-AUTHORITY-001",
-      "expiresWith": "the bounded-context repair that assigns explicit authority"
-    },
-    {
-      "key": "pricing-authority|client/src/pages/seo/sports-card-grading-uk.tsx|value:price#0",
-      "finding": "ARCH-AUTHORITY-001",
-      "expiresWith": "the bounded-context repair that assigns explicit authority"
-    },
-    {
-      "key": "pricing-authority|client/src/pages/seo/sports-card-grading-uk.tsx|value:price#1",
-      "finding": "ARCH-AUTHORITY-001",
-      "expiresWith": "the bounded-context repair that assigns explicit authority"
-    },
-    {
-      "key": "pricing-authority|client/src/pages/seo/sports-card-grading-uk.tsx|value:price#2",
-      "finding": "ARCH-AUTHORITY-001",
-      "expiresWith": "the bounded-context repair that assigns explicit authority"
-    },
-    {
-      "key": "pricing-authority|client/src/pages/seo/tcg-grading-uk.tsx|literal:£19#0",
-      "finding": "ARCH-AUTHORITY-001",
-      "expiresWith": "the bounded-context repair that assigns explicit authority"
-    },
-    {
-      "key": "pricing-authority|client/src/pages/seo/tcg-grading-uk.tsx|literal:£19#1",
-      "finding": "ARCH-AUTHORITY-001",
-      "expiresWith": "the bounded-context repair that assigns explicit authority"
-    },
-    {
-      "key": "pricing-authority|client/src/pages/seo/trading-card-grading-uk.tsx|literal:£19#0",
-      "finding": "ARCH-AUTHORITY-001",
-      "expiresWith": "the bounded-context repair that assigns explicit authority"
-    },
-    {
-      "key": "pricing-authority|client/src/pages/seo/trading-card-grading-uk.tsx|literal:£25#0",
-      "finding": "ARCH-AUTHORITY-001",
-      "expiresWith": "the bounded-context repair that assigns explicit authority"
-    },
-    {
-      "key": "pricing-authority|client/src/pages/seo/trading-card-grading-uk.tsx|literal:£45#0",
-      "finding": "ARCH-AUTHORITY-001",
-      "expiresWith": "the bounded-context repair that assigns explicit authority"
-    },
-    {
       "key": "pricing-authority|client/src/pages/seo/yugioh-card-grading-uk.tsx|endpoint:/pricing#0",
       "finding": "ARCH-AUTHORITY-001",
       "expiresWith": "the bounded-context repair that assigns explicit authority"
     },
     {
       "key": "pricing-authority|client/src/pages/seo/yugioh-card-grading-uk.tsx|endpoint:/pricing#1",
-      "finding": "ARCH-AUTHORITY-001",
-      "expiresWith": "the bounded-context repair that assigns explicit authority"
-    },
-    {
-      "key": "pricing-authority|client/src/pages/seo/yugioh-card-grading-uk.tsx|literal:£19#0",
-      "finding": "ARCH-AUTHORITY-001",
-      "expiresWith": "the bounded-context repair that assigns explicit authority"
-    },
-    {
-      "key": "pricing-authority|client/src/pages/seo/yugioh-card-grading-uk.tsx|literal:£19#1",
-      "finding": "ARCH-AUTHORITY-001",
-      "expiresWith": "the bounded-context repair that assigns explicit authority"
-    },
-    {
-      "key": "pricing-authority|client/src/pages/seo/yugioh-card-grading-uk.tsx|literal:£19#2",
-      "finding": "ARCH-AUTHORITY-001",
-      "expiresWith": "the bounded-context repair that assigns explicit authority"
-    },
-    {
-      "key": "pricing-authority|client/src/pages/seo/yugioh-card-grading-uk.tsx|literal:£25#0",
-      "finding": "ARCH-AUTHORITY-001",
-      "expiresWith": "the bounded-context repair that assigns explicit authority"
-    },
-    {
-      "key": "pricing-authority|client/src/pages/seo/yugioh-card-grading-uk.tsx|literal:£25#1",
-      "finding": "ARCH-AUTHORITY-001",
-      "expiresWith": "the bounded-context repair that assigns explicit authority"
-    },
-    {
-      "key": "pricing-authority|client/src/pages/seo/yugioh-card-grading-uk.tsx|literal:£45#0",
-      "finding": "ARCH-AUTHORITY-001",
-      "expiresWith": "the bounded-context repair that assigns explicit authority"
-    },
-    {
-      "key": "pricing-authority|client/src/pages/seo/yugioh-card-grading-uk.tsx|literal:£45#1",
-      "finding": "ARCH-AUTHORITY-001",
-      "expiresWith": "the bounded-context repair that assigns explicit authority"
-    },
-    {
-      "key": "pricing-authority|client/src/pages/seo/yugioh-card-grading-uk.tsx|value:price#0",
-      "finding": "ARCH-AUTHORITY-001",
-      "expiresWith": "the bounded-context repair that assigns explicit authority"
-    },
-    {
-      "key": "pricing-authority|client/src/pages/seo/yugioh-card-grading-uk.tsx|value:price#1",
-      "finding": "ARCH-AUTHORITY-001",
-      "expiresWith": "the bounded-context repair that assigns explicit authority"
-    },
-    {
-      "key": "pricing-authority|client/src/pages/seo/yugioh-card-grading-uk.tsx|value:price#2",
       "finding": "ARCH-AUTHORITY-001",
       "expiresWith": "the bounded-context repair that assigns explicit authority"
     },
@@ -2528,61 +1928,6 @@
     },
     {
       "key": "pricing-authority|server/seo-config.ts|endpoint:/pricing#1",
-      "finding": "ARCH-AUTHORITY-001",
-      "expiresWith": "the bounded-context repair that assigns explicit authority"
-    },
-    {
-      "key": "pricing-authority|server/seo-config.ts|literal:£19#0",
-      "finding": "ARCH-AUTHORITY-001",
-      "expiresWith": "the bounded-context repair that assigns explicit authority"
-    },
-    {
-      "key": "pricing-authority|server/seo-config.ts|literal:£19#1",
-      "finding": "ARCH-AUTHORITY-001",
-      "expiresWith": "the bounded-context repair that assigns explicit authority"
-    },
-    {
-      "key": "pricing-authority|server/seo-config.ts|literal:£19#2",
-      "finding": "ARCH-AUTHORITY-001",
-      "expiresWith": "the bounded-context repair that assigns explicit authority"
-    },
-    {
-      "key": "pricing-authority|server/seo-config.ts|literal:£19#3",
-      "finding": "ARCH-AUTHORITY-001",
-      "expiresWith": "the bounded-context repair that assigns explicit authority"
-    },
-    {
-      "key": "pricing-authority|server/seo-config.ts|literal:£19#4",
-      "finding": "ARCH-AUTHORITY-001",
-      "expiresWith": "the bounded-context repair that assigns explicit authority"
-    },
-    {
-      "key": "pricing-authority|server/seo-config.ts|literal:£19#5",
-      "finding": "ARCH-AUTHORITY-001",
-      "expiresWith": "the bounded-context repair that assigns explicit authority"
-    },
-    {
-      "key": "pricing-authority|server/seo-config.ts|literal:£19#6",
-      "finding": "ARCH-AUTHORITY-001",
-      "expiresWith": "the bounded-context repair that assigns explicit authority"
-    },
-    {
-      "key": "pricing-authority|server/seo-config.ts|literal:£19#7",
-      "finding": "ARCH-AUTHORITY-001",
-      "expiresWith": "the bounded-context repair that assigns explicit authority"
-    },
-    {
-      "key": "pricing-authority|server/seo-config.ts|literal:£19#8",
-      "finding": "ARCH-AUTHORITY-001",
-      "expiresWith": "the bounded-context repair that assigns explicit authority"
-    },
-    {
-      "key": "pricing-authority|server/seo-config.ts|literal:£19#9",
-      "finding": "ARCH-AUTHORITY-001",
-      "expiresWith": "the bounded-context repair that assigns explicit authority"
-    },
-    {
-      "key": "pricing-authority|server/seo-config.ts|literal:£45#0",
       "finding": "ARCH-AUTHORITY-001",
       "expiresWith": "the bounded-context repair that assigns explicit authority"
     },

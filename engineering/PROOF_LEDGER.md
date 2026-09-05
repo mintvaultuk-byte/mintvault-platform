@@ -1,5 +1,16 @@
 # Engineering proof ledger
 
+## 2026-09-05 pricing P2d — editorial catalogue convergence
+
+[Pricing packet](../.claude/controlled-code-lead/tasks/repository-architecture-recovery-20260904/pricing-recovery.md)
+records13 real SEO component/FAQ/schema trees, guides/server metadata and current
+pricing links: initial15red, root/independentSol/clean50green, zero skips. Held-out
+fixed tier-name copy reproduced and repaired. Final clean build/TypeScript pass,
+scoped lint0errors/1existing warning, ratchet345 unchanged. Independent architecture
+8313 PASS with147 obsolete legacy retirements/+16 exact transfers; no new files,
+owner rules, adoption or diagnostic waiver. SSR proof is not full-browser/crawler
+proof. P3/integration/exact-SHA/security/final hostile/release gates remain OPEN.
+
 ## 2026-09-05 pricing P2c — service copy and ancillary authority
 
 [Pricing packet](../.claude/controlled-code-lead/tasks/repository-architecture-recovery-20260904/pricing-recovery.md)

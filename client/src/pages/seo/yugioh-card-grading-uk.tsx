@@ -21,11 +21,11 @@ const faqs = [
   },
   {
     question: "How much does Yu-Gi-Oh card grading cost with MintVault?",
-    answer: "MintVault UK offers three service tiers: Vault Queue at £19 per card (40 working days), Standard at £25 (15 working days), and Express at £45 (5 working days). Bulk discounts apply for 10 or more cards. All prices include fully insured return shipping.",
+    answer: "See the current pricing page for available grading services, prices and turnaround. Your submission quote confirms applicable discounts, insurance, return shipping and the total before payment.",
   },
   {
     question: "How long does YGO card grading take?",
-    answer: "Turnaround depends on your chosen tier. Vault Queue is 40 working days, Standard is 15 working days, and Express is 5 working days. You can track your submission status online at any time.",
+    answer: "See the current pricing page for available grading services, prices and turnaround. Your submission quote confirms applicable discounts, insurance, return shipping and the total before payment.",
   },
   {
     question: "What grading scale is used for Yu-Gi-Oh cards?",
@@ -52,7 +52,7 @@ export default function YugiohCardGradingUk() {
     <div className="max-w-5xl mx-auto px-4 py-10 no-text-shadow">
       <SeoHead
         title="Yu-Gi-Oh Card Grading UK | Professional YGO Grading | MintVault"
-        description="Professional Yu-Gi-Oh card grading in the UK. Grade your rarest YGO cards with MintVault — tamper-evident slabs, NFC tracking, from £19 per card."
+        description="Professional Yu-Gi-Oh card grading in the UK. Grade your rarest YGO cards with MintVault — tamper-evident slabs, NFC tracking. View current service options and pricing."
         canonical="https://mintvaultuk.com/yugioh-card-grading-uk"
         ogImage="https://mintvaultuk.com/images/collector-lifestyle.webp"
         schema={schema}
@@ -91,20 +91,12 @@ export default function YugiohCardGradingUk() {
         <section className="mb-10" data-testid="section-ygo-tiers">
           <h2 className="text-2xl font-bold text-[#D4AF37] tracking-wide mb-4">Yu-Gi-Oh Grading Service Tiers</h2>
           <div className="space-y-3">
-            {[
-              { tier: "Vault Queue", days: "40 working days", price: "£19/card" },
-              { tier: "Standard", days: "15 working days", price: "£25/card" },
-              { tier: "Express", days: "5 working days", price: "£45/card" },
-            ].map((t) => (
-              <div key={t.tier} className="flex items-center justify-between border border-[#D4AF37]/20 bg-[#0a0e1a]/85 backdrop-blur-sm rounded-lg px-4 py-3">
-                <span className="text-white text-sm font-medium">{t.tier}</span>
-                <span className="text-[#d4d4d4] text-sm">{t.days}</span>
-                <span className="text-[#D4AF37] font-bold text-sm">{t.price}</span>
-              </div>
-            ))}
+            <Link href="/pricing" className="block px-4 py-3 text-[#D4AF37] hover:underline">
+              View current grading prices and turnaround →
+            </Link>
           </div>
           <p className="text-[#d4d4d4] text-sm mt-3">
-            All tiers include fully insured return shipping. <Link href="/pricing" className="text-[#D4AF37] hover:underline">View full pricing</Link>.
+            Your quote confirms insurance and return shipping before payment. <Link href="/pricing" className="text-[#D4AF37] hover:underline">View full pricing</Link>.
           </p>
         </section>
 
@@ -124,7 +116,7 @@ export default function YugiohCardGradingUk() {
             {[
               { icon: <Shield size={16} />, title: "UK-based service", desc: "No international shipping, no customs fees, no import duties." },
               { icon: <Award size={16} />, title: "NFC-enabled slabs", desc: "Every slab has an NFC chip for instant certificate verification." },
-              { icon: <Clock size={16} />, title: "Fast turnaround", desc: "Express tier available in 5 working days." },
+              { icon: <Clock size={16} />, title: "Fast turnaround", desc: "See the pricing page for current service turnaround." },
               { icon: <CheckCircle size={16} />, title: "Verified ownership", desc: "Register and transfer card ownership through the MintVault registry." },
             ].map((item, i) => (
               <div key={i} className="flex gap-3 border border-[#D4AF37]/20 bg-[#0a0e1a]/85 backdrop-blur-sm rounded-2xl p-4">

@@ -39,6 +39,63 @@ import { ValueCalculator } from "../client/src/pages/pre-grade";
 import CertificateForm from "../client/src/components/certificate-form";
 import HowItWorksV2 from "../client/src/pages/how-it-works-v2";
 import { insuranceTiers, insuranceSurchargeBands, bulkDiscountTiers } from "../shared/commerce";
+import { guides } from "../client/src/data/guides";
+import { getSeoMeta, getSitemapEntries } from "../server/seo-config";
+import CtaSection from "../client/src/components/cta-section";
+
+const seoPages = import.meta.glob<{ default: ComponentType }>("../client/src/pages/seo/*.tsx", { eager: true });
+const staleGrading =
+  /(?<![~\d])£(?:19|25|45)(?![\d,.])|(?:40|15|5)(?: to 40)? working days|(?:three|five) (?:service |grading )?tiers|Vault Queue, Standard,? (?:or |and )?Express/i;
+
+describe("editorial current-pricing boundary", () => {
+  it("covers the exact current SEO surface inventory", () => expect(Object.keys(seoPages)).toHaveLength(13));
+  for (const [path, module] of Object.entries(seoPages)) {
+    it(`${path} has price-free current copy, metadata and working pricing navigation`, async () => {
+      await render(module.default);
+      expect(container.textContent).not.toMatch(staleGrading);
+      expect(document.head.textContent).not.toMatch(staleGrading);
+      expect(document.querySelector('meta[name="description"]')?.getAttribute("content")).not.toMatch(staleGrading);
+      for (const button of container.querySelectorAll<HTMLButtonElement>('[data-testid^="button-faq-"]')) {
+        await act(async () => button.click());
+        expect(container.textContent).not.toMatch(staleGrading);
+      }
+      expect(container.querySelector('a[href="/pricing"]')).not.toBeNull();
+      const pricing = container.querySelector('[data-testid="link-pricing"]');
+      if (pricing) expect(pricing.getAttribute("href")).toBe("/pricing");
+      for (const script of document.head.querySelectorAll('script[type="application/ld+json"]')) {
+        const schemas = JSON.parse(script.textContent ?? "null");
+        for (const schema of Array.isArray(schemas) ? schemas : [schemas]) {
+          if (schema?.["@type"] === "FAQPage") {
+            for (const entity of schema.mainEntity) {
+              expect(typeof entity.acceptedAnswer.text).toBe("string");
+              expect(entity.acceptedAnswer.text).not.toMatch(/<[^>]+>/);
+              expect(entity.acceptedAnswer.text).not.toMatch(staleGrading);
+            }
+          }
+        }
+      }
+    });
+  }
+  it("shared editorial pricing CTA targets canonical pricing", async () => {
+    await render(CtaSection);
+    expect(container.querySelector('[data-testid="button-cta-pricing"]')!.closest("a")!.getAttribute("href")).toBe(
+      "/pricing"
+    );
+  });
+  it("guide and server metadata do not repeat a static current MintVault catalogue", () => {
+    for (const guide of guides) {
+      expect(guide.body).not.toMatch(staleGrading);
+      expect(guide.body).not.toMatch(/£188\.50|£186 all-inclusive/);
+    }
+    for (const route of [
+      "/",
+      "/pricing",
+      ...getSitemapEntries().map((entry) => new URL(entry.loc, "https://mintvaultuk.com").pathname),
+    ]) {
+      expect(getSeoMeta(route).description).not.toMatch(staleGrading);
+    }
+  });
+});
 import { TierPriceWithPromo } from "../client/src/components/v2/promo-display";
 
 const live = {
@@ -177,7 +234,9 @@ describe("remaining service price displays", () => {
         expect(container.querySelector(`a[href="/submit?type=${type}"]`)?.textContent).toContain("Current prices");
       }
       expect(container.textContent).not.toMatch(/£(?:15|35)(?![\d,.])/);
-      expect(container.textContent).not.toMatch(/No percentage discount|Subscriptions temporarily paused|Tier only changes/);
+      expect(container.textContent).not.toMatch(
+        /No percentage discount|Subscriptions temporarily paused|Tier only changes/
+      );
     });
   }
   for (const [label, component] of [
@@ -280,6 +339,7 @@ afterEach(async () => {
   container?.remove();
   client?.clear();
   localStorage.clear();
+  document.head.innerHTML = "";
   window.history.replaceState({}, "", "/");
   vi.unstubAllGlobals();
 });

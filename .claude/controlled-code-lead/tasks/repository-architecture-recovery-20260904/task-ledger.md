@@ -2,6 +2,14 @@
 
 ## Current checkpoint and next bounded wave
 
+P2c c5ccf5998148f9e4abc7fce5c0ccccc3019a8fc4 is pushed; draftPR336 exact head
+verified. P2d editorial wave independently50/50, final clean build PASS;13SEO
+pages/guides/server metadata/current-pricing links converged. Exact hashes and
+red→green/limits in pricing-recovery.md. Architecture8313,147retired/+16transfers;
+no broad ownership/gate relaxation. WIP commit/push now, then P3 ownedDB full
+Admin→public→quote→provider-double charge→receipt. No owner/idle pause/deployment.
+c5 primary33993809931/governance33993809966/33993807345 running, not green.
+
 P2b7857c3c3e13befb7979eb26e04c62cfce13fb1e4 is pushed, draftPR336 exact head verified.
 P2c service/ancillary wave is independently34/34, clean53regressions plus34focused
 and final build PASS. One held-out cap-note defect reproduced and repaired. Exact

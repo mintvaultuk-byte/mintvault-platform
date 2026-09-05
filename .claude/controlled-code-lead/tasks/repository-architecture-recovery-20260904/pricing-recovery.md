@@ -1,5 +1,71 @@
 # Commercial pricing recovery — existing ARCH-PRICING-001
 
+## P2d editorial wave — locally verified checkpoint
+
+P2c checkpoint c5ccf599, same feature branch. P2d preflight CRITICAL/HOSTILE.
+Exact production manifest: the13 existing `client/src/pages/seo/*.tsx` files
+(best-card-grading-uk, card-grading-cost-uk, card-grading-near-me,
+card-grading-service-uk, how-to-grade-pokemon-cards, mtg-card-grading-uk,
+one-piece-card-grading-uk, pokemon-card-grading-uk, psa-alternative-uk,
+sports-card-grading-uk, tcg-grading-uk, trading-card-grading-uk,
+yugioh-card-grading-uk), `client/src/data/guides.ts`, `server/seo-config.ts`,
+and existing `client/src/components/cta-section.tsx` (View Pricing href only).
+Extend `tests/pricing-consumers.test.ts`; same exact architecture inventories
+as needed, no new framework/folders or diagnostic waiver.
+
+Remove duplicate current grading tier arrays and static price/day/count claims;
+preserve non-price product copy and link to canonical `/pricing`. Plain metadata
+and FAQ schema stay price-free strings, rendered page links route correctly.
+Correct included-shipping claims to server-quote-confirmed shipping/insurance,
+not a charge policy change. Remove fixed MintVault break-even/basket arithmetic;
+retained competitor/card-market examples explicitly illustrative, never current
+MintVault pricing. Preserve unrelated ownership/grading source and physical gates.
+No external price research, provider calls, schema, grading, payment or deployment.
+Shared addon fields have no remaining active price consumer, so do not create a
+replacement authority model. Rollback this editorial+link set to c5cc; no records
+or payment snapshots change. Root sole writer; Terra discovery, Sol proof.
+
+P2d proof receipt: baseline behavioral matrix15red/1inventorypass; final root,
+independent Sol and clean exact-lock50/50, zero skips. All13 pages mounted, FAQ
+buttons expanded, metadata/JSON-LD parsed with plain price-free answers; guides,
+server metadata and exact current-pricing links covered. Three additional wrong
+homepage links and one held-out fixed tier-name trio reproduced red and repaired.
+Retained overseas amounts are explicitly illustrative, not current tax/provider
+claims. Component/SSR proof is not crawler or full-browser proof. Final exact clean
+client/server build3366modules PASS; TypeScript PASS, scoped lint0errors/1existing
+Clock warning, tests ratchet345 unchanged. Independent Terra normal architecture
+8313 PASS, pricing1710→1579:147 obsolete legacy keys retired and16 exact reviewed
+transfers retained, no new owner rules/adoption/gate relaxation. Mixed editorial
+authority stays OPEN. No new files/folders/framework, schema or payment changes.
+c5 primary33993809931 and governance33993809966/33993807345 running at last read;
+older primary7857 cancelled by superseding run. Hosted green not claimed. P3 and
+exact-candidate/hostile/security/release vetoes remain OPEN. Postflight and graph
+validation receipt recorded at wave end; no protected acceptance override.
+Wave-end graph validation: parent101/nested34 valid, NOT READY. Postflight remains
+red on existing managed-CLAUDE drift, npm-egress, dirty tree and protected review;
+graph REBUILD_REQUIRED warning retained. No veto waived.
+
+Final independently verified P2d SHA-256:
+```text
+5817421ce6cd7d36fdd0a1753df9da03fa0243015b4a899a828fbd1d05d750bb client/src/pages/seo/best-card-grading-uk.tsx
+51075c0539cec5fb212d823a19967515ddc453741e4a30f0420df62354805247 client/src/pages/seo/card-grading-cost-uk.tsx
+7bc92944567b292760cbf75e9d114070c01f48ff621dd048188be54e5ed35653 client/src/pages/seo/card-grading-near-me.tsx
+30a14dd4d22e8727d2386fae3c9a373be7add91295460b0ff44cac21ae4914bd client/src/pages/seo/card-grading-service-uk.tsx
+97eced4d21988e8bd7dd88c21e2e28b987a73e1b9a9703f58d3e18ca67b72b4c client/src/pages/seo/how-to-grade-pokemon-cards.tsx
+92bd1dd1bc29ee8ddc1bf01614afbcd55d51955782c2b7da3fe1ef1dd97fc110 client/src/pages/seo/mtg-card-grading-uk.tsx
+70b7fabb352633a94ce1c3e444a49bd6bdf9af512de9ca7e8c875b0fa5d92245 client/src/pages/seo/one-piece-card-grading-uk.tsx
+59412289eb94d86230fc8f8128e64089ffb677535f16e1b30a8d4344c9e12f43 client/src/pages/seo/pokemon-card-grading-uk.tsx
+8e9a4703b2ba6a16d95d4d4223e63e00ba5306c365d93fcd5b138d4379a08057 client/src/pages/seo/psa-alternative-uk.tsx
+14c06284f3fe0443d9cf8ac8177ed4bc890e7abac8460f504d2b09681ea9b8fa client/src/pages/seo/sports-card-grading-uk.tsx
+58156d7ba7418cfc46466ebf267e96b9ae9d50fd69dcaab80d043fc026f6283f client/src/pages/seo/tcg-grading-uk.tsx
+89b1045967f5da39b9b2098e766e9a334e9e98d91fd266c454875800f4a8a60e client/src/pages/seo/trading-card-grading-uk.tsx
+cc1ac42dbcb9cfcf140cc78217f8d78463f974cd97f9fd115f0f160b9d01e78c client/src/pages/seo/yugioh-card-grading-uk.tsx
+0e2ab999ebe110b13c7e2608de3b33088205980675d031385af983087209a7da client/src/data/guides.ts
+592575c86e4d921aecbf7fd181524b20a0c401e8a45f07998e33189f2dbf0b5b server/seo-config.ts
+138604533c232deb9f51f29fec83f73db59708875f0cba8ed11f680174f24049 client/src/components/cta-section.tsx
+91db04748ac828726c72c3add72d266d59234a9b98e87ee9ac20a1dee94d7948 tests/pricing-consumers.test.ts
+```
+
 ## P2c service and ancillary copy wave — current
 
 P2b pushed at `7857c3c3e13befb7979eb26e04c62cfce13fb1e4`, draftPR336 exact SHA

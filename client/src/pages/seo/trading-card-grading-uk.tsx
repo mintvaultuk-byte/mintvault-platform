@@ -30,7 +30,7 @@ const faqs = [
   {
     question: "How much does trading card grading cost in the UK?",
     // keep in sync with bulkDiscountTiers (shared/schema.ts) — max 10%; serialised into faqSchema JSON-LD (Google-indexed).
-    answer: "Grading starts from £19 per card (Vault Queue tier, 40 working days). Standard is £25 (15 working days) and Express is £45 (5 working days). Bulk discounts of up to 10% apply to larger submissions. Visit our <a href='/' class='text-[#D4AF37] hover:underline'>pricing page</a> for full details.",
+    answer: "See the current pricing page for available grading services, prices and turnaround. Your submission quote confirms applicable discounts, insurance, return shipping and the total before payment.",
   },
   {
     question: "Do graded trading cards sell for more than raw cards?",
@@ -166,7 +166,7 @@ export default function TradingCardGradingUk() {
               Choosing a UK-based grading service means your cards never leave the country. There is no risk of loss during international transit, no customs paperwork, no import duties or VAT surprises, and no weeks of additional waiting for overseas shipping.
             </p>
             <p>
-              MintVault offers turnaround from 40 working days down to 5 working days, with all return shipping fully insured. Our UK-based customer support team is available to answer questions about your submission without time zone complications.
+              See the pricing page for current MintVault turnaround. Your submission quote confirms insurance and return shipping. Our UK-based customer support team is available to answer questions about your submission without time zone complications.
             </p>
             <p>
               For a detailed comparison of UK versus international grading options, see our <Link href="/psa-alternative-uk" className="text-[#D4AF37] hover:underline" data-testid="link-psa-alt">PSA alternative guide</Link>.

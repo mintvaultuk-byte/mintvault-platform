@@ -24,7 +24,7 @@ export default function CtaSection({
             Submit Your Cards <ArrowRight size={16} />
           </GradientButton>
         </Link>
-        <Link href="/" className="no-underline">
+        <Link href="/pricing" className="no-underline">
           <GradientButton height="42px" data-testid="button-cta-pricing">
             <CreditCard size={16} /> View Pricing
           </GradientButton>
