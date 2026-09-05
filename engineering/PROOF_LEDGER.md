@@ -1,5 +1,18 @@
 # Engineering proof ledger
 
+## 2026-09-05 continuous H1 local integration checkpoint
+
+[Retained commands, hashes and limitations](../.claude/controlled-code-lead/tasks/repository-architecture-recovery-20260904/hygiene-wave-proof.md):
+actual ARM64 production image/native libraries/dev-toolchain absence independently
+PASS; owned CI-pinned PostgreSQL16/vector+17 preparation and all 70 Partner suites
+PASS (1328 assertions, no skips); final runner failure-path fixes independently
+PASS (13 lifecycle tests) and real preparation+22 migration assertions re-proven.
+Real local MinIO adapter/stream/conditional/replay/signed-download diagnostic PASS.
+Starting application HEAD1ae1a7c5 plus the H1b WIP hashes are retained there; the
+70-suite run predates final runner corrections and is not exact-final CI proof.
+No release node closed; browser, durable object-store CI, managed workflow,
+restricted security evidence and hosted exact-SHA proof remain open. No deploy.
+
 ## 2026-09-05 authorized hygiene launch
 
 See [first-wave evidence](../.claude/controlled-code-lead/tasks/repository-architecture-recovery-20260904/hygiene-wave-proof.md).

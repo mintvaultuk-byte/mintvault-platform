@@ -18,7 +18,7 @@
     "session-principal": 585,
     "table": 360,
     "table-access": 3314,
-    "timer": 89
+    "timer": 90
   },
   "records": [
     {
@@ -163255,6 +163255,16 @@
       "key": "table-access|server/workers/r2-to-b2-archival.ts|write:public.certificates#0",
       "source": "server/workers/r2-to-b2-archival.ts:154",
       "owner": "runtime-jobs-platform"
+    },
+    {
+      "category": "timer",
+      "id": "setTimeout:() => kill(\"SIGKILL\")",
+      "timerKind": "one-shot-unclassified",
+      "delay": "5000",
+      "lifecycle": "untracked",
+      "key": "timer|scripts/ci/run-disposable-integration.mjs|setTimeout:() => kill(\"SIGKILL\")#0",
+      "source": "scripts/ci/run-disposable-integration.mjs:188",
+      "owner": "engineering-test-platform"
     },
     {
       "category": "timer",

@@ -1,5 +1,23 @@
 # Task ledger — repository architecture recovery
 
+## Continuous H1 progress — 2026-09-05 daytime
+
+Owner rejected half-hour wakeups: heartbeat PAUSED, continuous Goal ACTIVE; no
+periodic idle gaps. From1ae1a7c5, actual production ARM64 image and independent
+native/dependency proof pass. New owned PostgreSQL runner implemented and narrow
+independent failure-path review completed after fixing reproduced defects.
+Shared PG16/vector preparation +70 Partner suites/1328 assertions pass; final
+failure-path revisions have targeted real preparation+22-assertion reproof.
+Existing server/r2.ts passes local MinIO real transport/replay diagnostic. Details,
+exact file/evidence hashes and limitations are in hygiene-wave-proof.md.
+
+Next: keep H1 IN_PROGRESS; make the proven local object-store fixture durable,
+wire remaining CI-equivalent/full application/browser substrate, reconcile
+managed workflow under existing authority, then continue approved runtime/product
+graph packets. Do not restart scanner/evidence or broad audits. Exact-candidate
+CI and restricted independent security evidence remain open. Preserve the unrelated
+docs/planning/vault-worlds files. No staging/production deployment or shared migration.
+
 ## Current continuation — owner-authorized repair launch, 2026-09-05
 
 Launch update: all nine dispositions retained and dispatch gate passed at80a20611.

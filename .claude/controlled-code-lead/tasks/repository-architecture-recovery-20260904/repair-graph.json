@@ -1341,6 +1341,7 @@
         "package.json",
         "package-lock.json",
         "tests/production-dependency-boundary.test.ts",
+        "tests/disposable-integration-runner.test.ts",
         "tsconfig.tests.json",
         "tsconfig.scripts.json",
         "tsconfig.architecture.json",
@@ -1351,7 +1352,8 @@
       ],
       "proof_required": [
         "Isolated Partner runner, Scanner test gates (signed package proof remains Phase 5 REPAIR-SCANNER-PACKAGE), script/test typechecks, ratcheted unreachable-code proof, shipped-migration labels, non-vacuity and injected-failure proof",
-        "hygiene-repair-manifest.md H1a: pinned omit-dev dependency tree excludes build-only toolchain while retaining native runtime modules; builder CSS and complete production image proof remain required"
+        "hygiene-repair-manifest.md H1a: pinned omit-dev dependency tree excludes build-only toolchain while retaining native runtime modules; builder CSS and complete production image proof remain required",
+        "hygiene-repair-manifest.md H1b: owned CI-pinned PG16/vector and PG17, process-only preparation exports, per-suite topology, non-vacuous real Partner runner and independently verified failure/cancellation cleanup; hygiene-wave-proof.md retains local results, not release closure"
       ],
       "evidence": [
         {

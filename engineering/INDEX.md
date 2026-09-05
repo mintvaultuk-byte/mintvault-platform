@@ -35,6 +35,15 @@ Same-database accounting identities and distinct restricted runtime roles must r
 consistent with scripts/ci/partner-suite-env-matrix.mjs; a universal database override
 is not a valid substitute for isolated suites.
 
+The owned PostgreSQL runner is `node scripts/ci/run-disposable-integration.mjs
+--docker-context <dedicated-local-context> --all --json <report-directory>`.
+Add `--prepare` to exercise the existing shared-schema/VQ test preparation first.
+It creates fresh CI-pinned PG16/vector and PG17 services on random loopback ports,
+then removes only its verified containers and their anonymous test volumes. It
+never adopts an existing database. Use the pinned Node20 runtime and an explicit
+test-only PATH/native PostgreSQL17 installation; do not load local environment files.
+This runner does not yet provision object storage or certify browser/hardware proof.
+
 ## Retention and consolidation
 
 | Material | Ownership and rule |
