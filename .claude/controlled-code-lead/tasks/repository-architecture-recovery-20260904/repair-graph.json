@@ -167,7 +167,13 @@
       "proof_required": [
         "Explicit retain-migrate-retire decision for both historical tables, distinct routes, permissions, rollback, and Stripe order authority"
       ],
-      "evidence": [{"ref": "owner-approval-record.md; partner-contract-recovery.md: retained histories, route rollback, existing roles; local CI independently verified 64/64; hosted/security vetoes open", "sha": "0494d5fbed5cb30f8379bb507d28c9b2a0a09c0b", "observer": "repository-owner"}],
+      "evidence": [
+        {
+          "ref": "owner-approval-record.md; partner-contract-recovery.md: retained histories, route rollback, existing roles; local CI independently verified 64/64; hosted/security vetoes open",
+          "sha": "0494d5fbed5cb30f8379bb507d28c9b2a0a09c0b",
+          "observer": "repository-owner"
+        }
+      ],
       "invalidated_by": ["Partner order/request contract change", "owner decision change"],
       "vetoes_release": true
     },
@@ -187,7 +193,13 @@
       "proof_required": [
         "Confirm settled Scanner Operator product intent and approve shared/generated client transport changes without expanding server permissions"
       ],
-      "evidence": [{"ref": "owner-approval-record.md; partner-contract-recovery.md: retained histories, route rollback, existing roles; local CI independently verified 64/64; hosted/security vetoes open", "sha": "0494d5fbed5cb30f8379bb507d28c9b2a0a09c0b", "observer": "repository-owner"}],
+      "evidence": [
+        {
+          "ref": "owner-approval-record.md; partner-contract-recovery.md: retained histories, route rollback, existing roles; local CI independently verified 64/64; hosted/security vetoes open",
+          "sha": "0494d5fbed5cb30f8379bb507d28c9b2a0a09c0b",
+          "observer": "repository-owner"
+        }
+      ],
       "invalidated_by": ["Partner role or permission contract change", "owner decision change"],
       "vetoes_release": true
     },
@@ -207,7 +219,13 @@
       "proof_required": [
         "Explicit authority for grading price, turnaround, active-state, promotion, metadata, quote, charge, and receipt parity"
       ],
-      "evidence": [{"ref": "owner-approval-record.md; pricing-recovery.md: existing DB price authority, no price-value change, no deployment or shared migration", "sha": "c228af1998fb770e12c93758d3737fc92c5a9009", "observer": "repository-owner"}],
+      "evidence": [
+        {
+          "ref": "owner-approval-record.md; pricing-recovery.md: existing DB price authority, no price-value change, no deployment or shared migration",
+          "sha": "c228af1998fb770e12c93758d3737fc92c5a9009",
+          "observer": "repository-owner"
+        }
+      ],
       "invalidated_by": ["Pricing/payment contract change", "owner decision change"],
       "vetoes_release": true
     },
@@ -243,7 +261,7 @@
       "kind": "OWNER_GATE",
       "title": "Decide Vault Quest required/optional schema and migration authority",
       "severity": "NONE",
-      "status": "OWNER_DECISION",
+      "status": "PROVEN",
       "agent_mode": "EXTERNAL_OWNER",
       "agent_id": "repository-owner",
       "workspace": "external",
@@ -253,7 +271,13 @@
       "proof_required": [
         "VQ required-or-optional decision and approval for exact migration runner, component mount/readiness, schema convergence, and fallback retirement"
       ],
-      "evidence": [],
+      "evidence": [
+        {
+          "ref": "owner-approval-record.md; vq-schema-recovery.md: required/enabled preserves currently mounted VQ",
+          "sha": "c712e4647bf8cd01732370e10e0282e8e454ded1",
+          "observer": "repository-owner"
+        }
+      ],
       "invalidated_by": ["VQ product status", "schema estate", "owner decision change"],
       "vetoes_release": true
     },
@@ -503,7 +527,12 @@
           "observer": "data-runtime-observer"
         }
       ],
-      "invalidated_by": ["Direct reprint response", "print evidence schema", "artifact finalizer", "audit documentation"],
+      "invalidated_by": [
+        "Direct reprint response",
+        "print evidence schema",
+        "artifact finalizer",
+        "audit documentation"
+      ],
       "vetoes_release": true
     },
     {
@@ -586,7 +615,12 @@
           "observer": "data-runtime-observer"
         }
       ],
-      "invalidated_by": ["Print artifact replay", "Partner print eligibility", "certificate lifecycle", "object-write result"],
+      "invalidated_by": [
+        "Print artifact replay",
+        "Partner print eligibility",
+        "certificate lifecycle",
+        "object-write result"
+      ],
       "vetoes_release": true
     },
     {
@@ -1334,13 +1368,8 @@
       "agent_mode": "LEAD",
       "agent_id": "codex-lead",
       "workspace": "shared",
-      "depends_on": [
-        "ARCH-CI-001",
-        "REPAIR-AUTHORITY-CONTROLS"
-      ],
-      "addresses": [
-        "ARCH-CI-001"
-      ],
+      "depends_on": ["ARCH-CI-001", "REPAIR-AUTHORITY-CONTROLS"],
+      "addresses": ["ARCH-CI-001"],
       "write_scope": [
         ".github/workflows/ci.yml",
         "package.json",
@@ -1470,7 +1499,13 @@
       "proof_required": [
         "Both historical tables preserved or explicitly migrated, route/permission rollback, Stripe replay safety, and role compatibility"
       ],
-      "evidence": [{"ref": "owner-approval-record.md; partner-contract-recovery.md: retained histories, route rollback, existing roles; local CI independently verified 64/64; hosted/security vetoes open", "sha": "0494d5fbed5cb30f8379bb507d28c9b2a0a09c0b", "observer": "codex-lead"}],
+      "evidence": [
+        {
+          "ref": "owner-approval-record.md; partner-contract-recovery.md: retained histories, route rollback, existing roles; local CI independently verified 64/64; hosted/security vetoes open",
+          "sha": "0494d5fbed5cb30f8379bb507d28c9b2a0a09c0b",
+          "observer": "codex-lead"
+        }
+      ],
       "invalidated_by": ["Partner data", "route", "permission", "Stripe", "recovery procedure"],
       "vetoes_release": true
     },
@@ -1490,7 +1525,13 @@
       "proof_required": [
         "Old/new projection compatibility, cache rollback, in-flight quote/payment preservation, and immutable price receipt authority"
       ],
-      "evidence": [{"ref": "pricing-recovery.md: P1/P2/P3 exact manifest, compatible projection/cache rollback, immutable in-flight and paid history; recovery depends on owner authority, repair retains finding dependency", "sha": "c228af1998fb770e12c93758d3737fc92c5a9009", "observer": "codex-lead"}],
+      "evidence": [
+        {
+          "ref": "pricing-recovery.md: P1/P2/P3 exact manifest, compatible projection/cache rollback, immutable in-flight and paid history; recovery depends on owner authority, repair retains finding dependency",
+          "sha": "c228af1998fb770e12c93758d3737fc92c5a9009",
+          "observer": "codex-lead"
+        }
+      ],
       "invalidated_by": ["Pricing contract", "cache", "quote", "payment", "recovery procedure"],
       "vetoes_release": true
     },
@@ -1528,17 +1569,23 @@
       "kind": "OWNER_GATE",
       "title": "Approve pre-wave VQ schema and readiness recovery packet",
       "severity": "NONE",
-      "status": "OPEN",
+      "status": "PROVEN",
       "agent_mode": "LEAD",
       "agent_id": "codex-lead",
       "workspace": "shared",
-      "depends_on": ["ARCH-SCHEMA-001"],
+      "depends_on": ["OWNER-VQ-SCHEMA"],
       "addresses": [],
       "write_scope": [],
       "proof_required": [
         "Fresh/historical forward convergence, mixed-version compatibility, component disable/restore, and immutable migration rollback target"
       ],
-      "evidence": [],
+      "evidence": [
+        {
+          "ref": "vq-schema-recovery.md: S1 only; S2/S3 require extension. Recovery depends on owner authority; repair retains finding dependency.",
+          "sha": "c712e4647bf8cd01732370e10e0282e8e454ded1",
+          "observer": "codex-lead"
+        }
+      ],
       "invalidated_by": ["VQ estate", "migration plan", "readiness", "recovery procedure"],
       "vetoes_release": true
     },
@@ -1720,12 +1767,7 @@
       "agent_mode": "LEAD",
       "agent_id": "codex-lead",
       "workspace": "shared",
-      "depends_on": [
-        "ARCH-SESSION-001",
-        "OWNER-IDENTITY-SESSION",
-        "RECOVERY-ADMIN",
-        "REPAIR-CI-TOPOLOGY"
-      ],
+      "depends_on": ["ARCH-SESSION-001", "OWNER-IDENTITY-SESSION", "RECOVERY-ADMIN", "REPAIR-CI-TOPOLOGY"],
       "addresses": ["ARCH-SESSION-001"],
       "write_scope": [
         "config/components/core-runtime.ts",
@@ -1740,15 +1782,15 @@
         ".claude/controlled-code-lead/tasks/repository-architecture-recovery-20260904/reviewer-status.md",
         ".claude/controlled-code-lead/tasks/repository-architecture-recovery-20260904/rollback.md",
         ".claude/controlled-code-lead/tasks/repository-architecture-recovery-20260904/task-ledger.md",
-    "client/src/App.tsx",
-    "client/src/components/card-identification/CardIdentifyPanel.tsx",
-    "client/src/components/admin/admin-step-up.tsx",
-    "client/src/components/admin/admin-shell.tsx",
-    "client/src/components/certificate-form.tsx",
+        "client/src/App.tsx",
+        "client/src/components/card-identification/CardIdentifyPanel.tsx",
+        "client/src/components/admin/admin-step-up.tsx",
+        "client/src/components/admin/admin-shell.tsx",
+        "client/src/components/certificate-form.tsx",
         "client/src/components/grading",
-    "client/src/components/grading-workflow/CertificatePreviewPanel.tsx",
-    "client/src/components/identity-tools.tsx",
-    "client/src/components/ownership-section.tsx",
+        "client/src/components/grading-workflow/CertificatePreviewPanel.tsx",
+        "client/src/components/identity-tools.tsx",
+        "client/src/components/ownership-section.tsx",
         "client/src/components/vault-quest/workflow.tsx",
         "client/src/lib/queryClient.ts",
         "client/src/lib/admin-session.tsx",
@@ -1785,9 +1827,9 @@
         "docs/engineering/ARCHITECTURE_AUTHORITY.md",
         "engineering/ISSUE_REGISTER.md",
         "engineering/PROOF_LEDGER.md",
-    "server/routes/auth.ts",
-    "scripts/architecture/check-architecture.mjs",
-    "scripts/architecture/authority-policy.json",
+        "server/routes/auth.ts",
+        "scripts/architecture/check-architecture.mjs",
+        "scripts/architecture/authority-policy.json",
         "scripts/architecture/generated/architecture-authority.json",
         "scripts/architecture/legacy-authority.json",
         "scripts/ci/typecheck-baselines/architecture.json",
@@ -1795,9 +1837,9 @@
         "tests/admin-session-contracts.test.ts",
         "tests/admin-auth-reliability.test.ts",
         "tests/admin-station-approval-step-up-ui.test.ts",
-    "tests/admin-staff-legacy-shell-guard.test.ts",
-    "tests/architecture-authority.test.ts",
-    "tests/command-centre-ui-runtime.test.ts",
+        "tests/admin-staff-legacy-shell-guard.test.ts",
+        "tests/architecture-authority.test.ts",
+        "tests/command-centre-ui-runtime.test.ts",
         "tests/partner-dashboard-admin-ui.test.ts",
         "tests/partner-management-admin-ui.test.ts",
         "tests/partner-network-admin-ui.test.ts"
@@ -1939,7 +1981,18 @@
       "proof_required": [
         "Explicit retain/migrate/retire decision, distinct routes/permissions, both historical tables and fixtures preserved or migrated without loss, paid webhook order in My Orders, legacy request visibility, migration/rollback evidence, one shell, capability controls, and Scanner Operator least privilege"
       ],
-      "evidence": [{"ref":"owner-approval-record.md; partner-contract-recovery.md: retained histories, route rollback, existing roles; local CI independently verified 64/64; hosted/security vetoes open","sha":"0494d5fbed5cb30f8379bb507d28c9b2a0a09c0b","observer":"codex-lead"},{"ref":"partner-contract-recovery.md: exact hashes; independent Sol HTTP7/React9/runtime47/final-owner2/commerce+scanner33; actual Chrome22/0/0 root+independent+clean; clean exact-lock178; no hosted/final release closure","sha":"0494d5fbed5cb30f8379bb507d28c9b2a0a09c0b","observer":"Sol h1c_lifecycle independent"}],
+      "evidence": [
+        {
+          "ref": "owner-approval-record.md; partner-contract-recovery.md: retained histories, route rollback, existing roles; local CI independently verified 64/64; hosted/security vetoes open",
+          "sha": "0494d5fbed5cb30f8379bb507d28c9b2a0a09c0b",
+          "observer": "codex-lead"
+        },
+        {
+          "ref": "partner-contract-recovery.md: exact hashes; independent Sol HTTP7/React9/runtime47/final-owner2/commerce+scanner33; actual Chrome22/0/0 root+independent+clean; clean exact-lock178; no hosted/final release closure",
+          "sha": "0494d5fbed5cb30f8379bb507d28c9b2a0a09c0b",
+          "observer": "Sol h1c_lifecycle independent"
+        }
+      ],
       "invalidated_by": [
         "Partner router",
         "order/request aggregate",
@@ -2061,7 +2114,13 @@
       "proof_required": [
         "Owner-selected separate retirement of analyze-v1-legacy and grade-with-ai; both are authenticated unconditional typed 410 tombstones mounted before every legacy route-local feature/AI-rate/upload/body/grading-domain-DB/R2/provider/grading/prediction/evidence/audit effect, while bounded global middleware, authentication, and supported grading identities remain unchanged"
       ],
-      "evidence": [{"ref": "grading-legacy-recovery.md: already implemented80a20611, independent Terra5/5 current unchanged source; exact hashes and synthetic-vs-full-mount limits retained, candidate/hostile gates OPEN", "sha": "aa4ec14a273da779f550fd4bb777ca1616d5e518", "observer": "Terra h1b_runner independent; root source verification"}],
+      "evidence": [
+        {
+          "ref": "grading-legacy-recovery.md: already implemented80a20611, independent Terra5/5 current unchanged source; exact hashes and synthetic-vs-full-mount limits retained, candidate/hostile gates OPEN",
+          "sha": "aa4ec14a273da779f550fd4bb777ca1616d5e518",
+          "observer": "Terra h1b_runner independent; root source verification"
+        }
+      ],
       "invalidated_by": ["Legacy path", "feature flag", "provider", "grading command", "object lifecycle"],
       "vetoes_release": false
     },
@@ -2075,7 +2134,15 @@
       "agent_mode": "LEAD",
       "agent_id": "codex-lead",
       "workspace": "shared",
-      "depends_on": ["ARCH-WAA-SUBGRAPH-001", "OWNER-WAA-EXACT", "RECOVERY-WAA", "REPAIR-CI-TOPOLOGY", "REPAIR-ADMIN-CONTRACTS", "REPAIR-ADMIN-PRINT", "REPAIR-LEGACY-AI"],
+      "depends_on": [
+        "ARCH-WAA-SUBGRAPH-001",
+        "OWNER-WAA-EXACT",
+        "RECOVERY-WAA",
+        "REPAIR-CI-TOPOLOGY",
+        "REPAIR-ADMIN-CONTRACTS",
+        "REPAIR-ADMIN-PRINT",
+        "REPAIR-LEGACY-AI"
+      ],
       "addresses": ["ARCH-WAA-SUBGRAPH-001"],
       "write_scope": [
         ".claude/controlled-code-lead/tasks/white-ace-assurance-repository-20260904/repair-graph.json",
@@ -2105,7 +2172,7 @@
       "kind": "REPAIR",
       "title": "Unify shipped Vault Quest migration and component readiness authority",
       "severity": "HIGH",
-      "status": "OPEN",
+      "status": "IN_PROGRESS",
       "agent_mode": "LEAD",
       "agent_id": "codex-lead",
       "workspace": "shared",
@@ -2116,7 +2183,7 @@
         "scripts/db",
         "drizzle-vq.config.ts",
         "Dockerfile",
-        "config/components/vault-quest.json",
+        "config/components/vault-quest.ts",
         "server/routes/vault-quest-production.ts",
         "server/vault-quest/lib/export-job-store.ts",
         "tests/vq-migration-authority.test.ts"
@@ -2124,7 +2191,13 @@
       "proof_required": [
         "Checksummed advisory-locked runner, shipped inventory, owner-selected required/optional component manifest consumed by readiness, fresh and historic convergence, no fleet-unsafe fallback"
       ],
-      "evidence": [],
+      "evidence": [
+        {
+          "ref": "vq-schema-recovery.md: S1 exact manifest; schema/readiness/fallback and final proof remain OPEN",
+          "sha": "c712e4647bf8cd01732370e10e0282e8e454ded1",
+          "observer": "codex-lead"
+        }
+      ],
       "invalidated_by": [
         "VQ migration",
         "journal",
@@ -2538,12 +2611,8 @@
       "agent_mode": "READ_ONLY",
       "agent_id": "ci-topology-verifier",
       "workspace": "read_only",
-      "depends_on": [
-        "REPAIR-CI-TOPOLOGY"
-      ],
-      "addresses": [
-        "ARCH-CI-001"
-      ],
+      "depends_on": ["REPAIR-CI-TOPOLOGY"],
+      "addresses": ["ARCH-CI-001"],
       "write_scope": [],
       "proof_required": [
         "Exact runtime invokes isolated Partner, Scanner, scripts/tests typechecks and shipped migration proof; skip and injected failure make gate red"
@@ -2560,14 +2629,7 @@
           "observer": "Sol h1c_lifecycle independent, codex-lead integration"
         }
       ],
-      "invalidated_by": [
-        "Candidate SHA",
-        "workflow",
-        "runner",
-        "test inventory",
-        "runtime",
-        "migration inventory"
-      ],
+      "invalidated_by": ["Candidate SHA", "workflow", "runner", "test inventory", "runtime", "migration inventory"],
       "vetoes_release": true
     },
     {
@@ -2664,7 +2726,13 @@
       "proof_required": [
         "No route collision; paid order visible after checkout; legacy request remains visible under the selected contract; fixtures for both historical tables; migration/no-loss and rollback evidence; one shell; capability matrix; invite/edit Scanner Operator; deny grading/purchase"
       ],
-      "evidence": [{"ref":"partner-contract-recovery.md: exact hashes; independent Sol HTTP7/React9/runtime47/final-owner2/commerce+scanner33; actual Chrome22/0/0 root+independent+clean; clean exact-lock178; no hosted/final release closure","sha":"0494d5fbed5cb30f8379bb507d28c9b2a0a09c0b","observer":"Sol h1c_lifecycle independent"}],
+      "evidence": [
+        {
+          "ref": "partner-contract-recovery.md: exact hashes; independent Sol HTTP7/React9/runtime47/final-owner2/commerce+scanner33; actual Chrome22/0/0 root+independent+clean; clean exact-lock178; no hosted/final release closure",
+          "sha": "0494d5fbed5cb30f8379bb507d28c9b2a0a09c0b",
+          "observer": "Sol h1c_lifecycle independent"
+        }
+      ],
       "invalidated_by": [
         "Candidate SHA",
         "Partner mount",
@@ -2694,7 +2762,13 @@
       "proof_required": [
         "Real database admin mutation appears identically on public, submit, promotion, quote, charge, and receipt; static-value mutation fails"
       ],
-      "evidence": [{"ref": "pricing-recovery.md: P1/P2a/P2b/P2c/P2d locally verified; P3 source-hash-bound independent18/18 and clean106/106 HTTP-to-receipt, baseline two turnaround failures plus held-out invalid snapshot fixed. Architecture8313. Exact candidate/hosted/full-browser/final hostile remain OPEN", "sha": "43ca275757e93cc981e9d0091fc4d62c6003dc0d", "observer": "Sol h1c_lifecycle independent; Terra h1b_runner topology"}],
+      "evidence": [
+        {
+          "ref": "pricing-recovery.md: P1/P2a/P2b/P2c/P2d locally verified; P3 source-hash-bound independent18/18 and clean106/106 HTTP-to-receipt, baseline two turnaround failures plus held-out invalid snapshot fixed. Architecture8313. Exact candidate/hosted/full-browser/final hostile remain OPEN",
+          "sha": "43ca275757e93cc981e9d0091fc4d62c6003dc0d",
+          "observer": "Sol h1c_lifecycle independent; Terra h1b_runner topology"
+        }
+      ],
       "invalidated_by": ["Candidate SHA", "tier data", "projection", "promotion", "quote", "payment", "receipt"],
       "vetoes_release": true
     },
@@ -2714,7 +2788,13 @@
       "proof_required": [
         "Feature-on and adversarial multipart requests prove both exact legacy identities are unconditional typed 410 tombstones after authentication and before every legacy route-local feature/AI-rate/upload/body/grading-domain-DB/R2/provider/grading/prediction/evidence/audit effect; bounded global middleware and supported grading identities remain reachable"
       ],
-      "evidence": [{"ref": "grading-legacy-recovery.md: already implemented80a20611, independent Terra5/5 current unchanged source; exact hashes and synthetic-vs-full-mount limits retained, candidate/hostile gates OPEN", "sha": "aa4ec14a273da779f550fd4bb777ca1616d5e518", "observer": "Terra h1b_runner independent; root source verification"}],
+      "evidence": [
+        {
+          "ref": "grading-legacy-recovery.md: already implemented80a20611, independent Terra5/5 current unchanged source; exact hashes and synthetic-vs-full-mount limits retained, candidate/hostile gates OPEN",
+          "sha": "aa4ec14a273da779f550fd4bb777ca1616d5e518",
+          "observer": "Terra h1b_runner independent; root source verification"
+        }
+      ],
       "invalidated_by": ["Candidate SHA", "feature flag", "route", "provider", "grading", "object"],
       "vetoes_release": true
     },
@@ -2724,7 +2804,7 @@
       "kind": "PROOF",
       "title": "Independently prove one shipped schema/readiness estate",
       "severity": "HIGH",
-      "status": "OPEN",
+      "status": "IN_PROGRESS",
       "agent_mode": "READ_ONLY",
       "agent_id": "schema-verifier",
       "workspace": "read_only",
@@ -2734,7 +2814,13 @@
       "proof_required": [
         "Fresh and each historical estate converge through shipped runner; concurrent lock/checksum; required/optional readiness; no memory fallback"
       ],
-      "evidence": [],
+      "evidence": [
+        {
+          "ref": "vq-schema-recovery.md: S1 independent Sol31/31, clean105/105, source hashes; full estate/readiness/fallback/image/candidate proof OPEN",
+          "sha": "c712e4647bf8cd01732370e10e0282e8e454ded1",
+          "observer": "sol-vq-s1-verifier"
+        }
+      ],
       "invalidated_by": ["Candidate SHA", "migration", "journal", "image", "readiness", "fallback", "VQ status"],
       "vetoes_release": true
     },

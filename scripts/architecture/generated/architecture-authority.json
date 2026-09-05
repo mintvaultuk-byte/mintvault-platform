@@ -8,7 +8,7 @@
     "migration": 169,
     "migration-lineage": 6,
     "object-writer": 89,
-    "pricing-authority": 1579,
+    "pricing-authority": 1576,
     "provider-adapter": 135,
     "role-authority": 733,
     "route-middleware": 61,
@@ -12513,7 +12513,7 @@
       "id": "literal:$1",
       "pricingKind": "currency-bearing-literal",
       "key": "pricing-authority|scripts/db/migrate.ts|literal:$1#0",
-      "source": "scripts/db/migrate.ts:244",
+      "source": "scripts/db/migrate.ts:266",
       "disposition": "known-legacy",
       "finding": "ARCH-AUTHORITY-001",
       "legacyExpiry": "the bounded-context repair that assigns explicit authority"
@@ -12523,7 +12523,7 @@
       "id": "literal:$1",
       "pricingKind": "currency-bearing-literal",
       "key": "pricing-authority|scripts/db/migrate.ts|literal:$1#1",
-      "source": "scripts/db/migrate.ts:535",
+      "source": "scripts/db/migrate.ts:570",
       "disposition": "known-legacy",
       "finding": "ARCH-AUTHORITY-001",
       "legacyExpiry": "the bounded-context repair that assigns explicit authority"
@@ -12533,7 +12533,7 @@
       "id": "literal:$1",
       "pricingKind": "currency-bearing-literal",
       "key": "pricing-authority|scripts/db/migrate.ts|literal:$1#2",
-      "source": "scripts/db/migrate.ts:552",
+      "source": "scripts/db/migrate.ts:587",
       "disposition": "known-legacy",
       "finding": "ARCH-AUTHORITY-001",
       "legacyExpiry": "the bounded-context repair that assigns explicit authority"
@@ -12543,7 +12543,7 @@
       "id": "literal:$1",
       "pricingKind": "currency-bearing-literal",
       "key": "pricing-authority|scripts/db/migrate.ts|literal:$1#3",
-      "source": "scripts/db/migrate.ts:666",
+      "source": "scripts/db/migrate.ts:731",
       "disposition": "known-legacy",
       "finding": "ARCH-AUTHORITY-001",
       "legacyExpiry": "the bounded-context repair that assigns explicit authority"
@@ -12553,7 +12553,7 @@
       "id": "literal:$1",
       "pricingKind": "currency-bearing-literal",
       "key": "pricing-authority|scripts/db/migrate.ts|literal:$1#4",
-      "source": "scripts/db/migrate.ts:683",
+      "source": "scripts/db/migrate.ts:894",
       "disposition": "known-legacy",
       "finding": "ARCH-AUTHORITY-001",
       "legacyExpiry": "the bounded-context repair that assigns explicit authority"
@@ -12563,37 +12563,7 @@
       "id": "literal:$1",
       "pricingKind": "currency-bearing-literal",
       "key": "pricing-authority|scripts/db/migrate.ts|literal:$1#5",
-      "source": "scripts/db/migrate.ts:696",
-      "disposition": "known-legacy",
-      "finding": "ARCH-AUTHORITY-001",
-      "legacyExpiry": "the bounded-context repair that assigns explicit authority"
-    },
-    {
-      "category": "pricing-authority",
-      "id": "literal:$1",
-      "pricingKind": "currency-bearing-literal",
-      "key": "pricing-authority|scripts/db/migrate.ts|literal:$1#6",
-      "source": "scripts/db/migrate.ts:849",
-      "disposition": "known-legacy",
-      "finding": "ARCH-AUTHORITY-001",
-      "legacyExpiry": "the bounded-context repair that assigns explicit authority"
-    },
-    {
-      "category": "pricing-authority",
-      "id": "literal:$1",
-      "pricingKind": "currency-bearing-literal",
-      "key": "pricing-authority|scripts/db/migrate.ts|literal:$1#7",
-      "source": "scripts/db/migrate.ts:874",
-      "disposition": "known-legacy",
-      "finding": "ARCH-AUTHORITY-001",
-      "legacyExpiry": "the bounded-context repair that assigns explicit authority"
-    },
-    {
-      "category": "pricing-authority",
-      "id": "literal:$1",
-      "pricingKind": "currency-bearing-literal",
-      "key": "pricing-authority|scripts/db/migrate.ts|literal:$1#8",
-      "source": "scripts/db/migrate.ts:893",
+      "source": "scripts/db/migrate.ts:938",
       "disposition": "known-legacy",
       "finding": "ARCH-AUTHORITY-001",
       "legacyExpiry": "the bounded-context repair that assigns explicit authority"
@@ -129282,11 +129252,33 @@
     },
     {
       "category": "table-access",
+      "id": "read:public.__expr__",
+      "effect": "read",
+      "access": "sql",
+      "key": "table-access|scripts/db/migrate.ts|read:public.__expr__#0",
+      "source": "scripts/db/migrate.ts:389",
+      "disposition": "known-legacy",
+      "finding": "ARCH-AUTHORITY-001",
+      "legacyExpiry": "the bounded-context repair that assigns explicit authority"
+    },
+    {
+      "category": "table-access",
+      "id": "read:public.__expr__",
+      "effect": "read",
+      "access": "sql",
+      "key": "table-access|scripts/db/migrate.ts|read:public.__expr__#1",
+      "source": "scripts/db/migrate.ts:787",
+      "disposition": "known-legacy",
+      "finding": "ARCH-AUTHORITY-001",
+      "legacyExpiry": "the bounded-context repair that assigns explicit authority"
+    },
+    {
+      "category": "table-access",
       "id": "read:public.pg_class",
       "effect": "read",
       "access": "sql",
       "key": "table-access|scripts/db/migrate.ts|read:public.pg_class#0",
-      "source": "scripts/db/migrate.ts:243",
+      "source": "scripts/db/migrate.ts:265",
       "disposition": "known-legacy",
       "finding": "ARCH-AUTHORITY-001",
       "legacyExpiry": "the bounded-context repair that assigns explicit authority"
@@ -129297,7 +129289,7 @@
       "effect": "read",
       "access": "sql",
       "key": "table-access|scripts/db/migrate.ts|read:public.pg_database#0",
-      "source": "scripts/db/migrate.ts:546",
+      "source": "scripts/db/migrate.ts:581",
       "disposition": "known-legacy",
       "finding": "ARCH-AUTHORITY-001",
       "legacyExpiry": "the bounded-context repair that assigns explicit authority"
@@ -129308,7 +129300,7 @@
       "effect": "read",
       "access": "sql",
       "key": "table-access|scripts/db/migrate.ts|read:public.pg_index#0",
-      "source": "scripts/db/migrate.ts:243",
+      "source": "scripts/db/migrate.ts:265",
       "disposition": "known-legacy",
       "finding": "ARCH-AUTHORITY-001",
       "legacyExpiry": "the bounded-context repair that assigns explicit authority"
@@ -129319,29 +129311,7 @@
       "effect": "read",
       "access": "sql",
       "key": "table-access|scripts/db/migrate.ts|read:public.pg_locks#0",
-      "source": "scripts/db/migrate.ts:546",
-      "disposition": "known-legacy",
-      "finding": "ARCH-AUTHORITY-001",
-      "legacyExpiry": "the bounded-context repair that assigns explicit authority"
-    },
-    {
-      "category": "table-access",
-      "id": "read:public.schema_migrations",
-      "effect": "read",
-      "access": "sql",
-      "key": "table-access|scripts/db/migrate.ts|read:public.schema_migrations#0",
-      "source": "scripts/db/migrate.ts:362",
-      "disposition": "known-legacy",
-      "finding": "ARCH-AUTHORITY-001",
-      "legacyExpiry": "the bounded-context repair that assigns explicit authority"
-    },
-    {
-      "category": "table-access",
-      "id": "read:public.schema_migrations",
-      "effect": "read",
-      "access": "sql",
-      "key": "table-access|scripts/db/migrate.ts|read:public.schema_migrations#1",
-      "source": "scripts/db/migrate.ts:748",
+      "source": "scripts/db/migrate.ts:581",
       "disposition": "known-legacy",
       "finding": "ARCH-AUTHORITY-001",
       "legacyExpiry": "the bounded-context repair that assigns explicit authority"
@@ -129352,7 +129322,7 @@
       "effect": "unclassified",
       "access": "sql-unclassified",
       "key": "table-access|scripts/db/migrate.ts|unclassified:\"BEGIN\"#0",
-      "source": "scripts/db/migrate.ts:679",
+      "source": "scripts/db/migrate.ts:714",
       "disposition": "known-legacy",
       "finding": "ARCH-AUTHORITY-001",
       "legacyExpiry": "the bounded-context repair that assigns explicit authority"
@@ -129363,7 +129333,7 @@
       "effect": "unclassified",
       "access": "sql-unclassified",
       "key": "table-access|scripts/db/migrate.ts|unclassified:\"BEGIN\"#1",
-      "source": "scripts/db/migrate.ts:870",
+      "source": "scripts/db/migrate.ts:915",
       "disposition": "known-legacy",
       "finding": "ARCH-AUTHORITY-001",
       "legacyExpiry": "the bounded-context repair that assigns explicit authority"
@@ -129374,7 +129344,7 @@
       "effect": "unclassified",
       "access": "sql-unclassified",
       "key": "table-access|scripts/db/migrate.ts|unclassified:\"COMMIT\"#0",
-      "source": "scripts/db/migrate.ts:686",
+      "source": "scripts/db/migrate.ts:721",
       "disposition": "known-legacy",
       "finding": "ARCH-AUTHORITY-001",
       "legacyExpiry": "the bounded-context repair that assigns explicit authority"
@@ -129385,7 +129355,7 @@
       "effect": "unclassified",
       "access": "sql-unclassified",
       "key": "table-access|scripts/db/migrate.ts|unclassified:\"COMMIT\"#1",
-      "source": "scripts/db/migrate.ts:877",
+      "source": "scripts/db/migrate.ts:922",
       "disposition": "known-legacy",
       "finding": "ARCH-AUTHORITY-001",
       "legacyExpiry": "the bounded-context repair that assigns explicit authority"
@@ -129396,7 +129366,7 @@
       "effect": "unclassified",
       "access": "sql-unclassified",
       "key": "table-access|scripts/db/migrate.ts|unclassified:\"ROLLBACK\"#0",
-      "source": "scripts/db/migrate.ts:688",
+      "source": "scripts/db/migrate.ts:723",
       "disposition": "known-legacy",
       "finding": "ARCH-AUTHORITY-001",
       "legacyExpiry": "the bounded-context repair that assigns explicit authority"
@@ -129407,7 +129377,7 @@
       "effect": "unclassified",
       "access": "sql-unclassified",
       "key": "table-access|scripts/db/migrate.ts|unclassified:\"ROLLBACK\"#1",
-      "source": "scripts/db/migrate.ts:879",
+      "source": "scripts/db/migrate.ts:924",
       "disposition": "known-legacy",
       "finding": "ARCH-AUTHORITY-001",
       "legacyExpiry": "the bounded-context repair that assigns explicit authority"
@@ -129418,7 +129388,7 @@
       "effect": "unclassified",
       "access": "sql-unclassified",
       "key": "table-access|scripts/db/migrate.ts|unclassified:\"SELECT current_database() AS db, inet_server_addr()::text AS addr\"#0",
-      "source": "scripts/db/migrate.ts:993",
+      "source": "scripts/db/migrate.ts:1040",
       "disposition": "known-legacy",
       "finding": "ARCH-AUTHORITY-001",
       "legacyExpiry": "the bounded-context repair that assigns explicit authority"
@@ -129429,7 +129399,7 @@
       "effect": "unclassified",
       "access": "sql-unclassified",
       "key": "table-access|scripts/db/migrate.ts|unclassified:\"SELECT pg_advisory_unlock($1)\"#0",
-      "source": "scripts/db/migrate.ts:696",
+      "source": "scripts/db/migrate.ts:731",
       "disposition": "known-legacy",
       "finding": "ARCH-AUTHORITY-001",
       "legacyExpiry": "the bounded-context repair that assigns explicit authority"
@@ -129440,7 +129410,7 @@
       "effect": "unclassified",
       "access": "sql-unclassified",
       "key": "table-access|scripts/db/migrate.ts|unclassified:\"SELECT pg_advisory_unlock($1)\"#1",
-      "source": "scripts/db/migrate.ts:893",
+      "source": "scripts/db/migrate.ts:938",
       "disposition": "known-legacy",
       "finding": "ARCH-AUTHORITY-001",
       "legacyExpiry": "the bounded-context repair that assigns explicit authority"
@@ -129451,7 +129421,7 @@
       "effect": "unclassified",
       "access": "sql-unclassified",
       "key": "table-access|scripts/db/migrate.ts|unclassified:\"SELECT pg_backend_pid() AS pid\"#0",
-      "source": "scripts/db/migrate.ts:173",
+      "source": "scripts/db/migrate.ts:195",
       "disposition": "known-legacy",
       "finding": "ARCH-AUTHORITY-001",
       "legacyExpiry": "the bounded-context repair that assigns explicit authority"
@@ -129462,7 +129432,7 @@
       "effect": "unclassified",
       "access": "sql-unclassified",
       "key": "table-access|scripts/db/migrate.ts|unclassified:\"SELECT pg_backend_pid() AS pid\"#1",
-      "source": "scripts/db/migrate.ts:530",
+      "source": "scripts/db/migrate.ts:565",
       "disposition": "known-legacy",
       "finding": "ARCH-AUTHORITY-001",
       "legacyExpiry": "the bounded-context repair that assigns explicit authority"
@@ -129473,7 +129443,7 @@
       "effect": "unclassified",
       "access": "sql-unclassified",
       "key": "table-access|scripts/db/migrate.ts|unclassified:\"SELECT pg_backend_pid() AS pid\"#2",
-      "source": "scripts/db/migrate.ts:947",
+      "source": "scripts/db/migrate.ts:994",
       "disposition": "known-legacy",
       "finding": "ARCH-AUTHORITY-001",
       "legacyExpiry": "the bounded-context repair that assigns explicit authority"
@@ -129484,7 +129454,7 @@
       "effect": "unclassified",
       "access": "sql-unclassified",
       "key": "table-access|scripts/db/migrate.ts|unclassified:\"SELECT pg_try_advisory_lock($1) AS got\"#0",
-      "source": "scripts/db/migrate.ts:535",
+      "source": "scripts/db/migrate.ts:570",
       "disposition": "known-legacy",
       "finding": "ARCH-AUTHORITY-001",
       "legacyExpiry": "the bounded-context repair that assigns explicit authority"
@@ -129495,18 +129465,7 @@
       "effect": "unclassified",
       "access": "sql-unclassified",
       "key": "table-access|scripts/db/migrate.ts|unclassified:\"SELECT pg_try_advisory_lock($1) AS ok\"#0",
-      "source": "scripts/db/migrate.ts:849",
-      "disposition": "known-legacy",
-      "finding": "ARCH-AUTHORITY-001",
-      "legacyExpiry": "the bounded-context repair that assigns explicit authority"
-    },
-    {
-      "category": "table-access",
-      "id": "unclassified:\"SELECT to_regclass('public.schema_migrations') AS reg\"",
-      "effect": "unclassified",
-      "access": "sql-unclassified",
-      "key": "table-access|scripts/db/migrate.ts|unclassified:\"SELECT to_regclass('public.schema_migrations') AS reg\"#0",
-      "source": "scripts/db/migrate.ts:351",
+      "source": "scripts/db/migrate.ts:894",
       "disposition": "known-legacy",
       "finding": "ARCH-AUTHORITY-001",
       "legacyExpiry": "the bounded-context repair that assigns explicit authority"
@@ -129517,7 +129476,18 @@
       "effect": "unclassified",
       "access": "sql-unclassified",
       "key": "table-access|scripts/db/migrate.ts|unclassified:`DROP INDEX CONCURRENTLY ${quoteQualifiedIdentifier(target)}`#0",
-      "source": "scripts/db/migrate.ts:274",
+      "source": "scripts/db/migrate.ts:296",
+      "disposition": "known-legacy",
+      "finding": "ARCH-AUTHORITY-001",
+      "legacyExpiry": "the bounded-context repair that assigns explicit authority"
+    },
+    {
+      "category": "table-access",
+      "id": "unclassified:`SELECT to_regclass('public.${journalTable}') AS reg`",
+      "effect": "unclassified",
+      "access": "sql-unclassified",
+      "key": "table-access|scripts/db/migrate.ts|unclassified:`SELECT to_regclass('public.${journalTable}') AS reg`#0",
+      "source": "scripts/db/migrate.ts:377",
       "disposition": "known-legacy",
       "finding": "ARCH-AUTHORITY-001",
       "legacyExpiry": "the bounded-context repair that assigns explicit authority"
@@ -129528,7 +129498,7 @@
       "effect": "unclassified",
       "access": "sql-unclassified",
       "key": "table-access|scripts/db/migrate.ts|unclassified:f.sql#0",
-      "source": "scripts/db/migrate.ts:263",
+      "source": "scripts/db/migrate.ts:285",
       "disposition": "known-legacy",
       "finding": "ARCH-AUTHORITY-001",
       "legacyExpiry": "the bounded-context repair that assigns explicit authority"
@@ -129539,7 +129509,7 @@
       "effect": "unclassified",
       "access": "sql-unclassified",
       "key": "table-access|scripts/db/migrate.ts|unclassified:f.sql#1",
-      "source": "scripts/db/migrate.ts:276",
+      "source": "scripts/db/migrate.ts:298",
       "disposition": "known-legacy",
       "finding": "ARCH-AUTHORITY-001",
       "legacyExpiry": "the bounded-context repair that assigns explicit authority"
@@ -129550,18 +129520,18 @@
       "effect": "unclassified",
       "access": "sql-unclassified",
       "key": "table-access|scripts/db/migrate.ts|unclassified:f.sql#2",
-      "source": "scripts/db/migrate.ts:681",
+      "source": "scripts/db/migrate.ts:716",
       "disposition": "known-legacy",
       "finding": "ARCH-AUTHORITY-001",
       "legacyExpiry": "the bounded-context repair that assigns explicit authority"
     },
     {
       "category": "table-access",
-      "id": "unclassified:JOURNAL_DDL",
+      "id": "unclassified:journalDdl(estate)",
       "effect": "unclassified",
       "access": "sql-unclassified",
-      "key": "table-access|scripts/db/migrate.ts|unclassified:JOURNAL_DDL#0",
-      "source": "scripts/db/migrate.ts:342",
+      "key": "table-access|scripts/db/migrate.ts|unclassified:journalDdl(estate)#0",
+      "source": "scripts/db/migrate.ts:367",
       "disposition": "known-legacy",
       "finding": "ARCH-AUTHORITY-001",
       "legacyExpiry": "the bounded-context repair that assigns explicit authority"
@@ -129572,62 +129542,62 @@
       "effect": "unclassified",
       "access": "sql-unclassified",
       "key": "table-access|scripts/db/migrate.ts|unclassified:target.sql#0",
-      "source": "scripts/db/migrate.ts:872",
+      "source": "scripts/db/migrate.ts:917",
       "disposition": "known-legacy",
       "finding": "ARCH-AUTHORITY-001",
       "legacyExpiry": "the bounded-context repair that assigns explicit authority"
     },
     {
       "category": "table-access",
-      "id": "write:public.schema_migrations",
+      "id": "write:public.__expr__",
       "effect": "write",
       "access": "sql",
-      "key": "table-access|scripts/db/migrate.ts|write:public.schema_migrations#0",
-      "source": "scripts/db/migrate.ts:665",
+      "key": "table-access|scripts/db/migrate.ts|write:public.__expr__#0",
+      "source": "scripts/db/migrate.ts:700",
       "disposition": "known-legacy",
       "finding": "ARCH-AUTHORITY-001",
       "legacyExpiry": "the bounded-context repair that assigns explicit authority"
     },
     {
       "category": "table-access",
-      "id": "write:public.schema_migrations",
+      "id": "write:public.__expr__",
       "effect": "write",
       "access": "sql",
-      "key": "table-access|scripts/db/migrate.ts|write:public.schema_migrations#1",
-      "source": "scripts/db/migrate.ts:671",
+      "key": "table-access|scripts/db/migrate.ts|write:public.__expr__#1",
+      "source": "scripts/db/migrate.ts:706",
       "disposition": "known-legacy",
       "finding": "ARCH-AUTHORITY-001",
       "legacyExpiry": "the bounded-context repair that assigns explicit authority"
     },
     {
       "category": "table-access",
-      "id": "write:public.schema_migrations",
+      "id": "write:public.__expr__",
       "effect": "write",
       "access": "sql",
-      "key": "table-access|scripts/db/migrate.ts|write:public.schema_migrations#2",
-      "source": "scripts/db/migrate.ts:675",
+      "key": "table-access|scripts/db/migrate.ts|write:public.__expr__#2",
+      "source": "scripts/db/migrate.ts:710",
       "disposition": "known-legacy",
       "finding": "ARCH-AUTHORITY-001",
       "legacyExpiry": "the bounded-context repair that assigns explicit authority"
     },
     {
       "category": "table-access",
-      "id": "write:public.schema_migrations",
+      "id": "write:public.__expr__",
       "effect": "write",
       "access": "sql",
-      "key": "table-access|scripts/db/migrate.ts|write:public.schema_migrations#3",
-      "source": "scripts/db/migrate.ts:682",
+      "key": "table-access|scripts/db/migrate.ts|write:public.__expr__#3",
+      "source": "scripts/db/migrate.ts:717",
       "disposition": "known-legacy",
       "finding": "ARCH-AUTHORITY-001",
       "legacyExpiry": "the bounded-context repair that assigns explicit authority"
     },
     {
       "category": "table-access",
-      "id": "write:public.schema_migrations",
+      "id": "write:public.__expr__",
       "effect": "write",
       "access": "sql",
-      "key": "table-access|scripts/db/migrate.ts|write:public.schema_migrations#4",
-      "source": "scripts/db/migrate.ts:873",
+      "key": "table-access|scripts/db/migrate.ts|write:public.__expr__#4",
+      "source": "scripts/db/migrate.ts:918",
       "disposition": "known-legacy",
       "finding": "ARCH-AUTHORITY-001",
       "legacyExpiry": "the bounded-context repair that assigns explicit authority"

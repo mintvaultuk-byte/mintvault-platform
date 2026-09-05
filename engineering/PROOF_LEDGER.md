@@ -1,5 +1,17 @@
 # Engineering proof ledger
 
+## 2026-09-05 VQ S1 — isolated migration runner namespaces
+
+[VQ recovery packet](../.claude/controlled-code-lead/tasks/repository-architecture-recovery-20260904/vq-schema-recovery.md)
+records the closed main/vault-quest directory/journal/lock choice and preserved
+main defaults. Root78/78; independent Sol31/31; final clean exact-lock105/105,
+zero skips; clean build3366 modules and bundled invalid-estate refusal PASS.
+TypeScript/scoped lint PASS; test345/script11 diagnostic ratchets unchanged.
+Architecture8310 with exact legacy-query transfers, no owner-rule/extractor waiver.
+Synthetic namespace proof is NOT historical VQ convergence, image application or
+runtime readiness. Required/enabled owner choice preserves the mounted feature;
+S2/S3 and exact candidate/Opus/security/hosted release vetoes remain OPEN.
+
 ## 2026-09-05 pricing/legacy integration carry-forward
 
 [Existing legacy packet](../.claude/controlled-code-lead/tasks/repository-architecture-recovery-20260904/grading-legacy-recovery.md)

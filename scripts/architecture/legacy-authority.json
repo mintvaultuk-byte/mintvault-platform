@@ -967,21 +967,6 @@
       "expiresWith": "the bounded-context repair that assigns explicit authority"
     },
     {
-      "key": "pricing-authority|scripts/db/migrate.ts|literal:$1#6",
-      "finding": "ARCH-AUTHORITY-001",
-      "expiresWith": "the bounded-context repair that assigns explicit authority"
-    },
-    {
-      "key": "pricing-authority|scripts/db/migrate.ts|literal:$1#7",
-      "finding": "ARCH-AUTHORITY-001",
-      "expiresWith": "the bounded-context repair that assigns explicit authority"
-    },
-    {
-      "key": "pricing-authority|scripts/db/migrate.ts|literal:$1#8",
-      "finding": "ARCH-AUTHORITY-001",
-      "expiresWith": "the bounded-context repair that assigns explicit authority"
-    },
-    {
       "key": "pricing-authority|scripts/db/schema-registry.ts|endpoint:grading/pricing#0",
       "finding": "ARCH-AUTHORITY-001",
       "expiresWith": "the bounded-context repair that assigns explicit authority"
@@ -8052,16 +8037,6 @@
       "expiresWith": "the bounded-context repair that assigns explicit authority"
     },
     {
-      "key": "table-access|scripts/db/migrate.ts|read:public.schema_migrations#0",
-      "finding": "ARCH-AUTHORITY-001",
-      "expiresWith": "the bounded-context repair that assigns explicit authority"
-    },
-    {
-      "key": "table-access|scripts/db/migrate.ts|read:public.schema_migrations#1",
-      "finding": "ARCH-AUTHORITY-001",
-      "expiresWith": "the bounded-context repair that assigns explicit authority"
-    },
-    {
       "key": "table-access|scripts/db/migrate.ts|unclassified:\"BEGIN\"#0",
       "finding": "ARCH-AUTHORITY-001",
       "expiresWith": "the bounded-context repair that assigns explicit authority"
@@ -8132,11 +8107,6 @@
       "expiresWith": "the bounded-context repair that assigns explicit authority"
     },
     {
-      "key": "table-access|scripts/db/migrate.ts|unclassified:\"SELECT to_regclass('public.schema_migrations') AS reg\"#0",
-      "finding": "ARCH-AUTHORITY-001",
-      "expiresWith": "the bounded-context repair that assigns explicit authority"
-    },
-    {
       "key": "table-access|scripts/db/migrate.ts|unclassified:`DROP INDEX CONCURRENTLY ${quoteQualifiedIdentifier(target)}`#0",
       "finding": "ARCH-AUTHORITY-001",
       "expiresWith": "the bounded-context repair that assigns explicit authority"
@@ -8157,37 +8127,7 @@
       "expiresWith": "the bounded-context repair that assigns explicit authority"
     },
     {
-      "key": "table-access|scripts/db/migrate.ts|unclassified:JOURNAL_DDL#0",
-      "finding": "ARCH-AUTHORITY-001",
-      "expiresWith": "the bounded-context repair that assigns explicit authority"
-    },
-    {
       "key": "table-access|scripts/db/migrate.ts|unclassified:target.sql#0",
-      "finding": "ARCH-AUTHORITY-001",
-      "expiresWith": "the bounded-context repair that assigns explicit authority"
-    },
-    {
-      "key": "table-access|scripts/db/migrate.ts|write:public.schema_migrations#0",
-      "finding": "ARCH-AUTHORITY-001",
-      "expiresWith": "the bounded-context repair that assigns explicit authority"
-    },
-    {
-      "key": "table-access|scripts/db/migrate.ts|write:public.schema_migrations#1",
-      "finding": "ARCH-AUTHORITY-001",
-      "expiresWith": "the bounded-context repair that assigns explicit authority"
-    },
-    {
-      "key": "table-access|scripts/db/migrate.ts|write:public.schema_migrations#2",
-      "finding": "ARCH-AUTHORITY-001",
-      "expiresWith": "the bounded-context repair that assigns explicit authority"
-    },
-    {
-      "key": "table-access|scripts/db/migrate.ts|write:public.schema_migrations#3",
-      "finding": "ARCH-AUTHORITY-001",
-      "expiresWith": "the bounded-context repair that assigns explicit authority"
-    },
-    {
-      "key": "table-access|scripts/db/migrate.ts|write:public.schema_migrations#4",
       "finding": "ARCH-AUTHORITY-001",
       "expiresWith": "the bounded-context repair that assigns explicit authority"
     },
@@ -14170,6 +14110,51 @@
       "key": "pricing-authority|shared/schema.ts|import:formatTierPrice#0",
       "finding": "ARCH-AUTHORITY-001",
       "expiresWith": "the bounded-context storage/schema authority repair; same pricing method/adapter transferred in pricing-recovery.md"
+    },
+    {
+      "key": "table-access|scripts/db/migrate.ts|unclassified:journalDdl(estate)#0",
+      "finding": "ARCH-AUTHORITY-001",
+      "expiresWith": "the bounded-context repair that assigns explicit authority"
+    },
+    {
+      "key": "table-access|scripts/db/migrate.ts|unclassified:`SELECT to_regclass('public.${journalTable}') AS reg`#0",
+      "finding": "ARCH-AUTHORITY-001",
+      "expiresWith": "the bounded-context repair that assigns explicit authority"
+    },
+    {
+      "key": "table-access|scripts/db/migrate.ts|read:public.__expr__#0",
+      "finding": "ARCH-AUTHORITY-001",
+      "expiresWith": "the bounded-context repair that assigns explicit authority"
+    },
+    {
+      "key": "table-access|scripts/db/migrate.ts|write:public.__expr__#0",
+      "finding": "ARCH-AUTHORITY-001",
+      "expiresWith": "the bounded-context repair that assigns explicit authority"
+    },
+    {
+      "key": "table-access|scripts/db/migrate.ts|write:public.__expr__#1",
+      "finding": "ARCH-AUTHORITY-001",
+      "expiresWith": "the bounded-context repair that assigns explicit authority"
+    },
+    {
+      "key": "table-access|scripts/db/migrate.ts|write:public.__expr__#2",
+      "finding": "ARCH-AUTHORITY-001",
+      "expiresWith": "the bounded-context repair that assigns explicit authority"
+    },
+    {
+      "key": "table-access|scripts/db/migrate.ts|write:public.__expr__#3",
+      "finding": "ARCH-AUTHORITY-001",
+      "expiresWith": "the bounded-context repair that assigns explicit authority"
+    },
+    {
+      "key": "table-access|scripts/db/migrate.ts|read:public.__expr__#1",
+      "finding": "ARCH-AUTHORITY-001",
+      "expiresWith": "the bounded-context repair that assigns explicit authority"
+    },
+    {
+      "key": "table-access|scripts/db/migrate.ts|write:public.__expr__#4",
+      "finding": "ARCH-AUTHORITY-001",
+      "expiresWith": "the bounded-context repair that assigns explicit authority"
     }
   ]
 }

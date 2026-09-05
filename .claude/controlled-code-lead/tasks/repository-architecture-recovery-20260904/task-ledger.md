@@ -2,6 +2,14 @@
 
 ## Current checkpoint and next bounded wave
 
+VQ S1 foundation locally complete from pushed c712e464: separate main/VQ journal,
+lock and CLI inventory through the existing runner; no historical SQL/schema/web
+change. Root78/independent31/final clean105 passed; exact-lock build PASS. Exact
+manifest/hashes/limitations in vq-schema-recovery.md. Wave-end WIP commit/push,
+then extend S2 packet for fresh/historical schema convergence and shipping/CI/
+required readiness before implementation. No owner pause. Main c712 CI in progress,
+both governance checks failed; no green/release claim or restricted investigation.
+
 Pricing P3 aa4ec14a273da779f550fd4bb777ca1616d5e518 pushed and exact draftPR336
 head verified. Existing legacy retirement carried forward without product edits;
 three stale architecture-test price/field expectations reproduced and corrected.
