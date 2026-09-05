@@ -43,6 +43,21 @@ const realCiInput = () => ({
 });
 
 describe("hosted CI proof topology", () => {
+  it("requires the disposable main runtime prerequisite before VQ", () => {
+    const command = "node --import tsx scripts/ci/prepare-vq-test-db.mjs";
+    for (const replacement of ["echo removed", `# ${command}`, `if false; then ${command}; fi`]) {
+      const input = realCiInput();
+      input.workflow = input.workflow.replace(command, replacement);
+      expect(validateCiTopology(input)).toContain(`workflow does not execute ${command}`);
+    }
+    const helper = readFileSync("scripts/ci/prepare-engineering-governance-db.mjs", "utf8");
+    expect(helper.indexOf("scripts/ci/prepare-vq-test-db.mjs")).toBeGreaterThan(
+      helper.indexOf('"drizzle-kit", "push", "--force"')
+    );
+    expect(helper.indexOf("scripts/ci/prepare-vq-test-db.mjs")).toBeLessThan(
+      helper.indexOf('"--estate", "vault-quest", "--apply"')
+    );
+  });
   it("requires the disposable VQ preparation to use the namespaced journalled runner", () => {
     const command =
       'MINTVAULT_MIGRATION_DATABASE_URL="$TEST_DATABASE_URL" node node_modules/tsx/dist/cli.mjs scripts/db/migrate.ts --estate vault-quest --apply';
@@ -360,7 +375,7 @@ describe("migration and TypeScript debt classification", () => {
     const policy = JSON.parse(readFileSync("scripts/ci/migration-reference-policy.json", "utf8"));
     const report = buildMigrationReferenceReport(process.cwd(), policy);
     expect(report.violations).toEqual([]);
-    expect(report.inventory).toMatchObject({ shippedMain: 86, vqUnshippedOwnerDecision: 16 });
+    expect(report.inventory).toMatchObject({ shippedMain: 86, vqUnshippedOwnerDecision: 17 });
     expect(
       report.classifications.filter((entry) => entry.disposition === "unshipped-owner-decision-required").length
     ).toBeGreaterThan(0);

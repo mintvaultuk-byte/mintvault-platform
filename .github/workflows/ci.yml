@@ -587,6 +587,9 @@ jobs:
             psql "$full_set_admin" -v ON_ERROR_STOP=1 -c "ALTER TABLE certificates OWNER TO pn_migrator"
           done
 
+      - name: Main runtime authority for disposable Vault Quest
+        run: node --import tsx scripts/ci/prepare-vq-test-db.mjs
+
       - name: Journalled disposable Vault Quest migrations
         run: MINTVAULT_MIGRATION_DATABASE_URL="$TEST_DATABASE_URL" node node_modules/tsx/dist/cli.mjs scripts/db/migrate.ts --estate vault-quest --apply
 

@@ -107,6 +107,7 @@ for (const [name, cluster] of Object.entries(CLUSTERS)) {
 ensureDatabase("pg16", "mintvault_vq_phase10_local");
 psql(sharedTestUrl, "CREATE EXTENSION IF NOT EXISTS vector");
 run("npx", ["drizzle-kit", "push", "--force"]);
+run(process.execPath, ["--import", "tsx", "scripts/ci/prepare-vq-test-db.mjs"]);
 run(
   process.execPath,
   ["node_modules/tsx/dist/cli.mjs", "scripts/db/migrate.ts", "--estate", "vault-quest", "--apply"],

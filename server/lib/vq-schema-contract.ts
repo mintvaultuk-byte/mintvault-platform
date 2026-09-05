@@ -2,6 +2,7 @@ import { createHash } from "node:crypto";
 
 /** Structural evidence only: never records execution or grants migration authority. */
 export const VQ_BASELINE_ID = "vq-0000-0015-v1";
+export const VQ_BASELINE_AUTHORITY_FILE = "0016_schema_baseline_authority.sql";
 // Observed identically from immutable SQL on owned PostgreSQL16.13 and17.10.
 export const VQ_BASELINE_FINGERPRINT = "9aeaa1c206ffd26372274b4e223a609b801e459e89282a77a41a2d6d8b82cf52";
 export const VQ_BASELINE_MIGRATION_SET_SHA256 = "d92f083e1f119dc89724e08e6b36143256be627ba533be414146414c963aa90a";

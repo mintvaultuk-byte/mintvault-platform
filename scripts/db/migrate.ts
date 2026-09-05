@@ -36,6 +36,7 @@ import { createHash } from "node:crypto";
 import { lintSql, isApprovedDestructiveFinding, unapprovedBlockingFindings } from "./lint-destructive-sql";
 import { securePostgresPoolConnection } from "../../server/lib/postgres-transport-security";
 import type pg from "pg";
+import { assertFreshVq, attestedVqFiles, applyHistoricalVq } from "./vq-schema-recovery";
 
 export type MigrationEstate = "main" | "vault-quest";
 
@@ -66,6 +67,24 @@ export function parseMigrationEstate(args: string[]): MigrationEstate {
     throw new Error("Migration estate must be main or vault-quest.");
   }
   return value;
+}
+
+export function parseHistoricalBaseline(args: string[], estate: MigrationEstate): boolean {
+  const flags = args.filter((arg) => arg.startsWith("--historical-baseline"));
+  if (flags.length === 0) return false;
+  if (
+    flags.length !== 1 ||
+    flags[0] !== "--historical-baseline-v1" ||
+    estate !== "vault-quest" ||
+    args.length !== 4 ||
+    ["--estate", "vault-quest", "--historical-baseline-v1", "--apply"].some(
+      (token) => args.filter((arg) => arg === token).length !== 1
+    ) ||
+    args[args.indexOf("--estate") + 1] !== "vault-quest"
+  ) {
+    throw new Error("Historical baseline requires only --estate vault-quest --historical-baseline-v1 --apply.");
+  }
+  return true;
 }
 
 const MIGRATIONS_DIR = migrationProfile().migrationsDir;
@@ -214,7 +233,7 @@ export function migrationClientConfig(connectionString: string): pg.ClientConfig
   };
 }
 
-interface MigrationFile {
+export interface MigrationFile {
   number: string;
   filename: string;
   path: string;
@@ -359,7 +378,7 @@ ALTER TABLE ${journalTable} ADD COLUMN IF NOT EXISTS completed_at TIMESTAMPTZ;
 ALTER TABLE ${journalTable} ADD COLUMN IF NOT EXISTS status TEXT NOT NULL DEFAULT 'applied';`;
 }
 
-interface PgClientLike {
+export interface PgClientLike {
   query: (sql: string, args?: unknown[]) => Promise<{ rows: Array<Record<string, unknown>> }>;
 }
 
@@ -368,7 +387,7 @@ async function ensureJournal(client: PgClientLike, estate: MigrationEstate): Pro
   await client.query(journalDdl(estate));
 }
 
-interface JournalRow {
+export interface JournalRow {
   checksum: string;
   status: string;
 }
@@ -394,13 +413,19 @@ async function journalExists(client: PgClientLike, estate: MigrationEstate): Pro
 async function journalMap(client: PgClientLike, estate: MigrationEstate): Promise<Map<string, JournalRow>> {
   const { journalTable } = migrationProfile(estate);
   const m = new Map<string, JournalRow>();
-  if (!(await journalExists(client, estate))) return m;
+  if (!(await journalExists(client, estate))) {
+    if (estate === "vault-quest") await assertFreshVq(client);
+    return m;
+  }
   const { rows } = await client.query(`SELECT filename, checksum, status FROM ${journalTable}`);
   for (const r of rows) m.set(String(r.filename), { checksum: String(r.checksum), status: String(r.status) });
+  if (estate === "vault-quest" && m.size === 0) await assertFreshVq(client);
   return m;
 }
 
 export interface MigratePlan {
+  /** Observed base schema, never represented as execution rows. */
+  attestedNotApplied?: string[];
   pending: string[];
   alreadyApplied: string[];
   checksumMismatches: { filename: string; storedChecksum: string; currentChecksum: string }[];
@@ -422,6 +447,7 @@ export async function planMigrations(
   estate: MigrationEstate = "main"
 ): Promise<MigratePlan> {
   const journal = await journalMap(client, estate);
+  const attested = estate === "vault-quest" ? await attestedVqFiles(client, files, journal) : [];
   const plan: MigratePlan = {
     pending: [],
     alreadyApplied: [],
@@ -430,7 +456,9 @@ export async function planMigrations(
     destructive: [],
     journalFilenames: [...journal.keys()],
   };
+  if (estate === "vault-quest") plan.attestedNotApplied = attested;
   for (const f of files) {
+    if (attested.includes(f.filename)) continue;
     const row = journal.get(f.filename);
     if (row === undefined) {
       plan.pending.push(f.filename);
@@ -562,9 +590,17 @@ export function partitionIdentityConflicts(
 export async function applyMigrations(
   client: PgClientLike,
   files: MigrationFile[],
-  opts: { allowDestructive?: boolean; exclusions?: LineageExclusion[]; estate?: MigrationEstate } = {}
+  opts: {
+    allowDestructive?: boolean;
+    exclusions?: LineageExclusion[];
+    estate?: MigrationEstate;
+    historicalBaseline?: boolean;
+  } = {}
 ): Promise<{ applied: string[] }> {
   const { estate, journalTable, advisoryLockKey } = migrationProfile(opts.estate);
+  if (opts.historicalBaseline && (estate !== "vault-quest" || opts.allowDestructive || opts.exclusions?.length)) {
+    throw new Error("Historical baseline is an exact non-destructive Vault Quest operation.");
+  }
   if (estate === "vault-quest" && opts.exclusions?.length) {
     throw new Error("Vault Quest does not accept main-lineage exclusion declarations.");
   }
@@ -618,6 +654,16 @@ export async function applyMigrations(
   };
   await assertLockOwned("after acquire");
   try {
+    if (opts.historicalBaseline)
+      return await applyHistoricalVq(client, files, {
+        assertLockOwned,
+        journalExists: () => journalExists(client, "vault-quest"),
+        ensureJournal: () => ensureJournal(client, "vault-quest"),
+      });
+    if (estate === "vault-quest") {
+      if (await journalExists(client, estate)) await planMigrations(client, files, estate);
+      else await assertFreshVq(client);
+    }
     await ensureJournal(client, estate); // create/upgrade the journal only on the apply path (never on dry-run)
     const plan = await planMigrations(client, files, estate);
     if (plan.inconsistent.length > 0) {
@@ -826,6 +872,13 @@ export async function applyScopedMigration(
     throw new Error(`Scoped migration target '${targetFilename}' does not exist in the migrations directory.`);
   }
 
+  if (
+    estate === "vault-quest" &&
+    (await planMigrations(client, files, estate)).attestedNotApplied?.includes(targetFilename)
+  ) {
+    throw new Error("Scoped Vault Quest cannot execute an attested historical migration.");
+  }
+
   if (!(await journalExists(client, estate))) {
     throw new Error(
       `Scoped migration refuses to run: this database has no ${journalTable} journal. ` +
@@ -914,6 +967,12 @@ export async function applyScopedMigration(
     if (estate === "vault-quest" && !(await journalExists(client, estate))) {
       throw new Error("Scoped Vault Quest journal disappeared after pre-flight. Refusing to run.");
     }
+    if (
+      estate === "vault-quest" &&
+      (await planMigrations(client, files, estate)).attestedNotApplied?.includes(targetFilename)
+    ) {
+      throw new Error("Scoped Vault Quest cannot execute an attested historical migration.");
+    }
     const underLock = await journalFingerprint(client, estate);
     if (underLock.fingerprint !== before.fingerprint || underLock.count !== before.count) {
       throw new Error(
@@ -978,6 +1037,7 @@ export function resolveMigrationDatabaseUrl(env: NodeJS.ProcessEnv = process.env
 
 async function main(): Promise<void> {
   const estate = parseMigrationEstate(process.argv.slice(2));
+  const historicalBaseline = parseHistoricalBaseline(process.argv.slice(2), estate);
   const { migrationsDir } = migrationProfile(estate);
   let url: string;
   try {
@@ -1026,6 +1086,13 @@ async function main(): Promise<void> {
     console.log(`[migrate] lock-owning endpoint: ${h}`);
   }
   try {
+    if (historicalBaseline) {
+      const result = await applyMigrations(client, listMigrationFiles(migrationsDir), { estate, historicalBaseline });
+      console.log(
+        `Verified historical schema; executed only ${result.applied.join(", ")}. Old SQL is attested, not applied.`
+      );
+      return;
+    }
     // ── SCOPED CONVERGENCE MODE ────────────────────────────────────────────────
     // Deliberately verbose to invoke and impossible to reach by habit: it needs an
     // exact filename AND an explicit acknowledgement that this is a convergence /
@@ -1096,6 +1163,8 @@ async function main(): Promise<void> {
     const files = listMigrationFiles(migrationsDir);
     const exclusions = estate === "main" ? loadLineageExclusions(migrationsDir) : [];
     const plan = await planMigrations(client as unknown as PgClientLike, files, estate);
+    if (plan.attestedNotApplied?.length)
+      console.log(`[migrate] attested-not-applied: ${plan.attestedNotApplied.join(", ")}`);
     console.log(
       `Migrations: ${files.length} total, ${plan.alreadyApplied.length} applied, ${plan.pending.length} pending, ` +
         `${plan.inconsistent.length} inconsistent, ${plan.checksumMismatches.length} checksum-mismatch.`

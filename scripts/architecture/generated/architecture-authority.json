@@ -5,10 +5,10 @@
     "component": 8,
     "job": 37,
     "layer-exception": 4,
-    "migration": 169,
+    "migration": 170,
     "migration-lineage": 6,
     "object-writer": 89,
-    "pricing-authority": 1576,
+    "pricing-authority": 1579,
     "provider-adapter": 135,
     "role-authority": 733,
     "route-middleware": 61,
@@ -16,8 +16,8 @@
     "schema-object": 3,
     "server-route": 989,
     "session-principal": 587,
-    "table": 360,
-    "table-access": 3214,
+    "table": 361,
+    "table-access": 3248,
     "timer": 97
   },
   "records": [
@@ -7488,6 +7488,18 @@
     },
     {
       "category": "migration",
+      "id": "0016_schema_baseline_authority.sql",
+      "shippingDisposition": "unshipped-owner-decision-required",
+      "lineage": "hand-applied-raw-sql-owner-decision",
+      "migrationNumber": "16",
+      "sha256": "fbc741ee9356f7c30f44bee7d4e99ce8f0a1048d5522aa2be7130349abc175c6",
+      "key": "migration|migrations-vq/0016_schema_baseline_authority.sql|0016_schema_baseline_authority.sql#0",
+      "source": "migrations-vq/0016_schema_baseline_authority.sql:1",
+      "disposition": "owner-decision-required",
+      "finding": "OWNER-VQ-SCHEMA"
+    },
+    {
+      "category": "migration",
       "id": "_rollback_enforce_status_transition_OLD.sql",
       "shippingDisposition": "rollback-only",
       "lineage": "excluded-from-numbered-runner",
@@ -12513,7 +12525,7 @@
       "id": "literal:$1",
       "pricingKind": "currency-bearing-literal",
       "key": "pricing-authority|scripts/db/migrate.ts|literal:$1#0",
-      "source": "scripts/db/migrate.ts:266",
+      "source": "scripts/db/migrate.ts:285",
       "disposition": "known-legacy",
       "finding": "ARCH-AUTHORITY-001",
       "legacyExpiry": "the bounded-context repair that assigns explicit authority"
@@ -12523,7 +12535,7 @@
       "id": "literal:$1",
       "pricingKind": "currency-bearing-literal",
       "key": "pricing-authority|scripts/db/migrate.ts|literal:$1#1",
-      "source": "scripts/db/migrate.ts:579",
+      "source": "scripts/db/migrate.ts:615",
       "disposition": "known-legacy",
       "finding": "ARCH-AUTHORITY-001",
       "legacyExpiry": "the bounded-context repair that assigns explicit authority"
@@ -12533,7 +12545,7 @@
       "id": "literal:$1",
       "pricingKind": "currency-bearing-literal",
       "key": "pricing-authority|scripts/db/migrate.ts|literal:$1#2",
-      "source": "scripts/db/migrate.ts:596",
+      "source": "scripts/db/migrate.ts:632",
       "disposition": "known-legacy",
       "finding": "ARCH-AUTHORITY-001",
       "legacyExpiry": "the bounded-context repair that assigns explicit authority"
@@ -12543,7 +12555,7 @@
       "id": "literal:$1",
       "pricingKind": "currency-bearing-literal",
       "key": "pricing-authority|scripts/db/migrate.ts|literal:$1#3",
-      "source": "scripts/db/migrate.ts:740",
+      "source": "scripts/db/migrate.ts:786",
       "disposition": "known-legacy",
       "finding": "ARCH-AUTHORITY-001",
       "legacyExpiry": "the bounded-context repair that assigns explicit authority"
@@ -12553,7 +12565,7 @@
       "id": "literal:$1",
       "pricingKind": "currency-bearing-literal",
       "key": "pricing-authority|scripts/db/migrate.ts|literal:$1#4",
-      "source": "scripts/db/migrate.ts:903",
+      "source": "scripts/db/migrate.ts:956",
       "disposition": "known-legacy",
       "finding": "ARCH-AUTHORITY-001",
       "legacyExpiry": "the bounded-context repair that assigns explicit authority"
@@ -12563,7 +12575,7 @@
       "id": "literal:$1",
       "pricingKind": "currency-bearing-literal",
       "key": "pricing-authority|scripts/db/migrate.ts|literal:$1#5",
-      "source": "scripts/db/migrate.ts:950",
+      "source": "scripts/db/migrate.ts:1009",
       "disposition": "known-legacy",
       "finding": "ARCH-AUTHORITY-001",
       "legacyExpiry": "the bounded-context repair that assigns explicit authority"
@@ -12577,6 +12589,30 @@
       "disposition": "known-legacy",
       "finding": "ARCH-AUTHORITY-001",
       "legacyExpiry": "the bounded-context repair that assigns explicit authority"
+    },
+    {
+      "category": "pricing-authority",
+      "id": "literal:$1",
+      "pricingKind": "currency-bearing-literal",
+      "key": "pricing-authority|scripts/db/vq-schema-recovery.ts|literal:$1#0",
+      "source": "scripts/db/vq-schema-recovery.ts:152",
+      "owner": "vault-quest-platform"
+    },
+    {
+      "category": "pricing-authority",
+      "id": "literal:$1",
+      "pricingKind": "currency-bearing-literal",
+      "key": "pricing-authority|scripts/db/vq-schema-recovery.ts|literal:$1#1",
+      "source": "scripts/db/vq-schema-recovery.ts:167",
+      "owner": "vault-quest-platform"
+    },
+    {
+      "category": "pricing-authority",
+      "id": "literal:$1",
+      "pricingKind": "currency-bearing-literal",
+      "key": "pricing-authority|scripts/db/vq-schema-recovery.ts|literal:$1#2",
+      "source": "scripts/db/vq-schema-recovery.ts:171",
+      "owner": "vault-quest-platform"
     },
     {
       "category": "pricing-authority",
@@ -125482,6 +125518,15 @@
     },
     {
       "category": "table",
+      "id": "public.drizzle",
+      "authority": "migration-ddl",
+      "key": "table|migrations-vq/0016_schema_baseline_authority.sql|public.drizzle#0",
+      "source": "migrations-vq/0016_schema_baseline_authority.sql:24",
+      "disposition": "owner-decision-required",
+      "finding": "OWNER-VQ-SCHEMA"
+    },
+    {
+      "category": "table",
       "id": "public.partner_audit_events",
       "authority": "migration-ddl",
       "key": "table|migrations/0001_partner_foundation.sql|public.partner_audit_events#0",
@@ -129046,6 +129091,33 @@
     },
     {
       "category": "table-access",
+      "id": "read:public.schema_migrations",
+      "effect": "read",
+      "access": "sql",
+      "key": "table-access|scripts/ci/prepare-vq-test-db.mjs|read:public.schema_migrations#0",
+      "source": "scripts/ci/prepare-vq-test-db.mjs:36",
+      "owner": "engineering-test-platform"
+    },
+    {
+      "category": "table-access",
+      "id": "unclassified:\"SELECT pg_backend_pid() AS pid\"",
+      "effect": "unclassified",
+      "access": "sql-unclassified",
+      "key": "table-access|scripts/ci/prepare-vq-test-db.mjs|unclassified:\"SELECT pg_backend_pid() AS pid\"#0",
+      "source": "scripts/ci/prepare-vq-test-db.mjs:26",
+      "owner": "engineering-test-platform"
+    },
+    {
+      "category": "table-access",
+      "id": "unclassified:\"SELECT to_regclass('public.schema_migrations') AS journal\"",
+      "effect": "unclassified",
+      "access": "sql-unclassified",
+      "key": "table-access|scripts/ci/prepare-vq-test-db.mjs|unclassified:\"SELECT to_regclass('public.schema_migrations') AS journal\"#0",
+      "source": "scripts/ci/prepare-vq-test-db.mjs:34",
+      "owner": "engineering-test-platform"
+    },
+    {
+      "category": "table-access",
       "id": "read:public.certificates",
       "effect": "read",
       "access": "sql",
@@ -129256,7 +129328,7 @@
       "effect": "read",
       "access": "sql",
       "key": "table-access|scripts/db/migrate.ts|read:public.__expr__#0",
-      "source": "scripts/db/migrate.ts:398",
+      "source": "scripts/db/migrate.ts:420",
       "disposition": "known-legacy",
       "finding": "ARCH-AUTHORITY-001",
       "legacyExpiry": "the bounded-context repair that assigns explicit authority"
@@ -129267,7 +129339,7 @@
       "effect": "read",
       "access": "sql",
       "key": "table-access|scripts/db/migrate.ts|read:public.__expr__#1",
-      "source": "scripts/db/migrate.ts:796",
+      "source": "scripts/db/migrate.ts:842",
       "disposition": "known-legacy",
       "finding": "ARCH-AUTHORITY-001",
       "legacyExpiry": "the bounded-context repair that assigns explicit authority"
@@ -129278,7 +129350,7 @@
       "effect": "read",
       "access": "sql",
       "key": "table-access|scripts/db/migrate.ts|read:public.pg_class#0",
-      "source": "scripts/db/migrate.ts:265",
+      "source": "scripts/db/migrate.ts:284",
       "disposition": "known-legacy",
       "finding": "ARCH-AUTHORITY-001",
       "legacyExpiry": "the bounded-context repair that assigns explicit authority"
@@ -129289,7 +129361,7 @@
       "effect": "read",
       "access": "sql",
       "key": "table-access|scripts/db/migrate.ts|read:public.pg_database#0",
-      "source": "scripts/db/migrate.ts:590",
+      "source": "scripts/db/migrate.ts:626",
       "disposition": "known-legacy",
       "finding": "ARCH-AUTHORITY-001",
       "legacyExpiry": "the bounded-context repair that assigns explicit authority"
@@ -129300,7 +129372,7 @@
       "effect": "read",
       "access": "sql",
       "key": "table-access|scripts/db/migrate.ts|read:public.pg_index#0",
-      "source": "scripts/db/migrate.ts:265",
+      "source": "scripts/db/migrate.ts:284",
       "disposition": "known-legacy",
       "finding": "ARCH-AUTHORITY-001",
       "legacyExpiry": "the bounded-context repair that assigns explicit authority"
@@ -129311,7 +129383,7 @@
       "effect": "read",
       "access": "sql",
       "key": "table-access|scripts/db/migrate.ts|read:public.pg_locks#0",
-      "source": "scripts/db/migrate.ts:590",
+      "source": "scripts/db/migrate.ts:626",
       "disposition": "known-legacy",
       "finding": "ARCH-AUTHORITY-001",
       "legacyExpiry": "the bounded-context repair that assigns explicit authority"
@@ -129322,7 +129394,7 @@
       "effect": "unclassified",
       "access": "sql-unclassified",
       "key": "table-access|scripts/db/migrate.ts|unclassified:\"BEGIN\"#0",
-      "source": "scripts/db/migrate.ts:723",
+      "source": "scripts/db/migrate.ts:769",
       "disposition": "known-legacy",
       "finding": "ARCH-AUTHORITY-001",
       "legacyExpiry": "the bounded-context repair that assigns explicit authority"
@@ -129333,7 +129405,7 @@
       "effect": "unclassified",
       "access": "sql-unclassified",
       "key": "table-access|scripts/db/migrate.ts|unclassified:\"BEGIN\"#1",
-      "source": "scripts/db/migrate.ts:927",
+      "source": "scripts/db/migrate.ts:986",
       "disposition": "known-legacy",
       "finding": "ARCH-AUTHORITY-001",
       "legacyExpiry": "the bounded-context repair that assigns explicit authority"
@@ -129344,7 +129416,7 @@
       "effect": "unclassified",
       "access": "sql-unclassified",
       "key": "table-access|scripts/db/migrate.ts|unclassified:\"COMMIT\"#0",
-      "source": "scripts/db/migrate.ts:730",
+      "source": "scripts/db/migrate.ts:776",
       "disposition": "known-legacy",
       "finding": "ARCH-AUTHORITY-001",
       "legacyExpiry": "the bounded-context repair that assigns explicit authority"
@@ -129355,7 +129427,7 @@
       "effect": "unclassified",
       "access": "sql-unclassified",
       "key": "table-access|scripts/db/migrate.ts|unclassified:\"COMMIT\"#1",
-      "source": "scripts/db/migrate.ts:934",
+      "source": "scripts/db/migrate.ts:993",
       "disposition": "known-legacy",
       "finding": "ARCH-AUTHORITY-001",
       "legacyExpiry": "the bounded-context repair that assigns explicit authority"
@@ -129366,7 +129438,7 @@
       "effect": "unclassified",
       "access": "sql-unclassified",
       "key": "table-access|scripts/db/migrate.ts|unclassified:\"ROLLBACK\"#0",
-      "source": "scripts/db/migrate.ts:732",
+      "source": "scripts/db/migrate.ts:778",
       "disposition": "known-legacy",
       "finding": "ARCH-AUTHORITY-001",
       "legacyExpiry": "the bounded-context repair that assigns explicit authority"
@@ -129377,7 +129449,7 @@
       "effect": "unclassified",
       "access": "sql-unclassified",
       "key": "table-access|scripts/db/migrate.ts|unclassified:\"ROLLBACK\"#1",
-      "source": "scripts/db/migrate.ts:936",
+      "source": "scripts/db/migrate.ts:995",
       "disposition": "known-legacy",
       "finding": "ARCH-AUTHORITY-001",
       "legacyExpiry": "the bounded-context repair that assigns explicit authority"
@@ -129388,7 +129460,7 @@
       "effect": "unclassified",
       "access": "sql-unclassified",
       "key": "table-access|scripts/db/migrate.ts|unclassified:\"SELECT current_database() AS db, inet_server_addr()::text AS addr\"#0",
-      "source": "scripts/db/migrate.ts:1052",
+      "source": "scripts/db/migrate.ts:1119",
       "disposition": "known-legacy",
       "finding": "ARCH-AUTHORITY-001",
       "legacyExpiry": "the bounded-context repair that assigns explicit authority"
@@ -129399,7 +129471,7 @@
       "effect": "unclassified",
       "access": "sql-unclassified",
       "key": "table-access|scripts/db/migrate.ts|unclassified:\"SELECT pg_advisory_unlock($1)\"#0",
-      "source": "scripts/db/migrate.ts:740",
+      "source": "scripts/db/migrate.ts:786",
       "disposition": "known-legacy",
       "finding": "ARCH-AUTHORITY-001",
       "legacyExpiry": "the bounded-context repair that assigns explicit authority"
@@ -129410,7 +129482,7 @@
       "effect": "unclassified",
       "access": "sql-unclassified",
       "key": "table-access|scripts/db/migrate.ts|unclassified:\"SELECT pg_advisory_unlock($1)\"#1",
-      "source": "scripts/db/migrate.ts:950",
+      "source": "scripts/db/migrate.ts:1009",
       "disposition": "known-legacy",
       "finding": "ARCH-AUTHORITY-001",
       "legacyExpiry": "the bounded-context repair that assigns explicit authority"
@@ -129421,7 +129493,7 @@
       "effect": "unclassified",
       "access": "sql-unclassified",
       "key": "table-access|scripts/db/migrate.ts|unclassified:\"SELECT pg_backend_pid() AS pid\"#0",
-      "source": "scripts/db/migrate.ts:195",
+      "source": "scripts/db/migrate.ts:214",
       "disposition": "known-legacy",
       "finding": "ARCH-AUTHORITY-001",
       "legacyExpiry": "the bounded-context repair that assigns explicit authority"
@@ -129432,7 +129504,7 @@
       "effect": "unclassified",
       "access": "sql-unclassified",
       "key": "table-access|scripts/db/migrate.ts|unclassified:\"SELECT pg_backend_pid() AS pid\"#1",
-      "source": "scripts/db/migrate.ts:574",
+      "source": "scripts/db/migrate.ts:610",
       "disposition": "known-legacy",
       "finding": "ARCH-AUTHORITY-001",
       "legacyExpiry": "the bounded-context repair that assigns explicit authority"
@@ -129443,7 +129515,7 @@
       "effect": "unclassified",
       "access": "sql-unclassified",
       "key": "table-access|scripts/db/migrate.ts|unclassified:\"SELECT pg_backend_pid() AS pid\"#2",
-      "source": "scripts/db/migrate.ts:1006",
+      "source": "scripts/db/migrate.ts:1066",
       "disposition": "known-legacy",
       "finding": "ARCH-AUTHORITY-001",
       "legacyExpiry": "the bounded-context repair that assigns explicit authority"
@@ -129454,7 +129526,7 @@
       "effect": "unclassified",
       "access": "sql-unclassified",
       "key": "table-access|scripts/db/migrate.ts|unclassified:\"SELECT pg_try_advisory_lock($1) AS got\"#0",
-      "source": "scripts/db/migrate.ts:579",
+      "source": "scripts/db/migrate.ts:615",
       "disposition": "known-legacy",
       "finding": "ARCH-AUTHORITY-001",
       "legacyExpiry": "the bounded-context repair that assigns explicit authority"
@@ -129465,7 +129537,7 @@
       "effect": "unclassified",
       "access": "sql-unclassified",
       "key": "table-access|scripts/db/migrate.ts|unclassified:\"SELECT pg_try_advisory_lock($1) AS ok\"#0",
-      "source": "scripts/db/migrate.ts:903",
+      "source": "scripts/db/migrate.ts:956",
       "disposition": "known-legacy",
       "finding": "ARCH-AUTHORITY-001",
       "legacyExpiry": "the bounded-context repair that assigns explicit authority"
@@ -129476,7 +129548,7 @@
       "effect": "unclassified",
       "access": "sql-unclassified",
       "key": "table-access|scripts/db/migrate.ts|unclassified:`DROP INDEX CONCURRENTLY ${quoteQualifiedIdentifier(target)}`#0",
-      "source": "scripts/db/migrate.ts:296",
+      "source": "scripts/db/migrate.ts:315",
       "disposition": "known-legacy",
       "finding": "ARCH-AUTHORITY-001",
       "legacyExpiry": "the bounded-context repair that assigns explicit authority"
@@ -129487,7 +129559,7 @@
       "effect": "unclassified",
       "access": "sql-unclassified",
       "key": "table-access|scripts/db/migrate.ts|unclassified:`SELECT to_regclass('${relation}') AS reg${legacyCheck}`#0",
-      "source": "scripts/db/migrate.ts:383",
+      "source": "scripts/db/migrate.ts:402",
       "disposition": "known-legacy",
       "finding": "ARCH-AUTHORITY-001",
       "legacyExpiry": "the bounded-context repair that assigns explicit authority"
@@ -129498,7 +129570,7 @@
       "effect": "unclassified",
       "access": "sql-unclassified",
       "key": "table-access|scripts/db/migrate.ts|unclassified:f.sql#0",
-      "source": "scripts/db/migrate.ts:285",
+      "source": "scripts/db/migrate.ts:304",
       "disposition": "known-legacy",
       "finding": "ARCH-AUTHORITY-001",
       "legacyExpiry": "the bounded-context repair that assigns explicit authority"
@@ -129509,7 +129581,7 @@
       "effect": "unclassified",
       "access": "sql-unclassified",
       "key": "table-access|scripts/db/migrate.ts|unclassified:f.sql#1",
-      "source": "scripts/db/migrate.ts:298",
+      "source": "scripts/db/migrate.ts:317",
       "disposition": "known-legacy",
       "finding": "ARCH-AUTHORITY-001",
       "legacyExpiry": "the bounded-context repair that assigns explicit authority"
@@ -129520,7 +129592,7 @@
       "effect": "unclassified",
       "access": "sql-unclassified",
       "key": "table-access|scripts/db/migrate.ts|unclassified:f.sql#2",
-      "source": "scripts/db/migrate.ts:725",
+      "source": "scripts/db/migrate.ts:771",
       "disposition": "known-legacy",
       "finding": "ARCH-AUTHORITY-001",
       "legacyExpiry": "the bounded-context repair that assigns explicit authority"
@@ -129531,7 +129603,7 @@
       "effect": "unclassified",
       "access": "sql-unclassified",
       "key": "table-access|scripts/db/migrate.ts|unclassified:journalDdl(estate)#0",
-      "source": "scripts/db/migrate.ts:368",
+      "source": "scripts/db/migrate.ts:387",
       "disposition": "known-legacy",
       "finding": "ARCH-AUTHORITY-001",
       "legacyExpiry": "the bounded-context repair that assigns explicit authority"
@@ -129542,7 +129614,7 @@
       "effect": "unclassified",
       "access": "sql-unclassified",
       "key": "table-access|scripts/db/migrate.ts|unclassified:target.sql#0",
-      "source": "scripts/db/migrate.ts:929",
+      "source": "scripts/db/migrate.ts:988",
       "disposition": "known-legacy",
       "finding": "ARCH-AUTHORITY-001",
       "legacyExpiry": "the bounded-context repair that assigns explicit authority"
@@ -129553,7 +129625,7 @@
       "effect": "write",
       "access": "sql",
       "key": "table-access|scripts/db/migrate.ts|write:public.__expr__#0",
-      "source": "scripts/db/migrate.ts:709",
+      "source": "scripts/db/migrate.ts:755",
       "disposition": "known-legacy",
       "finding": "ARCH-AUTHORITY-001",
       "legacyExpiry": "the bounded-context repair that assigns explicit authority"
@@ -129564,7 +129636,7 @@
       "effect": "write",
       "access": "sql",
       "key": "table-access|scripts/db/migrate.ts|write:public.__expr__#1",
-      "source": "scripts/db/migrate.ts:715",
+      "source": "scripts/db/migrate.ts:761",
       "disposition": "known-legacy",
       "finding": "ARCH-AUTHORITY-001",
       "legacyExpiry": "the bounded-context repair that assigns explicit authority"
@@ -129575,7 +129647,7 @@
       "effect": "write",
       "access": "sql",
       "key": "table-access|scripts/db/migrate.ts|write:public.__expr__#2",
-      "source": "scripts/db/migrate.ts:719",
+      "source": "scripts/db/migrate.ts:765",
       "disposition": "known-legacy",
       "finding": "ARCH-AUTHORITY-001",
       "legacyExpiry": "the bounded-context repair that assigns explicit authority"
@@ -129586,7 +129658,7 @@
       "effect": "write",
       "access": "sql",
       "key": "table-access|scripts/db/migrate.ts|write:public.__expr__#3",
-      "source": "scripts/db/migrate.ts:726",
+      "source": "scripts/db/migrate.ts:772",
       "disposition": "known-legacy",
       "finding": "ARCH-AUTHORITY-001",
       "legacyExpiry": "the bounded-context repair that assigns explicit authority"
@@ -129597,7 +129669,7 @@
       "effect": "write",
       "access": "sql",
       "key": "table-access|scripts/db/migrate.ts|write:public.__expr__#4",
-      "source": "scripts/db/migrate.ts:930",
+      "source": "scripts/db/migrate.ts:989",
       "disposition": "known-legacy",
       "finding": "ARCH-AUTHORITY-001",
       "legacyExpiry": "the bounded-context repair that assigns explicit authority"
@@ -129821,6 +129893,285 @@
       "disposition": "known-legacy",
       "finding": "ARCH-AUTHORITY-001",
       "legacyExpiry": "the bounded-context repair that assigns explicit authority"
+    },
+    {
+      "category": "table-access",
+      "id": "read:drizzle.vq_schema_baselines",
+      "effect": "read",
+      "access": "sql",
+      "key": "table-access|scripts/db/vq-schema-recovery.ts|read:drizzle.vq_schema_baselines#0",
+      "source": "scripts/db/vq-schema-recovery.ts:59",
+      "owner": "vault-quest-platform"
+    },
+    {
+      "category": "table-access",
+      "id": "read:drizzle.vq_schema_migrations",
+      "effect": "read",
+      "access": "sql",
+      "key": "table-access|scripts/db/vq-schema-recovery.ts|read:drizzle.vq_schema_migrations#0",
+      "source": "scripts/db/vq-schema-recovery.ts:90",
+      "owner": "vault-quest-platform"
+    },
+    {
+      "category": "table-access",
+      "id": "read:pg_catalog.pg_attrdef",
+      "effect": "read",
+      "access": "sql",
+      "key": "table-access|scripts/db/vq-schema-recovery.ts|read:pg_catalog.pg_attrdef#0",
+      "source": "scripts/db/vq-schema-recovery.ts:40",
+      "owner": "vault-quest-platform"
+    },
+    {
+      "category": "table-access",
+      "id": "read:pg_catalog.pg_attribute",
+      "effect": "read",
+      "access": "sql",
+      "key": "table-access|scripts/db/vq-schema-recovery.ts|read:pg_catalog.pg_attribute#0",
+      "source": "scripts/db/vq-schema-recovery.ts:40",
+      "owner": "vault-quest-platform"
+    },
+    {
+      "category": "table-access",
+      "id": "read:pg_catalog.pg_attribute",
+      "effect": "read",
+      "access": "sql",
+      "key": "table-access|scripts/db/vq-schema-recovery.ts|read:pg_catalog.pg_attribute#1",
+      "source": "scripts/db/vq-schema-recovery.ts:40",
+      "owner": "vault-quest-platform"
+    },
+    {
+      "category": "table-access",
+      "id": "read:pg_catalog.pg_class",
+      "effect": "read",
+      "access": "sql",
+      "key": "table-access|scripts/db/vq-schema-recovery.ts|read:pg_catalog.pg_class#0",
+      "source": "scripts/db/vq-schema-recovery.ts:40",
+      "owner": "vault-quest-platform"
+    },
+    {
+      "category": "table-access",
+      "id": "read:pg_catalog.pg_class",
+      "effect": "read",
+      "access": "sql",
+      "key": "table-access|scripts/db/vq-schema-recovery.ts|read:pg_catalog.pg_class#1",
+      "source": "scripts/db/vq-schema-recovery.ts:40",
+      "owner": "vault-quest-platform"
+    },
+    {
+      "category": "table-access",
+      "id": "read:pg_catalog.pg_class",
+      "effect": "read",
+      "access": "sql",
+      "key": "table-access|scripts/db/vq-schema-recovery.ts|read:pg_catalog.pg_class#2",
+      "source": "scripts/db/vq-schema-recovery.ts:40",
+      "owner": "vault-quest-platform"
+    },
+    {
+      "category": "table-access",
+      "id": "read:pg_catalog.pg_collation",
+      "effect": "read",
+      "access": "sql",
+      "key": "table-access|scripts/db/vq-schema-recovery.ts|read:pg_catalog.pg_collation#0",
+      "source": "scripts/db/vq-schema-recovery.ts:40",
+      "owner": "vault-quest-platform"
+    },
+    {
+      "category": "table-access",
+      "id": "read:pg_catalog.pg_constraint",
+      "effect": "read",
+      "access": "sql",
+      "key": "table-access|scripts/db/vq-schema-recovery.ts|read:pg_catalog.pg_constraint#0",
+      "source": "scripts/db/vq-schema-recovery.ts:40",
+      "owner": "vault-quest-platform"
+    },
+    {
+      "category": "table-access",
+      "id": "read:pg_catalog.pg_depend",
+      "effect": "read",
+      "access": "sql",
+      "key": "table-access|scripts/db/vq-schema-recovery.ts|read:pg_catalog.pg_depend#0",
+      "source": "scripts/db/vq-schema-recovery.ts:40",
+      "owner": "vault-quest-platform"
+    },
+    {
+      "category": "table-access",
+      "id": "read:pg_catalog.pg_index",
+      "effect": "read",
+      "access": "sql",
+      "key": "table-access|scripts/db/vq-schema-recovery.ts|read:pg_catalog.pg_index#0",
+      "source": "scripts/db/vq-schema-recovery.ts:40",
+      "owner": "vault-quest-platform"
+    },
+    {
+      "category": "table-access",
+      "id": "read:pg_catalog.pg_namespace",
+      "effect": "read",
+      "access": "sql",
+      "key": "table-access|scripts/db/vq-schema-recovery.ts|read:pg_catalog.pg_namespace#0",
+      "source": "scripts/db/vq-schema-recovery.ts:40",
+      "owner": "vault-quest-platform"
+    },
+    {
+      "category": "table-access",
+      "id": "read:pg_catalog.pg_namespace",
+      "effect": "read",
+      "access": "sql",
+      "key": "table-access|scripts/db/vq-schema-recovery.ts|read:pg_catalog.pg_namespace#1",
+      "source": "scripts/db/vq-schema-recovery.ts:40",
+      "owner": "vault-quest-platform"
+    },
+    {
+      "category": "table-access",
+      "id": "read:pg_catalog.pg_namespace",
+      "effect": "read",
+      "access": "sql",
+      "key": "table-access|scripts/db/vq-schema-recovery.ts|read:pg_catalog.pg_namespace#2",
+      "source": "scripts/db/vq-schema-recovery.ts:40",
+      "owner": "vault-quest-platform"
+    },
+    {
+      "category": "table-access",
+      "id": "read:pg_catalog.pg_policy",
+      "effect": "read",
+      "access": "sql",
+      "key": "table-access|scripts/db/vq-schema-recovery.ts|read:pg_catalog.pg_policy#0",
+      "source": "scripts/db/vq-schema-recovery.ts:40",
+      "owner": "vault-quest-platform"
+    },
+    {
+      "category": "table-access",
+      "id": "read:pg_catalog.pg_sequence",
+      "effect": "read",
+      "access": "sql",
+      "key": "table-access|scripts/db/vq-schema-recovery.ts|read:pg_catalog.pg_sequence#0",
+      "source": "scripts/db/vq-schema-recovery.ts:40",
+      "owner": "vault-quest-platform"
+    },
+    {
+      "category": "table-access",
+      "id": "read:pg_catalog.pg_trigger",
+      "effect": "read",
+      "access": "sql",
+      "key": "table-access|scripts/db/vq-schema-recovery.ts|read:pg_catalog.pg_trigger#0",
+      "source": "scripts/db/vq-schema-recovery.ts:40",
+      "owner": "vault-quest-platform"
+    },
+    {
+      "category": "table-access",
+      "id": "read:public.pg_class",
+      "effect": "read",
+      "access": "sql",
+      "key": "table-access|scripts/db/vq-schema-recovery.ts|read:public.pg_class#0",
+      "source": "scripts/db/vq-schema-recovery.ts:15",
+      "owner": "vault-quest-platform"
+    },
+    {
+      "category": "table-access",
+      "id": "read:public.pg_class",
+      "effect": "read",
+      "access": "sql",
+      "key": "table-access|scripts/db/vq-schema-recovery.ts|read:public.pg_class#1",
+      "source": "scripts/db/vq-schema-recovery.ts:151",
+      "owner": "vault-quest-platform"
+    },
+    {
+      "category": "table-access",
+      "id": "read:public.pg_namespace",
+      "effect": "read",
+      "access": "sql",
+      "key": "table-access|scripts/db/vq-schema-recovery.ts|read:public.pg_namespace#0",
+      "source": "scripts/db/vq-schema-recovery.ts:15",
+      "owner": "vault-quest-platform"
+    },
+    {
+      "category": "table-access",
+      "id": "read:public.pg_roles",
+      "effect": "read",
+      "access": "sql",
+      "key": "table-access|scripts/db/vq-schema-recovery.ts|read:public.pg_roles#0",
+      "source": "scripts/db/vq-schema-recovery.ts:133",
+      "owner": "vault-quest-platform"
+    },
+    {
+      "category": "table-access",
+      "id": "unclassified:\"BEGIN ISOLATION LEVEL SERIALIZABLE\"",
+      "effect": "unclassified",
+      "access": "sql-unclassified",
+      "key": "table-access|scripts/db/vq-schema-recovery.ts|unclassified:\"BEGIN ISOLATION LEVEL SERIALIZABLE\"#0",
+      "source": "scripts/db/vq-schema-recovery.ts:130",
+      "owner": "vault-quest-platform"
+    },
+    {
+      "category": "table-access",
+      "id": "unclassified:\"COMMIT\"",
+      "effect": "unclassified",
+      "access": "sql-unclassified",
+      "key": "table-access|scripts/db/vq-schema-recovery.ts|unclassified:\"COMMIT\"#0",
+      "source": "scripts/db/vq-schema-recovery.ts:174",
+      "owner": "vault-quest-platform"
+    },
+    {
+      "category": "table-access",
+      "id": "unclassified:\"ROLLBACK\"",
+      "effect": "unclassified",
+      "access": "sql-unclassified",
+      "key": "table-access|scripts/db/vq-schema-recovery.ts|unclassified:\"ROLLBACK\"#0",
+      "source": "scripts/db/vq-schema-recovery.ts:177",
+      "owner": "vault-quest-platform"
+    },
+    {
+      "category": "table-access",
+      "id": "unclassified:\"SELECT to_regclass('drizzle.vq_schema_baselines') AS receipt\"",
+      "effect": "unclassified",
+      "access": "sql-unclassified",
+      "key": "table-access|scripts/db/vq-schema-recovery.ts|unclassified:\"SELECT to_regclass('drizzle.vq_schema_baselines') AS receipt\"#0",
+      "source": "scripts/db/vq-schema-recovery.ts:52",
+      "owner": "vault-quest-platform"
+    },
+    {
+      "category": "table-access",
+      "id": "unclassified:`ALTER SEQUENCE public.${sequence.name} OWNER TO \"${owner.replaceAll('\"', '\"\"')}\"`",
+      "effect": "unclassified",
+      "access": "sql-unclassified",
+      "key": "table-access|scripts/db/vq-schema-recovery.ts|unclassified:`ALTER SEQUENCE public.${sequence.name} OWNER TO \"${owner.replaceAll('\"', '\"\"')}\"`#0",
+      "source": "scripts/db/vq-schema-recovery.ts:158",
+      "owner": "vault-quest-platform"
+    },
+    {
+      "category": "table-access",
+      "id": "unclassified:`LOCK TABLE ${VQ_BASELINE_RELATIONS.map((name) => `public.${name}`).join(\",\")} IN SHARE ROW EXCLUSIVE MODE`",
+      "effect": "unclassified",
+      "access": "sql-unclassified",
+      "key": "table-access|scripts/db/vq-schema-recovery.ts|unclassified:`LOCK TABLE ${VQ_BASELINE_RELATIONS.map((name) => `public.${name}`).join(\",\")} IN SHARE ROW EXCLUSIVE MODE`#0",
+      "source": "scripts/db/vq-schema-recovery.ts:140",
+      "owner": "vault-quest-platform"
+    },
+    {
+      "category": "table-access",
+      "id": "unclassified:authority.sql",
+      "effect": "unclassified",
+      "access": "sql-unclassified",
+      "key": "table-access|scripts/db/vq-schema-recovery.ts|unclassified:authority.sql#0",
+      "source": "scripts/db/vq-schema-recovery.ts:165",
+      "owner": "vault-quest-platform"
+    },
+    {
+      "category": "table-access",
+      "id": "write:drizzle.vq_schema_baselines",
+      "effect": "write",
+      "access": "sql",
+      "key": "table-access|scripts/db/vq-schema-recovery.ts|write:drizzle.vq_schema_baselines#0",
+      "source": "scripts/db/vq-schema-recovery.ts:166",
+      "owner": "vault-quest-platform"
+    },
+    {
+      "category": "table-access",
+      "id": "write:drizzle.vq_schema_migrations",
+      "effect": "write",
+      "access": "sql",
+      "key": "table-access|scripts/db/vq-schema-recovery.ts|write:drizzle.vq_schema_migrations#0",
+      "source": "scripts/db/vq-schema-recovery.ts:170",
+      "owner": "vault-quest-platform"
     },
     {
       "category": "table-access",

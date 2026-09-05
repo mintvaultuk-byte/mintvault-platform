@@ -1,5 +1,18 @@
 # Engineering proof ledger
 
+## 2026-09-06 VQ honest historical recovery
+
+[Existing VQ packet](../.claude/controlled-code-lead/tasks/repository-architecture-recovery-20260904/vq-schema-recovery.md)
+binds baseline97a88450 plus exact final hashes: independentSol64/64 and held-out
+DDL/state races, subsequent CI-helper preflight Terra15/15; clean-lock168/168 and
+production build PASS. Owned PG16.13/17.10 prove fresh17 executed vs historical
+one executed/16 attested, no fabricated old rows, exact grants and preserved data.
+All reproduced changed-surface recovery defects fixed in the same wave. Historical
+admission quiesces writers; actual rollout also requires exclusive operator DDL.
+No live/shared DB, deployment, seed-content or real future-export migration claim.
+Shipping/readiness/fallback/final Opus and hosted CI remain OPEN; latest hosted
+97a88450 checks failed and restricted causes remain UNKNOWN.
+
 ## 2026-09-06 VQ metadata compatibility
 
 [Existing VQ packet](../.claude/controlled-code-lead/tasks/repository-architecture-recovery-20260904/vq-schema-recovery.md)

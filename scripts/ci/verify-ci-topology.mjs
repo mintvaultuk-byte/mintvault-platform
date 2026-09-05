@@ -156,6 +156,7 @@ export function validateCiTopology({
   const partnerBrowserCommand =
     "node scripts/ci/run-disposable-integration.mjs --docker-context default --partner-browser-proof";
   const requiredCommands = [
+    "node --import tsx scripts/ci/prepare-vq-test-db.mjs",
     'MINTVAULT_MIGRATION_DATABASE_URL="$TEST_DATABASE_URL" node node_modules/tsx/dist/cli.mjs scripts/db/migrate.ts --estate vault-quest --apply',
     "npm run architecture:check",
     "npm run check:tests",
@@ -173,6 +174,16 @@ export function validateCiTopology({
   for (const command of requiredCommands) {
     if (!steps.some((step) => executes(step, command))) errors.push(`workflow does not execute ${command}`);
   }
+  const vqRole = steps.findIndex((step) => executes(step, "node --import tsx scripts/ci/prepare-vq-test-db.mjs"));
+  const vqApply = steps.findIndex((step) =>
+    executes(
+      step,
+      'MINTVAULT_MIGRATION_DATABASE_URL="$TEST_DATABASE_URL" node node_modules/tsx/dist/cli.mjs scripts/db/migrate.ts --estate vault-quest --apply'
+    )
+  );
+  const freshMain = steps.findIndex((step) => enabled(step) && step.run.includes("npx drizzle-kit push --force"));
+  if (freshMain < 0 || vqRole <= freshMain || vqApply <= vqRole)
+    errors.push("Vault Quest fixture requires Drizzle -> main runtime authority -> VQ migrations");
   const node20 = steps.findIndex(
     (step) => enabled(step) && step.uses.startsWith("actions/setup-node@") && step.with["node-version"] === "20.20.2"
   );

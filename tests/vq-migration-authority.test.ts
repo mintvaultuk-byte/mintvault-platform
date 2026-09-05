@@ -9,6 +9,7 @@ import {
   listMigrationFiles,
   migrationProfile,
   parseMigrationEstate,
+  parseHistoricalBaseline,
   planMigrations,
   type MigrationEstate,
 } from "../scripts/db/migrate";
@@ -57,9 +58,9 @@ describe("closed migration estate namespace", () => {
     expect(profile.journalTable).toBe("drizzle.vq_schema_migrations");
     expect(profile.advisoryLockKey).toBe(4_150_206);
     const files = listMigrationFiles(profile.migrationsDir);
-    expect(files).toHaveLength(16);
+    expect(files).toHaveLength(17);
     expect(files[0].filename).toBe("0000_next_mister_fear.sql");
-    expect(files.at(-1)?.filename).toBe("0015_feature_flags_generation_types.sql");
+    expect(files.at(-1)?.filename).toBe("0016_schema_baseline_authority.sql");
   });
 
   it("rejects ambiguous CLI choices before database work", async () => {
@@ -153,6 +154,23 @@ describe("closed migration estate namespace", () => {
     expect((await client.query("SELECT filename, checksum, status FROM drizzle.vq_schema_migrations")).rows).toEqual([
       { filename: vq.filename, checksum: vq.checksum, status: "applied" },
     ]);
+  });
+
+  it("refuses an empty qualified journal over unjournalled business data but resumes a genuinely empty estate", async () => {
+    await applyMigrations(client, [], { estate: "vault-quest" });
+    expect((await planMigrations(client, [vq], "vault-quest")).pending).toEqual([vq.filename]);
+    await client.query("CREATE TABLE vq_effect (id integer)");
+    const changed = file(vq.filename, "ALTER TABLE vq_effect ADD COLUMN replayed integer");
+    await expect(planMigrations(client, [changed], "vault-quest")).rejects.toThrow(/unjournalled/);
+    await expect(applyMigrations(client, [changed], { estate: "vault-quest" })).rejects.toThrow(/unjournalled/);
+    expect((await client.query("SELECT count(*)::int n FROM drizzle.vq_schema_migrations")).rows[0].n).toBe(0);
+    expect(
+      (
+        await client.query(
+          "SELECT column_name FROM information_schema.columns WHERE table_name='vq_effect' AND column_name='replayed'"
+        )
+      ).rowCount
+    ).toBe(0);
   });
 
   it("refuses VQ checksum drift, failed state and same-estate numeric collision", async () => {
@@ -261,9 +279,15 @@ describe("closed migration estate namespace", () => {
 });
 
 describe("fresh immutable VQ estate through the real CLI", () => {
-  it("journals all sixteen files exactly once and retains durable rows and constraints", async () => {
+  it("journals all seventeen files exactly once and retains durable rows and constraints", async () => {
     const fresh = await startPostgres17("vq-fresh-cli");
-    const db = new pg.Client({ connectionString: fresh.url });
+    const admin = new pg.Client({ connectionString: fresh.url });
+    await admin.connect();
+    await admin.query("CREATE DATABASE mintvault_vq_phase10_local");
+    await admin.end();
+    const target = new URL(fresh.url);
+    target.pathname = "/mintvault_vq_phase10_local";
+    const db = new pg.Client({ connectionString: target.href });
     await db.connect();
     const run = (apply: boolean) =>
       execFileSync(
@@ -282,15 +306,27 @@ describe("fresh immutable VQ estate through the real CLI", () => {
             LANG: "C",
             LC_ALL: "C",
             NODE_ENV: "test",
-            MINTVAULT_MIGRATION_DATABASE_URL: fresh.url,
+            MINTVAULT_MIGRATION_DATABASE_URL: target.href,
           },
           timeout: 30_000,
         }
       );
     try {
-      expect(run(false)).toContain("16 pending");
+      expect(run(false)).toContain("17 pending");
       expect((await db.query("SELECT to_regclass('drizzle.vq_schema_migrations') journal")).rows[0].journal).toBeNull();
-      expect(run(true)).toContain("Applied 16:");
+      const prepareMain = () =>
+        execFileSync(process.execPath, ["--import", "tsx", "scripts/ci/prepare-vq-test-db.mjs"], {
+          env: { PATH: process.env.PATH, LANG: "C", LC_ALL: "C", TEST_DATABASE_URL: target.href },
+          timeout: 30_000,
+        });
+      prepareMain();
+      await db.query("UPDATE public.schema_migrations SET status='failed'");
+      const invalidBefore = (await db.query("SELECT * FROM public.schema_migrations")).rows;
+      expect(() => prepareMain()).toThrow(/invalid main migration lineage/);
+      expect((await db.query("SELECT * FROM public.schema_migrations")).rows).toEqual(invalidBefore);
+      await db.query("UPDATE public.schema_migrations SET status='applied'");
+      prepareMain();
+      expect(run(true)).toContain("Applied 17:");
       const files = listMigrationFiles(migrationProfile("vault-quest").migrationsDir);
       const journal = (
         await db.query(
@@ -300,7 +336,15 @@ describe("fresh immutable VQ estate through the real CLI", () => {
       expect(journal).toEqual(
         files.map((f) => ({ filename: f.filename, checksum: f.checksum, status: "applied", completed: true }))
       );
-      expect((await db.query("SELECT to_regclass('public.schema_migrations') journal")).rows[0].journal).toBeNull();
+      expect((await db.query("SELECT filename FROM public.schema_migrations")).rows).toEqual([
+        { filename: "0121_main_runtime_role_authority.sql" },
+      ]);
+      expect((await db.query("SELECT * FROM drizzle.vq_schema_baselines")).rows).toEqual([]);
+      await db.query("SET ROLE mintvault_app");
+      expect((await db.query("SELECT count(*)::int count FROM drizzle.vq_schema_migrations")).rows[0].count).toBe(17);
+      await expect(db.query("DELETE FROM drizzle.vq_schema_migrations")).rejects.toMatchObject({ code: "42501" });
+      await expect(db.query("DELETE FROM vq_export_jobs")).rejects.toMatchObject({ code: "42501" });
+      await db.query("RESET ROLE");
       await db.query(
         "INSERT INTO vq_feature_flags (feature, enabled) VALUES ('gen_action_pose', false), ('auto_paid_retry', false)"
       );
@@ -310,7 +354,7 @@ describe("fresh immutable VQ estate through the real CLI", () => {
       const before = (await db.query("SELECT * FROM vq_export_jobs")).rows;
       expect(run(true)).toContain("Applied 0:");
       expect((await db.query("SELECT * FROM vq_export_jobs")).rows).toEqual(before);
-      expect((await db.query("SELECT count(*)::int count FROM drizzle.vq_schema_migrations")).rows[0].count).toBe(16);
+      expect((await db.query("SELECT count(*)::int count FROM drizzle.vq_schema_migrations")).rows[0].count).toBe(17);
       await expect(
         db.query(
           "INSERT INTO vq_export_jobs (kind,owner_admin_id,idempotency_key) VALUES ('test','synthetic-admin','fresh-proof')"
@@ -324,4 +368,31 @@ describe("fresh immutable VQ estate through the real CLI", () => {
       await fresh.stop();
     }
   }, 60_000);
+});
+
+describe("closed historical CLI selection", () => {
+  it("rejects ambiguous or cross-estate historical commands before credentials", () => {
+    expect(parseHistoricalBaseline([], "main")).toBe(false);
+    expect(
+      parseHistoricalBaseline(["--estate", "vault-quest", "--historical-baseline-v1", "--apply"], "vault-quest")
+    ).toBe(true);
+    for (const extra of ["--unexpected", "--apply", "--convergence-mode=true"]) {
+      expect(() =>
+        parseHistoricalBaseline(
+          ["--estate", "vault-quest", "--historical-baseline-v1", "--apply", extra],
+          "vault-quest"
+        )
+      ).toThrow();
+    }
+    for (const args of [
+      ["--historical-baseline-v1"],
+      ["--historical-baseline-v1=true", "--apply"],
+      ["--historical-baseline-v1", "--historical-baseline-v1", "--apply"],
+      ["--historical-baseline-v1", "--apply", "--only", "0016_schema_baseline_authority.sql"],
+      ["--historical-baseline-v1", "--apply", "--allow-destructive"],
+    ]) {
+      expect(() => parseHistoricalBaseline(args, "vault-quest")).toThrow();
+    }
+    expect(() => parseHistoricalBaseline(["--historical-baseline-v1", "--apply"], "main")).toThrow();
+  });
 });

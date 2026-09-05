@@ -1,7 +1,7 @@
 {
   "schemaVersion": 1,
-  "fileCount": 67,
-  "filesSha256": "bacd0f9a1da77eee1e9eedf4cf611c9c68f551adf4f4f64831ee466ad79bd3f1",
+  "fileCount": 68,
+  "filesSha256": "eaa773a268ad6b2dc159b35a2644c0d24d75556f7547d492d781cc78e76ce54b",
   "files": [
     "scripts/architecture/check-architecture.mjs",
     "scripts/ci/assert-connector-suites-executed.mjs",
@@ -14,6 +14,7 @@
     "scripts/ci/partner-suite-env-matrix.mjs",
     "scripts/ci/partner-suite-verdict.mjs",
     "scripts/ci/prepare-engineering-governance-db.mjs",
+    "scripts/ci/prepare-vq-test-db.mjs",
     "scripts/ci/run-disposable-integration.mjs",
     "scripts/ci/run-partner-suite.mjs",
     "scripts/ci/run-r2-object-store-proof.mjs",

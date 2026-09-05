@@ -1,10 +1,18 @@
 import { createHash } from "node:crypto";
 import { readFileSync } from "node:fs";
+import { execFileSync } from "node:child_process";
 import pg from "pg";
 import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it } from "vitest";
-import { applyMigrations, listMigrationFiles, migrationProfile } from "../scripts/db/migrate";
+import {
+  applyMigrations,
+  applyScopedMigration,
+  listMigrationFiles,
+  migrationProfile,
+  planMigrations,
+} from "../scripts/db/migrate";
 import {
   VQ_BASELINE_FINGERPRINT,
+  VQ_BASELINE_AUTHORITY_FILE,
   VQ_BASELINE_RELATIONS,
   VQ_BASELINE_MIGRATION_SET_SHA256,
   VQ_SCHEMA_CATALOG_SQL,
@@ -28,6 +36,329 @@ beforeAll(async () => {
 afterAll(async () => {
   await db?.end();
   await cluster?.stop();
+});
+
+async function withHistorical(work: (client: pg.Client, url: string) => Promise<void>, mainRole = true) {
+  const owned = await startPostgres17("vq-history");
+  const client = new pg.Client({ connectionString: owned.url });
+  await client.connect();
+  try {
+    // Reproduce the former raw-SQL installation without inventing execution rows.
+    for (const file of files) await client.query(file.sql);
+    if (mainRole) await client.query(readFileSync("migrations/0121_main_runtime_role_authority.sql", "utf8"));
+    await client.query(
+      "INSERT INTO vq_export_jobs (kind,owner_admin_id,idempotency_key) VALUES ('test','synthetic','preserve-history')"
+    );
+    await work(client, owned.url);
+  } finally {
+    await client.end();
+    await owned.stop();
+  }
+}
+
+describe("honest historical VQ admission", () => {
+  const release = () => listMigrationFiles(migrationProfile("vault-quest").migrationsDir);
+  it("refuses ordinary plan/apply before creating metadata on unjournalled business data", async () => {
+    await withHistorical(async (client) => {
+      const before = (await client.query("SELECT * FROM vq_export_jobs")).rows;
+      await expect(planMigrations(client, release(), "vault-quest")).rejects.toThrow(/unjournalled/);
+      await expect(applyMigrations(client, release(), { estate: "vault-quest" })).rejects.toThrow(/unjournalled/);
+      expect(
+        (await client.query("SELECT to_regclass('drizzle.vq_schema_migrations') journal")).rows[0].journal
+      ).toBeNull();
+      expect((await client.query("SELECT * FROM vq_export_jobs")).rows).toEqual(before);
+    });
+  }, 60_000);
+
+  it("attests shape without executing old SQL, preserves rows, and converges exact runtime grants", async () => {
+    await withHistorical(async (client) => {
+      // Simulate overly broad historical grants; convergence must remove them.
+      await client.query("GRANT ALL ON vq_export_jobs TO PUBLIC, mintvault_app");
+      await client.query("GRANT UPDATE(id) ON vq_card_revisions TO PUBLIC, mintvault_app");
+      const before = (await client.query("SELECT * FROM vq_export_jobs")).rows;
+      const result = await applyMigrations(client, release(), { estate: "vault-quest", historicalBaseline: true });
+      expect(result.applied).toEqual([VQ_BASELINE_AUTHORITY_FILE]);
+      expect(
+        (
+          await client.query(
+            "SELECT filename, status, completed_at IS NOT NULL complete FROM drizzle.vq_schema_migrations"
+          )
+        ).rows
+      ).toEqual([{ filename: VQ_BASELINE_AUTHORITY_FILE, status: "applied", complete: true }]);
+      const receipt = (await client.query("SELECT * FROM drizzle.vq_schema_baselines")).rows;
+      expect(receipt).toHaveLength(1);
+      expect(receipt[0]).toMatchObject({
+        evidence_kind: "observed_schema-v1",
+        source_sha256: VQ_BASELINE_MIGRATION_SET_SHA256,
+        schema_sha256: VQ_BASELINE_FINGERPRINT,
+      });
+      const plan = await planMigrations(client, release(), "vault-quest");
+      expect(plan.attestedNotApplied).toEqual(files.map((file) => file.filename));
+      expect(plan.alreadyApplied).toEqual([VQ_BASELINE_AUTHORITY_FILE]);
+      expect(plan.pending).toEqual([]);
+      await client.query("UPDATE drizzle.vq_schema_migrations SET completed_at=NULL");
+      await expect(planMigrations(client, release(), "vault-quest")).rejects.toThrow(/incomplete/);
+      await client.query("UPDATE drizzle.vq_schema_migrations SET completed_at=now()");
+      expect(await applyMigrations(client, release(), { estate: "vault-quest" })).toEqual({ applied: [] });
+      expect((await client.query("SELECT * FROM drizzle.vq_schema_baselines")).rows).toEqual(receipt);
+      expect((await client.query("SELECT * FROM vq_export_jobs")).rows).toEqual(before);
+      for (const table of VQ_BASELINE_RELATIONS) {
+        const append = ["vq_artwork_revision_events", "vq_card_revisions", "vq_character_revisions"].includes(table);
+        const acl = (
+          await client.query(
+            "SELECT has_table_privilege('mintvault_app',$1,'SELECT') s, has_table_privilege('mintvault_app',$1,'INSERT') i, has_table_privilege('mintvault_app',$1,'UPDATE') u, has_table_privilege('mintvault_app',$1,'DELETE') d, has_table_privilege('mintvault_app',$1,'TRUNCATE') t, has_table_privilege('mintvault_app',$1,'TRIGGER') trigger, has_table_privilege('mintvault_app',$1,'REFERENCES') ref",
+            [`public.${table}`]
+          )
+        ).rows[0];
+        expect(acl, table).toEqual({ s: true, i: true, u: !append, d: false, t: false, trigger: false, ref: false });
+      }
+      await client.query("SET ROLE mintvault_app");
+      expect(
+        (
+          await client.query(
+            "SELECT has_column_privilege(current_user,'public.vq_card_revisions','id','UPDATE') allowed"
+          )
+        ).rows[0].allowed
+      ).toBe(false);
+      expect((await client.query("SELECT * FROM drizzle.vq_schema_baselines")).rowCount).toBe(1);
+      await expect(client.query("UPDATE drizzle.vq_schema_baselines SET observed_by='fake'")).rejects.toMatchObject({
+        code: "42501",
+      });
+      await expect(
+        client.query("INSERT INTO drizzle.vq_schema_migrations (filename,checksum) VALUES ('fake','fake')")
+      ).rejects.toMatchObject({ code: "42501" });
+      await expect(client.query("DELETE FROM vq_export_jobs")).rejects.toMatchObject({ code: "42501" });
+      await client.query("RESET ROLE");
+      await expect(
+        applyMigrations(client, release(), { estate: "vault-quest", historicalBaseline: true })
+      ).rejects.toThrow(/absent VQ control/);
+      await expect(
+        applyScopedMigration(client, files[0].filename, { files: release(), estate: "vault-quest" })
+      ).rejects.toThrow(/attested/);
+    });
+  }, 60_000);
+
+  it.each([
+    ["shape", "ALTER TABLE vq_export_jobs ALTER COLUMN attempt_count SET DEFAULT 9"],
+    ["partial journal", "CREATE SCHEMA drizzle; CREATE TABLE drizzle.vq_schema_migrations (id integer)"],
+    ["receipt", "CREATE SCHEMA drizzle; CREATE TABLE drizzle.vq_schema_baselines (id integer)"],
+    ["public residue", "CREATE SEQUENCE public.vq_schema_migrations_id_seq"],
+    ["unrestricted role", "ALTER ROLE mintvault_app SUPERUSER"],
+  ])(
+    "refuses %s without creating new history",
+    async (_name, mutation) => {
+      await withHistorical(async (client) => {
+        await client.query(mutation);
+        const before = (
+          await client.query(
+            "SELECT to_regclass('drizzle.vq_schema_migrations') journal, to_regclass('drizzle.vq_schema_baselines') receipt"
+          )
+        ).rows;
+        const data = (await client.query("SELECT * FROM vq_export_jobs")).rows;
+        await expect(
+          applyMigrations(client, release(), { estate: "vault-quest", historicalBaseline: true })
+        ).rejects.toThrow();
+        expect(
+          (
+            await client.query(
+              "SELECT to_regclass('drizzle.vq_schema_migrations') journal, to_regclass('drizzle.vq_schema_baselines') receipt"
+            )
+          ).rows
+        ).toEqual(before);
+        expect((await client.query("SELECT * FROM vq_export_jobs")).rows).toEqual(data);
+      });
+    },
+    60_000
+  );
+
+  it("refuses absent runtime authority and changed source without new metadata", async () => {
+    await withHistorical(async (client) => {
+      await expect(
+        applyMigrations(client, release(), { estate: "vault-quest", historicalBaseline: true })
+      ).rejects.toThrow(/existing main runtime role/);
+      const changed = release().map((file, index) => (index === 0 ? { ...file, checksum: "changed" } : file));
+      await expect(
+        applyMigrations(client, changed, { estate: "vault-quest", historicalBaseline: true })
+      ).rejects.toThrow(/source inventory/);
+      expect(
+        (await client.query("SELECT to_regclass('drizzle.vq_schema_migrations') journal")).rows[0].journal
+      ).toBeNull();
+    }, false);
+  }, 60_000);
+
+  it("rolls back the whole new control state when receipt persistence fails", async () => {
+    await withHistorical(async (client) => {
+      const failing = {
+        async query(sql: string, args?: unknown[]) {
+          if (sql.startsWith("INSERT INTO drizzle.vq_schema_baselines")) throw new Error("injected receipt failure");
+          return client.query(sql, args);
+        },
+      };
+      await expect(
+        applyMigrations(failing, release(), { estate: "vault-quest", historicalBaseline: true })
+      ).rejects.toThrow(/injected/);
+      expect(
+        (
+          await client.query(
+            "SELECT to_regclass('drizzle.vq_schema_migrations') journal, to_regclass('drizzle.vq_schema_baselines') receipt"
+          )
+        ).rows[0]
+      ).toEqual({ journal: null, receipt: null });
+      expect((await client.query("SELECT count(*)::int n FROM vq_export_jobs")).rows[0].n).toBe(1);
+    });
+  }, 60_000);
+
+  it("runs the actual historical CLI and resumes without rewriting observation or execution history", async () => {
+    await withHistorical(async (client, url) => {
+      const run = (historical: boolean) =>
+        execFileSync(
+          process.execPath,
+          [
+            "node_modules/tsx/dist/cli.mjs",
+            "scripts/db/migrate.ts",
+            "--estate",
+            "vault-quest",
+            "--apply",
+            ...(historical ? ["--historical-baseline-v1"] : []),
+          ],
+          {
+            encoding: "utf8",
+            env: {
+              PATH: process.env.PATH,
+              LANG: "C",
+              LC_ALL: "C",
+              NODE_ENV: "test",
+              MINTVAULT_MIGRATION_DATABASE_URL: url,
+            },
+            timeout: 30_000,
+          }
+        );
+      expect(run(true)).toContain("Old SQL is attested, not applied");
+      const before = (await client.query("SELECT * FROM drizzle.vq_schema_baselines")).rows;
+      expect(run(false)).toContain("Applied 0:");
+      expect((await client.query("SELECT * FROM drizzle.vq_schema_baselines")).rows).toEqual(before);
+      expect((await client.query("SELECT count(*)::int n FROM drizzle.vq_schema_migrations")).rows[0].n).toBe(1);
+    });
+  }, 60_000);
+
+  it.each(["DELETE FROM drizzle.vq_schema_baselines", "DROP TABLE drizzle.vq_schema_baselines"])(
+    "refuses lost historical evidence instead of replaying old SQL: %s",
+    async (mutation) => {
+      await withHistorical(async (client) => {
+        await applyMigrations(client, release(), { estate: "vault-quest", historicalBaseline: true });
+        const before = (await client.query("SELECT * FROM drizzle.vq_schema_migrations")).rows;
+        const data = (await client.query("SELECT * FROM vq_export_jobs")).rows;
+        await client.query(mutation);
+        await expect(planMigrations(client, release(), "vault-quest")).rejects.toThrow(/receipt/);
+        await expect(applyMigrations(client, release(), { estate: "vault-quest" })).rejects.toThrow(/receipt/);
+        expect((await client.query("SELECT * FROM drizzle.vq_schema_migrations")).rows).toEqual(before);
+        expect((await client.query("SELECT * FROM vq_export_jobs")).rows).toEqual(data);
+      });
+    },
+    60_000
+  );
+
+  it("retains baseline provenance through an explicit forward schema cut and rejects mixed history", async () => {
+    await withHistorical(async (client) => {
+      await applyMigrations(client, release(), { estate: "vault-quest", historicalBaseline: true });
+      const before = (await client.query("SELECT * FROM drizzle.vq_schema_baselines")).rows;
+      const sql = "ALTER TABLE vq_export_jobs ADD COLUMN proof_generation integer DEFAULT 0";
+      const future = {
+        ...release().at(-1)!,
+        number: "0017",
+        filename: "0017_test_dependency.sql",
+        sql,
+        checksum: createHash("sha256").update(sql).digest("hex"),
+      };
+      const evolved = [...release(), future];
+      expect(await applyMigrations(client, evolved, { estate: "vault-quest" })).toEqual({ applied: [future.filename] });
+      expect(await applyMigrations(client, evolved, { estate: "vault-quest" })).toEqual({ applied: [] });
+      expect((await client.query("SELECT * FROM drizzle.vq_schema_baselines")).rows).toEqual(before);
+      expect((await planMigrations(client, evolved, "vault-quest")).attestedNotApplied).toHaveLength(16);
+      await client.query(
+        "INSERT INTO drizzle.vq_schema_migrations(filename,checksum,status,completed_at) VALUES($1,$2,'applied',now())",
+        [files[0].filename, files[0].checksum]
+      );
+      await expect(planMigrations(client, evolved, "vault-quest")).rejects.toThrow(/mixed/);
+    });
+  }, 60_000);
+
+  it("revalidates the historical receipt under the scoped lock", async () => {
+    await withHistorical(async (client) => {
+      await applyMigrations(client, release(), { estate: "vault-quest", historicalBaseline: true });
+      const sql = "ALTER TABLE vq_export_jobs ADD COLUMN raced integer";
+      const next = {
+        ...release().at(-1)!,
+        number: "0017",
+        filename: "0017_test_dependency.sql",
+        sql,
+        checksum: createHash("sha256").update(sql).digest("hex"),
+      };
+      const before = (await client.query("SELECT * FROM drizzle.vq_schema_migrations")).rows;
+      let injected = false;
+      const racing = {
+        async query(statement: string, args?: unknown[]) {
+          if (!injected && statement.includes("pg_try_advisory_lock")) {
+            injected = true;
+            await client.query("DELETE FROM drizzle.vq_schema_baselines");
+          }
+          return client.query(statement, args);
+        },
+      };
+      await expect(
+        applyScopedMigration(racing, next.filename, { estate: "vault-quest", files: [...release(), next] })
+      ).rejects.toThrow(/receipt/);
+      expect(injected).toBe(true);
+      expect((await client.query("SELECT * FROM drizzle.vq_schema_migrations")).rows).toEqual(before);
+      expect(
+        (
+          await client.query(
+            "SELECT column_name FROM information_schema.columns WHERE table_name='vq_export_jobs' AND column_name='raced'"
+          )
+        ).rowCount
+      ).toBe(0);
+    });
+  }, 60_000);
+
+  it("holds table/index and sequence DDL locks through the final observation without consuming sequence values", async () => {
+    await withHistorical(async (client, url) => {
+      const peer = new pg.Client({ connectionString: url });
+      await peer.connect();
+      try {
+        await peer.query("SET lock_timeout='100ms'");
+        const before = (await client.query("SELECT * FROM public.vq_export_jobs_id_seq")).rows;
+        let reads = 0;
+        const outcomes: string[] = [];
+        const observed = {
+          async query(sql: string, args?: unknown[]) {
+            const result = await client.query(sql, args);
+            if (sql === VQ_SCHEMA_CATALOG_SQL && ++reads === 2) {
+              for (const ddl of [
+                "ALTER SEQUENCE public.vq_export_jobs_id_seq INCREMENT BY 2",
+                "CREATE INDEX vq_locked_proof_idx ON vq_export_jobs(kind)",
+              ]) {
+                try {
+                  await peer.query(ddl);
+                  outcomes.push("unexpected-success");
+                } catch (error) {
+                  outcomes.push((error as { code: string }).code);
+                }
+              }
+            }
+            return result;
+          },
+        };
+        await applyMigrations(observed, release(), { estate: "vault-quest", historicalBaseline: true });
+        expect(outcomes).toEqual(["55P03", "55P03"]);
+        expect((await client.query("SELECT * FROM public.vq_export_jobs_id_seq")).rows).toEqual(before);
+        expect(vqSchemaFingerprint((await client.query(VQ_SCHEMA_CATALOG_SQL)).rows[0].catalog)).toBe(
+          VQ_BASELINE_FINGERPRINT
+        );
+      } finally {
+        await peer.end();
+      }
+    });
+  }, 60_000);
 });
 beforeEach(async () => {
   await db.query("BEGIN");

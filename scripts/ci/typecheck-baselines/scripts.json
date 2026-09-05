@@ -4,8 +4,8 @@
   "contract": {
     "compilerVersion": "5.6.3",
     "configSha256": "ca79b882707d394988cb82b72321072dc150931bb6996fe63b93558764433d45",
-    "trackedFileCount": 52,
-    "trackedFilesSha256": "b732cc71468197892fcdb4a6e4a8d1a3bff2d7da73a92485f13fe1189306e6dd",
+    "trackedFileCount": 53,
+    "trackedFilesSha256": "164977982ed028055b3e5d126160ea9960c0aaa5f7ae16392a93eee473d5f2a8",
     "noCheckFileCount": 0,
     "noCheckFiles": [],
     "noCheckFilesSha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"

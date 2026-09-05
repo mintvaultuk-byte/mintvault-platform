@@ -2179,6 +2179,9 @@
       "depends_on": ["ARCH-SCHEMA-001", "OWNER-VQ-SCHEMA", "RECOVERY-VQ-SCHEMA", "REPAIR-CI-TOPOLOGY"],
       "addresses": ["ARCH-SCHEMA-001"],
       "write_scope": [
+        "scripts/ci/script-syntax-baseline.json",
+        "scripts/ci/prepare-vq-test-db.mjs",
+        "scripts/ci/typecheck-baselines/scripts.json",
         "server/lib/vq-schema-contract.ts",
         "tests/vq-historical-baseline.test.ts",
         "scripts/ci/typecheck-baselines/architecture.json",
@@ -2325,7 +2328,7 @@
       ],
       "addresses": ["ARCH-VQ-EXPORT-001"],
       "write_scope": [
-        "migrations-vq/0016_export_job_reclaim.sql",
+        "migrations-vq/0017_export_job_reclaim.sql",
         "server/index.ts",
         "server/vault-quest/lib/export-job-store.ts",
         "server/vault-quest/jobs/export-maintenance.ts",
@@ -2826,6 +2829,11 @@
         "Fresh and each historical estate converge through shipped runner; concurrent lock/checksum; required/optional readiness; no memory fallback"
       ],
       "evidence": [
+        {
+          "ref": "vq-schema-recovery.md S2c: independentSol64 and held-outDDL/refusal races, Terra15 helper recheck, clean168/build; PG16/17 fresh17 vs historical1+16attested; shipping/readiness/fallback remain OPEN",
+          "sha": "97a8845069042a2ef47f1107f3103b5459ca2cc7",
+          "observer": "sol-vq-history-verifier; terra-ci-prerequisite-verifier"
+        },
         {
           "ref": "vq-schema-recovery.md metadata correction: independentSol30/30 plus held-out scoped-race red/green, clean127/127; current0121 compatibility; history/grants/readiness remain OPEN",
           "sha": "5e8140bb441f5432a6592c07b6d5047a2e4c105a",
