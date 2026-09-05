@@ -1,5 +1,42 @@
 # Task ledger — repository architecture recovery
 
+## Current continuation — owner-authorized repair launch, 2026-09-05
+
+Launch update: all nine dispositions retained and dispatch gate passed at80a20611.
+H1a production dependency classification repaired with independent narrow proof; H2a
+current-authority index/paragraph consolidation implemented. See hygiene-wave-proof.md
+for exact commands, limitations and runtime disposition. No product HIGH or release is
+closed by this hygiene checkpoint. HY-SECURITY is platform-restricted/UNKNOWN; dependent
+security work remains gated and must not be rerouted through another model.
+
+This entry supersedes the historical next-action paragraph below. The owner approved
+execution of the senior remediation plan and requested Astra orchestration with cheaper
+worker models. Starting HEAD is `80a20611ff5e8928fd6380961ca6bd420abe4727`; the seven
+planning/control changes from the prior turn are preserved. No product repair is claimed
+by launch. The original graph baseline and historical evidence are not silently repinned.
+
+- Lead routing: this task continuation explicitly requested `gpt-6-astra`, high reasoning,
+  through the app's model override. Astra owns planning/adjudication/integration/monitoring.
+- Wave 1 dispatched: `/root/hy_git` and `/root/hy_docs` on `gpt-5.6-luna` medium;
+  `/root/hy_ci` on `gpt-5.6-terra` medium. All are bounded read-only investigators.
+- Worker escalation policy: Luna for routine inventory, Terra for specified implementation,
+  Sol for demanding scoped work, Astra for disputed/high-risk decisions; no recursive agents,
+  maximum three concurrent workers, and no shared-workspace writer other than Lead.
+- Preflight: CRITICAL / HOSTILE due to the existing branch-wide protected surface; no
+  weaker execution mode selected. Dispatch plan/self-tests pass (13); actual report gate
+  remains open until all nine retained SHA-bound reports are adjudicated.
+- Next: finish the three evidence waves, record actual reports/model assignments, update
+  the existing graph/manifests and approved gates, then execute authorized repairs with
+  independent proof. Do not relaunch the completed architecture or scanner audit.
+- Existing exclusions still apply: no shared migrations, staging/production deployment,
+  frozen MVGS changes, live credentials/provider mutation, merge, force push, or destructive
+  worktree/branch/data cleanup under this launch.
+
+Runtime metadata: native PostgreSQL 17.10 and 16.13 are installed; Docker CLI/Colima exist
+but the default VM is stopped. Local Node is 24.14.1, not the application pin20.20.2.
+The inspected native PG16 extension path lacks vector.control. These are provisioning
+tasks/observations, not proof that disposable dependencies cannot be provisioned.
+
 ## Baseline
 
 - Repository: `/Users/cornelius/mintvault-platform`

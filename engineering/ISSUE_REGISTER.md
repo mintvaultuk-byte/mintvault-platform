@@ -1,5 +1,22 @@
 # Engineering issue register
 
+## 2026-09-05 hygiene planning checkpoint
+
+The current sequencing/dispatch entry point is the addendum in
+[`phased-repair-plan.md`](../.claude/controlled-code-lead/tasks/repository-architecture-recovery-20260904/phased-repair-plan.md).
+Read it before treating historical status rows below as current authority. Read-only remote
+checks now work: PR #336 exists at `2913bcb1`, with failing CI; local HEAD `80a20611` is two
+commits ahead and unpushed. This supersedes older claims of unavailable GitHub access, not
+the unresolved enforcement finding `REM-GH-001`. Sep 4 owner approval is already recorded
+in the active task; do not re-request approved product choices merely because old rows say
+OWNER_APPROVAL_REQUIRED. Exact-candidate proof and excluded actions remain unchanged.
+
+No product finding is closed by this planning pass. The nine-lane dispatch contract covers
+Git/worktrees, documents, CI/lint, DB, security, contracts, runtime, structure and Scanner
+operations using existing finding IDs. New hygiene observations are plan checkpoints,
+not speculative new HIGHs. Their accepted repair/proof nodes must be adjudicated into the
+existing graph before implementation. Current release disposition remains NOT READY.
+
 ## 2026-09-04 repository architecture recovery correction
 
 The prior White Ace delta below remains valid for the release-integrity defects it

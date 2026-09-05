@@ -1304,6 +1304,9 @@
         "server/lib/component-readiness-registry.ts",
         "server/readiness.ts",
         "tests/architecture-authority.test.ts",
+        "engineering/INDEX.md",
+        "README.md",
+        ".claude/controlled-code-lead/INDEX.md",
         "CLAUDE.md"
       ],
       "proof_required": [
@@ -1327,7 +1330,7 @@
       "kind": "REPAIR",
       "title": "Wire authoritative Partner, Scanner, script, migration, and unreachable-code proof into CI",
       "severity": "HIGH",
-      "status": "FIXED",
+      "status": "IN_PROGRESS",
       "agent_mode": "LEAD",
       "agent_id": "codex-lead",
       "workspace": "shared",
@@ -1336,6 +1339,8 @@
       "write_scope": [
         ".github/workflows/ci.yml",
         "package.json",
+        "package-lock.json",
+        "tests/production-dependency-boundary.test.ts",
         "tsconfig.tests.json",
         "tsconfig.scripts.json",
         "tsconfig.architecture.json",
@@ -1345,7 +1350,8 @@
         "tests/ci-proof-topology.test.ts"
       ],
       "proof_required": [
-        "Isolated Partner runner, Scanner test gates (signed package proof remains Phase 5 REPAIR-SCANNER-PACKAGE), script/test typechecks, ratcheted unreachable-code proof, shipped-migration labels, non-vacuity and injected-failure proof"
+        "Isolated Partner runner, Scanner test gates (signed package proof remains Phase 5 REPAIR-SCANNER-PACKAGE), script/test typechecks, ratcheted unreachable-code proof, shipped-migration labels, non-vacuity and injected-failure proof",
+        "hygiene-repair-manifest.md H1a: pinned omit-dev dependency tree excludes build-only toolchain while retaining native runtime modules; builder CSS and complete production image proof remain required"
       ],
       "evidence": [
         {

@@ -1,5 +1,19 @@
 # Owner approval record — blanket authorisation to proceed
 
+## 2026-09-05 continuation and model routing
+
+The owner subsequently instructed in this task:
+
+> Proceed using Astra as the orchestrator, planner, and monitor and use cheaper models to
+> execute to save on tokens where you can. Are you prepared enough to launch this reparation?
+
+This authorizes execution of the immediately preceding senior remediation plan, with
+GPT-6 Astra orchestration and cost-conscious scoped worker selection. It does not authorize
+the excluded external/destructive actions listed below. Model routing is operational:
+Luna for routine read-only work, Terra/Sol for bounded implementation/proof, escalation
+to Astra where necessary. Preserve independent hostile review and all existing safeguards.
+No numerical token budget, new provider spend or global skill installation is implied.
+
 **Date:** 2026-09-04 (evening, Europe/London)
 **Owner:** Cornelius Oliver (repository owner)
 **Recorded by:** Claude (owner-directed relay; verbatim owner words below)

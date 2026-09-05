@@ -1,0 +1,75 @@
+{
+  "schema_version": 1,
+  "parent_program": "mintvault-repository-architecture-recovery-20260904",
+  "planning_baseline_sha": "80a20611ff5e8928fd6380961ca6bd420abe4727",
+  "execution_sha": "80a20611ff5e8928fd6380961ca6bd420abe4727",
+  "max_parallel_agents": 3,
+  "shared_writer": "codex-lead",
+  "permission": "read-only-investigation",
+  "prohibited": ["edit", "commit", "push", "merge", "deploy", "shared-migration", "secret-values", "provider-mutation", "delete", "spawn-children"],
+  "lanes": [
+    {
+      "id": "HY-GIT", "wave": 1, "agent_mode": "READ_ONLY", "write_scope": [],
+      "assigned_agent": "/root/hy_git", "report": {"sha":"80a20611ff5e8928fd6380961ca6bd420abe4727","observer":"/root/hy_git","result":"FAIL","ref":".claude/controlled-code-lead/tasks/repository-architecture-recovery-20260904/hygiene-reports.md","content_sha256":"6eacdf140c99dc453b7d7cf23c924da6289d05f8b900a0b2d18644ef728ed083"},
+      "graph_nodes": ["REM-GH-001", "EXTERNAL-GITHUB"],
+      "scope": "Remote refs and exact-SHA checks, PR336 and competing PR lineage, protections/check names, all registered worktrees and safe retention inventory; do not change GitHub or remove anything.",
+      "deliverable": "Committed/pushed/merged/deployed distinction; each worktree owner/activity/dirty/unique-commit/backup/PR/retention status; proposed integration queue and explicit cleanup candidates; enforcement gaps and negative-check plan."
+    },
+    {
+      "id": "HY-DOCS", "wave": 1, "agent_mode": "READ_ONLY", "write_scope": [],
+      "assigned_agent": "/root/hy_docs", "report": {"sha":"80a20611ff5e8928fd6380961ca6bd420abe4727","observer":"/root/hy_docs","result":"FAIL","ref":".claude/controlled-code-lead/tasks/repository-architecture-recovery-20260904/hygiene-reports.md","content_sha256":"6eacdf140c99dc453b7d7cf23c924da6289d05f8b900a0b2d18644ef728ed083"},
+      "graph_nodes": ["ARCH-AUTHORITY-001", "REPAIR-AUTHORITY-CONTROLS"],
+      "scope": "Conflicting instructions/approvals/status ledgers, folder and generated-artifact ownership, skill activation and historical-document retention. No runtime re-audit or file moves.",
+      "deliverable": "One canonical-source index proposal, conflicts with exact evidence, old-to-new move/reference/retention map, supersession rules and minimal skill activation matrix."
+    },
+    {
+      "id": "HY-CI", "wave": 1, "agent_mode": "READ_ONLY", "write_scope": [],
+      "assigned_agent": "/root/hy_ci", "report": {"sha":"80a20611ff5e8928fd6380961ca6bd420abe4727","observer":"/root/hy_ci","result":"FAIL","ref":".claude/controlled-code-lead/tasks/repository-architecture-recovery-20260904/hygiene-reports.md","content_sha256":"6eacdf140c99dc453b7d7cf23c924da6289d05f8b900a0b2d18644ef728ed083"},
+      "graph_nodes": ["ARCH-CI-001", "REPAIR-CI-TOPOLOGY", "REM-SUPPLY-001", "WAA-GATE-001"],
+      "scope": "Current failing hosted steps, local/hosted/nested runtimes and locks, managed gate drift, lint/type debt, report floors/artifacts, dev-dependency image exclusion. DB lane owns service configuration design.",
+      "deliverable": "Failure classification with exact SHA/job/step; gate-command and runtime matrix; zero-new-warning ratchet; unified local/CI runner specification and dispatch-check wiring manifest."
+    },
+    {
+      "id": "HY-DB", "wave": 2, "agent_mode": "READ_ONLY", "write_scope": [],
+      "assigned_agent": "/root/hy_db", "report": {"sha":"80a20611ff5e8928fd6380961ca6bd420abe4727","observer":"/root/hy_db","result":"FAIL","ref":".claude/controlled-code-lead/tasks/repository-architecture-recovery-20260904/hygiene-reports.md","content_sha256":"6eacdf140c99dc453b7d7cf23c924da6289d05f8b900a0b2d18644ef728ed083"},
+      "graph_nodes": ["ARCH-SCHEMA-001", "REPAIR-SCHEMA-AUTHORITY", "ARCH-POOL-001", "ARCH-PRINT-READINESS-001"],
+      "scope": "Configuration names/identity, same-database separate-role accounting, migration/readiness lineage, runtime ACL/RLS/timeouts/pools, disposable PG16/vector and PG17 service ownership. Never read connection-secret values or execute destructive/shared SQL.",
+      "deliverable": "Sanitized environment/role/schema matrix; guarded run-owned provisioning/bootstrap/cleanup design; fresh/historical upgrade and recovery matrix; current VQ graph reconciliation; exact implementation file manifest."
+    },
+    {
+      "id": "HY-SECURITY", "wave": 2, "agent_mode": "READ_ONLY", "write_scope": [],
+      "assigned_agent": "/root/hy_security", "report": {"sha":"80a20611ff5e8928fd6380961ca6bd420abe4727","observer":"/root/hy_security","result":"UNKNOWN","ref":".claude/controlled-code-lead/tasks/repository-architecture-recovery-20260904/hygiene-reports.md","content_sha256":"6eacdf140c99dc453b7d7cf23c924da6289d05f8b900a0b2d18644ef728ed083"},
+      "graph_nodes": ["REL-TOKEN-001", "WAA-LOCAL-SECRET-001", "REM-SUPPLY-001", "ARCH-SESSION-001"],
+      "scope": "Current security annotations and known token/secret/supply-chain backlog, metadata-only credential permissions, artifact redaction, CI trust/privilege. Reuse existing auth/money proof unless invalidated.",
+      "deliverable": "Reproduced versus stale/unproven alert disposition, exact scan refs/rules/allowlists, least-privilege controls and independent negative proofs; no invented zero-HIGH claim."
+    },
+    {
+      "id": "HY-CONTRACTS", "wave": 2, "agent_mode": "READ_ONLY", "write_scope": [],
+      "assigned_agent": "/root/hy_git", "report": {"sha":"80a20611ff5e8928fd6380961ca6bd420abe4727","observer":"/root/hy_git","result":"FAIL","ref":".claude/controlled-code-lead/tasks/repository-architecture-recovery-20260904/hygiene-reports.md","content_sha256":"6eacdf140c99dc453b7d7cf23c924da6289d05f8b900a0b2d18644ef728ed083"},
+      "graph_nodes": ["ARCH-SUPPLY-001", "ARCH-PRICING-001", "ARCH-ROLE-001", "ARCH-SESSION-001", "ARCH-LEGACY-AI-001", "REPAIR-ADMIN-PRINT"],
+      "scope": "Known client-to-HTTP-to-service-to-readmodel breaks for orders/pricing/RBAC; candidate proof gaps for repaired Admin session/print/legacy tombstones; deterministic browser identity and journey coverage. No redesign of completed scanner/evidence work.",
+      "deliverable": "Mounted-route and role contract map, existing issue crosswalk, server price/tax/payment authority and replay proof, browser/HTTP fixtures with negative tenant/role cases, bounded repair manifests."
+    },
+    {
+      "id": "HY-RUNTIME", "wave": 3, "agent_mode": "READ_ONLY", "write_scope": [],
+      "assigned_agent": "/root/hy_runtime", "report": {"sha":"80a20611ff5e8928fd6380961ca6bd420abe4727","observer":"/root/hy_runtime","result":"FAIL","ref":".claude/controlled-code-lead/tasks/repository-architecture-recovery-20260904/hygiene-reports.md","content_sha256":"6eacdf140c99dc453b7d7cf23c924da6289d05f8b900a0b2d18644ef728ed083"},
+      "graph_nodes": ["WAA-IMAGE-001", "WAA-IMAGE-002", "WAA-IMAGE-003", "WAA-CREDIT-001", "ARCH-SOCIAL-001", "ARCH-VQ-EXPORT-001", "ARCH-CYCLE-001", "ARCH-PROXY-001"],
+      "scope": "Known DB/object/audit/provider crash boundaries; job startup/lease/retry/shutdown, VQ export/social lifecycle, server cycles and request redispatch. Recover earlier R2/HTTP harnesses and specify owned MinIO coverage; no real provider calls.",
+      "deliverable": "Existing defect repair order; job/provider/object wiring matrix, fault/replay/restore proof; source-safe extraction map and old-harness reuse inventory."
+    },
+    {
+      "id": "HY-STRUCTURE", "wave": 3, "agent_mode": "READ_ONLY", "write_scope": [],
+      "assigned_agent": "/root/hy_structure", "report": {"sha":"80a20611ff5e8928fd6380961ca6bd420abe4727","observer":"/root/hy_structure","result":"FAIL","ref":".claude/controlled-code-lead/tasks/repository-architecture-recovery-20260904/hygiene-reports.md","content_sha256":"6eacdf140c99dc453b7d7cf23c924da6289d05f8b900a0b2d18644ef728ed083"},
+      "graph_nodes": ["ARCH-CLIENT-001", "ARCH-ADMIN-TAB-001", "ARCH-DEAD-001", "ARCH-COMP-001", "REPAIR-SERVER-BOUNDARIES"],
+      "scope": "Reachable/dead routes and modules, historical clone inventory, client variants/giant components, generated snapshots and script entrypoint consumers. Keep frozen MVGS and intentional independent fixtures out of consolidation proposals.",
+      "deliverable": "Evidence-backed retain/extract/retire list, domain ownership and import boundaries, safe move/parity/rollback manifest; proposed unused-export/clone/cycle ratchet with explicit exceptions."
+    },
+    {
+      "id": "HY-SCANNER", "wave": 3, "agent_mode": "READ_ONLY", "write_scope": [],
+      "assigned_agent": "/root/hy_scanner", "report": {"sha":"80a20611ff5e8928fd6380961ca6bd420abe4727","observer":"/root/hy_scanner","result":"FAIL","ref":".claude/controlled-code-lead/tasks/repository-architecture-recovery-20260904/hygiene-reports.md","content_sha256":"6eacdf140c99dc453b7d7cf23c924da6289d05f8b900a0b2d18644ef728ed083"},
+      "graph_nodes": ["SFAP-002", "SFAP-007", "SFAP-009", "ARCH-LEGACY-OPS-001"],
+      "scope": "Existing scanner package/runtime dependency boundary and contradictory operator runbooks, exact accepted-source preservation and external hardware gate disposition. No scanner redesign, packaging/distribution, device use or blanket legacy deletion.",
+      "deliverable": "Software package containment/proof checklist, supported-runbook map, exact retirement prerequisites, separate V850/printer/NFC/clean-Mac/current-browser-hardware gates."
+    }
+  ]
+}

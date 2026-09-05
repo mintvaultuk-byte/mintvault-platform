@@ -1,5 +1,19 @@
 # MintVault Agent Instructions
 
+## Active remediation continuation
+
+For the next repository remediation/Graph Loop run, start with the current entry point in
+[the existing phased recovery plan](.claude/controlled-code-lead/tasks/repository-architecture-recovery-20260904/phased-repair-plan.md)
+and its `hygiene-dispatch.json`. Run `validate-hygiene-dispatch.py`; dispatch its bounded
+read-only lanes before further product repair, then require `--dispatched` and Lead
+adjudication. Preserve the existing issue IDs, graphs, owner approvals and proof invalidators.
+The Sep5 launch completed that dispatch at `80a20611`; retained reports and the wave proof
+record are the receipt. Later checkpoint SHAs do not authorize rebinding old reports or
+redispatching every lane: revalidate only evidence invalidated by the next exact manifest.
+The unavailable security lane remains UNKNOWN and gates its dependent work.
+This does not authorize deployment, shared migrations, secret changes, GitHub mutations,
+worktree deletion, or a new broad audit. Missing evidence is UNKNOWN, not PASS.
+
 ## MANDATORY COMPLETION CONTROLLER
 
 Before every build, audit, repair, security, migration or release task, read and obey:

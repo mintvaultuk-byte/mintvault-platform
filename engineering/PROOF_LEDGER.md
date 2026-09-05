@@ -1,5 +1,47 @@
 # Engineering proof ledger
 
+## 2026-09-05 authorized hygiene launch
+
+See [first-wave evidence](../.claude/controlled-code-lead/tasks/repository-architecture-recovery-20260904/hygiene-wave-proof.md).
+Nine dispatch dispositions retained; gate/self-tests pass at80a20611 (13). Local first
+dependency repair has red/green regression and independent Terra verification, clean
+Linux omit-dev proof and Node20 build. H2a canonical index preserves histories and managed
+blocks. Security worker platform failure remains UNKNOWN; no release/security closure.
+Full program remains NOT READY; no external deployment or shared migration occurred.
+
+## 2026-09-05 read-only hygiene baseline (not repair/release proof)
+
+At local `80a20611ff5e8928fd6380961ca6bd420abe4727`, live `git ls-remote` and authenticated
+GitHub reads confirm main `01d5e4da`, remote recovery `2913bcb1`, draft PR #336 and red
+terminal checks. Local HEAD is two unpushed commits beyond that branch. Branch protection
+requires five status contexts but zero approvals, no code-owner review and no admin
+enforcement; rulesets list is empty. This is a time-bound control-plane observation, not
+an exploit or release test. Changes to remote refs/settings invalidate it.
+
+Local metadata/read-only inventory: 97 worktrees, 30 dirty, seven detached, none missing
+or prunable. Main-to-HEAD two-tree diff: 491 files, +238,558/-11,899; generated architecture
+snapshot accounts for 164,197 insertions. Root ESLint (JSON reporter, no fix) exits 0 with
+zero errors and 2,876 warnings across 1,589 files under local Node 24.14.1, not the pinned
+20.20.2 application runtime. Scope/method and the exact dispatch plan are recorded in the
+existing recovery plan addendum. No worktree is thereby certified safe to delete.
+
+Lead observer: Codex; independent read-only CI/DB planning lane: `ci_db_plan`. No full
+integration result was obtained. No provider/hardware proof, migration, push, merge or
+deployment was performed. Planning/dispatch validation is not candidate readiness evidence.
+
+Planning controls: dispatch schema/coverage check and 13 in-memory positive/negative
+self-tests pass; independent `ci_db_plan` recheck confirms known-but-wrong issue mappings
+and nonexistent report artifacts are rejected in all nine lanes. Undispatched mode refuses
+advancement as expected. Both root instruction links resolve; `git diff --check` passes.
+Existing parent/nested graph validation passes structurally (101 + 34 nodes), remains
+not ready and has no candidate SHA. `engineering postflight --run` was attempted but
+interrupted rather than treating an unprovisioned broad suite as a useful planning gate;
+no full-suite result is claimed. This does not waive postflight for the repair candidate.
+The subsequent governance-only postflight returns red: existing managed `CLAUDE.md`
+drift, npm package-egress check failure, this uncommitted planning diff, and protected
+paths across the pre-existing branch delta; Graphify also needs refresh. No protection
+override was used and no gate commands ran in that governance-only invocation.
+
 ## 2026-09-04 repository architecture recovery evidence
 
 These are assessment and graph-structure records bound to committed baseline

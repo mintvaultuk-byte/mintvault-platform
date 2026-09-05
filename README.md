@@ -2,6 +2,9 @@
 
 MintVaultUK is a full-stack web application for a UK-based trading card grading, reholdering, crossover, and authentication service. It provides a public-facing submission flow, admin portal, certificate lookup, label printing, ownership claim system, and NFC tag support.
 
+For current remediation, configuration and proof, start at [engineering/INDEX.md](engineering/INDEX.md).
+The overview below is not deployment evidence or authoritative commercial configuration.
+
 ---
 
 ## Tech Stack
@@ -77,8 +80,9 @@ MintVaultUK is a full-stack web application for a UK-based trading card grading,
 │   └── index.html
 ├── server/                    # Express backend
 │   ├── index.ts               # App entry point
-│   ├── routes.ts              # All 42+ API routes
-│   ├── storage.ts             # Data access layer (IStorage interface)
+│   ├── routes.ts              # Root composition and remaining legacy handlers
+│   ├── routes/                # Domain routers (also Partner and Vault Quest contexts)
+│   ├── storage.ts             # Legacy/core storage interface; not all domain queries
 │   ├── db.ts                  # Drizzle ORM connection
 │   ├── config.ts              # Env var validation (uses MINTVAULT_DATABASE_URL)
 │   ├── auth.ts                # Admin 2-step auth
