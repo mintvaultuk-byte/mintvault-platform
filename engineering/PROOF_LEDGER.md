@@ -1,5 +1,21 @@
 # Engineering proof ledger
 
+## 2026-09-05 H1c durable owned object-store proof
+
+Existing runner now owns pinned loopback MinIO and a direct real server/r2.ts proof
+child; CI topology requires the enabled failure-blocking command. Eleven named
+transport/integrity/signed-GET/conditional-race/immutable-replay/delete checks pass
+on root, independent Sol, and a clean exact-lock Node20 copy. Exact-ID cleanup is
+observed after each passing run. First premature-zero-exit attempt was NOT accepted;
+entrypoint and independently reproduced termination bugs were fixed and re-proven.
+Lifecycle/topology/architecture72/72 and unchanged345-diagnostic test ratchet pass on
+both dependency trees; shared PG lifecycle regression22/22 passes. See existing
+[hygiene-wave proof](../.claude/controlled-code-lead/tasks/repository-architecture-recovery-20260904/hygiene-wave-proof.md)
+for WIP hashes, run identities and limitations. Hosted H1c proof remains UNKNOWN.
+At baseline a6670fc4 CI now reaches tests (5 failed /7378 passed /5 skipped), but
+the image vulnerability gate and both governance runs remain red. No release gate,
+Cloudflare IAM/retention proof, browser proof or restricted security evidence is closed.
+
 ## 2026-09-05 H1e–g clean-install fixture/type parity
 
 See existing hygiene-wave proof: seven repaired Admin tests plus session contract

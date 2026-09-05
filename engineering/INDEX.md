@@ -42,7 +42,12 @@ It creates fresh CI-pinned PG16/vector and PG17 services on random loopback port
 then removes only its verified containers and their anonymous test volumes. It
 never adopts an existing database. Use the pinned Node20 runtime and an explicit
 test-only PATH/native PostgreSQL17 installation; do not load local environment files.
-This runner does not yet provision object storage or certify browser/hardware proof.
+For real local object transport, use the exclusive target `--r2-proof` instead of
+the PostgreSQL arguments. The same runner creates one pinned MinIO instance, verifies
+11 named checks through server/r2.ts and removes only its owned synthetic storage.
+It fails on missing/partial reports, child failure or timeout; generated credentials
+exist only in test processes. This proves S3-compatible behavior, not Cloudflare
+IAM/retention, staging, browser or physical hardware.
 
 ## Retention and consolidation
 

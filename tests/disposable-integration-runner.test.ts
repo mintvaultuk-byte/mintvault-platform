@@ -1,5 +1,6 @@
 import { EventEmitter } from "node:events";
-import { describe, expect, it } from "vitest";
+import { writeFileSync } from "node:fs";
+import { describe, expect, it, vi } from "vitest";
 import {
   childStatus,
   cleanup,
@@ -9,7 +10,12 @@ import {
   preparationExports,
   runChild,
   startDisposableServices,
+  startDisposableObjectStore,
+  validateR2ProofReport,
+  MINIO_IMAGE,
+  R2_PROOF_CHECKS,
 } from "../scripts/ci/run-disposable-integration.mjs";
+import { objectProofEnvironment } from "../scripts/ci/run-r2-object-store-proof.mjs";
 
 function fakeDriver({ failSecondStart = false, unowned = false } = {}) {
   const owned = new Set<string>();
@@ -203,5 +209,250 @@ describe("disposable integration runner", () => {
     ).rejects.toThrow("termination could not be confirmed");
     expect(driver.removed).toEqual([]);
     expect(signals.listenerCount("SIGTERM")).toBe(0);
+  });
+});
+
+const readyMinio = async () => new Response(null, { status: 200 });
+function objectReport(env: Record<string, string>) {
+  return {
+    schemaVersion: 1,
+    runId: env.MINTVAULT_OBJECT_PROOF_RUN_ID,
+    endpoint: env.R2_ENDPOINT,
+    bucket: env.R2_BUCKET_NAME,
+    image: MINIO_IMAGE,
+    passed: R2_PROOF_CHECKS.length,
+    failed: 0,
+    skipped: 0,
+    checks: R2_PROOF_CHECKS.map((name: string) => ({ name, status: "passed" })),
+  };
+}
+
+describe("disposable real object-store proof", () => {
+  it("bounds readiness even when the service never responds", async () => {
+    vi.useFakeTimers();
+    try {
+      const driver = fakeDriver();
+      const fetchReady = (_url: string | URL | Request, options?: RequestInit) =>
+        new Promise<Response>((_resolve, reject) => {
+          options!.signal!.addEventListener("abort", () => reject(new Error("timed out")), { once: true });
+        });
+      const result = startDisposableObjectStore({ driver, fetchReady });
+      const rejected = expect(result).rejects.toThrow();
+      await vi.advanceTimersByTimeAsync(20_000);
+      await rejected;
+      expect(driver.removed).toEqual(["abcdefabcdef1"]);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it("bounds post-SIGKILL uncertainty and retains storage instead of hanging or deleting it", async () => {
+    vi.useFakeTimers();
+    try {
+      const driver = fakeDriver(),
+        signals = new EventEmitter(),
+        killed: string[] = [];
+      const fakeSpawn = () => {
+        const child = new EventEmitter() as EventEmitter & { kill: (kind: string) => void };
+        child.kill = (kind) => {
+          killed.push(kind);
+        };
+        queueMicrotask(() => signals.emit("SIGTERM"));
+        return child;
+      };
+      const result = main(["--docker-context", "owned", "--r2-proof"], {
+        driver,
+        fetchReady: readyMinio,
+        spawnProcess: fakeSpawn,
+        signalSource: signals,
+      });
+      const rejected = expect(result).rejects.toThrow("termination could not be confirmed");
+      await vi.advanceTimersByTimeAsync(10_001);
+      await rejected;
+      expect(killed).toEqual(["SIGTERM", "SIGKILL"]);
+      expect(driver.removed).toEqual([]);
+      expect(signals.listenerCount("SIGTERM")).toBe(0);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it("does not schedule a second termination after synchronous child closure", async () => {
+    vi.useFakeTimers();
+    try {
+      const controller = new AbortController(),
+        killed: string[] = [];
+      const fakeSpawn = () => {
+        const child = new EventEmitter() as EventEmitter & { kill: (kind: string) => void };
+        child.kill = (kind) => {
+          killed.push(kind);
+          child.emit("close", null);
+        };
+        return child;
+      };
+      const result = runChild(["ignored"], {}, fakeSpawn as never, controller.signal);
+      controller.abort();
+      expect(await result).toEqual({ code: null });
+      await vi.advanceTimersByTimeAsync(15_000);
+      expect(killed).toEqual(["SIGTERM"]);
+      expect(vi.getTimerCount()).toBe(0);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it("requires an explicit context and an exclusive target", () => {
+    expect(parse(["--docker-context", "owned", "--r2-proof"])).toMatchObject({ r2Proof: true, context: "owned" });
+    for (const extra of [["--all"], ["--prepare"], ["--json", "/tmp/reports"], ["--r2-proof"], ["tests/a.test.ts"]])
+      expect(() => parse(["--docker-context", "owned", "--r2-proof", ...extra])).toThrow();
+    expect(() => parse(["--r2-proof"])).toThrow();
+  });
+
+  it("uses the pinned MinIO image, generated process-only credentials and random loopback mapping", async () => {
+    const driver = fakeDriver();
+    const original = driver.run;
+    const calls: Array<{ args: string[]; env?: Record<string, string> }> = [];
+    driver.run = (args: string[], env?: Record<string, string>) => {
+      calls.push({ args, env });
+      return original(args);
+    };
+    const service = await startDisposableObjectStore({ driver, fetchReady: readyMinio });
+    expect(calls[0].args).toEqual(expect.arrayContaining([MINIO_IMAGE, "127.0.0.1::9000", "MINIO_ROOT_PASSWORD"]));
+    expect(calls[0].args).not.toContain(calls[0].env!.MINIO_ROOT_PASSWORD);
+    expect(calls[0].args).not.toContain("--volume");
+    expect(calls[0].env!.MINIO_ROOT_PASSWORD).toMatch(/^[a-f0-9]{48}$/);
+    expect(service.env.R2_SECRET_ACCESS_KEY).toBe(calls[0].env!.MINIO_ROOT_PASSWORD);
+    expect(service.env.R2_BUCKET_NAME).toBe(`proof-${service.token}`);
+    expect(objectProofEnvironment({ ...service.env, NODE_ENV: "test" }).runId).toBe(service.token);
+    cleanup(driver, service.ids, service.token);
+    expect(driver.removed).toEqual(["abcdefabcdef1"]);
+  });
+
+  it.each(["0.0.0.0:9000", "127.0.0.1:0", "127.0.0.1:65536", "127.0.0.1:41001\n[::]:41001"])(
+    "rejects invalid or exposed mapping %s and cleans only its owned ID",
+    async (mapping) => {
+      const driver = fakeDriver();
+      driver.port = () => mapping;
+      await expect(startDisposableObjectStore({ driver, fetchReady: readyMinio })).rejects.toThrow();
+      expect(driver.removed).toEqual(["abcdefabcdef1"]);
+    }
+  );
+
+  it("cleans the owned instance when startup is cancelled, without entering the child", async () => {
+    const driver = fakeDriver(),
+      controller = new AbortController();
+    const fetchReady = async () => {
+      controller.abort();
+      return new Response(null, { status: 503 });
+    };
+    await expect(startDisposableObjectStore({ driver, signal: controller.signal, fetchReady })).rejects.toThrow();
+    expect(driver.removed).toEqual(["abcdefabcdef1"]);
+  });
+
+  it("retains an instance whose ownership cannot be verified", async () => {
+    const driver = fakeDriver({ unowned: true });
+    await expect(startDisposableObjectStore({ driver, fetchReady: readyMinio })).rejects.toThrow("cleanup failed");
+    expect(driver.removed).toEqual([]);
+  });
+
+  it("rejects inherited live, remote or local-filesystem proof configuration before importing the adapter", async () => {
+    const driver = fakeDriver();
+    const service = await startDisposableObjectStore({ driver, fetchReady: readyMinio });
+    const env = { ...service.env, NODE_ENV: "test" };
+    for (const override of [
+      { NODE_ENV: "production" },
+      { R2_ENDPOINT: "https://r2.example.test" },
+      { R2_ENDPOINT: "http://localhost:9000" },
+      { R2_ENDPOINT: "http://127.0.0.1:9000/path" },
+      { R2_ENDPOINT: "http://127.0.0.1:9000/?x=y" },
+      { R2_BUCKET_NAME: "live" },
+      { R2_SECRET_ACCESS_KEY: "inherited" },
+      { MINTVAULT_OBJECT_PROOF_RUN_ID: "wrong" },
+      { MINTVAULT_LOCAL_EVIDENCE_DIR: "/tmp/local" },
+    ])
+      expect(() => objectProofEnvironment({ ...env, ...override })).toThrow();
+    const controlled = controlledEnvironment({ ...env, STRIPE_SECRET_KEY: "live", MINTVAULT_DATABASE_URL: "live" });
+    expect(controlled).not.toHaveProperty("R2_ENDPOINT");
+    expect(controlled).not.toHaveProperty("R2_SECRET_ACCESS_KEY");
+    expect(controlled).not.toHaveProperty("MINTVAULT_DATABASE_URL");
+    expect(controlled).not.toHaveProperty("STRIPE_SECRET_KEY");
+  });
+
+  it("rejects absent, zero, skipped, duplicate, mismatched and failed proof reports", async () => {
+    const service = await startDisposableObjectStore({ driver: fakeDriver(), fetchReady: readyMinio });
+    const good = objectReport(service.env);
+    expect(validateR2ProofReport(good, service)).toBe(good);
+    for (const bad of [
+      null,
+      {},
+      { ...good, passed: 0 },
+      { ...good, skipped: 1 },
+      { ...good, failed: 1 },
+      { ...good, runId: "other" },
+      { ...good, endpoint: "http://127.0.0.1:9000" },
+      { ...good, bucket: "other" },
+      { ...good, image: "minio/minio:latest" },
+      { ...good, checks: [] },
+      { ...good, checks: [...good.checks.slice(1), good.checks[1]] },
+    ])
+      expect(() => validateR2ProofReport(bad, service)).toThrow();
+  });
+
+  it.each(["success", "missing", "malformed", "empty", "child-failed"])(
+    "requires a non-vacuous report even when child outcome is %s",
+    async (scenario) => {
+      const driver = fakeDriver();
+      const fakeSpawn = (_command: string, args: string[], options: { env: Record<string, string> }) => {
+        expect(args.slice(0, 3)).toEqual(["--import", "tsx", "scripts/ci/run-r2-object-store-proof.mjs"]);
+        expect(options.env).not.toHaveProperty("MINTVAULT_DATABASE_URL");
+        const report = scenario === "empty" ? {} : objectReport(options.env);
+        if (scenario !== "missing") writeFileSync(args[3], scenario === "malformed" ? "{" : JSON.stringify(report));
+        const child = new EventEmitter();
+        queueMicrotask(() => child.emit("close", scenario === "child-failed" ? 1 : 0));
+        return child;
+      };
+      const operation = main(["--docker-context", "owned", "--r2-proof"], {
+        driver,
+        fetchReady: readyMinio,
+        spawnProcess: fakeSpawn,
+      });
+      if (scenario === "success") expect(await operation).toBe(0);
+      else if (scenario === "child-failed") expect(await operation).toBe(1);
+      else await expect(operation).rejects.toThrow();
+      expect(driver.removed).toEqual(["abcdefabcdef1"]);
+    }
+  );
+
+  it("waits for object-proof child closure before signal cleanup", async () => {
+    const driver = fakeDriver(),
+      signals = new EventEmitter(),
+      events: string[] = [];
+    const original = driver.remove;
+    driver.remove = (id) => {
+      events.push("remove");
+      return original(id);
+    };
+    const fakeSpawn = () => {
+      const child = new EventEmitter() as EventEmitter & { kill: (kind: string) => void };
+      child.kill = (kind) => {
+        events.push(kind);
+        expect(driver.removed).toEqual([]);
+        queueMicrotask(() => {
+          events.push("close");
+          child.emit("close", null);
+        });
+      };
+      queueMicrotask(() => signals.emit("SIGTERM"));
+      return child;
+    };
+    expect(
+      await main(["--docker-context", "owned", "--r2-proof"], {
+        driver,
+        fetchReady: readyMinio,
+        spawnProcess: fakeSpawn,
+        signalSource: signals,
+      })
+    ).toBe(143);
+    expect(events).toEqual(["SIGTERM", "close", "remove"]);
   });
 });

@@ -1,6 +1,29 @@
 # Task ledger — repository architecture recovery
 
-## Continuous H1 next checkpoint — Admin fixtures and exact lock parity
+## Continuous H1c checkpoint — durable owned object-store proof
+
+H1e/f/g are pushed at a6670fc4456e6b4185d3a735b189ef9f86f667b2. Primary CI
+33965041567 and governance33965041568/33965039903 are terminal FAILURE, not pending.
+Primary application job now passes architecture, lint and type gates; its full test
+step reports 7378 passed / 5 failed / 5 skipped (492 files). The five failures are
+two certificate-image assertions, two UTC credit assertions and one claim-ownership
+assertion. Image vulnerability gate remains red; restricted security evidence is
+UNKNOWN and is not rerouted or waived. These are test counts, not a remaining-issue count.
+
+H1c now reuses the owned runner for exclusive --r2-proof mode and a direct adapter
+child. Eleven real MinIO checks pass on root, independently, and in the clean exact-lock
+copy; all three passing runs leave no owned containers. Independent review reproduced
+two child-close defects; root fixed and re-proved them without weakening cleanup or
+report requirements. Combined lifecycle/topology/architecture tests pass72/72 on root
+and exact-lock Node20. PG regression passes22/22. Exact commands, run IDs, hashes and
+limitations are retained in hygiene-wave-proof.md. Hosted proof of this WIP remains open.
+
+Next: checkpoint/push this bounded repair, observe exact CI, continue existing UTC/image/
+claim failure packets and local application/browser substrate. No new broad audit.
+Goal ACTIVE / heartbeat PAUSED; root sole shared writer, bounded cheaper workers.
+No deployment, shared migration, live credentials or unrelated-folder cleanup.
+
+## Previous H1 checkpoint — Admin fixtures and exact lock parity
 
 H1d is pushed at b6fccb07 and its architecture CI gate passes. H1e fixes the seven
 existing Admin fixture/source-contract suites without runtime changes; H1f updates

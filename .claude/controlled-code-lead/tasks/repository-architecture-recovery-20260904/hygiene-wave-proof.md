@@ -296,3 +296,82 @@ metadata without reading contents, all remaining assertions/paths intact, and6/6
 PASS in the clean copy under pinned Node20. Final governance-only postflight remains
 fail-closed on the same managed CLAUDE/npm-egress/dirty/protected-path conditions
 and Graphify warning. No acceptance override, no --run or final release claim.
+
+### H1c — durable owned local object-store proof
+
+Baseline a6670fc4456e6b4185d3a735b189ef9f86f667b2; sole shared writer root.
+Existing runner gains exclusive --r2-proof mode; direct child uses actual server/r2.ts.
+Same exact-ID/run-label lifecycle, explicit Docker context, no mounts, random loopback
+port, synthetic credentials only by child/process environment, unique bucket and private
+report directory. MinIO pin:
+minio/minio@sha256:14cea493d9a34af32f524e538b8346cf79f3321eff8e708c1e2960462bd8936e.
+No product storage changes or historical PARTNER_REAL_R2_PROOF_* configuration restored.
+
+Parent requires matching run/bucket/endpoint/image and all eleven ordered passing
+checks, zero failures/skips; absent/empty/malformed/mismatched reports fail. A sixty-second
+proof deadline and bounded TERM/KILL/close wait retain identified services/report directory
+when child closure is unknown. Startup has a referenced twenty-second abort deadline.
+No automatic cleanup of unowned resources. Enabled root Node20 CI step invokes the
+same command with explicit hosted default context. Existing topology mutations reject
+removed, disabled, continue-on-error or commented proof steps.
+
+First real invocation returned zero without report and left owned container
+c43e419878ec8f7d2e1cef6e34a7345d71c74315a778e2c5c640041a3e5a1b54,
+run a293c67a-59f9-42cc-abf0-6c34b74d24c3. NOT accepted as success. Root verified exact
+ownership then removed only that container and synthetic volume. Entrypoint now awaits
+main at top level and exits with its actual result. Independent Sol then reproduced
+unbounded post-SIGKILL closure and a redundant KILL scheduled after synchronous TERM
+closure. Root fixed both, added fake-clock assertions, and independently re-proved them.
+
+Actual invocation under scrubbed Node20.20.2 environment (no .env/live credentials):
+node scripts/ci/run-disposable-integration.mjs --docker-context colima-mintvault-remediation-20260905 --r2-proof
+
+Real passing runs (all11 passed,0 failed,0 skipped; exact-label post-run inventory empty):
+- Root intermediate final-entrypoint run17ebbb45-ecdd-4f5f-a624-45d7083bdc21, port32777.
+- Independent Sol final-lifecycle run354b6c61-aabd-432f-9c71-6d214b6eae39, port32778.
+- Root clean exact-lock copy runb67b4ee2-c1cb-460d-b08d-6b16acb32e72, port32779.
+
+Named checks: upload-roundtrip, stream-integrity, head-readability, listing, stream,
+signed-download, conditional-collision, conditional-race, immutable-replay,
+immutable-mismatch, delete-missing. Assertions include actual byte/hash/length equality,
+real signed HTTP GET, exact412 collision, one concurrent winner, preserved original
+immutable bytes and verified deletion. This proves local S3 adapter behavior, NOT
+Cloudflare IAM/retention, staging Stripe, full browser, physical hardware or release.
+
+Root and clean exact-lock copy /private/tmp/mintvault-h1ef-clean.x3NRtE both pass
+tests/disposable-integration-runner.test.ts32/32, tests/ci-proof-topology.test.ts13/13,
+tests/architecture-authority.test.ts27/27:72/72 total, no skips. Clean copy retains
+Vitest4.1.7 from exact lock; root has4.1.11. Test typecheck ratchet unchanged345 PASS
+on both after a proper optional-AbortSignal JSDoc repair, not a baseline increase.
+Script syntax67 PASS (one new module). Architecture8455 records, zero violations;
+exact new child owner added, no legacy/diagnostic/no-check allowance increased.
+Scoped ESLint zero errors/warnings. git diff --check PASS.
+
+Shared PostgreSQL lifecycle regression on final runner:
+node scripts/ci/run-disposable-integration.mjs --docker-context colima-mintvault-remediation-20260905 tests/partner-rbac-migration.test.ts
+Owned runfbfe3da4-d204-42dd-86c5-3e927b67bbf0, PG16/vector32780 and PG17 port32781:
+22/22 PASS, zero skips, exact-label post-cleanup inventory empty. Expected missing-role
+catalogue warnings are deliberate mutation proof. The full70-suite matrix was not rerun.
+
+Final executable SHA256s:
+- scripts/ci/run-disposable-integration.mjs:09b678a6a5b66cbd84bec391be6fa079e7364f6317592a54069016a8a5abd144
+- scripts/ci/run-r2-object-store-proof.mjs:8f8a0118e46a3fd4c0be275ff8da6c1ed45469f0c244f57667000e59567389d7
+- tests/disposable-integration-runner.test.ts:a16302e41932f8947b58809bb78882965f37fd317a36141b4a53c33afd34a7e9
+
+Independent Sol changed-surface review CLEAN after fixes: no further reproduced
+lifecycle/ownership/configuration/non-vacuity/CI-wiring defect; required final hostile
+review and hosted exact-candidate evidence remain open. No restricted security reroute.
+Structural program validation valid:true, ready:false over101 parent +34 nested nodes.
+Governance-only postflight remains red on existing managed CLAUDE drift, npm egress,
+preserved dirty tree and branch-wide protected paths; Graphify REBUILD_REQUIRED warning.
+No --accept-protected or --run claim. No release/product proof node closed.
+
+Baseline CI33965041567 terminal FAILURE: application job101303561813 passes repaired
+architecture/lint/type gates, then Test fails5 assertions /7378 passes /5 skips across
+492 files (3 failed /489 passed). Two certificate-update assertions (front-byte audit
+hash, two-side500), two UTC credit assertions and one already-claimed ownership assertion
+remain for existing repair packets. Image job101303561992 fails the existing fixable
+HIGH/CRITICAL vulnerability gate; downstream readiness/migration/shutdown are skipped.
+CodeQL, gitleaks and dependency-review jobs pass but cannot waive that veto.
+Governance33965041568 and33965039903 also terminal FAILURE on exacta6670fc4. Their
+terminal status alone is not a new diagnosis. All exact-candidate release gates stay open.

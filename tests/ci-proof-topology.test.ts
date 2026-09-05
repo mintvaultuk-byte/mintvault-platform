@@ -43,6 +43,20 @@ const realCiInput = () => ({
 });
 
 describe("hosted CI proof topology", () => {
+  it("requires real object-store proof to remain enabled and failure-blocking", () => {
+    const command = "node scripts/ci/run-disposable-integration.mjs --docker-context default --r2-proof";
+    for (const replacement of [
+      "run: echo removed",
+      `if: false\n        run: ${command}`,
+      `continue-on-error: true\n        run: ${command}`,
+      `run: echo omitted # ${command}`,
+    ]) {
+      const input = realCiInput();
+      input.workflow = input.workflow.replace(`run: ${command}`, replacement);
+      expect(validateCiTopology(input)).toContain(`workflow does not execute ${command}`);
+    }
+  });
+
   it("wires every authority gate into the real workflow", () => {
     expect(validateCiTopology(realCiInput())).toEqual([]);
     const result = spawnSync(process.execPath, ["scripts/ci/verify-ci-topology.mjs"], {

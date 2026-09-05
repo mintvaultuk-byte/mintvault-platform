@@ -7,9 +7,9 @@
     "layer-exception": 4,
     "migration": 169,
     "migration-lineage": 6,
-    "object-writer": 81,
+    "object-writer": 89,
     "pricing-authority": 1769,
-    "provider-adapter": 133,
+    "provider-adapter": 135,
     "role-authority": 724,
     "route-middleware": 61,
     "route-mount": 69,
@@ -18,7 +18,7 @@
     "session-principal": 585,
     "table": 360,
     "table-access": 3184,
-    "timer": 90
+    "timer": 93
   },
   "records": [
     {
@@ -9183,6 +9183,70 @@
       "disposition": "known-legacy",
       "finding": "ARCH-AUTHORITY-001",
       "legacyExpiry": "the bounded-context repair that assigns explicit authority"
+    },
+    {
+      "category": "object-writer",
+      "id": "deleteFromR2:key",
+      "effect": "direct-delete-r2",
+      "key": "object-writer|scripts/ci/run-r2-object-store-proof.mjs|deleteFromR2:key#0",
+      "source": "scripts/ci/run-r2-object-store-proof.mjs:129",
+      "owner": "engineering-test-platform"
+    },
+    {
+      "category": "object-writer",
+      "id": "uploadCreateOnlyToR2:target",
+      "effect": "direct-put-r2",
+      "key": "object-writer|scripts/ci/run-r2-object-store-proof.mjs|uploadCreateOnlyToR2:target#0",
+      "source": "scripts/ci/run-r2-object-store-proof.mjs:95",
+      "owner": "engineering-test-platform"
+    },
+    {
+      "category": "object-writer",
+      "id": "uploadCreateOnlyToR2:target",
+      "effect": "direct-put-r2",
+      "key": "object-writer|scripts/ci/run-r2-object-store-proof.mjs|uploadCreateOnlyToR2:target#1",
+      "source": "scripts/ci/run-r2-object-store-proof.mjs:97",
+      "owner": "engineering-test-platform"
+    },
+    {
+      "category": "object-writer",
+      "id": "uploadCreateOnlyToR2:target",
+      "effect": "direct-put-r2",
+      "key": "object-writer|scripts/ci/run-r2-object-store-proof.mjs|uploadCreateOnlyToR2:target#2",
+      "source": "scripts/ci/run-r2-object-store-proof.mjs:106",
+      "owner": "engineering-test-platform"
+    },
+    {
+      "category": "object-writer",
+      "id": "uploadImmutableEvidenceToR2:immutableKey",
+      "effect": "direct-put-r2",
+      "key": "object-writer|scripts/ci/run-r2-object-store-proof.mjs|uploadImmutableEvidenceToR2:immutableKey#0",
+      "source": "scripts/ci/run-r2-object-store-proof.mjs:116",
+      "owner": "engineering-test-platform"
+    },
+    {
+      "category": "object-writer",
+      "id": "uploadImmutableEvidenceToR2:immutableKey",
+      "effect": "direct-put-r2",
+      "key": "object-writer|scripts/ci/run-r2-object-store-proof.mjs|uploadImmutableEvidenceToR2:immutableKey#1",
+      "source": "scripts/ci/run-r2-object-store-proof.mjs:117",
+      "owner": "engineering-test-platform"
+    },
+    {
+      "category": "object-writer",
+      "id": "uploadImmutableEvidenceToR2:immutableKey",
+      "effect": "direct-put-r2",
+      "key": "object-writer|scripts/ci/run-r2-object-store-proof.mjs|uploadImmutableEvidenceToR2:immutableKey#2",
+      "source": "scripts/ci/run-r2-object-store-proof.mjs:123",
+      "owner": "engineering-test-platform"
+    },
+    {
+      "category": "object-writer",
+      "id": "uploadToR2:key",
+      "effect": "direct-put-r2",
+      "key": "object-writer|scripts/ci/run-r2-object-store-proof.mjs|uploadToR2:key#0",
+      "source": "scripts/ci/run-r2-object-store-proof.mjs:63",
+      "owner": "engineering-test-platform"
     },
     {
       "category": "object-writer",
@@ -26126,6 +26190,37 @@
       "disposition": "known-legacy",
       "finding": "ARCH-AUTHORITY-001",
       "legacyExpiry": "the bounded-context repair that assigns explicit authority"
+    },
+    {
+      "category": "provider-adapter",
+      "id": "fetch:dynamic-fetch",
+      "effect": "http-fetch",
+      "urlAuthority": "<dynamic:await r2.getR2SignedUrl(key, 60)>",
+      "httpMethod": "GET",
+      "timeoutSignal": "AbortSignal.timeout(5000)",
+      "idempotencyEvidence": "not-declared",
+      "optionsAuthority": "<dynamic:{ signal: AbortSignal.timeout(5000), redirect: \"error\" }>",
+      "callsiteAuthorities": [
+        {
+          "source": "scripts/ci/run-r2-object-store-proof.mjs:160",
+          "urlAuthority": "<dynamic:await r2.getR2SignedUrl(key, 60)>",
+          "httpMethod": "GET",
+          "timeoutSignal": "AbortSignal.timeout(5000)",
+          "idempotencyEvidence": "not-declared",
+          "optionsAuthority": "<dynamic:{ signal: AbortSignal.timeout(5000), redirect: \"error\" }>"
+        }
+      ],
+      "key": "provider-adapter|scripts/ci/run-r2-object-store-proof.mjs|fetch:dynamic-fetch#0",
+      "source": "scripts/ci/run-r2-object-store-proof.mjs:88",
+      "owner": "engineering-test-platform"
+    },
+    {
+      "category": "provider-adapter",
+      "id": "module:@aws-sdk/client-s3",
+      "effect": "sdk-import",
+      "key": "provider-adapter|scripts/ci/run-r2-object-store-proof.mjs|module:@aws-sdk/client-s3#0",
+      "source": "scripts/ci/run-r2-object-store-proof.mjs:7",
+      "owner": "engineering-test-platform"
     },
     {
       "category": "provider-adapter",
@@ -161114,12 +161209,42 @@
     },
     {
       "category": "timer",
-      "id": "setTimeout:() => kill(\"SIGKILL\")",
+      "id": "setTimeout:() => { if (settled || !kill(\"SIGKILL\") || settled) return; timer = setTimeout(() => terminationUnknown(new Error(\"child did not close after SIGKILL\")), 5000); timer.unref(); }",
       "timerKind": "one-shot-unclassified",
       "delay": "5000",
       "lifecycle": "untracked",
-      "key": "timer|scripts/ci/run-disposable-integration.mjs|setTimeout:() => kill(\"SIGKILL\")#0",
-      "source": "scripts/ci/run-disposable-integration.mjs:188",
+      "key": "timer|scripts/ci/run-disposable-integration.mjs|setTimeout:() => { if (settled || !kill(\"SIGKILL\") || settled) return; timer = setTimeout(() => terminationUnknown(new Error(\"child did not close after SIGKILL\")), 5000); timer.unref(); }#0",
+      "source": "scripts/ci/run-disposable-integration.mjs:299",
+      "owner": "engineering-test-platform"
+    },
+    {
+      "category": "timer",
+      "id": "setTimeout:() => { timedOut = true; controller.abort(); }",
+      "timerKind": "watchdog",
+      "delay": "60_000",
+      "lifecycle": "untracked",
+      "key": "timer|scripts/ci/run-disposable-integration.mjs|setTimeout:() => { timedOut = true; controller.abort(); }#0",
+      "source": "scripts/ci/run-disposable-integration.mjs:397",
+      "owner": "engineering-test-platform"
+    },
+    {
+      "category": "timer",
+      "id": "setTimeout:() => startup.abort(new Error(\"owned MinIO startup timed out\"))",
+      "timerKind": "watchdog",
+      "delay": "20_000",
+      "lifecycle": "untracked",
+      "key": "timer|scripts/ci/run-disposable-integration.mjs|setTimeout:() => startup.abort(new Error(\"owned MinIO startup timed out\"))#0",
+      "source": "scripts/ci/run-disposable-integration.mjs:105",
+      "owner": "engineering-test-platform"
+    },
+    {
+      "category": "timer",
+      "id": "setTimeout:() => terminationUnknown(new Error(\"child did not close after SIGKILL\"))",
+      "timerKind": "one-shot-unclassified",
+      "delay": "5000",
+      "lifecycle": "untracked",
+      "key": "timer|scripts/ci/run-disposable-integration.mjs|setTimeout:() => terminationUnknown(new Error(\"child did not close after SIGKILL\"))#0",
+      "source": "scripts/ci/run-disposable-integration.mjs:301",
       "owner": "engineering-test-platform"
     },
     {

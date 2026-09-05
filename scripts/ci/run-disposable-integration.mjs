@@ -1,15 +1,30 @@
 #!/usr/bin/env node
-/** Bounded PostgreSQL-only CI harness. It never adopts a pre-existing container. */
+/** Owned PostgreSQL or object-store proof harness. Never adopts existing services. */
 import { spawn, spawnSync } from "node:child_process";
 import { mkdtempSync, readFileSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
-import { randomUUID } from "node:crypto";
+import { randomUUID, randomBytes } from "node:crypto";
+import { setTimeout as delay } from "node:timers/promises";
 import { MANAGED_DATABASE_ENVIRONMENT_KEYS } from "./partner-suite-env-matrix.mjs";
 const PG16 = "pgvector/pgvector:pg16@sha256:ccc6e83d6e35e931dc7c5def2022729d5a6c370318d099181995567ff1fb4d6b";
 const PG17 = "postgres:17.10@sha256:7958605b474b3d264a969cb3a123d6aa00ad1e1fe9da8a69984dabb704d93317";
 const LABEL = "mintvault.disposable.integration.run";
+export const MINIO_IMAGE = "minio/minio@sha256:14cea493d9a34af32f524e538b8346cf79f3321eff8e708c1e2960462bd8936e";
+export const R2_PROOF_CHECKS = Object.freeze([
+  "upload-roundtrip",
+  "stream-integrity",
+  "head-readability",
+  "listing",
+  "stream",
+  "signed-download",
+  "conditional-collision",
+  "conditional-race",
+  "immutable-replay",
+  "immutable-mismatch",
+  "delete-missing",
+]);
 const PREPARATION_KEYS = new Set([
   ...MANAGED_DATABASE_ENVIRONMENT_KEYS,
   "PROJECT_CONTROL_TEST_ADMIN_URL",
@@ -37,11 +52,11 @@ function checked(command, args, options = {}) {
 }
 export function dockerDriver(context) {
   if (!context || context.startsWith("-")) throw new Error("--docker-context requires an explicit Docker context name");
-  const call = (args) => checked("docker", ["--context", context, ...args]);
+  const call = (args, env) => checked("docker", ["--context", context, ...args], { env });
   return {
     run: call,
     inspect: (id, token) => call(["inspect", "--format", `{{ index .Config.Labels "${LABEL}" }}`, id]) === token,
-    port: (id) => call(["port", id, "5432"]),
+    port: (id, port = "5432") => call(["port", id, port]),
     remove: (id) => call(["rm", "-f", "-v", id]),
   };
 }
@@ -70,15 +85,111 @@ function startOwned(driver, ids, token, image, service) {
   if (!driver.inspect(id, token)) throw new Error(`docker did not prove ownership of ${service}`);
   return id;
 }
-function loopbackPort(driver, id) {
+function loopbackPort(driver, id, containerPort = "5432") {
   const mappings = driver
-    .port(id)
+    .port(id, containerPort)
     .split("\n")
     .filter(Boolean)
     .map((line) => line.trim());
   if (mappings.length !== 1 || !mappings.every((line) => /^127\.0\.0\.1:\d+$/.test(line)))
     throw new Error(`${id} has a non-loopback or ambiguous published port`);
-  return Number(mappings[0].split(":").at(-1));
+  const port = Number(mappings[0].split(":").at(-1));
+  if (!Number.isInteger(port) || port < 1 || port > 65535) throw new Error("invalid published port");
+  return port;
+}
+
+/** @param {{driver: ReturnType<typeof dockerDriver>, token?: string, signal?: AbortSignal, fetchReady?: typeof fetch}} options */
+export async function startDisposableObjectStore({ driver, token = randomUUID(), signal, fetchReady = fetch }) {
+  const ids = [];
+  const startup = new AbortController();
+  // Keep the process alive while awaiting network readiness, and bound startup.
+  const deadline = setTimeout(() => startup.abort(new Error("owned MinIO startup timed out")), 20_000);
+  signal = signal ? AbortSignal.any([signal, startup.signal]) : startup.signal;
+  const credentials = {
+    MINIO_ROOT_USER: `mvtest-${randomBytes(10).toString("hex")}`,
+    MINIO_ROOT_PASSWORD: randomBytes(24).toString("hex"),
+  };
+  try {
+    signal?.throwIfAborted();
+    const id = driver.run(
+      [
+        "run",
+        "-d",
+        "--label",
+        `${LABEL}=${token}`,
+        "--label",
+        "mintvault.service=minio",
+        "-e",
+        "MINIO_ROOT_USER",
+        "-e",
+        "MINIO_ROOT_PASSWORD",
+        "-p",
+        "127.0.0.1::9000",
+        MINIO_IMAGE,
+        "server",
+        "/data",
+      ],
+      credentials
+    );
+    if (!/^[a-f0-9]{12,64}$/i.test(id)) throw new Error("docker did not return a MinIO container id");
+    ids.push(id);
+    if (!driver.inspect(id, token)) throw new Error("docker did not prove MinIO ownership");
+    const endpoint = `http://127.0.0.1:${loopbackPort(driver, id, "9000")}`;
+    let ready = false;
+    for (let attempt = 0; attempt < 40; attempt += 1) {
+      signal?.throwIfAborted();
+      ready = await fetchReady(`${endpoint}/minio/health/ready`, {
+        signal: signal ? AbortSignal.any([signal, AbortSignal.timeout(1500)]) : AbortSignal.timeout(1500),
+        redirect: "error",
+      }).then(
+        (response) => response.ok,
+        () => false
+      );
+      if (ready) break;
+      await delay(250, undefined, { signal });
+    }
+    if (!ready) throw new Error("owned MinIO did not become ready");
+    return {
+      ids,
+      token,
+      env: {
+        R2_ENDPOINT: endpoint,
+        R2_ACCESS_KEY_ID: credentials.MINIO_ROOT_USER,
+        R2_SECRET_ACCESS_KEY: credentials.MINIO_ROOT_PASSWORD,
+        R2_BUCKET_NAME: `proof-${token}`,
+        MINTVAULT_OBJECT_PROOF_RUN_ID: token,
+      },
+    };
+  } catch (error) {
+    try {
+      cleanup(driver, ids, token);
+    } catch (cleanupError) {
+      throw new AggregateError([error, cleanupError], "object startup and cleanup failed");
+    }
+    throw error;
+  } finally {
+    clearTimeout(deadline);
+  }
+}
+
+export function validateR2ProofReport(report, services) {
+  if (
+    report?.schemaVersion !== 1 ||
+    report.runId !== services.token ||
+    report.endpoint !== services.env.R2_ENDPOINT ||
+    report.bucket !== services.env.R2_BUCKET_NAME ||
+    report.image !== MINIO_IMAGE ||
+    report.passed !== R2_PROOF_CHECKS.length ||
+    report.failed !== 0 ||
+    report.skipped !== 0 ||
+    !Array.isArray(report.checks) ||
+    report.checks.length !== R2_PROOF_CHECKS.length ||
+    !R2_PROOF_CHECKS.every(
+      (name, index) => report.checks[index]?.name === name && report.checks[index]?.status === "passed"
+    )
+  )
+    throw new Error("object-store proof report is incomplete, failed, or does not match the owned run");
+  return report;
 }
 function waitForPostgres(driver, id, major) {
   let last;
@@ -164,7 +275,8 @@ export function runChild(args, env, spawnProcess = spawn, signal) {
       env,
       detached: process.platform !== "win32",
     });
-    let timer;
+    let timer,
+      settled = false;
     const terminationUnknown = (error) => {
       done();
       const failure = new Error("child termination could not be confirmed; retain owned services", { cause: error });
@@ -184,11 +296,16 @@ export function runChild(args, env, spawnProcess = spawn, signal) {
       return true;
     };
     const abort = () => {
-      if (!kill("SIGTERM")) return;
-      timer = setTimeout(() => kill("SIGKILL"), 5000);
+      if (settled || !kill("SIGTERM") || settled) return;
+      timer = setTimeout(() => {
+        if (settled || !kill("SIGKILL") || settled) return;
+        timer = setTimeout(() => terminationUnknown(new Error("child did not close after SIGKILL")), 5000);
+        timer.unref();
+      }, 5000);
       timer.unref();
     };
     const done = () => {
+      settled = true;
       clearTimeout(timer);
       signal?.removeEventListener("abort", abort);
     };
@@ -207,7 +324,8 @@ export function runChild(args, env, spawnProcess = spawn, signal) {
 }
 export function parse(argv) {
   let context,
-    prepare = false;
+    prepare = false,
+    r2Proof = false;
   const selection = [],
     targets = [];
   for (let index = 0; index < argv.length; index += 1) {
@@ -219,11 +337,18 @@ export function parse(argv) {
         if (context) throw new Error("duplicate Docker context");
         context = value;
       } else selection.push(arg, value);
+    } else if (arg === "--r2-proof") {
+      if (r2Proof) throw new Error("duplicate object-store target");
+      r2Proof = true;
     } else if (arg === "--prepare") prepare = true;
     else if (arg === "--all" || /^tests\/[\w./-]+\.test\.ts$/.test(arg)) {
       targets.push(arg);
       selection.push(arg);
     } else throw new Error(`unknown argument: ${arg}`);
+  }
+  if (r2Proof) {
+    if (!context || prepare || selection.length) throw new Error("--r2-proof requires only an explicit Docker context");
+    return { context, prepare: false, selection: [], r2Proof: true };
   }
   if (!context || !targets.length || (targets.includes("--all") && targets.length !== 1))
     throw new Error("require --docker-context <name> and --all or explicit test paths");
@@ -246,7 +371,7 @@ export function preparationExports(text, serviceEnv) {
   return result;
 }
 export async function main(argv = process.argv.slice(2), deps = {}) {
-  const { context, prepare, selection } = parse(argv);
+  const { context, prepare, selection, r2Proof } = parse(argv);
   const driver = deps.driver || dockerDriver(context);
   const controller = new AbortController(),
     signalSource = deps.signalSource || process;
@@ -266,6 +391,31 @@ export async function main(argv = process.argv.slice(2), deps = {}) {
   const temp = mkdtempSync(join(tmpdir(), "mintvault-ci-env-")),
     envPath = join(temp, "github-env");
   try {
+    if (r2Proof) {
+      services = await startDisposableObjectStore({ driver, signal: controller.signal, fetchReady: deps.fetchReady });
+      const reportPath = join(temp, "object-proof.json");
+      let timedOut = false;
+      const timeout = setTimeout(() => {
+        timedOut = true;
+        controller.abort();
+      }, 60_000);
+      timeout.unref();
+      let outcome;
+      try {
+        outcome = await runChild(
+          ["--import", "tsx", "scripts/ci/run-r2-object-store-proof.mjs", reportPath],
+          controlledEnvironment(process.env, services.env),
+          deps.spawnProcess,
+          controller.signal
+        );
+      } finally {
+        clearTimeout(timeout);
+      }
+      if (signalCode || timedOut || childStatus(outcome)) return signalCode || 1;
+      const report = validateR2ProofReport(JSON.parse(readFileSync(reportPath, "utf8")), services);
+      console.log(`[disposable-ci] ${JSON.stringify(report)}`);
+      return 0;
+    }
     services = await startDisposableServices({ driver });
     console.log(
       `[disposable-ci] owned run ${services.token}; PG16 port=${services.env.MINTVAULT_TEST_PG16_PORT}, PG17 port=${services.env.MINTVAULT_TEST_PG17_PORT}`
@@ -293,18 +443,19 @@ export async function main(argv = process.argv.slice(2), deps = {}) {
   } finally {
     signalSource.removeListener("SIGINT", interrupt);
     signalSource.removeListener("SIGTERM", terminate);
-    rmSync(temp, { recursive: true, force: true });
+    if (!retainServices) rmSync(temp, { recursive: true, force: true });
     if (services && !retainServices) cleanup(driver, services.ids, services.token);
     if (services && retainServices)
       console.error(
-        `[disposable-ci] retained run ${services.token}; unconfirmed child termination; container IDs=${services.ids.join(",")}`
+        `[disposable-ci] retained run ${services.token}; unconfirmed child termination; container IDs=${services.ids.join(",")}; proof directory=${temp}`
       );
   }
 }
 if (process.argv[1] && fileURLToPath(import.meta.url) === process.argv[1])
-  main()
-    .then((code) => process.exit(code))
-    .catch((error) => {
-      console.error(error.message);
-      process.exit(1);
-    });
+  try {
+    // Top-level await must not silently exit zero on an unresolved proof promise.
+    process.exit(await main());
+  } catch (error) {
+    console.error(error.message);
+    process.exit(1);
+  }

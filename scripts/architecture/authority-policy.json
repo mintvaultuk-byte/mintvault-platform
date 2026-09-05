@@ -76,6 +76,7 @@
   "scanRoots": ["server", "client/src", "shared", "scripts", "migrations", "migrations-vq", "config/components"],
   "ownerRules": [
     { "prefix": "scripts/ci/run-disposable-integration.mjs", "owner": "engineering-test-platform" },
+    { "prefix": "scripts/ci/run-r2-object-store-proof.mjs", "owner": "engineering-test-platform" },
     { "prefix": "server/partner/", "owner": "partner-platform" },
     { "prefix": "client/src/components/partner/", "owner": "partner-platform" },
     { "prefix": "client/src/pages/partner/", "owner": "partner-platform" },

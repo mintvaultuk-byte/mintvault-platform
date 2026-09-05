@@ -179,3 +179,42 @@ Prove existing failure in the clean-source copy, then all six existing assertion
 pass there. This is missing-fixture parity, not a TLS change or a new security/
 supply-chain investigation. Independent verifier checks boundary and unchanged guards.
 Rollback is the one test-list entry; the ignored local script remains untouched.
+
+## H1c durable packet — exclusive owned MinIO proof
+
+Baseline a6670fc4456e6b4185d3a735b189ef9f86f667b2; existing REPAIR-CI-TOPOLOGY /
+PROOF-CI, root sole shared writer. Reuse run-disposable-integration.mjs lifecycle
+with exclusive --r2-proof mode, same exact-ID/UUID-label cleanup and child signal
+handling, explicit Docker context, pinned MinIO image, random loopback-only port,
+generated process-only credentials and unique bucket. No PG service is needed in
+this mode. Do not restore absent historical PARTNER_REAL_R2_PROOF_* configuration.
+
+Exact implementation files: scripts/ci/run-disposable-integration.mjs,
+scripts/ci/run-r2-object-store-proof.mjs (new direct child, not orchestrator),
+tests/disposable-integration-runner.test.ts. Parent owns all cleanup and report path;
+child uses existing server/r2.ts with no product changes. Verify ordinary roundtrip,
+stream hash/length, HEAD/readability, list/stream, real signed HTTP GET, conditional
+collision/race, immutable identical replay/mismatch refusal and delete/missing in
+synthetic bucket only. JSON requires the exact run/bucket/endpoint/image plus all
+named checks, no missing/duplicate/skipped/failing/zero-check success. Bounded proof
+timeout terminates and awaits the child before owned cleanup; unconfirmed termination
+retains identified services and fails. No live endpoint or inherited credentials.
+
+Mechanical wiring scope: scripts/ci/script-syntax-baseline.json adds only new module;
+scripts/architecture/authority-policy.json registers the exact child as engineering
+test infrastructure; regenerate scripts/architecture/generated/architecture-authority.json.
+Do not grow diagnostic/no-check/legacy allowances. engineering/INDEX.md adds one command.
+.github/workflows/ci.yml invokes the same proof with an explicit hosted Docker context;
+preserve all existing jobs/gates. Managed workflow generation/drift remains separate;
+do not hand-edit its generated gate. Test counts and exact hosted proof remain open
+until observed. Root implements; independent cheaper worker verifies changed lifecycle
+and actual object transport, with no broad security investigation or scanner redesign.
+
+Rollback: exact packet diff; cleanup only this run's owned container/synthetic volume
+after verifying label and child closure. Never delete other objects, containers,
+worktrees, caches or credentials. Cloudflare IAM/retention and hardware remain external.
+
+H1c gate wiring amendment: scripts/ci/verify-ci-topology.mjs and
+tests/ci-proof-topology.test.ts must require the exact object-proof command in the
+failure-blocking root Node20 phase; removing/disabling/commenting or moving the step
+must fail the existing topology validator. No new required GitHub protection setting.

@@ -1353,13 +1353,19 @@
       "proof_required": [
         "Isolated Partner runner, Scanner test gates (signed package proof remains Phase 5 REPAIR-SCANNER-PACKAGE), script/test typechecks, ratcheted unreachable-code proof, shipped-migration labels, non-vacuity and injected-failure proof",
         "hygiene-repair-manifest.md H1a: pinned omit-dev dependency tree excludes build-only toolchain while retaining native runtime modules; builder CSS and complete production image proof remain required",
-        "hygiene-repair-manifest.md H1b: owned CI-pinned PG16/vector and PG17, process-only preparation exports, per-suite topology, non-vacuous real Partner runner and independently verified failure/cancellation cleanup; hygiene-wave-proof.md retains local results, not release closure"
+        "hygiene-repair-manifest.md H1b: owned CI-pinned PG16/vector and PG17, process-only preparation exports, per-suite topology, non-vacuous real Partner runner and independently verified failure/cancellation cleanup; hygiene-wave-proof.md retains local results, not release closure",
+        "hygiene-repair-manifest.md H1c: exclusive owned pinned MinIO with synthetic process-only configuration, exact-identity eleven-check report, real adapter transport/integrity/conditional/replay proof, independent bounded child-close/cleanup verification and failure-blocking hosted wiring; exact-candidate hosted proof remains required"
       ],
       "evidence": [
         {
           "ref": "checkpoint 2913bcb1 plus local executable/dependency diff 776721dfcd7cca0196bea0b1e5eedaa98d53efa44a76ebec622ea06c45e9c8f6; scripts/scanner-app/package.json:21-25; lock direct happy-dom edge and node_modules/happy-dom; Scanner 14 files/175 assertions; ci:topology; CI topology 12/12",
           "sha": "2913bcb1092ea8f43ee1294b711a8df653a06a3d",
           "observer": "data-runtime-observer"
+        },
+        {
+          "ref": "hygiene-wave-proof.md H1d/e/f/g: clean tracked inventory parity; clean exact-lock Admin126/126 and operational6/6; PDF old/new declaration red-green; a6670fc4 hosted architecture/lint/type gates pass, test5 failures and image vulnerability veto remain; H1c subsequent WIP hashes and independent local11-check proof recorded separately, not candidate closure",
+          "sha": "a6670fc4456e6b4185d3a735b189ef9f86f667b2",
+          "observer": "codex-lead with independent scoped Luna/Terra/Sol observations"
         }
       ],
       "invalidated_by": [

@@ -626,6 +626,11 @@ jobs:
       - name: CI topology self-check
         run: npm run ci:topology
 
+      # The hosted runner's explicit default context is disposable. The parent
+      # generates credentials and verifies ownership; no global R2 env is exported.
+      - name: Owned real object-store proof
+        run: node scripts/ci/run-disposable-integration.mjs --docker-context default --r2-proof
+
       - name: Lint
         run: npm run lint
 

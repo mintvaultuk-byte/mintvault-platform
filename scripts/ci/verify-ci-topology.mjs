@@ -161,6 +161,7 @@ export function validateCiTopology({
     "npm run ci:topology",
     "npm run test:partner:critical",
     "npm run test:scanner:critical",
+    "node scripts/ci/run-disposable-integration.mjs --docker-context default --r2-proof",
   ];
   for (const command of requiredCommands) {
     if (!steps.some((step) => executes(step, command))) errors.push(`workflow does not execute ${command}`);
