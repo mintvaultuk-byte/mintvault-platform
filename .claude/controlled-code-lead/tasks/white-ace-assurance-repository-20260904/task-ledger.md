@@ -1,5 +1,52 @@
 # Task ledger — White Ace repository assurance and remediation intake
 
+## Image-core continuation — 2026-09-05
+
+Pre-wave cecbd8288d591d101bf60c124e5779ea65a54458, existing OWNER-IMAGE approval,
+root sole writer; unrelated docs/planning/vault-worlds preserved. Terra independently
+reproduced both original image failures (2 failed / 178 filtered). Manual derivative
+publication now preserves both canonical original pointers while retaining both source
+CAS guards, including absent back. Default scanner publication is unchanged. Pipeline
+returns identities of exact object bodies passed to the durable writer; the route binds
+the selected display audit tuple to that manifest. Back-only/no-front fallback audits
+the exact original JPEG buffer persisted without transformation. No extra storage read,
+schema change, finalizer change, frozen grading change, or external object mutation.
+
+Root route185/185; clean exact-lock Node20/Vitest4.1.7 matrix235/235 across certificate-
+update-route, certificate-image-upload-audit, manual-certificate-image-object-write,
+object-write-coordinator and object-write-reconciliation. All zero skips; owned native
+PG17 and synthetic in-memory R2. Clean copy /private/tmp/mintvault-h1ef-clean.x3NRtE
+required approved npm rebuild canvas after its earlier ignore-scripts install; package
+lock cmp unchanged. Invocation: scrubbed env -i, pinned Node20.20.2, POSTGRES17_BIN,
+vitest run <the five suites> --pool=forks --maxWorkers=1 --no-file-parallelism.
+
+Independent Sol at /private/tmp/mintvault-image-core-proof-20260905-h1c, detached
+cecbd828 plus only three image overlay files, passes the same235/235. Four isolated
+mutations all fail behaviorally: remove front CAS, remove back CAS, restore manual
+original overwrites, and bind PNG audit to source JPEG. Restored185/185, exact hashes
+match root; changed-surface review CLEAN. This does not discharge final hostile review.
+
+New regressions cover exact PNG/JPEG bytes/hash/type/size, dual-side pointer preservation,
+both CAS conflicts, second-side failure with durable first-side history and successful
+failed-side forward recovery, and unchanged ordinary scanner original publication.
+Recovery uses current guarded state and a new operation; same-idempotency-key direct
+service replay is NOT proven/repaired (changing crop recorded_at and advanced pointers
+remain outside this packet). No aggregate success audit on partial500; inner committed
+0122 audits remain. No committed object deletion. Phone/remaining writers stay open.
+
+Final check, unchanged345 test diagnostic ratchet, local build, scoped lint0errors
+(existing routes611/scan31/test86 warnings), and diff check pass. Architecture remains
+8455 records/zero violations: generated delta is source coordinates only, recursively
+verified excluding source keys; no provider contract/allowance change. Governance-only
+postflight remains red for managed CLAUDE drift/npm egress/dirty tree/protected paths;
+Graphify rebuild required. No --accept-protected, final --run, release or deploy claim.
+
+Exact SHA256: routes.ts 7b65089bc0d557c8418feb0472167443b4b63d70d55c97f8d2b7e6145bbe2ad7;
+scan-ingest-service.ts 10472282c40ea1305ba9eccc74213f85d137a51722b074a1e47a57fa75039be8;
+certificate-update-route.test.ts a1f4d5f8f4f580114031d3e901c493d32f51d4813ff41c872b119b3af9a2c8eb.
+REPAIR-IMAGE-CORE and WAA-IMAGE-001/002 FIXED locally; PROOF-IMAGE remains in progress
+for phone/remaining writer coverage and immutable-candidate binding. No release veto closed.
+
 ## UTC-credit continuation — 2026-09-05
 
 Pre-wave15101b2844187aa184198d5116e2898463dfae61, preserved unrelated

@@ -375,3 +375,18 @@ HIGH/CRITICAL vulnerability gate; downstream readiness/migration/shutdown are sk
 CodeQL, gitleaks and dependency-review jobs pass but cannot waive that veto.
 Governance33965041568 and33965039903 also terminal FAILURE on exacta6670fc4. Their
 terminal status alone is not a new diagnosis. All exact-candidate release gates stay open.
+
+H1c hosted checkpoint15101b2844187aa184198d5116e2898463dfae61: actual Owned real
+object-store proof step in CI33966648590/job101307847322 passes11/11, zero failures/
+skips. Real run e4f72a67-42a9-4bea-85ce-7ae5996e5756, loopback32768, same MinIO pin.
+This report is from the dedicated step, NOT the lifecycle test's fake report at41001.
+Whole CI terminal FAILURE: test6failed/7397passed/5skipped,492files(3failed/489passed).
+Two image, two UTC and TWO claim assertions fail (verified-email collection binding
+and already-claimed refusal); claim failures vary across full CI runs and remain open.
+Image vulnerability job101307847300 red, later boot proof skipped. Both governance
+33966648539/33966645906 terminal FAILURE. Hosted object proof does not waive other gates.
+
+Subsequent approved UTC repair pushed atcecbd8288d591d101bf60c124e5779ea65a54458;
+see White Ace task-ledger for45/45 independent/clean matrix and biting mutations.
+Exact new CI33967570551 and governance33967570544/33967566515 launched; terminal
+result not yet observed. Existing branch and draftPR336 only; no deployment/merge.

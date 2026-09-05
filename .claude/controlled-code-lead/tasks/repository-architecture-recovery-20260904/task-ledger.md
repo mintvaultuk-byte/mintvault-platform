@@ -1,5 +1,38 @@
 # Task ledger — repository architecture recovery
 
+## Current checkpoint and next bounded wave
+
+Image-core continuation supersedes the pre-edit paragraph below: owner-approved root
+repair now locally FIXED, root route185/185, clean exact-lock and independent235/235;
+four independent mutations fail and exact restoration passes. White Ace task-ledger
+records hashes and recovery limitations. Phone/remaining writer and exact-candidate
+gates stay open. Existing-browser substrate discovery is complete: reuse the owned
+runner, Command Centre app lifecycle and CDP script, adding only bounded test wiring.
+Do not invoke npm run dev or inherit .env/live settings. Image checkpoint/push pending.
+cecbd828 CI33967570551 is terminal FAILURE:4failed/7404passed/5skipped; UTC failures
+are gone, two image failures are locally repaired, two claim failures remain. Image
+vulnerability gate remains red and restricted security investigation is not rerouted.
+
+Pushed cecbd8288d591d101bf60c124e5779ea65a54458, UTC-credit repair locally FIXED;
+independent/clean/root45/45 and three biting mutation groups, restored hashes exact.
+White Ace task-ledger retains evidence. ExactCI33967570551, governance33967570544/
+33967566515 started; keep observing these handles. H1c real hosted11/11 is proven at
+15101b28, while that whole run and both governance runs are terminal red; details in
+hygiene-wave-proof.md. No exact-candidate release closure or deployment.
+
+Next: WAA-IMAGE-001/002 approved recovery/change packet, then narrow root repair.
+Terra independently reproduces both known route assertions (2failed/178filtered):
+derived display PNG key paired with source JPEG audit hash; front-side derivative
+pass overwrites the back original pointer before back-side CAS. Proposed source scope
+must explicitly add scan-ingest-service.ts to the existing image node before edits.
+Preserve manual canonical originals during manual derivative publication, retain CAS
+guards on source pointers even if those pointers are omitted from updates, and return
+verified object-manifest identity for the outer audit. Verify byte/hash/type/size,
+two-side behavior, genuine concurrent conflicts and second-side failure recovery.
+No runtime image edits yet; no broad scanner/evidence review or restricted security lane.
+Remaining browser/managed workflow/product graph packets remain in scope. Continuous
+Goal ACTIVE, heartbeat PAUSED, only unrelated vault-worlds dirty before these records.
+
 ## Continuous UTC-credit wave — 2026-09-05
 
 H1c checkpoint15101b2844187aa184198d5116e2898463dfae61 pushed non-force to existing

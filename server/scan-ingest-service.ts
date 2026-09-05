@@ -621,6 +621,8 @@ export interface CertificateImagePipelineResult {
   backVariants: any | null;
   timing: { sharpMs: number; r2Ms: number };
   objectKeys: Record<string, string>;
+  /** Identity of the exact buffers verified and committed by the coordinator. */
+  objectIdentities: Record<string, { sha256: string; bytes: number; contentType: string }>;
 }
 
 /**
@@ -788,6 +790,7 @@ export async function attachManualCertificateSideAndReprocess(
         action: "certificate_image_derivatives_generated",
         auditMetadata: { source: "manual_attach", side: input.side, originalOperationId: original.operationId },
         writeVersion,
+        preserveOriginalPointers: true,
       });
       return { pipeline, pipelineError: null, originalObjectKey: original.objectKey, replayed: original.replayed };
     } catch (error) {
@@ -804,7 +807,7 @@ async function uploadImagesToCertUnlocked(
   certId: number,
   frontBuffer: Buffer,
   backBuffer: Buffer | null,
-  options: CertificateImagePipelineOptions = {}
+  options: CertificateImagePipelineOptions & { preserveOriginalPointers?: boolean } = {}
 ): Promise<CertificateImagePipelineResult> {
   const tImg = process.hrtime.bigint();
   const { maskRoundedCorners, tightenForDisplay } = await import("./image-processing");
@@ -995,6 +998,7 @@ async function uploadImagesToCertUnlocked(
   const prefix = `images/grading/${certId}/revisions/${writeVersion}`;
   const uploadKeys: Record<string, string> = {};
   const objectItems: ObjectWriteItemInput[] = [];
+  const objectIdentities: CertificateImagePipelineResult["objectIdentities"] = {};
   const addObject = (
     logicalSlot: string,
     objectKey: string,
@@ -1003,6 +1007,11 @@ async function uploadImagesToCertUnlocked(
     objectClass: "CANONICAL" | "DERIVATIVE" = "DERIVATIVE",
     priorObjectKey?: string | null
   ) => {
+    objectIdentities[objectKey] = {
+      sha256: createHash("sha256").update(body).digest("hex"),
+      bytes: body.length,
+      contentType,
+    };
     objectItems.push({
       store: "R2",
       logicalSlot,
@@ -1038,6 +1047,7 @@ async function uploadImagesToCertUnlocked(
   // AND the collision source. Dropping it makes the key deterministic.
   const jpgVariants = ["original", "greyscale", "highcontrast", "edgeenhanced", "inverted"] as const;
   for (const vName of jpgVariants) {
+    if (options.preserveOriginalPointers && vName === "original") continue;
     const buf = (frontVariants as any)[vName] as Buffer | undefined;
     if (!buf) continue;
     const k = `${prefix}/front_${vName}.jpg`;
@@ -1053,6 +1063,7 @@ async function uploadImagesToCertUnlocked(
   }
   if (backVariants) {
     for (const vName of jpgVariants) {
+      if (options.preserveOriginalPointers && vName === "original") continue;
       const buf = (backVariants as any)[vName] as Buffer | undefined;
       if (!buf) continue;
       const k = `${prefix}/back_${vName}.jpg`;
@@ -1163,7 +1174,7 @@ async function uploadImagesToCertUnlocked(
   };
 
   const updates: Record<string, string> = {
-    grading_front_original: uploadKeys.front_original,
+    ...(!options.preserveOriginalPointers ? { grading_front_original: uploadKeys.front_original } : {}),
     grading_front_cropped: uploadKeys.front_cropped_display,
     grading_front_greyscale: uploadKeys.front_greyscale,
     grading_front_highcontrast: uploadKeys.front_highcontrast,
@@ -1175,7 +1186,7 @@ async function uploadImagesToCertUnlocked(
   };
   if (backVariants) {
     Object.assign(updates, {
-      grading_back_original: uploadKeys.back_original,
+      ...(!options.preserveOriginalPointers ? { grading_back_original: uploadKeys.back_original } : {}),
       grading_back_cropped: uploadKeys.back_cropped_display,
       grading_back_greyscale: uploadKeys.back_greyscale,
       grading_back_highcontrast: uploadKeys.back_highcontrast,
@@ -1186,6 +1197,12 @@ async function uploadImagesToCertUnlocked(
     });
   }
   const expectedState = Object.fromEntries(Object.keys(updates).map((column) => [column, certRow[column]]));
+  if (options.preserveOriginalPointers) {
+    // Manual originals remain canonical, but a concurrent source change must
+    // still prevent stale derived displays from committing over newer work.
+    expectedState.grading_front_original = certRow.grading_front_original;
+    expectedState.grading_back_original = certRow.grading_back_original;
+  }
   const evidenceUpdates = [] as Array<Record<string, unknown>>;
   if (frontSource) {
     evidenceUpdates.push({
@@ -1240,7 +1257,7 @@ async function uploadImagesToCertUnlocked(
   const r2Ms = elapsedMs(tR2);
   console.log(`[scan-ingest] cert=${certId}: committed ${objectItems.length} verified image artefacts`);
 
-  return { frontVariants, backVariants, timing: { sharpMs, r2Ms }, objectKeys: uploadKeys };
+  return { frontVariants, backVariants, timing: { sharpMs, r2Ms }, objectKeys: uploadKeys, objectIdentities };
 }
 
 /**

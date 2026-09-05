@@ -9713,7 +9713,7 @@
       "id": "deleteFromR2:`public/share/${shareCertNumber}/feed.jpg`",
       "effect": "direct-delete-r2",
       "key": "object-writer|server/routes.ts|deleteFromR2:`public/share/${shareCertNumber}/feed.jpg`#0",
-      "source": "server/routes.ts:7512",
+      "source": "server/routes.ts:7510",
       "owner": "core-platform"
     },
     {
@@ -9721,7 +9721,7 @@
       "id": "deleteFromR2:`public/share/${shareCertNumber}/story.jpg`",
       "effect": "direct-delete-r2",
       "key": "object-writer|server/routes.ts|deleteFromR2:`public/share/${shareCertNumber}/story.jpg`#0",
-      "source": "server/routes.ts:7513",
+      "source": "server/routes.ts:7511",
       "owner": "core-platform"
     },
     {
@@ -9729,7 +9729,7 @@
       "id": "deleteFromR2:key",
       "effect": "direct-delete-r2",
       "key": "object-writer|server/routes.ts|deleteFromR2:key#0",
-      "source": "server/routes.ts:6936",
+      "source": "server/routes.ts:6934",
       "owner": "core-platform"
     },
     {
@@ -9737,7 +9737,7 @@
       "id": "ObjectWriteCoordinator",
       "effect": "coordinated-write",
       "key": "object-writer|server/routes.ts|ObjectWriteCoordinator#0",
-      "source": "server/routes.ts:6319",
+      "source": "server/routes.ts:6317",
       "owner": "core-platform"
     },
     {
@@ -9745,7 +9745,7 @@
       "id": "ObjectWriteCoordinator",
       "effect": "coordinated-write",
       "key": "object-writer|server/routes.ts|ObjectWriteCoordinator#1",
-      "source": "server/routes.ts:6382",
+      "source": "server/routes.ts:6380",
       "owner": "core-platform"
     },
     {
@@ -9753,7 +9753,7 @@
       "id": "uploadToR2:cacheKey",
       "effect": "direct-put-r2",
       "key": "object-writer|server/routes.ts|uploadToR2:cacheKey#0",
-      "source": "server/routes.ts:3543",
+      "source": "server/routes.ts:3541",
       "owner": "core-platform"
     },
     {
@@ -9761,7 +9761,7 @@
       "id": "uploadToR2:cacheKey",
       "effect": "direct-put-r2",
       "key": "object-writer|server/routes.ts|uploadToR2:cacheKey#1",
-      "source": "server/routes.ts:3704",
+      "source": "server/routes.ts:3702",
       "owner": "core-platform"
     },
     {
@@ -9769,7 +9769,7 @@
       "id": "uploadToR2:key",
       "effect": "direct-put-r2",
       "key": "object-writer|server/routes.ts|uploadToR2:key#0",
-      "source": "server/routes.ts:7851",
+      "source": "server/routes.ts:7849",
       "owner": "core-platform"
     },
     {
@@ -9777,7 +9777,7 @@
       "id": "uploadToR2:manifestKey",
       "effect": "direct-put-r2",
       "key": "object-writer|server/routes.ts|uploadToR2:manifestKey#0",
-      "source": "server/routes.ts:11686",
+      "source": "server/routes.ts:11684",
       "owner": "core-platform"
     },
     {
@@ -9785,7 +9785,7 @@
       "id": "uploadToR2:newKey",
       "effect": "direct-put-r2",
       "key": "object-writer|server/routes.ts|uploadToR2:newKey#0",
-      "source": "server/routes.ts:12010",
+      "source": "server/routes.ts:12008",
       "owner": "core-platform"
     },
     {
@@ -9793,7 +9793,7 @@
       "id": "uploadToR2:newKey",
       "effect": "direct-put-r2",
       "key": "object-writer|server/routes.ts|uploadToR2:newKey#1",
-      "source": "server/routes.ts:12114",
+      "source": "server/routes.ts:12112",
       "owner": "core-platform"
     },
     {
@@ -9801,7 +9801,7 @@
       "id": "uploadToR2:opts.r2Key",
       "effect": "direct-put-r2",
       "key": "object-writer|server/routes.ts|uploadToR2:opts.r2Key#0",
-      "source": "server/routes.ts:11709",
+      "source": "server/routes.ts:11707",
       "owner": "core-platform"
     },
     {
@@ -9809,7 +9809,7 @@
       "id": "uploadToR2:r2Key",
       "effect": "direct-put-r2",
       "key": "object-writer|server/routes.ts|uploadToR2:r2Key#0",
-      "source": "server/routes.ts:12240",
+      "source": "server/routes.ts:12238",
       "owner": "core-platform"
     },
     {
@@ -9867,7 +9867,7 @@
       "id": "ObjectWriteCoordinator",
       "effect": "coordinated-write",
       "key": "object-writer|server/scan-ingest-service.ts|ObjectWriteCoordinator#0",
-      "source": "server/scan-ingest-service.ts:1214",
+      "source": "server/scan-ingest-service.ts:1231",
       "owner": "scanner-platform"
     },
     {
@@ -23000,7 +23000,7 @@
       "pricingKind": "source-or-projection",
       "expression": "Number(costGbp.toFixed(4))",
       "key": "pricing-authority|server/routes.ts|value:cost_estimate_gbp#0",
-      "source": "server/routes.ts:6787",
+      "source": "server/routes.ts:6785",
       "owner": "core-platform"
     },
     {
@@ -23009,7 +23009,7 @@
       "pricingKind": "source-or-projection",
       "expression": "Number(costGbp.toFixed(4))",
       "key": "pricing-authority|server/routes.ts|value:costEstimate#0",
-      "source": "server/routes.ts:6798",
+      "source": "server/routes.ts:6796",
       "owner": "core-platform"
     },
     {
@@ -23018,7 +23018,7 @@
       "pricingKind": "source-or-projection",
       "expression": "costUsd * 0.79",
       "key": "pricing-authority|server/routes.ts|value:costGbp#0",
-      "source": "server/routes.ts:6769",
+      "source": "server/routes.ts:6767",
       "owner": "core-platform"
     },
     {
@@ -23027,7 +23027,7 @@
       "pricingKind": "source-or-projection",
       "expression": "(inputTokens / 1_000_000) * 1 + (outputTokens / 1_000_000) * 5",
       "key": "pricing-authority|server/routes.ts|value:costUsd#0",
-      "source": "server/routes.ts:6768",
+      "source": "server/routes.ts:6766",
       "owner": "core-platform"
     },
     {
@@ -23036,7 +23036,7 @@
       "pricingKind": "source-or-projection",
       "expression": "r.estimated_cost_usd != null ? Number(r.estimated_cost_usd) : 0",
       "key": "pricing-authority|server/routes.ts|value:estimatedCostUsd#0",
-      "source": "server/routes.ts:11401",
+      "source": "server/routes.ts:11399",
       "owner": "core-platform"
     },
     {
@@ -23045,7 +23045,7 @@
       "pricingKind": "source-or-projection",
       "expression": "{ currency: \"gbp\", product_data: { name: `MintVault Pre-Grade Estimates — ${pkgInfo.label}`, description: `${pkgInfo.credits} AI pre-grading estimates for your trading cards`, }...",
       "key": "pricing-authority|server/routes.ts|value:price_data#0",
-      "source": "server/routes.ts:8831",
+      "source": "server/routes.ts:8829",
       "owner": "core-platform"
     },
     {
@@ -23081,7 +23081,7 @@
       "pricingKind": "source-or-projection",
       "expression": "totalRow?.total != null ? Number(totalRow.total) : 0",
       "key": "pricing-authority|server/routes.ts|value:totalCostUsd#0",
-      "source": "server/routes.ts:11414",
+      "source": "server/routes.ts:11412",
       "owner": "core-platform"
     },
     {
@@ -23090,7 +23090,7 @@
       "pricingKind": "source-or-projection",
       "expression": "pkgInfo.pricePence",
       "key": "pricing-authority|server/routes.ts|value:unit_amount#0",
-      "source": "server/routes.ts:8837",
+      "source": "server/routes.ts:8835",
       "owner": "core-platform"
     },
     {
@@ -23738,7 +23738,7 @@
       "id": "literal:$1",
       "pricingKind": "currency-bearing-literal",
       "key": "pricing-authority|server/scan-ingest-service.ts|literal:$1#0",
-      "source": "server/scan-ingest-service.ts:638",
+      "source": "server/scan-ingest-service.ts:640",
       "owner": "scanner-platform"
     },
     {
@@ -23746,7 +23746,7 @@
       "id": "literal:$1",
       "pricingKind": "currency-bearing-literal",
       "key": "pricing-authority|server/scan-ingest-service.ts|literal:$1#1",
-      "source": "server/scan-ingest-service.ts:650",
+      "source": "server/scan-ingest-service.ts:652",
       "owner": "scanner-platform"
     },
     {
@@ -26987,7 +26987,7 @@
       "optionsAuthority": "<dynamic:{ headers: { \"X-Api-Key\": apiKey } }>",
       "callsiteAuthorities": [
         {
-          "source": "server/routes.ts:7958",
+          "source": "server/routes.ts:7956",
           "urlAuthority": "https://api.pokemontcg.io/v2/cards?q=<dynamic:encodeURIComponent(`set.id:${code} number:${queryNumber}`)>&pageSize=5",
           "httpMethod": "GET",
           "timeoutSignal": "not-declared",
@@ -26995,7 +26995,7 @@
           "optionsAuthority": "<dynamic:{ headers: { \"X-Api-Key\": apiKey } }>"
         },
         {
-          "source": "server/routes.ts:8584",
+          "source": "server/routes.ts:8582",
           "urlAuthority": "https://api.pokemontcg.io/v2/cards?q=<dynamic:encodeURIComponent(`set.id:${code} number:${queryNumber}`)>&pageSize=5",
           "httpMethod": "GET",
           "timeoutSignal": "not-declared",
@@ -27003,7 +27003,7 @@
           "optionsAuthority": "<dynamic:{ headers: { \"X-Api-Key\": apiKey } }>"
         },
         {
-          "source": "server/scan-ingest-service.ts:1313",
+          "source": "server/scan-ingest-service.ts:1330",
           "urlAuthority": "https://api.pokemontcg.io/v2/cards?q=<dynamic:encodeURIComponent(`set.id:${code} number:${queryNumber}`)>&pageSize=5",
           "httpMethod": "GET",
           "timeoutSignal": "not-declared",
@@ -27028,7 +27028,7 @@
       "optionsAuthority": "<dynamic:{ headers: { \"X-Api-Key\": apiKey }, }>",
       "callsiteAuthorities": [
         {
-          "source": "server/routes.ts:7958",
+          "source": "server/routes.ts:7956",
           "urlAuthority": "https://api.pokemontcg.io/v2/cards?q=<dynamic:encodeURIComponent(`name:\"${detectedName}\" number:${queryNumber}`)>&pageSize=10",
           "httpMethod": "GET",
           "timeoutSignal": "not-declared",
@@ -27036,7 +27036,7 @@
           "optionsAuthority": "<dynamic:{ headers: { \"X-Api-Key\": apiKey }, }>"
         },
         {
-          "source": "server/routes.ts:8584",
+          "source": "server/routes.ts:8582",
           "urlAuthority": "https://api.pokemontcg.io/v2/cards?q=<dynamic:encodeURIComponent(`name:\"${detectedName}\" number:${queryNumber}`)>&pageSize=10",
           "httpMethod": "GET",
           "timeoutSignal": "not-declared",
@@ -27044,7 +27044,7 @@
           "optionsAuthority": "<dynamic:{ headers: { \"X-Api-Key\": apiKey }, }>"
         },
         {
-          "source": "server/scan-ingest-service.ts:1313",
+          "source": "server/scan-ingest-service.ts:1330",
           "urlAuthority": "https://api.pokemontcg.io/v2/cards?q=<dynamic:encodeURIComponent(`name:\"${detectedName}\" number:${queryNumber}`)>&pageSize=10",
           "httpMethod": "GET",
           "timeoutSignal": "not-declared",
@@ -27131,7 +27131,7 @@
           "optionsAuthority": "<dynamic:{ method: \"POST\", headers: { \"Content-Type\": \"application/json\", \"x-api-key\": opts.apiKey, \"anthropic-version\": \"2023-06-01\", // Enables cache_control ttl:\"1h\" on system prompts...>"
         },
         {
-          "source": "server/routes.ts:6747",
+          "source": "server/routes.ts:6745",
           "urlAuthority": "https://api.anthropic.com/v1/messages",
           "httpMethod": "POST",
           "timeoutSignal": "ctrl.signal",
@@ -27139,7 +27139,7 @@
           "optionsAuthority": "<dynamic:{ method: \"POST\", headers: { \"Content-Type\": \"application/json\", \"x-api-key\": opts.apiKey, \"anthropic-version\": \"2023-06-01\", // Enables cache_control ttl:\"1h\" on system prompts...>"
         },
         {
-          "source": "server/routes.ts:8112",
+          "source": "server/routes.ts:8110",
           "urlAuthority": "https://api.anthropic.com/v1/messages",
           "httpMethod": "POST",
           "timeoutSignal": "ctrl.signal",
@@ -27147,7 +27147,7 @@
           "optionsAuthority": "<dynamic:{ method: \"POST\", headers: { \"Content-Type\": \"application/json\", \"x-api-key\": opts.apiKey, \"anthropic-version\": \"2023-06-01\", // Enables cache_control ttl:\"1h\" on system prompts...>"
         },
         {
-          "source": "server/routes.ts:8255",
+          "source": "server/routes.ts:8253",
           "urlAuthority": "https://api.anthropic.com/v1/messages",
           "httpMethod": "POST",
           "timeoutSignal": "ctrl.signal",
@@ -27155,7 +27155,7 @@
           "optionsAuthority": "<dynamic:{ method: \"POST\", headers: { \"Content-Type\": \"application/json\", \"x-api-key\": opts.apiKey, \"anthropic-version\": \"2023-06-01\", // Enables cache_control ttl:\"1h\" on system prompts...>"
         },
         {
-          "source": "server/routes.ts:8370",
+          "source": "server/routes.ts:8368",
           "urlAuthority": "https://api.anthropic.com/v1/messages",
           "httpMethod": "POST",
           "timeoutSignal": "ctrl.signal",
@@ -27163,7 +27163,7 @@
           "optionsAuthority": "<dynamic:{ method: \"POST\", headers: { \"Content-Type\": \"application/json\", \"x-api-key\": opts.apiKey, \"anthropic-version\": \"2023-06-01\", // Enables cache_control ttl:\"1h\" on system prompts...>"
         },
         {
-          "source": "server/routes.ts:8919",
+          "source": "server/routes.ts:8917",
           "urlAuthority": "https://api.anthropic.com/v1/messages",
           "httpMethod": "POST",
           "timeoutSignal": "ctrl.signal",
@@ -27457,7 +27457,7 @@
           "optionsAuthority": "default-fetch-options"
         },
         {
-          "source": "server/routes.ts:10690",
+          "source": "server/routes.ts:10688",
           "urlAuthority": "<dynamic:await getR2SignedUrl(topCard.frontPngKey, 60)>",
           "httpMethod": "GET",
           "timeoutSignal": "not-declared",
@@ -27465,7 +27465,7 @@
           "optionsAuthority": "default-fetch-options"
         },
         {
-          "source": "server/routes.ts:11365",
+          "source": "server/routes.ts:11363",
           "urlAuthority": "<dynamic:await getR2SignedUrl(topCard.frontPngKey, 60)>",
           "httpMethod": "GET",
           "timeoutSignal": "not-declared",
@@ -27803,7 +27803,7 @@
           "optionsAuthority": "<dynamic:{ method: \"POST\", headers: { \"Content-Type\": \"application/json\" }, body: JSON.stringify(summary), // redirect:\"error\" closes the SSRF-via-redirect hole — otherwise an // attacke...>"
         },
         {
-          "source": "server/routes.ts:11346",
+          "source": "server/routes.ts:11344",
           "urlAuthority": "<dynamic:safe.toString()>",
           "httpMethod": "POST",
           "timeoutSignal": "not-declared",
@@ -28189,7 +28189,7 @@
       "optionsAuthority": "default-fetch-options",
       "callsiteAuthorities": [
         {
-          "source": "server/routes.ts:3538",
+          "source": "server/routes.ts:3536",
           "urlAuthority": "<dynamic:images.front>",
           "httpMethod": "GET",
           "timeoutSignal": "not-declared",
@@ -28197,7 +28197,7 @@
           "optionsAuthority": "default-fetch-options"
         },
         {
-          "source": "server/routes.ts:3599",
+          "source": "server/routes.ts:3597",
           "urlAuthority": "<dynamic:images.front>",
           "httpMethod": "GET",
           "timeoutSignal": "not-declared",
@@ -28205,7 +28205,7 @@
           "optionsAuthority": "default-fetch-options"
         },
         {
-          "source": "server/routes.ts:3701",
+          "source": "server/routes.ts:3699",
           "urlAuthority": "<dynamic:images.front>",
           "httpMethod": "GET",
           "timeoutSignal": "not-declared",
@@ -28230,7 +28230,7 @@
       "optionsAuthority": "default-fetch-options",
       "callsiteAuthorities": [
         {
-          "source": "server/routes.ts:3538",
+          "source": "server/routes.ts:3536",
           "urlAuthority": "<dynamic:images.back>",
           "httpMethod": "GET",
           "timeoutSignal": "not-declared",
@@ -28238,7 +28238,7 @@
           "optionsAuthority": "default-fetch-options"
         },
         {
-          "source": "server/routes.ts:3599",
+          "source": "server/routes.ts:3597",
           "urlAuthority": "<dynamic:images.back>",
           "httpMethod": "GET",
           "timeoutSignal": "not-declared",
@@ -28246,7 +28246,7 @@
           "optionsAuthority": "default-fetch-options"
         },
         {
-          "source": "server/routes.ts:3701",
+          "source": "server/routes.ts:3699",
           "urlAuthority": "<dynamic:images.back>",
           "httpMethod": "GET",
           "timeoutSignal": "not-declared",
@@ -28374,7 +28374,7 @@
         }
       ],
       "key": "provider-adapter|server/routes.ts|fetch:dynamic-fetch#0",
-      "source": "server/routes.ts:3527",
+      "source": "server/routes.ts:3525",
       "owner": "core-platform"
     },
     {
@@ -28397,7 +28397,7 @@
         }
       ],
       "key": "provider-adapter|server/routes.ts|fetch:dynamic-fetch#1",
-      "source": "server/routes.ts:6827",
+      "source": "server/routes.ts:6825",
       "owner": "core-platform"
     },
     {
@@ -28420,7 +28420,7 @@
         }
       ],
       "key": "provider-adapter|server/routes.ts|fetch:dynamic-fetch#2",
-      "source": "server/routes.ts:7943",
+      "source": "server/routes.ts:7941",
       "owner": "core-platform"
     },
     {
@@ -28434,6 +28434,14 @@
       "optionsAuthority": "default-fetch-options",
       "callsiteAuthorities": [
         {
+          "source": "server/routes.ts:8088",
+          "urlAuthority": "<dynamic:await getR2SignedUrl(key, 300)>",
+          "httpMethod": "GET",
+          "timeoutSignal": "not-declared",
+          "idempotencyEvidence": "not-declared",
+          "optionsAuthority": "default-fetch-options"
+        },
+        {
           "source": "server/routes.ts:8090",
           "urlAuthority": "<dynamic:await getR2SignedUrl(key, 300)>",
           "httpMethod": "GET",
@@ -28442,7 +28450,7 @@
           "optionsAuthority": "default-fetch-options"
         },
         {
-          "source": "server/routes.ts:8092",
+          "source": "server/routes.ts:8231",
           "urlAuthority": "<dynamic:await getR2SignedUrl(key, 300)>",
           "httpMethod": "GET",
           "timeoutSignal": "not-declared",
@@ -28458,15 +28466,7 @@
           "optionsAuthority": "default-fetch-options"
         },
         {
-          "source": "server/routes.ts:8235",
-          "urlAuthority": "<dynamic:await getR2SignedUrl(key, 300)>",
-          "httpMethod": "GET",
-          "timeoutSignal": "not-declared",
-          "idempotencyEvidence": "not-declared",
-          "optionsAuthority": "default-fetch-options"
-        },
-        {
-          "source": "server/routes.ts:8353",
+          "source": "server/routes.ts:8351",
           "urlAuthority": "<dynamic:await getR2SignedUrl(key, 300)>",
           "httpMethod": "GET",
           "timeoutSignal": "not-declared",
@@ -28475,7 +28475,7 @@
         }
       ],
       "key": "provider-adapter|server/routes.ts|fetch:dynamic-fetch#3",
-      "source": "server/routes.ts:8084",
+      "source": "server/routes.ts:8082",
       "owner": "core-platform"
     },
     {
@@ -28489,6 +28489,14 @@
       "optionsAuthority": "default-fetch-options",
       "callsiteAuthorities": [
         {
+          "source": "server/routes.ts:8088",
+          "urlAuthority": "<dynamic:await getR2SignedUrl(key, 300)>",
+          "httpMethod": "GET",
+          "timeoutSignal": "not-declared",
+          "idempotencyEvidence": "not-declared",
+          "optionsAuthority": "default-fetch-options"
+        },
+        {
           "source": "server/routes.ts:8090",
           "urlAuthority": "<dynamic:await getR2SignedUrl(key, 300)>",
           "httpMethod": "GET",
@@ -28497,7 +28505,7 @@
           "optionsAuthority": "default-fetch-options"
         },
         {
-          "source": "server/routes.ts:8092",
+          "source": "server/routes.ts:8231",
           "urlAuthority": "<dynamic:await getR2SignedUrl(key, 300)>",
           "httpMethod": "GET",
           "timeoutSignal": "not-declared",
@@ -28513,15 +28521,7 @@
           "optionsAuthority": "default-fetch-options"
         },
         {
-          "source": "server/routes.ts:8235",
-          "urlAuthority": "<dynamic:await getR2SignedUrl(key, 300)>",
-          "httpMethod": "GET",
-          "timeoutSignal": "not-declared",
-          "idempotencyEvidence": "not-declared",
-          "optionsAuthority": "default-fetch-options"
-        },
-        {
-          "source": "server/routes.ts:8353",
+          "source": "server/routes.ts:8351",
           "urlAuthority": "<dynamic:await getR2SignedUrl(key, 300)>",
           "httpMethod": "GET",
           "timeoutSignal": "not-declared",
@@ -28530,7 +28530,7 @@
         }
       ],
       "key": "provider-adapter|server/routes.ts|fetch:dynamic-fetch#4",
-      "source": "server/routes.ts:8227",
+      "source": "server/routes.ts:8225",
       "owner": "core-platform"
     },
     {
@@ -28544,6 +28544,14 @@
       "optionsAuthority": "default-fetch-options",
       "callsiteAuthorities": [
         {
+          "source": "server/routes.ts:8088",
+          "urlAuthority": "<dynamic:await getR2SignedUrl(key, 300)>",
+          "httpMethod": "GET",
+          "timeoutSignal": "not-declared",
+          "idempotencyEvidence": "not-declared",
+          "optionsAuthority": "default-fetch-options"
+        },
+        {
           "source": "server/routes.ts:8090",
           "urlAuthority": "<dynamic:await getR2SignedUrl(key, 300)>",
           "httpMethod": "GET",
@@ -28552,7 +28560,7 @@
           "optionsAuthority": "default-fetch-options"
         },
         {
-          "source": "server/routes.ts:8092",
+          "source": "server/routes.ts:8231",
           "urlAuthority": "<dynamic:await getR2SignedUrl(key, 300)>",
           "httpMethod": "GET",
           "timeoutSignal": "not-declared",
@@ -28568,15 +28576,7 @@
           "optionsAuthority": "default-fetch-options"
         },
         {
-          "source": "server/routes.ts:8235",
-          "urlAuthority": "<dynamic:await getR2SignedUrl(key, 300)>",
-          "httpMethod": "GET",
-          "timeoutSignal": "not-declared",
-          "idempotencyEvidence": "not-declared",
-          "optionsAuthority": "default-fetch-options"
-        },
-        {
-          "source": "server/routes.ts:8353",
+          "source": "server/routes.ts:8351",
           "urlAuthority": "<dynamic:await getR2SignedUrl(key, 300)>",
           "httpMethod": "GET",
           "timeoutSignal": "not-declared",
@@ -28585,7 +28585,7 @@
         }
       ],
       "key": "provider-adapter|server/routes.ts|fetch:dynamic-fetch#5",
-      "source": "server/routes.ts:8347",
+      "source": "server/routes.ts:8345",
       "owner": "core-platform"
     },
     {
@@ -28599,7 +28599,7 @@
       "optionsAuthority": "default-fetch-options",
       "callsiteAuthorities": [
         {
-          "source": "server/routes.ts:8483",
+          "source": "server/routes.ts:8481",
           "urlAuthority": "<dynamic:await getR2SignedUrl(key, 300)>",
           "httpMethod": "GET",
           "timeoutSignal": "not-declared",
@@ -28607,7 +28607,7 @@
           "optionsAuthority": "default-fetch-options"
         },
         {
-          "source": "server/routes.ts:8485",
+          "source": "server/routes.ts:8483",
           "urlAuthority": "<dynamic:await getR2SignedUrl(key, 300)>",
           "httpMethod": "GET",
           "timeoutSignal": "not-declared",
@@ -28616,7 +28616,7 @@
         }
       ],
       "key": "provider-adapter|server/routes.ts|fetch:dynamic-fetch#6",
-      "source": "server/routes.ts:8477",
+      "source": "server/routes.ts:8475",
       "owner": "core-platform"
     },
     {
@@ -28639,7 +28639,7 @@
         }
       ],
       "key": "provider-adapter|server/routes.ts|fetch:dynamic-fetch#7",
-      "source": "server/routes.ts:10733",
+      "source": "server/routes.ts:10731",
       "owner": "core-platform"
     },
     {
@@ -28653,7 +28653,7 @@
       "optionsAuthority": "default-fetch-options",
       "callsiteAuthorities": [
         {
-          "source": "server/routes.ts:11483",
+          "source": "server/routes.ts:11481",
           "urlAuthority": "<dynamic:await getR2SignedUrl(key, 60)>",
           "httpMethod": "GET",
           "timeoutSignal": "not-declared",
@@ -28661,7 +28661,7 @@
           "optionsAuthority": "default-fetch-options"
         },
         {
-          "source": "server/routes.ts:11652",
+          "source": "server/routes.ts:11650",
           "urlAuthority": "<dynamic:await getR2SignedUrl(key, 60)>",
           "httpMethod": "GET",
           "timeoutSignal": "not-declared",
@@ -28669,7 +28669,7 @@
           "optionsAuthority": "default-fetch-options"
         },
         {
-          "source": "server/routes.ts:11790",
+          "source": "server/routes.ts:11788",
           "urlAuthority": "<dynamic:await getR2SignedUrl(key, 60)>",
           "httpMethod": "GET",
           "timeoutSignal": "not-declared",
@@ -28677,7 +28677,7 @@
           "optionsAuthority": "default-fetch-options"
         },
         {
-          "source": "server/routes.ts:11824",
+          "source": "server/routes.ts:11822",
           "urlAuthority": "<dynamic:await getR2SignedUrl(key, 60)>",
           "httpMethod": "GET",
           "timeoutSignal": "not-declared",
@@ -28686,7 +28686,7 @@
         }
       ],
       "key": "provider-adapter|server/routes.ts|fetch:dynamic-fetch#8",
-      "source": "server/routes.ts:11429",
+      "source": "server/routes.ts:11427",
       "owner": "core-platform"
     },
     {
@@ -28694,7 +28694,7 @@
       "id": "module:@aws-sdk/client-s3",
       "effect": "sdk-import",
       "key": "provider-adapter|server/routes.ts|module:@aws-sdk/client-s3#0",
-      "source": "server/routes.ts:2451",
+      "source": "server/routes.ts:2449",
       "owner": "core-platform"
     },
     {
@@ -28702,7 +28702,7 @@
       "id": "module:@aws-sdk/client-s3",
       "effect": "sdk-import",
       "key": "provider-adapter|server/routes.ts|module:@aws-sdk/client-s3#1",
-      "source": "server/routes.ts:3303",
+      "source": "server/routes.ts:3301",
       "owner": "core-platform"
     },
     {
@@ -28710,7 +28710,7 @@
       "id": "module:@aws-sdk/client-s3",
       "effect": "sdk-import",
       "key": "provider-adapter|server/routes.ts|module:@aws-sdk/client-s3#2",
-      "source": "server/routes.ts:5050",
+      "source": "server/routes.ts:5048",
       "owner": "core-platform"
     },
     {
@@ -28718,7 +28718,7 @@
       "id": "module:@aws-sdk/client-s3",
       "effect": "sdk-import",
       "key": "provider-adapter|server/routes.ts|module:@aws-sdk/client-s3#3",
-      "source": "server/routes.ts:5086",
+      "source": "server/routes.ts:5084",
       "owner": "core-platform"
     },
     {
@@ -28726,7 +28726,7 @@
       "id": "module:@aws-sdk/client-s3",
       "effect": "sdk-import",
       "key": "provider-adapter|server/routes.ts|module:@aws-sdk/client-s3#4",
-      "source": "server/routes.ts:5123",
+      "source": "server/routes.ts:5121",
       "owner": "core-platform"
     },
     {
@@ -28734,7 +28734,7 @@
       "id": "module:@aws-sdk/client-s3",
       "effect": "sdk-import",
       "key": "provider-adapter|server/routes.ts|module:@aws-sdk/client-s3#5",
-      "source": "server/routes.ts:5160",
+      "source": "server/routes.ts:5158",
       "owner": "core-platform"
     },
     {
@@ -28742,7 +28742,7 @@
       "id": "module:@aws-sdk/client-s3",
       "effect": "sdk-import",
       "key": "provider-adapter|server/routes.ts|module:@aws-sdk/client-s3#6",
-      "source": "server/routes.ts:10247",
+      "source": "server/routes.ts:10245",
       "owner": "core-platform"
     },
     {
@@ -28750,7 +28750,7 @@
       "id": "stripe:stripe.checkout.sessions.create",
       "effect": "sdk-operation",
       "key": "provider-adapter|server/routes.ts|stripe:stripe.checkout.sessions.create#0",
-      "source": "server/routes.ts:8825",
+      "source": "server/routes.ts:8823",
       "owner": "core-platform"
     },
     {
@@ -28764,7 +28764,7 @@
       "optionsAuthority": "<dynamic:{ headers }>",
       "callsiteAuthorities": [
         {
-          "source": "server/routes.ts:2104",
+          "source": "server/routes.ts:2102",
           "urlAuthority": "https://api.pokemontcg.io/v2/sets?orderBy=-releaseDate&pageSize=250",
           "httpMethod": "GET",
           "timeoutSignal": "not-declared",
@@ -34811,7 +34811,7 @@
       "roleKind": "definition-or-mapping",
       "declaration": "actor",
       "key": "role-authority|server/routes.ts|role:admin#0",
-      "source": "server/routes.ts:1194",
+      "source": "server/routes.ts:1188",
       "owner": "core-platform"
     },
     {
@@ -34820,7 +34820,7 @@
       "roleKind": "definition-or-mapping",
       "declaration": "actor",
       "key": "role-authority|server/routes.ts|role:admin#1",
-      "source": "server/routes.ts:1499",
+      "source": "server/routes.ts:1497",
       "owner": "core-platform"
     },
     {
@@ -34829,7 +34829,7 @@
       "roleKind": "definition-or-mapping",
       "declaration": "actor",
       "key": "role-authority|server/routes.ts|role:admin#10",
-      "source": "server/routes.ts:11296",
+      "source": "server/routes.ts:11294",
       "owner": "core-platform"
     },
     {
@@ -34838,7 +34838,7 @@
       "roleKind": "definition-or-mapping",
       "declaration": "actor",
       "key": "role-authority|server/routes.ts|role:admin#11",
-      "source": "server/routes.ts:11502",
+      "source": "server/routes.ts:11500",
       "owner": "core-platform"
     },
     {
@@ -34847,7 +34847,7 @@
       "roleKind": "definition-or-mapping",
       "declaration": "actor",
       "key": "role-authority|server/routes.ts|role:admin#12",
-      "source": "server/routes.ts:11612",
+      "source": "server/routes.ts:11610",
       "owner": "core-platform"
     },
     {
@@ -34856,7 +34856,7 @@
       "roleKind": "definition-or-mapping",
       "declaration": "actor",
       "key": "role-authority|server/routes.ts|role:admin#13",
-      "source": "server/routes.ts:11630",
+      "source": "server/routes.ts:11628",
       "owner": "core-platform"
     },
     {
@@ -34865,7 +34865,7 @@
       "roleKind": "definition-or-mapping",
       "declaration": "actor",
       "key": "role-authority|server/routes.ts|role:admin#14",
-      "source": "server/routes.ts:11711",
+      "source": "server/routes.ts:11709",
       "owner": "core-platform"
     },
     {
@@ -34874,7 +34874,7 @@
       "roleKind": "definition-or-mapping",
       "declaration": "gradingActor",
       "key": "role-authority|server/routes.ts|role:admin#2",
-      "source": "server/routes.ts:1895",
+      "source": "server/routes.ts:1893",
       "owner": "core-platform"
     },
     {
@@ -34883,7 +34883,7 @@
       "roleKind": "definition-or-mapping",
       "declaration": "actor",
       "key": "role-authority|server/routes.ts|role:admin#3",
-      "source": "server/routes.ts:6144",
+      "source": "server/routes.ts:6142",
       "owner": "core-platform"
     },
     {
@@ -34892,7 +34892,7 @@
       "roleKind": "definition-or-mapping",
       "declaration": "actor",
       "key": "role-authority|server/routes.ts|role:admin#4",
-      "source": "server/routes.ts:6523",
+      "source": "server/routes.ts:6521",
       "owner": "core-platform"
     },
     {
@@ -34901,7 +34901,7 @@
       "roleKind": "definition-or-mapping",
       "declaration": "actor",
       "key": "role-authority|server/routes.ts|role:admin#5",
-      "source": "server/routes.ts:6619",
+      "source": "server/routes.ts:6617",
       "owner": "core-platform"
     },
     {
@@ -34910,7 +34910,7 @@
       "roleKind": "definition-or-mapping",
       "declaration": "actor",
       "key": "role-authority|server/routes.ts|role:admin#6",
-      "source": "server/routes.ts:8564",
+      "source": "server/routes.ts:8562",
       "owner": "core-platform"
     },
     {
@@ -34919,7 +34919,7 @@
       "roleKind": "definition-or-mapping",
       "declaration": "actor",
       "key": "role-authority|server/routes.ts|role:admin#7",
-      "source": "server/routes.ts:10896",
+      "source": "server/routes.ts:10894",
       "owner": "core-platform"
     },
     {
@@ -34928,7 +34928,7 @@
       "roleKind": "definition-or-mapping",
       "declaration": "actor",
       "key": "role-authority|server/routes.ts|role:admin#8",
-      "source": "server/routes.ts:11002",
+      "source": "server/routes.ts:11000",
       "owner": "core-platform"
     },
     {
@@ -34937,7 +34937,7 @@
       "roleKind": "definition-or-mapping",
       "declaration": "actor",
       "key": "role-authority|server/routes.ts|role:admin#9",
-      "source": "server/routes.ts:11252",
+      "source": "server/routes.ts:11250",
       "owner": "core-platform"
     },
     {
@@ -34946,7 +34946,7 @@
       "roleKind": "definition-or-mapping",
       "declaration": "role",
       "key": "role-authority|server/routes.ts|role:user#0",
-      "source": "server/routes.ts:6742",
+      "source": "server/routes.ts:6740",
       "owner": "core-platform"
     },
     {
@@ -34955,7 +34955,7 @@
       "roleKind": "definition-or-mapping",
       "declaration": "role",
       "key": "role-authority|server/routes.ts|role:user#1",
-      "source": "server/routes.ts:8113",
+      "source": "server/routes.ts:8111",
       "owner": "core-platform"
     },
     {
@@ -34964,7 +34964,7 @@
       "roleKind": "definition-or-mapping",
       "declaration": "role",
       "key": "role-authority|server/routes.ts|role:user#2",
-      "source": "server/routes.ts:8256",
+      "source": "server/routes.ts:8254",
       "owner": "core-platform"
     },
     {
@@ -34973,7 +34973,7 @@
       "roleKind": "definition-or-mapping",
       "declaration": "role",
       "key": "role-authority|server/routes.ts|role:user#3",
-      "source": "server/routes.ts:8371",
+      "source": "server/routes.ts:8369",
       "owner": "core-platform"
     },
     {
@@ -34982,7 +34982,7 @@
       "roleKind": "definition-or-mapping",
       "declaration": "role",
       "key": "role-authority|server/routes.ts|role:user#4",
-      "source": "server/routes.ts:8925",
+      "source": "server/routes.ts:8923",
       "owner": "core-platform"
     },
     {
@@ -35399,7 +35399,7 @@
       "roleKind": "definition-or-mapping",
       "declaration": "actorId",
       "key": "role-authority|server/scan-ingest-service.ts|role:scanner-pipeline#0",
-      "source": "server/scan-ingest-service.ts:1225",
+      "source": "server/scan-ingest-service.ts:1242",
       "owner": "scanner-platform"
     },
     {
@@ -35408,7 +35408,7 @@
       "roleKind": "definition-or-mapping",
       "declaration": "actor",
       "key": "role-authority|server/scan-ingest-service.ts|role:scanner-pipeline#1",
-      "source": "server/scan-ingest-service.ts:1230",
+      "source": "server/scan-ingest-service.ts:1247",
       "owner": "scanner-platform"
     },
     {
@@ -37242,7 +37242,7 @@
       "registrationOrder": 19,
       "compositionKind": "registrar-call",
       "key": "route-mount|server/routes.ts|server/routes.ts#registerRoutes:param:app->server/command-centre/routes.ts#registerCommandCentreRoutes:param:app@/#0",
-      "source": "server/routes.ts:2127",
+      "source": "server/routes.ts:2125",
       "owner": "core-platform"
     },
     {
@@ -37254,7 +37254,7 @@
       "registrationOrder": 4,
       "compositionKind": "registrar-call",
       "key": "route-mount|server/routes.ts|server/routes.ts#registerRoutes:param:app->server/correction-mode.ts#registerCorrectionModeRoutes:param:app@/#0",
-      "source": "server/routes.ts:2108",
+      "source": "server/routes.ts:2106",
       "owner": "core-platform"
     },
     {
@@ -37266,7 +37266,7 @@
       "registrationOrder": 240,
       "compositionKind": "registrar-call",
       "key": "route-mount|server/routes.ts|server/routes.ts#registerRoutes:param:app->server/marketplace-seller.ts#registerSellerRoutes:param:app@/#0",
-      "source": "server/routes.ts:12282",
+      "source": "server/routes.ts:12280",
       "owner": "core-platform"
     },
     {
@@ -37278,7 +37278,7 @@
       "registrationOrder": 12,
       "compositionKind": "registrar-call",
       "key": "route-mount|server/routes.ts|server/routes.ts#registerRoutes:param:app->server/partner/admin-routes.ts#registerSuperAdminPartnerRoutes:param:app@/#0",
-      "source": "server/routes.ts:2119",
+      "source": "server/routes.ts:2117",
       "owner": "core-platform"
     },
     {
@@ -37290,7 +37290,7 @@
       "registrationOrder": 13,
       "compositionKind": "registrar-call",
       "key": "route-mount|server/routes.ts|server/routes.ts#registerRoutes:param:app->server/partner/connector-admin-routes.ts#registerConnectorOpsRoutes:param:app@/#0",
-      "source": "server/routes.ts:2120",
+      "source": "server/routes.ts:2118",
       "owner": "core-platform"
     },
     {
@@ -37302,7 +37302,7 @@
       "registrationOrder": 16,
       "compositionKind": "registrar-call",
       "key": "route-mount|server/routes.ts|server/routes.ts#registerRoutes:param:app->server/partner/dashboard-routes.ts#registerPartnerDashboardRoutes:param:app@/#0",
-      "source": "server/routes.ts:2123",
+      "source": "server/routes.ts:2121",
       "owner": "core-platform"
     },
     {
@@ -37314,7 +37314,7 @@
       "registrationOrder": 23,
       "compositionKind": "registrar-call",
       "key": "route-mount|server/routes.ts|server/routes.ts#registerRoutes:param:app->server/partner/flag-admin-routes.ts#registerPartnerFlagAdminRoutes:param:app@/#0",
-      "source": "server/routes.ts:2131",
+      "source": "server/routes.ts:2129",
       "owner": "core-platform"
     },
     {
@@ -37326,7 +37326,7 @@
       "registrationOrder": 8,
       "compositionKind": "registrar-call",
       "key": "route-mount|server/routes.ts|server/routes.ts#registerRoutes:param:app->server/partner/mount.ts#mountPartnerPortal:param:app@/#0",
-      "source": "server/routes.ts:2115",
+      "source": "server/routes.ts:2113",
       "owner": "core-platform"
     },
     {
@@ -37338,7 +37338,7 @@
       "registrationOrder": 14,
       "compositionKind": "registrar-call",
       "key": "route-mount|server/routes.ts|server/routes.ts#registerRoutes:param:app->server/partner/partner-management-routes.ts#registerPartnerManagementRoutes:param:app@/#0",
-      "source": "server/routes.ts:2121",
+      "source": "server/routes.ts:2119",
       "owner": "core-platform"
     },
     {
@@ -37350,7 +37350,7 @@
       "registrationOrder": 1,
       "compositionKind": "registrar-call",
       "key": "route-mount|server/routes.ts|server/routes.ts#registerRoutes:param:app->server/partner/public-presence-routes.ts#registerPublicPartnerPresenceRoutes:param:app@/#0",
-      "source": "server/routes.ts:2105",
+      "source": "server/routes.ts:2103",
       "owner": "core-platform"
     },
     {
@@ -37362,7 +37362,7 @@
       "registrationOrder": 7,
       "compositionKind": "registrar-call",
       "key": "route-mount|server/routes.ts|server/routes.ts#registerRoutes:param:app->server/partner/public-routes.ts#registerPartnerPublicRoutes:param:app@/#0",
-      "source": "server/routes.ts:2114",
+      "source": "server/routes.ts:2112",
       "owner": "core-platform"
     },
     {
@@ -37374,7 +37374,7 @@
       "registrationOrder": 15,
       "compositionKind": "registrar-call",
       "key": "route-mount|server/routes.ts|server/routes.ts#registerRoutes:param:app->server/partner/station-admin-routes.ts#registerPartnerStationAdminRoutes:param:app@/#0",
-      "source": "server/routes.ts:2122",
+      "source": "server/routes.ts:2120",
       "owner": "core-platform"
     },
     {
@@ -37386,7 +37386,7 @@
       "registrationOrder": 17,
       "compositionKind": "registrar-call",
       "key": "route-mount|server/routes.ts|server/routes.ts#registerRoutes:param:app->server/partner/supplies-admin-routes.ts#registerPartnerSuppliesAdminRoutes:param:app@/#0",
-      "source": "server/routes.ts:2124",
+      "source": "server/routes.ts:2122",
       "owner": "core-platform"
     },
     {
@@ -37398,7 +37398,7 @@
       "registrationOrder": 18,
       "compositionKind": "registrar-call",
       "key": "route-mount|server/routes.ts|server/routes.ts#registerRoutes:param:app->server/partner/supply-admin-routes.ts#registerPartnerSupplyAdminRoutes:param:app@/#0",
-      "source": "server/routes.ts:2126",
+      "source": "server/routes.ts:2124",
       "owner": "core-platform"
     },
     {
@@ -37410,7 +37410,7 @@
       "registrationOrder": 11,
       "compositionKind": "registrar-call",
       "key": "route-mount|server/routes.ts|server/routes.ts#registerRoutes:param:app->server/routes/admin-config.ts#registerAdminConfigRoutes:param:app@/#0",
-      "source": "server/routes.ts:2118",
+      "source": "server/routes.ts:2116",
       "owner": "core-platform"
     },
     {
@@ -37422,7 +37422,7 @@
       "registrationOrder": 10,
       "compositionKind": "registrar-call",
       "key": "route-mount|server/routes.ts|server/routes.ts#registerRoutes:param:app->server/routes/admin-submissions.ts#registerAdminSubmissionRoutes:param:app@/#0",
-      "source": "server/routes.ts:2117",
+      "source": "server/routes.ts:2115",
       "owner": "core-platform"
     },
     {
@@ -37434,7 +37434,7 @@
       "registrationOrder": 26,
       "compositionKind": "registrar-call",
       "key": "route-mount|server/routes.ts|server/routes.ts#registerRoutes:param:app->server/routes/admin/catalogue.ts#registerCatalogueRoutes:param:app@/#0",
-      "source": "server/routes.ts:2134",
+      "source": "server/routes.ts:2132",
       "owner": "core-platform"
     },
     {
@@ -37446,7 +37446,7 @@
       "registrationOrder": 32,
       "compositionKind": "registrar-call",
       "key": "route-mount|server/routes.ts|server/routes.ts#registerRoutes:param:app->server/routes/admin/claim-register.ts#registerClaimRegisterRoutes:param:app@/#0",
-      "source": "server/routes.ts:2140",
+      "source": "server/routes.ts:2138",
       "owner": "core-platform"
     },
     {
@@ -37458,7 +37458,7 @@
       "registrationOrder": 20,
       "compositionKind": "registrar-call",
       "key": "route-mount|server/routes.ts|server/routes.ts#registerRoutes:param:app->server/routes/admin/commercial-growth.ts#registerCommercialGrowthRoutes:param:app@/#0",
-      "source": "server/routes.ts:2128",
+      "source": "server/routes.ts:2126",
       "owner": "core-platform"
     },
     {
@@ -37470,7 +37470,7 @@
       "registrationOrder": 27,
       "compositionKind": "registrar-call",
       "key": "route-mount|server/routes.ts|server/routes.ts#registerRoutes:param:app->server/routes/admin/project-control.ts#registerProjectControlRoutes:param:app@/#0",
-      "source": "server/routes.ts:2135",
+      "source": "server/routes.ts:2133",
       "owner": "core-platform"
     },
     {
@@ -37482,7 +37482,7 @@
       "registrationOrder": 33,
       "compositionKind": "registrar-call",
       "key": "route-mount|server/routes.ts|server/routes.ts#registerRoutes:param:app->server/routes/admin/promotions.ts#registerPromotionRoutes:param:app@/#0",
-      "source": "server/routes.ts:2141",
+      "source": "server/routes.ts:2139",
       "owner": "core-platform"
     },
     {
@@ -37494,7 +37494,7 @@
       "registrationOrder": 2,
       "compositionKind": "registrar-call",
       "key": "route-mount|server/routes.ts|server/routes.ts#registerRoutes:param:app->server/routes/auth.ts#registerAuthRoutes:param:app@/#0",
-      "source": "server/routes.ts:2106",
+      "source": "server/routes.ts:2104",
       "owner": "core-platform"
     },
     {
@@ -37506,7 +37506,7 @@
       "registrationOrder": 28,
       "compositionKind": "registrar-call",
       "key": "route-mount|server/routes.ts|server/routes.ts#registerRoutes:param:app->server/routes/card-identification.ts#registerCardIdentificationRoutes:param:app@/#0",
-      "source": "server/routes.ts:2136",
+      "source": "server/routes.ts:2134",
       "owner": "core-platform"
     },
     {
@@ -37518,7 +37518,7 @@
       "registrationOrder": 34,
       "compositionKind": "registrar-call",
       "key": "route-mount|server/routes.ts|server/routes.ts#registerRoutes:param:app->server/routes/embedding.ts#registerEmbeddingRoutes:param:app@/#0",
-      "source": "server/routes.ts:2142",
+      "source": "server/routes.ts:2140",
       "owner": "core-platform"
     },
     {
@@ -37530,7 +37530,7 @@
       "registrationOrder": 22,
       "compositionKind": "registrar-call",
       "key": "route-mount|server/routes.ts|server/routes.ts#registerRoutes:param:app->server/routes/growth-mcp.ts#registerGrowthMcpRoutes:param:app@/#0",
-      "source": "server/routes.ts:2130",
+      "source": "server/routes.ts:2128",
       "owner": "core-platform"
     },
     {
@@ -37542,7 +37542,7 @@
       "registrationOrder": 25,
       "compositionKind": "registrar-call",
       "key": "route-mount|server/routes.ts|server/routes.ts#registerRoutes:param:app->server/routes/pokemon-knowledge.ts#registerPokemonKnowledgeRoutes:param:app@/#0",
-      "source": "server/routes.ts:2133",
+      "source": "server/routes.ts:2131",
       "owner": "core-platform"
     },
     {
@@ -37554,7 +37554,7 @@
       "registrationOrder": 30,
       "compositionKind": "registrar-call",
       "key": "route-mount|server/routes.ts|server/routes.ts#registerRoutes:param:app->server/routes/pre-grade.ts#registerPreGradeRoutes:param:app@/#0",
-      "source": "server/routes.ts:2138",
+      "source": "server/routes.ts:2136",
       "owner": "core-platform"
     },
     {
@@ -37566,7 +37566,7 @@
       "registrationOrder": 6,
       "compositionKind": "registrar-call",
       "key": "route-mount|server/routes.ts|server/routes.ts#registerRoutes:param:app->server/routes/print-workflow.ts#registerPrintWorkflowRoutes:param:app@/#0",
-      "source": "server/routes.ts:2110",
+      "source": "server/routes.ts:2108",
       "owner": "core-platform"
     },
     {
@@ -37578,7 +37578,7 @@
       "registrationOrder": 0,
       "compositionKind": "registrar-call",
       "key": "route-mount|server/routes.ts|server/routes.ts#registerRoutes:param:app->server/routes/public.ts#registerPublicRoutes:param:app@/#0",
-      "source": "server/routes.ts:2104",
+      "source": "server/routes.ts:2102",
       "owner": "core-platform"
     },
     {
@@ -37590,7 +37590,7 @@
       "registrationOrder": 24,
       "compositionKind": "registrar-call",
       "key": "route-mount|server/routes.ts|server/routes.ts#registerRoutes:param:app->server/routes/rarity-mapping.ts#registerRarityMappingRoutes:param:app@/#0",
-      "source": "server/routes.ts:2132",
+      "source": "server/routes.ts:2130",
       "owner": "core-platform"
     },
     {
@@ -37602,7 +37602,7 @@
       "registrationOrder": 38,
       "compositionKind": "registrar-call",
       "key": "route-mount|server/routes.ts|server/routes.ts#registerRoutes:param:app->server/routes/redirects.ts#registerRedirectRoutes:param:app@/#0",
-      "source": "server/routes.ts:2152",
+      "source": "server/routes.ts:2150",
       "owner": "core-platform"
     },
     {
@@ -37614,7 +37614,7 @@
       "registrationOrder": 3,
       "compositionKind": "registrar-call",
       "key": "route-mount|server/routes.ts|server/routes.ts#registerRoutes:param:app->server/routes/review-preview.ts#registerReviewPreviewRoutes:param:app@/#0",
-      "source": "server/routes.ts:2107",
+      "source": "server/routes.ts:2105",
       "owner": "core-platform"
     },
     {
@@ -37626,7 +37626,7 @@
       "registrationOrder": 21,
       "compositionKind": "registrar-call",
       "key": "route-mount|server/routes.ts|server/routes.ts#registerRoutes:param:app->server/routes/reviews.ts#registerReviewRequestRoutes:param:app@/#0",
-      "source": "server/routes.ts:2129",
+      "source": "server/routes.ts:2127",
       "owner": "core-platform"
     },
     {
@@ -37638,7 +37638,7 @@
       "registrationOrder": 5,
       "compositionKind": "registrar-call",
       "key": "route-mount|server/routes.ts|server/routes.ts#registerRoutes:param:app->server/routes/staff.ts#registerStaffRoutes:param:app@/#0",
-      "source": "server/routes.ts:2109",
+      "source": "server/routes.ts:2107",
       "owner": "core-platform"
     },
     {
@@ -37650,7 +37650,7 @@
       "registrationOrder": 31,
       "compositionKind": "registrar-call",
       "key": "route-mount|server/routes.ts|server/routes.ts#registerRoutes:param:app->server/routes/stolen.ts#registerStolenRoutes:param:app@/#0",
-      "source": "server/routes.ts:2139",
+      "source": "server/routes.ts:2137",
       "owner": "core-platform"
     },
     {
@@ -37662,7 +37662,7 @@
       "registrationOrder": 9,
       "compositionKind": "registrar-call",
       "key": "route-mount|server/routes.ts|server/routes.ts#registerRoutes:param:app->server/routes/submissions.ts#registerSubmissionRoutes:param:app@/#0",
-      "source": "server/routes.ts:2116",
+      "source": "server/routes.ts:2114",
       "owner": "core-platform"
     },
     {
@@ -37674,7 +37674,7 @@
       "registrationOrder": 29,
       "compositionKind": "registrar-call",
       "key": "route-mount|server/routes.ts|server/routes.ts#registerRoutes:param:app->server/routes/transfers.ts#registerTransferRoutes:param:app@/#0",
-      "source": "server/routes.ts:2137",
+      "source": "server/routes.ts:2135",
       "owner": "core-platform"
     },
     {
@@ -37686,7 +37686,7 @@
       "registrationOrder": 35,
       "compositionKind": "registrar-call",
       "key": "route-mount|server/routes.ts|server/routes.ts#registerRoutes:param:app->server/routes/vault-quest-admin.ts#registerVaultQuestAdminRoutes:param:app@/#0",
-      "source": "server/routes.ts:2145",
+      "source": "server/routes.ts:2143",
       "owner": "core-platform"
     },
     {
@@ -37698,7 +37698,7 @@
       "registrationOrder": 37,
       "compositionKind": "registrar-call",
       "key": "route-mount|server/routes.ts|server/routes.ts#registerRoutes:param:app->server/routes/vault-quest-card-factory.ts#registerVaultQuestCardFactoryRoutes:param:app@/#0",
-      "source": "server/routes.ts:2149",
+      "source": "server/routes.ts:2147",
       "owner": "core-platform"
     },
     {
@@ -37710,7 +37710,7 @@
       "registrationOrder": 36,
       "compositionKind": "registrar-call",
       "key": "route-mount|server/routes.ts|server/routes.ts#registerRoutes:param:app->server/routes/vault-quest-production.ts#registerVaultQuestProductionRoutes:param:app@/#0",
-      "source": "server/routes.ts:2147",
+      "source": "server/routes.ts:2145",
       "owner": "core-platform"
     },
     {
@@ -37722,7 +37722,7 @@
       "registrationOrder": 238,
       "compositionKind": "registrar-call",
       "key": "route-mount|server/routes.ts|server/routes.ts#registerRoutes:param:app->server/showroom.ts#registerShowroomRoutes:param:app@/#0",
-      "source": "server/routes.ts:12276",
+      "source": "server/routes.ts:12274",
       "owner": "core-platform"
     },
     {
@@ -37734,7 +37734,7 @@
       "registrationOrder": 239,
       "compositionKind": "registrar-call",
       "key": "route-mount|server/routes.ts|server/routes.ts#registerRoutes:param:app->server/vault-club.ts#registerVaultClubRoutes:param:app@/#0",
-      "source": "server/routes.ts:12279",
+      "source": "server/routes.ts:12277",
       "owner": "core-platform"
     },
     {
@@ -69831,7 +69831,7 @@
       ],
       "retirementState": "active",
       "key": "server-route|server/routes.ts|DELETE /api/admin/certificates/:id/images/:side#0",
-      "source": "server/routes.ts:6866",
+      "source": "server/routes.ts:6864",
       "owner": "core-platform",
       "commandOwner": "server/routes.ts#registerRoutes",
       "delegatedCommands": [
@@ -69900,7 +69900,7 @@
       ],
       "retirementState": "active",
       "key": "server-route|server/routes.ts|DELETE /api/admin/certificates/:id/nfc#0",
-      "source": "server/routes.ts:5517",
+      "source": "server/routes.ts:5515",
       "owner": "core-platform",
       "commandOwner": "server/routes.ts#registerRoutes",
       "delegatedCommands": [
@@ -69962,7 +69962,7 @@
       ],
       "retirementState": "active",
       "key": "server-route|server/routes.ts|DELETE /api/admin/certificates/:id#0",
-      "source": "server/routes.ts:4167",
+      "source": "server/routes.ts:4165",
       "owner": "core-platform",
       "commandOwner": "server/routes.ts#registerRoutes",
       "delegatedCommands": [
@@ -70022,7 +70022,7 @@
       ],
       "retirementState": "retired",
       "key": "server-route|server/routes.ts|DELETE /api/admin/certs/:certId#0",
-      "source": "server/routes.ts:10180",
+      "source": "server/routes.ts:10178",
       "owner": "core-platform",
       "commandOwner": "server/routes.ts#registerRoutes",
       "delegatedCommands": [
@@ -70128,7 +70128,7 @@
       ],
       "retirementState": "active",
       "key": "server-route|server/routes.ts|DELETE /api/admin/ig/queue/:id#0",
-      "source": "server/routes.ts:12148",
+      "source": "server/routes.ts:12146",
       "owner": "core-platform",
       "commandOwner": "server/routes.ts#registerRoutes",
       "delegatedCommands": [
@@ -70189,7 +70189,7 @@
       ],
       "retirementState": "active",
       "key": "server-route|server/routes.ts|DELETE /api/admin/printing/override/:certId#0",
-      "source": "server/routes.ts:5253",
+      "source": "server/routes.ts:5251",
       "owner": "core-platform",
       "commandOwner": "server/routes.ts#registerRoutes",
       "delegatedCommands": [
@@ -70250,7 +70250,7 @@
       ],
       "retirementState": "active",
       "key": "server-route|server/routes.ts|GET /api/admin/card-lookup#0",
-      "source": "server/routes.ts:7600",
+      "source": "server/routes.ts:7598",
       "owner": "core-platform",
       "commandOwner": "server/routes.ts#registerRoutes",
       "delegatedCommands": [
@@ -70317,7 +70317,7 @@
       ],
       "retirementState": "active",
       "key": "server-route|server/routes.ts|GET /api/admin/certificates/:certId/certificate-document#0",
-      "source": "server/routes.ts:5652",
+      "source": "server/routes.ts:5650",
       "owner": "core-platform",
       "commandOwner": "server/routes.ts#registerRoutes",
       "delegatedCommands": [
@@ -70414,7 +70414,7 @@
       ],
       "retirementState": "active",
       "key": "server-route|server/routes.ts|GET /api/admin/certificates/:id/grading#0",
-      "source": "server/routes.ts:6966",
+      "source": "server/routes.ts:6964",
       "owner": "core-platform",
       "commandOwner": "server/routes.ts#registerRoutes",
       "delegatedCommands": [
@@ -70527,7 +70527,7 @@
       ],
       "retirementState": "active",
       "key": "server-route|server/routes.ts|GET /api/admin/certificates/:id/images#0",
-      "source": "server/routes.ts:6952",
+      "source": "server/routes.ts:6950",
       "owner": "core-platform",
       "commandOwner": "server/routes.ts#registerRoutes",
       "delegatedCommands": [
@@ -70609,7 +70609,7 @@
       ],
       "retirementState": "active",
       "key": "server-route|server/routes.ts|GET /api/admin/certificates/:id/label/:side#0",
-      "source": "server/routes.ts:4221",
+      "source": "server/routes.ts:4219",
       "owner": "core-platform",
       "commandOwner": "server/routes.ts#registerRoutes",
       "delegatedCommands": [
@@ -70726,7 +70726,7 @@
       ],
       "retirementState": "active",
       "key": "server-route|server/routes.ts|GET /api/admin/certificates/:id/scanner-capture-sessions/:sessionId#0",
-      "source": "server/routes.ts:9120",
+      "source": "server/routes.ts:9118",
       "owner": "core-platform",
       "commandOwner": "server/routes.ts#registerRoutes",
       "delegatedCommands": [
@@ -70786,7 +70786,7 @@
       ],
       "retirementState": "active",
       "key": "server-route|server/routes.ts|GET /api/admin/certificates/export-csv#0",
-      "source": "server/routes.ts:3971",
+      "source": "server/routes.ts:3969",
       "owner": "core-platform",
       "commandOwner": "server/routes.ts#registerRoutes",
       "delegatedCommands": [
@@ -70853,7 +70853,7 @@
       ],
       "retirementState": "active",
       "key": "server-route|server/routes.ts|GET /api/admin/certificates/label/:certId/:filename#0",
-      "source": "server/routes.ts:5181",
+      "source": "server/routes.ts:5179",
       "owner": "core-platform",
       "commandOwner": "server/routes.ts#registerRoutes",
       "delegatedCommands": [
@@ -70973,7 +70973,7 @@
       ],
       "retirementState": "active",
       "key": "server-route|server/routes.ts|GET /api/admin/certificates#0",
-      "source": "server/routes.ts:4031",
+      "source": "server/routes.ts:4029",
       "owner": "core-platform",
       "commandOwner": "server/routes.ts#registerRoutes",
       "delegatedCommands": [
@@ -71039,7 +71039,7 @@
       ],
       "retirementState": "active",
       "key": "server-route|server/routes.ts|GET /api/admin/certs/:certId/pop-report#0",
-      "source": "server/routes.ts:9724",
+      "source": "server/routes.ts:9722",
       "owner": "core-platform",
       "commandOwner": "server/routes.ts#registerRoutes",
       "delegatedCommands": [
@@ -71102,7 +71102,7 @@
       ],
       "retirementState": "active",
       "key": "server-route|server/routes.ts|GET /api/admin/certs/:certId/preview#0",
-      "source": "server/routes.ts:9680",
+      "source": "server/routes.ts:9678",
       "owner": "core-platform",
       "commandOwner": "server/routes.ts#registerRoutes",
       "delegatedCommands": [
@@ -71207,7 +71207,7 @@
       ],
       "retirementState": "active",
       "key": "server-route|server/routes.ts|GET /api/admin/community#0",
-      "source": "server/routes.ts:2855",
+      "source": "server/routes.ts:2853",
       "owner": "core-platform",
       "commandOwner": "server/routes.ts#registerRoutes",
       "delegatedCommands": [
@@ -71267,7 +71267,7 @@
       ],
       "retirementState": "active",
       "key": "server-route|server/routes.ts|GET /api/admin/grading-queue/current#0",
-      "source": "server/routes.ts:7739",
+      "source": "server/routes.ts:7737",
       "owner": "core-platform",
       "commandOwner": "server/routes.ts#registerRoutes",
       "delegatedCommands": [
@@ -71329,7 +71329,7 @@
       ],
       "retirementState": "active",
       "key": "server-route|server/routes.ts|GET /api/admin/grading-queue#0",
-      "source": "server/routes.ts:7618",
+      "source": "server/routes.ts:7616",
       "owner": "core-platform",
       "commandOwner": "server/routes.ts#registerRoutes",
       "delegatedCommands": [
@@ -71410,7 +71410,7 @@
       ],
       "retirementState": "active",
       "key": "server-route|server/routes.ts|GET /api/admin/ig/hashtag-presets#0",
-      "source": "server/routes.ts:12134",
+      "source": "server/routes.ts:12132",
       "owner": "core-platform",
       "commandOwner": "server/routes.ts#registerRoutes",
       "delegatedCommands": [
@@ -71470,7 +71470,7 @@
       ],
       "retirementState": "active",
       "key": "server-route|server/routes.ts|GET /api/admin/ig/queue/:id/image-url#0",
-      "source": "server/routes.ts:11876",
+      "source": "server/routes.ts:11874",
       "owner": "core-platform",
       "commandOwner": "server/routes.ts#registerRoutes",
       "delegatedCommands": [
@@ -71534,7 +71534,7 @@
       ],
       "retirementState": "active",
       "key": "server-route|server/routes.ts|GET /api/admin/ig/queue#0",
-      "source": "server/routes.ts:10581",
+      "source": "server/routes.ts:10579",
       "owner": "core-platform",
       "commandOwner": "server/routes.ts#registerRoutes",
       "delegatedCommands": [
@@ -71598,7 +71598,7 @@
       ],
       "retirementState": "active",
       "key": "server-route|server/routes.ts|GET /api/admin/ig/settings#0",
-      "source": "server/routes.ts:10509",
+      "source": "server/routes.ts:10507",
       "owner": "core-platform",
       "commandOwner": "server/routes.ts#registerRoutes",
       "delegatedCommands": [
@@ -71662,7 +71662,7 @@
       ],
       "retirementState": "active",
       "key": "server-route|server/routes.ts|GET /api/admin/learning/accuracy#0",
-      "source": "server/routes.ts:9569",
+      "source": "server/routes.ts:9567",
       "owner": "core-platform",
       "commandOwner": "server/routes.ts#registerRoutes",
       "delegatedCommands": [
@@ -71722,7 +71722,7 @@
       ],
       "retirementState": "active",
       "key": "server-route|server/routes.ts|GET /api/admin/learning/overview#0",
-      "source": "server/routes.ts:9510",
+      "source": "server/routes.ts:9508",
       "owner": "core-platform",
       "commandOwner": "server/routes.ts#registerRoutes",
       "delegatedCommands": [
@@ -71782,7 +71782,7 @@
       ],
       "retirementState": "active",
       "key": "server-route|server/routes.ts|GET /api/admin/mvgs/calibration#0",
-      "source": "server/routes.ts:11047",
+      "source": "server/routes.ts:11045",
       "owner": "core-platform",
       "commandOwner": "server/routes.ts#registerRoutes",
       "delegatedCommands": [
@@ -71845,7 +71845,7 @@
       ],
       "retirementState": "active",
       "key": "server-route|server/routes.ts|GET /api/admin/next-cert-id#0",
-      "source": "server/routes.ts:9633",
+      "source": "server/routes.ts:9631",
       "owner": "core-platform",
       "commandOwner": "server/routes.ts#registerRoutes",
       "delegatedCommands": [
@@ -71949,7 +71949,7 @@
       ],
       "retirementState": "active",
       "key": "server-route|server/routes.ts|GET /api/admin/orphan-certs#0",
-      "source": "server/routes.ts:9646",
+      "source": "server/routes.ts:9644",
       "owner": "core-platform",
       "commandOwner": "server/routes.ts#registerRoutes",
       "delegatedCommands": [
@@ -72052,7 +72052,7 @@
       ],
       "retirementState": "active",
       "key": "server-route|server/routes.ts|GET /api/admin/override-audit#0",
-      "source": "server/routes.ts:7575",
+      "source": "server/routes.ts:7573",
       "owner": "core-platform",
       "commandOwner": "server/routes.ts#registerRoutes",
       "delegatedCommands": [
@@ -72113,7 +72113,7 @@
       ],
       "retirementState": "active",
       "key": "server-route|server/routes.ts|GET /api/admin/print-batch/:batchId/cricut-cut.svg#0",
-      "source": "server/routes.ts:5143",
+      "source": "server/routes.ts:5141",
       "owner": "core-platform",
       "commandOwner": "server/routes.ts#registerRoutes",
       "delegatedCommands": [
@@ -72208,7 +72208,7 @@
       ],
       "retirementState": "active",
       "key": "server-route|server/routes.ts|GET /api/admin/print-batch/:batchId/pdf#0",
-      "source": "server/routes.ts:5032",
+      "source": "server/routes.ts:5030",
       "owner": "core-platform",
       "commandOwner": "server/routes.ts#registerRoutes",
       "delegatedCommands": [
@@ -72303,7 +72303,7 @@
       ],
       "retirementState": "active",
       "key": "server-route|server/routes.ts|GET /api/admin/print-batch/:batchId/png#0",
-      "source": "server/routes.ts:5069",
+      "source": "server/routes.ts:5067",
       "owner": "core-platform",
       "commandOwner": "server/routes.ts#registerRoutes",
       "delegatedCommands": [
@@ -72398,7 +72398,7 @@
       ],
       "retirementState": "active",
       "key": "server-route|server/routes.ts|GET /api/admin/print-batch/:batchId/print-png#0",
-      "source": "server/routes.ts:5106",
+      "source": "server/routes.ts:5104",
       "owner": "core-platform",
       "commandOwner": "server/routes.ts#registerRoutes",
       "delegatedCommands": [
@@ -72492,7 +72492,7 @@
       ],
       "retirementState": "active",
       "key": "server-route|server/routes.ts|GET /api/admin/printing/browser#0",
-      "source": "server/routes.ts:5218",
+      "source": "server/routes.ts:5216",
       "owner": "core-platform",
       "commandOwner": "server/routes.ts#registerRoutes",
       "delegatedCommands": [
@@ -72555,7 +72555,7 @@
       ],
       "retirementState": "active",
       "key": "server-route|server/routes.ts|GET /api/admin/printing/override/:certId#0",
-      "source": "server/routes.ts:5228",
+      "source": "server/routes.ts:5226",
       "owner": "core-platform",
       "commandOwner": "server/routes.ts#registerRoutes",
       "delegatedCommands": [
@@ -72616,7 +72616,7 @@
       ],
       "retirementState": "active",
       "key": "server-route|server/routes.ts|GET /api/admin/printing/queue#0",
-      "source": "server/routes.ts:4266",
+      "source": "server/routes.ts:4264",
       "owner": "core-platform",
       "commandOwner": "server/routes.ts#registerRoutes",
       "delegatedCommands": [
@@ -72677,7 +72677,7 @@
       ],
       "retirementState": "active",
       "key": "server-route|server/routes.ts|GET /api/admin/printing/sheets/:sheetRef#0",
-      "source": "server/routes.ts:4289",
+      "source": "server/routes.ts:4287",
       "owner": "core-platform",
       "commandOwner": "server/routes.ts#registerRoutes",
       "delegatedCommands": [
@@ -72738,7 +72738,7 @@
       ],
       "retirementState": "active",
       "key": "server-route|server/routes.ts|GET /api/admin/printing/sheets#0",
-      "source": "server/routes.ts:4280",
+      "source": "server/routes.ts:4278",
       "owner": "core-platform",
       "commandOwner": "server/routes.ts#registerRoutes",
       "delegatedCommands": [
@@ -72799,7 +72799,7 @@
       ],
       "retirementState": "active",
       "key": "server-route|server/routes.ts|GET /api/admin/scan-health#0",
-      "source": "server/routes.ts:9423",
+      "source": "server/routes.ts:9421",
       "owner": "core-platform",
       "commandOwner": "server/routes.ts#registerRoutes",
       "delegatedCommands": [
@@ -72861,7 +72861,7 @@
       ],
       "retirementState": "active",
       "key": "server-route|server/routes.ts|GET /api/admin/scan-history#0",
-      "source": "server/routes.ts:9453",
+      "source": "server/routes.ts:9451",
       "owner": "core-platform",
       "commandOwner": "server/routes.ts#registerRoutes",
       "delegatedCommands": [
@@ -72920,7 +72920,7 @@
       ],
       "retirementState": "active",
       "key": "server-route|server/routes.ts|GET /api/admin/scan-status/:certId#0",
-      "source": "server/routes.ts:9396",
+      "source": "server/routes.ts:9394",
       "owner": "core-platform",
       "commandOwner": "server/routes.ts#registerRoutes",
       "delegatedCommands": [
@@ -73029,7 +73029,7 @@
       ],
       "retirementState": "active",
       "key": "server-route|server/routes.ts|GET /api/admin/scanner/capture-sessions/:sessionId#0",
-      "source": "server/routes.ts:9080",
+      "source": "server/routes.ts:9078",
       "owner": "core-platform",
       "commandOwner": "server/routes.ts#registerRoutes",
       "delegatedCommands": [
@@ -73138,7 +73138,7 @@
       ],
       "retirementState": "active",
       "key": "server-route|server/routes.ts|GET /api/admin/scanner/capture-sessions/next#0",
-      "source": "server/routes.ts:9057",
+      "source": "server/routes.ts:9055",
       "owner": "core-platform",
       "commandOwner": "server/routes.ts#registerRoutes",
       "delegatedCommands": [
@@ -73244,7 +73244,7 @@
       ],
       "retirementState": "active",
       "key": "server-route|server/routes.ts|GET /api/admin/social-studio/backgrounds/:background/preview#0",
-      "source": "server/routes.ts:2680",
+      "source": "server/routes.ts:2678",
       "owner": "core-platform",
       "commandOwner": "server/routes.ts#registerRoutes",
       "delegatedCommands": [
@@ -73325,7 +73325,7 @@
       ],
       "retirementState": "active",
       "key": "server-route|server/routes.ts|GET /api/admin/social-studio/backgrounds#0",
-      "source": "server/routes.ts:2668",
+      "source": "server/routes.ts:2666",
       "owner": "core-platform",
       "commandOwner": "server/routes.ts#registerRoutes",
       "delegatedCommands": [
@@ -73384,7 +73384,7 @@
       ],
       "retirementState": "active",
       "key": "server-route|server/routes.ts|GET /api/admin/social-studio/certificates#0",
-      "source": "server/routes.ts:2699",
+      "source": "server/routes.ts:2697",
       "owner": "core-platform",
       "commandOwner": "server/routes.ts#registerRoutes",
       "delegatedCommands": [
@@ -73447,7 +73447,7 @@
       ],
       "retirementState": "active",
       "key": "server-route|server/routes.ts|GET /api/admin/weekly-reel/all-graded-cards#0",
-      "source": "server/routes.ts:10817",
+      "source": "server/routes.ts:10815",
       "owner": "core-platform",
       "commandOwner": "server/routes.ts#registerRoutes",
       "delegatedCommands": [
@@ -73507,7 +73507,7 @@
       ],
       "retirementState": "active",
       "key": "server-route|server/routes.ts|GET /api/admin/weekly-reel/analytics#0",
-      "source": "server/routes.ts:11374",
+      "source": "server/routes.ts:11372",
       "owner": "core-platform",
       "commandOwner": "server/routes.ts#registerRoutes",
       "delegatedCommands": [
@@ -73567,7 +73567,7 @@
       ],
       "retirementState": "active",
       "key": "server-route|server/routes.ts|GET /api/admin/weekly-reel/approvals/:date#0",
-      "source": "server/routes.ts:11582",
+      "source": "server/routes.ts:11580",
       "owner": "core-platform",
       "commandOwner": "server/routes.ts#registerRoutes",
       "delegatedCommands": [
@@ -73627,7 +73627,7 @@
       ],
       "retirementState": "active",
       "key": "server-route|server/routes.ts|GET /api/admin/weekly-reel/consenting-cards#0",
-      "source": "server/routes.ts:10776",
+      "source": "server/routes.ts:10774",
       "owner": "core-platform",
       "commandOwner": "server/routes.ts#registerRoutes",
       "delegatedCommands": [
@@ -73687,7 +73687,7 @@
       ],
       "retirementState": "active",
       "key": "server-route|server/routes.ts|GET /api/admin/weekly-reel/featured-cards#0",
-      "source": "server/routes.ts:10916",
+      "source": "server/routes.ts:10914",
       "owner": "core-platform",
       "commandOwner": "server/routes.ts#registerRoutes",
       "delegatedCommands": [
@@ -73747,7 +73747,7 @@
       ],
       "retirementState": "active",
       "key": "server-route|server/routes.ts|GET /api/admin/weekly-reel/key-status#0",
-      "source": "server/routes.ts:10700",
+      "source": "server/routes.ts:10698",
       "owner": "core-platform",
       "commandOwner": "server/routes.ts#registerRoutes",
       "delegatedCommands": [
@@ -73806,7 +73806,7 @@
       ],
       "retirementState": "active",
       "key": "server-route|server/routes.ts|GET /api/admin/weekly-reel/meta-status#0",
-      "source": "server/routes.ts:11452",
+      "source": "server/routes.ts:11450",
       "owner": "core-platform",
       "commandOwner": "server/routes.ts#registerRoutes",
       "delegatedCommands": [
@@ -73868,7 +73868,7 @@
       ],
       "retirementState": "active",
       "key": "server-route|server/routes.ts|GET /api/admin/weekly-reel/settings#0",
-      "source": "server/routes.ts:11147",
+      "source": "server/routes.ts:11145",
       "owner": "core-platform",
       "commandOwner": "server/routes.ts#registerRoutes",
       "delegatedCommands": [
@@ -73929,7 +73929,7 @@
       ],
       "retirementState": "active",
       "key": "server-route|server/routes.ts|GET /api/admin/weekly-reel/status#0",
-      "source": "server/routes.ts:10713",
+      "source": "server/routes.ts:10711",
       "owner": "core-platform",
       "commandOwner": "server/routes.ts#registerRoutes",
       "delegatedCommands": [
@@ -73993,7 +73993,7 @@
       ],
       "retirementState": "active",
       "key": "server-route|server/routes.ts|GET /api/admin/weekly-reel/thumbnail/:date#0",
-      "source": "server/routes.ts:11760",
+      "source": "server/routes.ts:11758",
       "owner": "core-platform",
       "commandOwner": "server/routes.ts#registerRoutes",
       "delegatedCommands": [
@@ -74056,7 +74056,7 @@
       ],
       "retirementState": "active",
       "key": "server-route|server/routes.ts|GET /api/admin/weekly-reel/tiktok-status#0",
-      "source": "server/routes.ts:11461",
+      "source": "server/routes.ts:11459",
       "owner": "core-platform",
       "commandOwner": "server/routes.ts#registerRoutes",
       "delegatedCommands": [
@@ -74113,7 +74113,7 @@
       ],
       "retirementState": "active",
       "key": "server-route|server/routes.ts|GET /api/capacity#0",
-      "source": "server/routes.ts:3922",
+      "source": "server/routes.ts:3920",
       "owner": "core-platform",
       "commandOwner": "server/routes.ts#registerRoutes",
       "delegatedCommands": [
@@ -74162,7 +74162,7 @@
       ],
       "retirementState": "active",
       "key": "server-route|server/routes.ts|GET /api/cards/autofill#0",
-      "source": "server/routes.ts:2215",
+      "source": "server/routes.ts:2213",
       "owner": "core-platform",
       "commandOwner": "server/routes.ts#registerRoutes",
       "delegatedCommands": [
@@ -74212,7 +74212,7 @@
       ],
       "retirementState": "active",
       "key": "server-route|server/routes.ts|GET /api/cards/sets#0",
-      "source": "server/routes.ts:2247",
+      "source": "server/routes.ts:2245",
       "owner": "core-platform",
       "commandOwner": "server/routes.ts#registerRoutes",
       "delegatedCommands": [
@@ -74262,7 +74262,7 @@
       ],
       "retirementState": "active",
       "key": "server-route|server/routes.ts|GET /api/cert/:id/population#0",
-      "source": "server/routes.ts:2930",
+      "source": "server/routes.ts:2928",
       "owner": "core-platform",
       "commandOwner": "server/routes.ts#registerRoutes",
       "delegatedCommands": [
@@ -74318,7 +74318,7 @@
       ],
       "retirementState": "active",
       "key": "server-route|server/routes.ts|GET /api/cert/:id/report/pdf#0",
-      "source": "server/routes.ts:3191",
+      "source": "server/routes.ts:3189",
       "owner": "core-platform",
       "commandOwner": "server/routes.ts#registerRoutes",
       "delegatedCommands": [
@@ -74406,7 +74406,7 @@
       ],
       "retirementState": "active",
       "key": "server-route|server/routes.ts|GET /api/cert/:id/report#0",
-      "source": "server/routes.ts:3008",
+      "source": "server/routes.ts:3006",
       "owner": "core-platform",
       "commandOwner": "server/routes.ts#registerRoutes",
       "delegatedCommands": [
@@ -74500,7 +74500,7 @@
       ],
       "retirementState": "active",
       "key": "server-route|server/routes.ts|GET /api/cert/:id#0",
-      "source": "server/routes.ts:2260",
+      "source": "server/routes.ts:2258",
       "owner": "core-platform",
       "commandOwner": "server/routes.ts#registerRoutes",
       "delegatedCommands": [
@@ -74596,7 +74596,7 @@
       ],
       "retirementState": "active",
       "key": "server-route|server/routes.ts|GET /api/certs/search#0",
-      "source": "server/routes.ts:2946",
+      "source": "server/routes.ts:2944",
       "owner": "core-platform",
       "commandOwner": "server/routes.ts#registerRoutes",
       "delegatedCommands": [
@@ -74656,7 +74656,7 @@
       ],
       "retirementState": "active",
       "key": "server-route|server/routes.ts|GET /api/customer/certificates#0",
-      "source": "server/routes.ts:6061",
+      "source": "server/routes.ts:6059",
       "owner": "core-platform",
       "commandOwner": "server/routes.ts#registerRoutes",
       "delegatedCommands": [
@@ -74717,7 +74717,7 @@
       ],
       "retirementState": "active",
       "key": "server-route|server/routes.ts|GET /api/customer/submissions#0",
-      "source": "server/routes.ts:5838",
+      "source": "server/routes.ts:5836",
       "owner": "core-platform",
       "commandOwner": "server/routes.ts#registerRoutes",
       "delegatedCommands": [
@@ -74776,7 +74776,7 @@
       ],
       "retirementState": "active",
       "key": "server-route|server/routes.ts|GET /api/health#0",
-      "source": "server/routes.ts:2185",
+      "source": "server/routes.ts:2183",
       "owner": "core-platform",
       "commandOwner": "server/routes.ts#registerRoutes",
       "delegatedCommands": [],
@@ -74824,7 +74824,7 @@
       ],
       "retirementState": "active",
       "key": "server-route|server/routes.ts|GET /api/logbook/:certId/verify#0",
-      "source": "server/routes.ts:3482",
+      "source": "server/routes.ts:3480",
       "owner": "core-platform",
       "commandOwner": "server/routes.ts#registerRoutes",
       "delegatedCommands": [
@@ -74882,7 +74882,7 @@
       ],
       "retirementState": "active",
       "key": "server-route|server/routes.ts|GET /api/logbook/:certId#0",
-      "source": "server/routes.ts:3470",
+      "source": "server/routes.ts:3468",
       "owner": "core-platform",
       "commandOwner": "server/routes.ts#registerRoutes",
       "delegatedCommands": [
@@ -74979,7 +74979,7 @@
       ],
       "retirementState": "active",
       "key": "server-route|server/routes.ts|GET /api/nfc/:certId#0",
-      "source": "server/routes.ts:5543",
+      "source": "server/routes.ts:5541",
       "owner": "core-platform",
       "commandOwner": "server/routes.ts#registerRoutes",
       "delegatedCommands": [
@@ -75034,7 +75034,7 @@
       ],
       "retirementState": "active",
       "key": "server-route|server/routes.ts|GET /api/public/community#0",
-      "source": "server/routes.ts:2841",
+      "source": "server/routes.ts:2839",
       "owner": "core-platform",
       "commandOwner": "server/routes.ts#registerRoutes",
       "delegatedCommands": [
@@ -75084,7 +75084,7 @@
       ],
       "retirementState": "active",
       "key": "server-route|server/routes.ts|GET /api/public/grade-distribution#0",
-      "source": "server/routes.ts:2383",
+      "source": "server/routes.ts:2381",
       "owner": "core-platform",
       "commandOwner": "server/routes.ts#registerRoutes",
       "delegatedCommands": [
@@ -75135,7 +75135,7 @@
       ],
       "retirementState": "active",
       "key": "server-route|server/routes.ts|GET /api/public/population#0",
-      "source": "server/routes.ts:2398",
+      "source": "server/routes.ts:2396",
       "owner": "core-platform",
       "commandOwner": "server/routes.ts#registerRoutes",
       "delegatedCommands": [
@@ -75187,7 +75187,7 @@
       ],
       "retirementState": "active",
       "key": "server-route|server/routes.ts|GET /api/public/recent-graded#0",
-      "source": "server/routes.ts:2368",
+      "source": "server/routes.ts:2366",
       "owner": "core-platform",
       "commandOwner": "server/routes.ts#registerRoutes",
       "delegatedCommands": [
@@ -75240,7 +75240,7 @@
       ],
       "retirementState": "active",
       "key": "server-route|server/routes.ts|GET /api/public/share-bg/:variant#0",
-      "source": "server/routes.ts:2585",
+      "source": "server/routes.ts:2583",
       "owner": "core-platform",
       "commandOwner": "server/routes.ts#registerRoutes",
       "delegatedCommands": [
@@ -75308,7 +75308,7 @@
       ],
       "retirementState": "active",
       "key": "server-route|server/routes.ts|GET /api/public/share-variants#0",
-      "source": "server/routes.ts:2567",
+      "source": "server/routes.ts:2565",
       "owner": "core-platform",
       "commandOwner": "server/routes.ts#registerRoutes",
       "delegatedCommands": [],
@@ -75356,7 +75356,7 @@
       ],
       "retirementState": "active",
       "key": "server-route|server/routes.ts|GET /api/public/share/:certNumber/:variant/feed#0",
-      "source": "server/routes.ts:2563",
+      "source": "server/routes.ts:2561",
       "owner": "core-platform",
       "commandOwner": "server/routes.ts#registerRoutes",
       "delegatedCommands": [
@@ -75456,7 +75456,7 @@
       ],
       "retirementState": "active",
       "key": "server-route|server/routes.ts|GET /api/public/share/:certNumber/:variant/story#0",
-      "source": "server/routes.ts:2564",
+      "source": "server/routes.ts:2562",
       "owner": "core-platform",
       "commandOwner": "server/routes.ts#registerRoutes",
       "delegatedCommands": [
@@ -75555,7 +75555,7 @@
       ],
       "retirementState": "active",
       "key": "server-route|server/routes.ts|GET /api/public/share/:certNumber/caption#0",
-      "source": "server/routes.ts:2601",
+      "source": "server/routes.ts:2599",
       "owner": "core-platform",
       "commandOwner": "server/routes.ts#registerRoutes",
       "delegatedCommands": [
@@ -75612,7 +75612,7 @@
       ],
       "retirementState": "active",
       "key": "server-route|server/routes.ts|GET /api/public/share/:certNumber/feed#0",
-      "source": "server/routes.ts:2556",
+      "source": "server/routes.ts:2554",
       "owner": "core-platform",
       "commandOwner": "server/routes.ts#registerRoutes",
       "delegatedCommands": [
@@ -75712,7 +75712,7 @@
       ],
       "retirementState": "active",
       "key": "server-route|server/routes.ts|GET /api/public/share/:certNumber/story#0",
-      "source": "server/routes.ts:2557",
+      "source": "server/routes.ts:2555",
       "owner": "core-platform",
       "commandOwner": "server/routes.ts#registerRoutes",
       "delegatedCommands": [
@@ -75812,7 +75812,7 @@
       ],
       "retirementState": "active",
       "key": "server-route|server/routes.ts|GET /api/public/slab-image/:certNumber/:kind#0",
-      "source": "server/routes.ts:2421",
+      "source": "server/routes.ts:2419",
       "owner": "core-platform",
       "commandOwner": "server/routes.ts#registerRoutes",
       "delegatedCommands": [
@@ -75871,7 +75871,7 @@
       ],
       "retirementState": "active",
       "key": "server-route|server/routes.ts|GET /api/public/slab-showcase#0",
-      "source": "server/routes.ts:2354",
+      "source": "server/routes.ts:2352",
       "owner": "core-platform",
       "commandOwner": "server/routes.ts#registerRoutes",
       "delegatedCommands": [
@@ -75986,7 +75986,7 @@
       ],
       "retirementState": "active",
       "key": "server-route|server/routes.ts|GET /api/reels/:date/:certNumber#0",
-      "source": "server/routes.ts:11820",
+      "source": "server/routes.ts:11818",
       "owner": "core-platform",
       "commandOwner": "server/routes.ts#registerRoutes",
       "delegatedCommands": [
@@ -76040,7 +76040,7 @@
       ],
       "retirementState": "active",
       "key": "server-route|server/routes.ts|GET /api/reels#0",
-      "source": "server/routes.ts:11777",
+      "source": "server/routes.ts:11775",
       "owner": "core-platform",
       "commandOwner": "server/routes.ts#registerRoutes",
       "delegatedCommands": [
@@ -76097,7 +76097,7 @@
       ],
       "retirementState": "active",
       "key": "server-route|server/routes.ts|GET /api/submissions/me#0",
-      "source": "server/routes.ts:5953",
+      "source": "server/routes.ts:5951",
       "owner": "core-platform",
       "commandOwner": "server/routes.ts#registerRoutes",
       "delegatedCommands": [
@@ -76161,7 +76161,7 @@
       ],
       "retirementState": "active",
       "key": "server-route|server/routes.ts|GET /api/tools/estimate/credits#0",
-      "source": "server/routes.ts:8785",
+      "source": "server/routes.ts:8783",
       "owner": "core-platform",
       "commandOwner": "server/routes.ts#registerRoutes",
       "delegatedCommands": [
@@ -76212,7 +76212,7 @@
       ],
       "retirementState": "active",
       "key": "server-route|server/routes.ts|GET /api/v1/verify/:certId#0",
-      "source": "server/routes.ts:2273",
+      "source": "server/routes.ts:2271",
       "owner": "core-platform",
       "commandOwner": "server/routes.ts#registerRoutes",
       "delegatedCommands": [
@@ -76297,7 +76297,7 @@
       ],
       "retirementState": "active",
       "key": "server-route|server/routes.ts|GET /api/vault/:certId/ebay-prices#0",
-      "source": "server/routes.ts:3943",
+      "source": "server/routes.ts:3941",
       "owner": "core-platform",
       "commandOwner": "server/routes.ts#registerRoutes",
       "delegatedCommands": [
@@ -76358,7 +76358,7 @@
       ],
       "retirementState": "active",
       "key": "server-route|server/routes.ts|GET /api/vault/:certId#0",
-      "source": "server/routes.ts:3712",
+      "source": "server/routes.ts:3710",
       "owner": "core-platform",
       "commandOwner": "server/routes.ts#registerRoutes",
       "delegatedCommands": [
@@ -76458,7 +76458,7 @@
       ],
       "retirementState": "active",
       "key": "server-route|server/routes.ts|GET /cert/:certId.pdf#0",
-      "source": "server/routes.ts:3692",
+      "source": "server/routes.ts:3690",
       "owner": "core-platform",
       "commandOwner": "server/routes.ts#registerRoutes",
       "delegatedCommands": [],
@@ -76505,7 +76505,7 @@
       ],
       "retirementState": "active",
       "key": "server-route|server/routes.ts|GET /logbook/:certId.pdf#0",
-      "source": "server/routes.ts:3494",
+      "source": "server/routes.ts:3492",
       "owner": "core-platform",
       "commandOwner": "server/routes.ts#registerRoutes",
       "delegatedCommands": [
@@ -76625,7 +76625,7 @@
       ],
       "retirementState": "active",
       "key": "server-route|server/routes.ts|GET /logbook/:certId/owner.pdf#0",
-      "source": "server/routes.ts:3565",
+      "source": "server/routes.ts:3563",
       "owner": "core-platform",
       "commandOwner": "server/routes.ts#registerRoutes",
       "delegatedCommands": [
@@ -76737,7 +76737,7 @@
       ],
       "retirementState": "active",
       "key": "server-route|server/routes.ts|GET /robots.txt#0",
-      "source": "server/routes.ts:5724",
+      "source": "server/routes.ts:5722",
       "owner": "core-platform",
       "commandOwner": "server/routes.ts#registerRoutes",
       "delegatedCommands": [],
@@ -76784,7 +76784,7 @@
       ],
       "retirementState": "active",
       "key": "server-route|server/routes.ts|GET /sitemap.xml#0",
-      "source": "server/routes.ts:5699",
+      "source": "server/routes.ts:5697",
       "owner": "core-platform",
       "commandOwner": "server/routes.ts#registerRoutes",
       "delegatedCommands": [
@@ -76855,7 +76855,7 @@
       ],
       "retirementState": "active",
       "key": "server-route|server/routes.ts|PATCH /api/admin/certificates/:certId/grading-report#0",
-      "source": "server/routes.ts:5672",
+      "source": "server/routes.ts:5670",
       "owner": "core-platform",
       "commandOwner": "server/routes.ts#registerRoutes",
       "delegatedCommands": [
@@ -76914,7 +76914,7 @@
       ],
       "retirementState": "active",
       "key": "server-route|server/routes.ts|PATCH /api/admin/community/:id#0",
-      "source": "server/routes.ts:2898",
+      "source": "server/routes.ts:2896",
       "owner": "core-platform",
       "commandOwner": "server/routes.ts#registerRoutes",
       "delegatedCommands": [
@@ -76975,7 +76975,7 @@
       ],
       "retirementState": "active",
       "key": "server-route|server/routes.ts|PATCH /api/admin/ig/queue/:id/retry#0",
-      "source": "server/routes.ts:11858",
+      "source": "server/routes.ts:11856",
       "owner": "core-platform",
       "commandOwner": "server/routes.ts#registerRoutes",
       "delegatedCommands": [
@@ -77036,7 +77036,7 @@
       ],
       "retirementState": "active",
       "key": "server-route|server/routes.ts|PATCH /api/admin/ig/queue/:id/skip#0",
-      "source": "server/routes.ts:11841",
+      "source": "server/routes.ts:11839",
       "owner": "core-platform",
       "commandOwner": "server/routes.ts#registerRoutes",
       "delegatedCommands": [
@@ -77097,7 +77097,7 @@
       ],
       "retirementState": "active",
       "key": "server-route|server/routes.ts|PATCH /api/admin/ig/queue/:id#0",
-      "source": "server/routes.ts:11897",
+      "source": "server/routes.ts:11895",
       "owner": "core-platform",
       "commandOwner": "server/routes.ts#registerRoutes",
       "delegatedCommands": [
@@ -77158,7 +77158,7 @@
       ],
       "retirementState": "active",
       "key": "server-route|server/routes.ts|PATCH /api/admin/ig/settings#0",
-      "source": "server/routes.ts:10556",
+      "source": "server/routes.ts:10554",
       "owner": "core-platform",
       "commandOwner": "server/routes.ts#registerRoutes",
       "delegatedCommands": [
@@ -77219,7 +77219,7 @@
       ],
       "retirementState": "active",
       "key": "server-route|server/routes.ts|PATCH /api/admin/mvgs/calibration#0",
-      "source": "server/routes.ts:11076",
+      "source": "server/routes.ts:11074",
       "owner": "core-platform",
       "commandOwner": "server/routes.ts#registerRoutes",
       "delegatedCommands": [
@@ -77284,7 +77284,7 @@
       ],
       "retirementState": "active",
       "key": "server-route|server/routes.ts|PATCH /api/admin/weekly-reel/approvals/:date/:certNumber#0",
-      "source": "server/routes.ts:11607",
+      "source": "server/routes.ts:11605",
       "owner": "core-platform",
       "commandOwner": "server/routes.ts#registerRoutes",
       "delegatedCommands": [
@@ -77344,7 +77344,7 @@
       ],
       "retirementState": "active",
       "key": "server-route|server/routes.ts|PATCH /api/admin/weekly-reel/card/:certNumber/blacklisted#0",
-      "source": "server/routes.ts:11325",
+      "source": "server/routes.ts:11323",
       "owner": "core-platform",
       "commandOwner": "server/routes.ts#registerRoutes",
       "delegatedCommands": [
@@ -77405,7 +77405,7 @@
       ],
       "retirementState": "active",
       "key": "server-route|server/routes.ts|PATCH /api/admin/weekly-reel/card/:certNumber/consent#0",
-      "source": "server/routes.ts:10859",
+      "source": "server/routes.ts:10857",
       "owner": "core-platform",
       "commandOwner": "server/routes.ts#registerRoutes",
       "delegatedCommands": [
@@ -77465,7 +77465,7 @@
       ],
       "retirementState": "active",
       "key": "server-route|server/routes.ts|PATCH /api/admin/weekly-reel/card/:certNumber/featured#0",
-      "source": "server/routes.ts:10965",
+      "source": "server/routes.ts:10963",
       "owner": "core-platform",
       "commandOwner": "server/routes.ts#registerRoutes",
       "delegatedCommands": [
@@ -77525,7 +77525,7 @@
       ],
       "retirementState": "active",
       "key": "server-route|server/routes.ts|PATCH /api/admin/weekly-reel/card/:certNumber/pinned#0",
-      "source": "server/routes.ts:11314",
+      "source": "server/routes.ts:11312",
       "owner": "core-platform",
       "commandOwner": "server/routes.ts#registerRoutes",
       "delegatedCommands": [
@@ -77586,7 +77586,7 @@
       ],
       "retirementState": "active",
       "key": "server-route|server/routes.ts|PATCH /api/admin/weekly-reel/settings#0",
-      "source": "server/routes.ts:11161",
+      "source": "server/routes.ts:11159",
       "owner": "core-platform",
       "commandOwner": "server/routes.ts#registerRoutes",
       "delegatedCommands": [
@@ -77650,7 +77650,7 @@
       ],
       "retirementState": "active",
       "key": "server-route|server/routes.ts|PATCH /api/customer/submissions/:id/marketing-consent#0",
-      "source": "server/routes.ts:5858",
+      "source": "server/routes.ts:5856",
       "owner": "core-platform",
       "commandOwner": "server/routes.ts#registerRoutes",
       "delegatedCommands": [
@@ -77709,7 +77709,7 @@
       ],
       "retirementState": "active",
       "key": "server-route|server/routes.ts|POST /api/admin/backfill-cert-metadata#0",
-      "source": "server/routes.ts:10233",
+      "source": "server/routes.ts:10231",
       "owner": "core-platform",
       "commandOwner": "server/routes.ts#registerRoutes",
       "delegatedCommands": [
@@ -77805,7 +77805,7 @@
       ],
       "retirementState": "active",
       "key": "server-route|server/routes.ts|POST /api/admin/bulk-reprocess-images#0",
-      "source": "server/routes.ts:9905",
+      "source": "server/routes.ts:9903",
       "owner": "core-platform",
       "commandOwner": "server/routes.ts#registerRoutes",
       "delegatedCommands": [
@@ -77921,7 +77921,7 @@
       ],
       "retirementState": "retired",
       "key": "server-route|server/routes.ts|POST /api/admin/certificates/:id/analyze-v1-legacy#0",
-      "source": "server/routes.ts:2991",
+      "source": "server/routes.ts:2989",
       "owner": "core-platform",
       "commandOwner": "server/routes.ts#registerRoutes",
       "delegatedCommands": [
@@ -77980,7 +77980,7 @@
       ],
       "retirementState": "active",
       "key": "server-route|server/routes.ts|POST /api/admin/certificates/:id/analyze#0",
-      "source": "server/routes.ts:8419",
+      "source": "server/routes.ts:8417",
       "owner": "core-platform",
       "commandOwner": "server/routes.ts#registerRoutes",
       "delegatedCommands": [
@@ -78062,7 +78062,7 @@
       ],
       "retirementState": "active",
       "key": "server-route|server/routes.ts|POST /api/admin/certificates/:id/detect-card-bounds#0",
-      "source": "server/routes.ts:6806",
+      "source": "server/routes.ts:6804",
       "owner": "core-platform",
       "commandOwner": "server/routes.ts#registerRoutes",
       "delegatedCommands": [
@@ -78137,7 +78137,7 @@
       ],
       "retirementState": "active",
       "key": "server-route|server/routes.ts|POST /api/admin/certificates/:id/detect-defects#0",
-      "source": "server/routes.ts:8207",
+      "source": "server/routes.ts:8205",
       "owner": "core-platform",
       "commandOwner": "server/routes.ts#registerRoutes",
       "delegatedCommands": [
@@ -78210,7 +78210,7 @@
       ],
       "retirementState": "retired",
       "key": "server-route|server/routes.ts|POST /api/admin/certificates/:id/generate-description#0",
-      "source": "server/routes.ts:6670",
+      "source": "server/routes.ts:6668",
       "owner": "core-platform",
       "commandOwner": "server/routes.ts#registerRoutes",
       "delegatedCommands": [
@@ -78278,7 +78278,7 @@
       ],
       "retirementState": "active",
       "key": "server-route|server/routes.ts|POST /api/admin/certificates/:id/grade-card#0",
-      "source": "server/routes.ts:8314",
+      "source": "server/routes.ts:8312",
       "owner": "core-platform",
       "commandOwner": "server/routes.ts#registerRoutes",
       "delegatedCommands": [
@@ -78352,7 +78352,7 @@
       ],
       "retirementState": "active",
       "key": "server-route|server/routes.ts|POST /api/admin/certificates/:id/grade#0",
-      "source": "server/routes.ts:8453",
+      "source": "server/routes.ts:8451",
       "owner": "core-platform",
       "commandOwner": "server/routes.ts#registerRoutes",
       "delegatedCommands": [
@@ -78450,7 +78450,7 @@
       ],
       "retirementState": "active",
       "key": "server-route|server/routes.ts|POST /api/admin/certificates/:id/identify-and-analyze#0",
-      "source": "server/routes.ts:8555",
+      "source": "server/routes.ts:8553",
       "owner": "core-platform",
       "commandOwner": "server/routes.ts#registerRoutes",
       "delegatedCommands": [
@@ -78607,7 +78607,7 @@
       ],
       "retirementState": "active",
       "key": "server-route|server/routes.ts|POST /api/admin/certificates/:id/identify-only#0",
-      "source": "server/routes.ts:7929",
+      "source": "server/routes.ts:7927",
       "owner": "core-platform",
       "commandOwner": "server/routes.ts#registerRoutes",
       "delegatedCommands": [
@@ -78709,7 +78709,7 @@
       ],
       "retirementState": "active",
       "key": "server-route|server/routes.ts|POST /api/admin/certificates/:id/identify#0",
-      "source": "server/routes.ts:7903",
+      "source": "server/routes.ts:7901",
       "owner": "core-platform",
       "commandOwner": "server/routes.ts#registerRoutes",
       "delegatedCommands": [
@@ -78800,7 +78800,7 @@
       ],
       "retirementState": "active",
       "key": "server-route|server/routes.ts|POST /api/admin/certificates/:id/identity-override#0",
-      "source": "server/routes.ts:7071",
+      "source": "server/routes.ts:7069",
       "owner": "core-platform",
       "commandOwner": "server/routes.ts#registerRoutes",
       "delegatedCommands": [
@@ -78862,7 +78862,7 @@
       ],
       "retirementState": "active",
       "key": "server-route|server/routes.ts|POST /api/admin/certificates/:id/manual-centering#0",
-      "source": "server/routes.ts:8147",
+      "source": "server/routes.ts:8145",
       "owner": "core-platform",
       "commandOwner": "server/routes.ts#registerRoutes",
       "delegatedCommands": [
@@ -78927,7 +78927,7 @@
       ],
       "retirementState": "active",
       "key": "server-route|server/routes.ts|POST /api/admin/certificates/:id/measure-centering#0",
-      "source": "server/routes.ts:8063",
+      "source": "server/routes.ts:8061",
       "owner": "core-platform",
       "commandOwner": "server/routes.ts#registerRoutes",
       "delegatedCommands": [
@@ -79000,7 +79000,7 @@
       ],
       "retirementState": "active",
       "key": "server-route|server/routes.ts|POST /api/admin/certificates/:id/nfc/lock/cancel#0",
-      "source": "server/routes.ts:5468",
+      "source": "server/routes.ts:5466",
       "owner": "core-platform",
       "commandOwner": "server/routes.ts#registerRoutes",
       "delegatedCommands": [
@@ -79064,7 +79064,7 @@
       ],
       "retirementState": "active",
       "key": "server-route|server/routes.ts|POST /api/admin/certificates/:id/nfc/lock/prepare#0",
-      "source": "server/routes.ts:5372",
+      "source": "server/routes.ts:5370",
       "owner": "core-platform",
       "commandOwner": "server/routes.ts#registerRoutes",
       "delegatedCommands": [
@@ -79128,7 +79128,7 @@
       ],
       "retirementState": "active",
       "key": "server-route|server/routes.ts|POST /api/admin/certificates/:id/nfc/lock#0",
-      "source": "server/routes.ts:5411",
+      "source": "server/routes.ts:5409",
       "owner": "core-platform",
       "commandOwner": "server/routes.ts#registerRoutes",
       "delegatedCommands": [
@@ -79193,7 +79193,7 @@
       ],
       "retirementState": "active",
       "key": "server-route|server/routes.ts|POST /api/admin/certificates/:id/nfc/verify#0",
-      "source": "server/routes.ts:5507",
+      "source": "server/routes.ts:5505",
       "owner": "core-platform",
       "commandOwner": "server/routes.ts#registerRoutes",
       "delegatedCommands": [
@@ -79253,7 +79253,7 @@
       ],
       "retirementState": "active",
       "key": "server-route|server/routes.ts|POST /api/admin/certificates/:id/nfc#0",
-      "source": "server/routes.ts:5269",
+      "source": "server/routes.ts:5267",
       "owner": "core-platform",
       "commandOwner": "server/routes.ts#registerRoutes",
       "delegatedCommands": [
@@ -79320,7 +79320,7 @@
       ],
       "retirementState": "active",
       "key": "server-route|server/routes.ts|POST /api/admin/certificates/:id/override-audit/batch#0",
-      "source": "server/routes.ts:7549",
+      "source": "server/routes.ts:7547",
       "owner": "core-platform",
       "commandOwner": "server/routes.ts#registerRoutes",
       "delegatedCommands": [
@@ -79379,7 +79379,7 @@
       ],
       "retirementState": "active",
       "key": "server-route|server/routes.ts|POST /api/admin/certificates/:id/override-audit#0",
-      "source": "server/routes.ts:7530",
+      "source": "server/routes.ts:7528",
       "owner": "core-platform",
       "commandOwner": "server/routes.ts#registerRoutes",
       "delegatedCommands": [
@@ -79438,7 +79438,7 @@
       ],
       "retirementState": "active",
       "key": "server-route|server/routes.ts|POST /api/admin/certificates/:id/recrop#0",
-      "source": "server/routes.ts:6541",
+      "source": "server/routes.ts:6539",
       "owner": "core-platform",
       "commandOwner": "server/routes.ts#registerRoutes",
       "delegatedCommands": [
@@ -79515,7 +79515,7 @@
       ],
       "retirementState": "active",
       "key": "server-route|server/routes.ts|POST /api/admin/certificates/:id/reprocess-images#0",
-      "source": "server/routes.ts:6515",
+      "source": "server/routes.ts:6513",
       "owner": "core-platform",
       "commandOwner": "server/routes.ts#registerRoutes",
       "delegatedCommands": [
@@ -79629,7 +79629,7 @@
       ],
       "retirementState": "active",
       "key": "server-route|server/routes.ts|POST /api/admin/certificates/:id/scanner-capture-sessions#0",
-      "source": "server/routes.ts:9004",
+      "source": "server/routes.ts:9002",
       "owner": "core-platform",
       "commandOwner": "server/routes.ts#registerRoutes",
       "delegatedCommands": [
@@ -79724,7 +79724,7 @@
       ],
       "retirementState": "active",
       "key": "server-route|server/routes.ts|POST /api/admin/certificates/:id/upload-images#0",
-      "source": "server/routes.ts:6105",
+      "source": "server/routes.ts:6103",
       "owner": "core-platform",
       "commandOwner": "server/routes.ts#registerRoutes",
       "delegatedCommands": [
@@ -79857,7 +79857,7 @@
       ],
       "retirementState": "active",
       "key": "server-route|server/routes.ts|POST /api/admin/certificates/:id/void#0",
-      "source": "server/routes.ts:4180",
+      "source": "server/routes.ts:4178",
       "owner": "core-platform",
       "commandOwner": "server/routes.ts#registerRoutes",
       "delegatedCommands": [
@@ -79921,7 +79921,7 @@
       ],
       "retirementState": "retired",
       "key": "server-route|server/routes.ts|POST /api/admin/certificates/grade-with-ai#0",
-      "source": "server/routes.ts:8753",
+      "source": "server/routes.ts:8751",
       "owner": "core-platform",
       "commandOwner": "server/routes.ts#registerRoutes",
       "delegatedCommands": [
@@ -79980,7 +79980,7 @@
       ],
       "retirementState": "active",
       "key": "server-route|server/routes.ts|POST /api/admin/certificates/new#0",
-      "source": "server/routes.ts:4094",
+      "source": "server/routes.ts:4092",
       "owner": "core-platform",
       "commandOwner": "server/routes.ts#registerRoutes",
       "delegatedCommands": [
@@ -80045,7 +80045,7 @@
       ],
       "retirementState": "active",
       "key": "server-route|server/routes.ts|POST /api/admin/certificates#0",
-      "source": "server/routes.ts:4145",
+      "source": "server/routes.ts:4143",
       "owner": "core-platform",
       "commandOwner": "server/routes.ts#registerRoutes",
       "delegatedCommands": [
@@ -80162,7 +80162,7 @@
       ],
       "retirementState": "retired",
       "key": "server-route|server/routes.ts|POST /api/admin/certs/:certId/image#0",
-      "source": "server/routes.ts:10028",
+      "source": "server/routes.ts:10026",
       "owner": "core-platform",
       "commandOwner": "server/routes.ts#registerRoutes",
       "delegatedCommands": [
@@ -80368,7 +80368,7 @@
       ],
       "retirementState": "active",
       "key": "server-route|server/routes.ts|POST /api/admin/certs/:certId/reprocess-images#0",
-      "source": "server/routes.ts:9827",
+      "source": "server/routes.ts:9825",
       "owner": "core-platform",
       "commandOwner": "server/routes.ts#registerRoutes",
       "delegatedCommands": [
@@ -80487,7 +80487,7 @@
       ],
       "retirementState": "active",
       "key": "server-route|server/routes.ts|POST /api/admin/community#0",
-      "source": "server/routes.ts:2866",
+      "source": "server/routes.ts:2864",
       "owner": "core-platform",
       "commandOwner": "server/routes.ts#registerRoutes",
       "delegatedCommands": [
@@ -80562,7 +80562,7 @@
       ],
       "retirementState": "active",
       "key": "server-route|server/routes.ts|POST /api/admin/grading-queue/set-current#0",
-      "source": "server/routes.ts:7753",
+      "source": "server/routes.ts:7751",
       "owner": "core-platform",
       "commandOwner": "server/routes.ts#registerRoutes",
       "delegatedCommands": [
@@ -80623,7 +80623,7 @@
       ],
       "retirementState": "retired",
       "key": "server-route|server/routes.ts|POST /api/admin/hot-folder-upload#0",
-      "source": "server/routes.ts:7874",
+      "source": "server/routes.ts:7872",
       "owner": "core-platform",
       "commandOwner": "server/routes.ts#registerRoutes",
       "delegatedCommands": [],
@@ -80677,7 +80677,7 @@
       ],
       "retirementState": "active",
       "key": "server-route|server/routes.ts|POST /api/admin/identify-image#0",
-      "source": "server/routes.ts:8761",
+      "source": "server/routes.ts:8759",
       "owner": "core-platform",
       "commandOwner": "server/routes.ts#registerRoutes",
       "delegatedCommands": [
@@ -80759,7 +80759,7 @@
       ],
       "retirementState": "active",
       "key": "server-route|server/routes.ts|POST /api/admin/ig/post-now#0",
-      "source": "server/routes.ts:10648",
+      "source": "server/routes.ts:10646",
       "owner": "core-platform",
       "commandOwner": "server/routes.ts#registerRoutes",
       "delegatedCommands": [
@@ -80871,7 +80871,7 @@
       ],
       "retirementState": "active",
       "key": "server-route|server/routes.ts|POST /api/admin/ig/queue/:id/regenerate-caption#0",
-      "source": "server/routes.ts:12038",
+      "source": "server/routes.ts:12036",
       "owner": "core-platform",
       "commandOwner": "server/routes.ts#registerRoutes",
       "delegatedCommands": [
@@ -80947,7 +80947,7 @@
       ],
       "retirementState": "active",
       "key": "server-route|server/routes.ts|POST /api/admin/ig/queue/:id/regenerate-image#0",
-      "source": "server/routes.ts:12082",
+      "source": "server/routes.ts:12080",
       "owner": "core-platform",
       "commandOwner": "server/routes.ts#registerRoutes",
       "delegatedCommands": [
@@ -81044,7 +81044,7 @@
       ],
       "retirementState": "active",
       "key": "server-route|server/routes.ts|POST /api/admin/ig/queue/:id/replace-image#0",
-      "source": "server/routes.ts:11967",
+      "source": "server/routes.ts:11965",
       "owner": "core-platform",
       "commandOwner": "server/routes.ts#registerRoutes",
       "delegatedCommands": [
@@ -81114,7 +81114,7 @@
       ],
       "retirementState": "active",
       "key": "server-route|server/routes.ts|POST /api/admin/ig/queue/from-cert#0",
-      "source": "server/routes.ts:12191",
+      "source": "server/routes.ts:12189",
       "owner": "core-platform",
       "commandOwner": "server/routes.ts#registerRoutes",
       "delegatedCommands": [
@@ -81207,7 +81207,7 @@
       ],
       "retirementState": "active",
       "key": "server-route|server/routes.ts|POST /api/admin/logbook/:certId/regenerate#0",
-      "source": "server/routes.ts:3697",
+      "source": "server/routes.ts:3695",
       "owner": "core-platform",
       "commandOwner": "server/routes.ts#registerRoutes",
       "delegatedCommands": [
@@ -81331,7 +81331,7 @@
       ],
       "retirementState": "active",
       "key": "server-route|server/routes.ts|POST /api/admin/mvgs/calibration/lock#0",
-      "source": "server/routes.ts:11110",
+      "source": "server/routes.ts:11108",
       "owner": "core-platform",
       "commandOwner": "server/routes.ts#registerRoutes",
       "delegatedCommands": [
@@ -81394,7 +81394,7 @@
       ],
       "retirementState": "active",
       "key": "server-route|server/routes.ts|POST /api/admin/mvgs/calibration/unlock#0",
-      "source": "server/routes.ts:11129",
+      "source": "server/routes.ts:11127",
       "owner": "core-platform",
       "commandOwner": "server/routes.ts#registerRoutes",
       "delegatedCommands": [
@@ -81457,7 +81457,7 @@
       ],
       "retirementState": "active",
       "key": "server-route|server/routes.ts|POST /api/admin/print-batch/reprint#0",
-      "source": "server/routes.ts:4853",
+      "source": "server/routes.ts:4851",
       "owner": "core-platform",
       "commandOwner": "server/routes.ts#registerRoutes",
       "delegatedCommands": [
@@ -81655,7 +81655,7 @@
       ],
       "retirementState": "active",
       "key": "server-route|server/routes.ts|POST /api/admin/print-batch#0",
-      "source": "server/routes.ts:4400",
+      "source": "server/routes.ts:4398",
       "owner": "core-platform",
       "commandOwner": "server/routes.ts#registerRoutes",
       "delegatedCommands": [
@@ -81873,7 +81873,7 @@
       ],
       "retirementState": "active",
       "key": "server-route|server/routes.ts|POST /api/admin/printing/mark-printed#0",
-      "source": "server/routes.ts:4824",
+      "source": "server/routes.ts:4822",
       "owner": "core-platform",
       "commandOwner": "server/routes.ts#registerRoutes",
       "delegatedCommands": [
@@ -81960,7 +81960,7 @@
       ],
       "retirementState": "active",
       "key": "server-route|server/routes.ts|POST /api/admin/printing/override/:certId#0",
-      "source": "server/routes.ts:5237",
+      "source": "server/routes.ts:5235",
       "owner": "core-platform",
       "commandOwner": "server/routes.ts#registerRoutes",
       "delegatedCommands": [
@@ -82018,7 +82018,7 @@
       ],
       "retirementState": "active",
       "key": "server-route|server/routes.ts|POST /api/admin/scan-ingest#0",
-      "source": "server/routes.ts:9392",
+      "source": "server/routes.ts:9390",
       "owner": "core-platform",
       "commandOwner": "server/routes.ts#registerRoutes",
       "delegatedCommands": [
@@ -82076,7 +82076,7 @@
       ],
       "retirementState": "active",
       "key": "server-route|server/routes.ts|POST /api/admin/scanner/capture-sessions/:sessionId/evidence#0",
-      "source": "server/routes.ts:9327",
+      "source": "server/routes.ts:9325",
       "owner": "core-platform",
       "commandOwner": "server/routes.ts#registerRoutes",
       "delegatedCommands": [
@@ -82246,7 +82246,7 @@
       ],
       "retirementState": "active",
       "key": "server-route|server/routes.ts|POST /api/admin/scanner/capture-sessions/:sessionId/failed#0",
-      "source": "server/routes.ts:9137",
+      "source": "server/routes.ts:9135",
       "owner": "core-platform",
       "commandOwner": "server/routes.ts#registerRoutes",
       "delegatedCommands": [
@@ -82353,7 +82353,7 @@
       ],
       "retirementState": "active",
       "key": "server-route|server/routes.ts|POST /api/admin/scanner/capture-sessions/:sessionId/keepalive#0",
-      "source": "server/routes.ts:9102",
+      "source": "server/routes.ts:9100",
       "owner": "core-platform",
       "commandOwner": "server/routes.ts#registerRoutes",
       "delegatedCommands": [
@@ -82463,7 +82463,7 @@
       ],
       "retirementState": "active",
       "key": "server-route|server/routes.ts|POST /api/admin/scanner/capture-sessions/:sessionId/staged-upload/:stagingId/finalise#0",
-      "source": "server/routes.ts:9203",
+      "source": "server/routes.ts:9201",
       "owner": "core-platform",
       "commandOwner": "server/routes.ts#registerRoutes",
       "delegatedCommands": [
@@ -82644,7 +82644,7 @@
       ],
       "retirementState": "active",
       "key": "server-route|server/routes.ts|POST /api/admin/scanner/capture-sessions/:sessionId/staged-upload#0",
-      "source": "server/routes.ts:9164",
+      "source": "server/routes.ts:9162",
       "owner": "core-platform",
       "commandOwner": "server/routes.ts#registerRoutes",
       "delegatedCommands": [
@@ -82762,7 +82762,7 @@
       ],
       "retirementState": "active",
       "key": "server-route|server/routes.ts|POST /api/admin/share/prewarm#0",
-      "source": "server/routes.ts:2919",
+      "source": "server/routes.ts:2917",
       "owner": "core-platform",
       "commandOwner": "server/routes.ts#registerRoutes",
       "delegatedCommands": [
@@ -82840,7 +82840,7 @@
       ],
       "retirementState": "active",
       "key": "server-route|server/routes.ts|POST /api/admin/social-studio/caption#0",
-      "source": "server/routes.ts:2787",
+      "source": "server/routes.ts:2785",
       "owner": "core-platform",
       "commandOwner": "server/routes.ts#registerRoutes",
       "delegatedCommands": [
@@ -82913,7 +82913,7 @@
       ],
       "retirementState": "active",
       "key": "server-route|server/routes.ts|POST /api/admin/social-studio/certificate#0",
-      "source": "server/routes.ts:2774",
+      "source": "server/routes.ts:2772",
       "owner": "core-platform",
       "commandOwner": "server/routes.ts#registerRoutes",
       "delegatedCommands": [
@@ -82986,7 +82986,7 @@
       ],
       "retirementState": "active",
       "key": "server-route|server/routes.ts|POST /api/admin/social-studio/render#0",
-      "source": "server/routes.ts:2801",
+      "source": "server/routes.ts:2799",
       "owner": "core-platform",
       "commandOwner": "server/routes.ts#registerRoutes",
       "delegatedCommands": [
@@ -83099,7 +83099,7 @@
       ],
       "retirementState": "active",
       "key": "server-route|server/routes.ts|POST /api/admin/staging/reset#0",
-      "source": "server/routes.ts:5634",
+      "source": "server/routes.ts:5632",
       "owner": "core-platform",
       "commandOwner": "server/routes.ts#registerRoutes",
       "delegatedCommands": [
@@ -83162,7 +83162,7 @@
       ],
       "retirementState": "active",
       "key": "server-route|server/routes.ts|POST /api/admin/staging/seed#0",
-      "source": "server/routes.ts:5619",
+      "source": "server/routes.ts:5617",
       "owner": "core-platform",
       "commandOwner": "server/routes.ts#registerRoutes",
       "delegatedCommands": [
@@ -83226,7 +83226,7 @@
       ],
       "retirementState": "active",
       "key": "server-route|server/routes.ts|POST /api/admin/submissions/:id/mark-received#0",
-      "source": "server/routes.ts:5997",
+      "source": "server/routes.ts:5995",
       "owner": "core-platform",
       "commandOwner": "server/routes.ts#registerRoutes",
       "delegatedCommands": [
@@ -83312,7 +83312,7 @@
       ],
       "retirementState": "active",
       "key": "server-route|server/routes.ts|POST /api/admin/upload-token#0",
-      "source": "server/routes.ts:7764",
+      "source": "server/routes.ts:7762",
       "owner": "core-platform",
       "commandOwner": "server/routes.ts#registerRoutes",
       "delegatedCommands": [
@@ -83374,7 +83374,7 @@
       ],
       "retirementState": "active",
       "key": "server-route|server/routes.ts|POST /api/admin/weekly-reel/approvals/:date/approve-all#0",
-      "source": "server/routes.ts:11627",
+      "source": "server/routes.ts:11625",
       "owner": "core-platform",
       "commandOwner": "server/routes.ts#registerRoutes",
       "delegatedCommands": [
@@ -83434,7 +83434,7 @@
       ],
       "retirementState": "active",
       "key": "server-route|server/routes.ts|POST /api/admin/weekly-reel/generate#0",
-      "source": "server/routes.ts:10687",
+      "source": "server/routes.ts:10685",
       "owner": "core-platform",
       "commandOwner": "server/routes.ts#registerRoutes",
       "delegatedCommands": [
@@ -83587,7 +83587,7 @@
       ],
       "retirementState": "active",
       "key": "server-route|server/routes.ts|POST /api/admin/weekly-reel/publish-facebook#0",
-      "source": "server/routes.ts:11526",
+      "source": "server/routes.ts:11524",
       "owner": "core-platform",
       "commandOwner": "server/routes.ts#registerRoutes",
       "delegatedCommands": [
@@ -83654,7 +83654,7 @@
       ],
       "retirementState": "active",
       "key": "server-route|server/routes.ts|POST /api/admin/weekly-reel/publish-instagram#0",
-      "source": "server/routes.ts:11521",
+      "source": "server/routes.ts:11519",
       "owner": "core-platform",
       "commandOwner": "server/routes.ts#registerRoutes",
       "delegatedCommands": [
@@ -83721,7 +83721,7 @@
       ],
       "retirementState": "active",
       "key": "server-route|server/routes.ts|POST /api/admin/weekly-reel/publish-tiktok#0",
-      "source": "server/routes.ts:11531",
+      "source": "server/routes.ts:11529",
       "owner": "core-platform",
       "commandOwner": "server/routes.ts#registerRoutes",
       "delegatedCommands": [
@@ -83792,7 +83792,7 @@
       ],
       "retirementState": "active",
       "key": "server-route|server/routes.ts|POST /api/admin/weekly-reel/refresh-insights#0",
-      "source": "server/routes.ts:11551",
+      "source": "server/routes.ts:11549",
       "owner": "core-platform",
       "commandOwner": "server/routes.ts#registerRoutes",
       "delegatedCommands": [
@@ -83854,7 +83854,7 @@
       ],
       "retirementState": "active",
       "key": "server-route|server/routes.ts|POST /api/admin/weekly-reel/regenerate-card#0",
-      "source": "server/routes.ts:11644",
+      "source": "server/routes.ts:11642",
       "owner": "core-platform",
       "commandOwner": "server/routes.ts#registerRoutes",
       "delegatedCommands": [
@@ -83931,7 +83931,7 @@
       ],
       "retirementState": "active",
       "key": "server-route|server/routes.ts|POST /api/admin/weekly-reel/rerun#0",
-      "source": "server/routes.ts:11362",
+      "source": "server/routes.ts:11360",
       "owner": "core-platform",
       "commandOwner": "server/routes.ts#registerRoutes",
       "delegatedCommands": [
@@ -84084,7 +84084,7 @@
       ],
       "retirementState": "active",
       "key": "server-route|server/routes.ts|POST /api/admin/weekly-reel/test-webhook#0",
-      "source": "server/routes.ts:11338",
+      "source": "server/routes.ts:11336",
       "owner": "core-platform",
       "commandOwner": "server/routes.ts#registerRoutes",
       "delegatedCommands": [
@@ -84152,7 +84152,7 @@
       ],
       "retirementState": "active",
       "key": "server-route|server/routes.ts|POST /api/admin/weekly-reel/upload-intro#0",
-      "source": "server/routes.ts:11721",
+      "source": "server/routes.ts:11719",
       "owner": "core-platform",
       "commandOwner": "server/routes.ts#registerRoutes",
       "delegatedCommands": [
@@ -84224,7 +84224,7 @@
       ],
       "retirementState": "active",
       "key": "server-route|server/routes.ts|POST /api/admin/weekly-reel/upload-music#0",
-      "source": "server/routes.ts:11745",
+      "source": "server/routes.ts:11743",
       "owner": "core-platform",
       "commandOwner": "server/routes.ts#registerRoutes",
       "delegatedCommands": [
@@ -84296,7 +84296,7 @@
       ],
       "retirementState": "active",
       "key": "server-route|server/routes.ts|POST /api/admin/weekly-reel/upload-outro#0",
-      "source": "server/routes.ts:11733",
+      "source": "server/routes.ts:11731",
       "owner": "core-platform",
       "commandOwner": "server/routes.ts#registerRoutes",
       "delegatedCommands": [
@@ -84362,7 +84362,7 @@
       ],
       "retirementState": "active",
       "key": "server-route|server/routes.ts|POST /api/cookies/acknowledge#0",
-      "source": "server/routes.ts:2197",
+      "source": "server/routes.ts:2195",
       "owner": "core-platform",
       "commandOwner": "server/routes.ts#registerRoutes",
       "delegatedCommands": [
@@ -84411,7 +84411,7 @@
       ],
       "retirementState": "active",
       "key": "server-route|server/routes.ts|POST /api/customer/logout#0",
-      "source": "server/routes.ts:5826",
+      "source": "server/routes.ts:5824",
       "owner": "core-platform",
       "commandOwner": "server/routes.ts#registerRoutes",
       "delegatedCommands": [],
@@ -84461,7 +84461,7 @@
       ],
       "retirementState": "active",
       "key": "server-route|server/routes.ts|POST /api/customer/marketing-consent/withdraw-all#0",
-      "source": "server/routes.ts:5911",
+      "source": "server/routes.ts:5909",
       "owner": "core-platform",
       "commandOwner": "server/routes.ts#registerRoutes",
       "delegatedCommands": [
@@ -84519,7 +84519,7 @@
       ],
       "retirementState": "active",
       "key": "server-route|server/routes.ts|POST /api/logbook/:certId/reissue#0",
-      "source": "server/routes.ts:3627",
+      "source": "server/routes.ts:3625",
       "owner": "core-platform",
       "commandOwner": "server/routes.ts#registerRoutes",
       "delegatedCommands": [
@@ -84624,7 +84624,7 @@
       ],
       "retirementState": "active",
       "key": "server-route|server/routes.ts|POST /api/submissions/:id/customer-tracking#0",
-      "source": "server/routes.ts:5971",
+      "source": "server/routes.ts:5969",
       "owner": "core-platform",
       "commandOwner": "server/routes.ts#registerRoutes",
       "delegatedCommands": [
@@ -84679,7 +84679,7 @@
       ],
       "retirementState": "active",
       "key": "server-route|server/routes.ts|POST /api/tools/estimate/checkout#0",
-      "source": "server/routes.ts:8799",
+      "source": "server/routes.ts:8797",
       "owner": "core-platform",
       "commandOwner": "server/routes.ts#registerRoutes",
       "delegatedCommands": [
@@ -84737,7 +84737,7 @@
       ],
       "retirementState": "active",
       "key": "server-route|server/routes.ts|POST /api/tools/estimate#0",
-      "source": "server/routes.ts:8860",
+      "source": "server/routes.ts:8858",
       "owner": "core-platform",
       "commandOwner": "server/routes.ts#registerRoutes",
       "delegatedCommands": [
@@ -84804,7 +84804,7 @@
       ],
       "retirementState": "active",
       "key": "server-route|server/routes.ts|POST /api/upload/:certId/:imageType#0",
-      "source": "server/routes.ts:7820",
+      "source": "server/routes.ts:7818",
       "owner": "core-platform",
       "commandOwner": "server/routes.ts#registerRoutes",
       "delegatedCommands": [
@@ -84882,7 +84882,7 @@
       ],
       "retirementState": "retired",
       "key": "server-route|server/routes.ts|PUT /api/admin/certificates/:id/approve-grade#0",
-      "source": "server/routes.ts:3000",
+      "source": "server/routes.ts:2998",
       "owner": "core-platform",
       "commandOwner": "server/routes.ts#registerRoutes",
       "delegatedCommands": [
@@ -84941,7 +84941,7 @@
       ],
       "retirementState": "active",
       "key": "server-route|server/routes.ts|PUT /api/admin/certificates/:id/approve#0",
-      "source": "server/routes.ts:7153",
+      "source": "server/routes.ts:7151",
       "owner": "core-platform",
       "commandOwner": "server/routes.ts#registerRoutes",
       "delegatedCommands": [
@@ -85055,7 +85055,7 @@
       ],
       "retirementState": "active",
       "key": "server-route|server/routes.ts|PUT /api/admin/certificates/:id/attach-images#0",
-      "source": "server/routes.ts:6455",
+      "source": "server/routes.ts:6453",
       "owner": "core-platform",
       "commandOwner": "server/routes.ts#registerRoutes",
       "delegatedCommands": [
@@ -85208,7 +85208,7 @@
       ],
       "retirementState": "active",
       "key": "server-route|server/routes.ts|PUT /api/admin/certificates/:id/grade#0",
-      "source": "server/routes.ts:7150",
+      "source": "server/routes.ts:7148",
       "owner": "core-platform",
       "commandOwner": "server/routes.ts#registerRoutes",
       "delegatedCommands": [
@@ -85324,7 +85324,7 @@
       ],
       "retirementState": "active",
       "key": "server-route|server/routes.ts|PUT /api/admin/certificates/:id/status#0",
-      "source": "server/routes.ts:10467",
+      "source": "server/routes.ts:10465",
       "owner": "core-platform",
       "commandOwner": "server/routes.ts#registerRoutes",
       "delegatedCommands": [
@@ -85386,7 +85386,7 @@
       ],
       "retirementState": "active",
       "key": "server-route|server/routes.ts|PUT /api/admin/certificates/:id#0",
-      "source": "server/routes.ts:4156",
+      "source": "server/routes.ts:4154",
       "owner": "core-platform",
       "commandOwner": "server/routes.ts#registerRoutes",
       "delegatedCommands": [
@@ -126088,7 +126088,7 @@
       "id": "server-session:adminEmail",
       "principalKind": "session-field",
       "key": "session-principal|server/routes.ts|server-session:adminEmail#10",
-      "source": "server/routes.ts:2909",
+      "source": "server/routes.ts:2907",
       "owner": "core-platform"
     },
     {
@@ -126096,7 +126096,7 @@
       "id": "server-session:adminEmail",
       "principalKind": "session-field",
       "key": "session-principal|server/routes.ts|server-session:adminEmail#11",
-      "source": "server/routes.ts:4172",
+      "source": "server/routes.ts:4170",
       "owner": "core-platform"
     },
     {
@@ -126104,7 +126104,7 @@
       "id": "server-session:adminEmail",
       "principalKind": "session-field",
       "key": "session-principal|server/routes.ts|server-session:adminEmail#12",
-      "source": "server/routes.ts:4204",
+      "source": "server/routes.ts:4202",
       "owner": "core-platform"
     },
     {
@@ -126112,7 +126112,7 @@
       "id": "server-session:adminEmail",
       "principalKind": "session-field",
       "key": "session-principal|server/routes.ts|server-session:adminEmail#13",
-      "source": "server/routes.ts:5622",
+      "source": "server/routes.ts:5620",
       "owner": "core-platform"
     },
     {
@@ -126120,7 +126120,7 @@
       "id": "server-session:adminEmail",
       "principalKind": "session-field",
       "key": "session-principal|server/routes.ts|server-session:adminEmail#14",
-      "source": "server/routes.ts:5637",
+      "source": "server/routes.ts:5635",
       "owner": "core-platform"
     },
     {
@@ -126128,7 +126128,7 @@
       "id": "server-session:adminEmail",
       "principalKind": "session-field",
       "key": "session-principal|server/routes.ts|server-session:adminEmail#15",
-      "source": "server/routes.ts:6027",
+      "source": "server/routes.ts:6025",
       "owner": "core-platform"
     },
     {
@@ -126136,7 +126136,7 @@
       "id": "server-session:adminEmail",
       "principalKind": "session-field",
       "key": "session-principal|server/routes.ts|server-session:adminEmail#16",
-      "source": "server/routes.ts:6488",
+      "source": "server/routes.ts:6486",
       "owner": "core-platform"
     },
     {
@@ -126144,7 +126144,7 @@
       "id": "server-session:adminEmail",
       "principalKind": "session-field",
       "key": "session-principal|server/routes.ts|server-session:adminEmail#17",
-      "source": "server/routes.ts:7460",
+      "source": "server/routes.ts:7458",
       "owner": "core-platform"
     },
     {
@@ -126152,7 +126152,7 @@
       "id": "server-session:adminEmail",
       "principalKind": "session-field",
       "key": "session-principal|server/routes.ts|server-session:adminEmail#18",
-      "source": "server/routes.ts:7490",
+      "source": "server/routes.ts:7488",
       "owner": "core-platform"
     },
     {
@@ -126160,7 +126160,7 @@
       "id": "server-session:adminEmail",
       "principalKind": "session-field",
       "key": "session-principal|server/routes.ts|server-session:adminEmail#19",
-      "source": "server/routes.ts:10252",
+      "source": "server/routes.ts:10250",
       "owner": "core-platform"
     },
     {
@@ -126168,7 +126168,7 @@
       "id": "server-session:adminEmail",
       "principalKind": "session-field",
       "key": "session-principal|server/routes.ts|server-session:adminEmail#2",
-      "source": "server/routes.ts:1194",
+      "source": "server/routes.ts:1188",
       "owner": "core-platform"
     },
     {
@@ -126176,7 +126176,7 @@
       "id": "server-session:adminEmail",
       "principalKind": "session-field",
       "key": "session-principal|server/routes.ts|server-session:adminEmail#3",
-      "source": "server/routes.ts:1311",
+      "source": "server/routes.ts:1309",
       "owner": "core-platform"
     },
     {
@@ -126184,7 +126184,7 @@
       "id": "server-session:adminEmail",
       "principalKind": "session-field",
       "key": "session-principal|server/routes.ts|server-session:adminEmail#4",
-      "source": "server/routes.ts:1328",
+      "source": "server/routes.ts:1326",
       "owner": "core-platform"
     },
     {
@@ -126192,7 +126192,7 @@
       "id": "server-session:adminEmail",
       "principalKind": "session-field",
       "key": "session-principal|server/routes.ts|server-session:adminEmail#5",
-      "source": "server/routes.ts:1461",
+      "source": "server/routes.ts:1459",
       "owner": "core-platform"
     },
     {
@@ -126200,7 +126200,7 @@
       "id": "server-session:adminEmail",
       "principalKind": "session-field",
       "key": "session-principal|server/routes.ts|server-session:adminEmail#6",
-      "source": "server/routes.ts:1499",
+      "source": "server/routes.ts:1497",
       "owner": "core-platform"
     },
     {
@@ -126208,7 +126208,7 @@
       "id": "server-session:adminEmail",
       "principalKind": "session-field",
       "key": "session-principal|server/routes.ts|server-session:adminEmail#7",
-      "source": "server/routes.ts:1509",
+      "source": "server/routes.ts:1507",
       "owner": "core-platform"
     },
     {
@@ -126216,7 +126216,7 @@
       "id": "server-session:adminEmail",
       "principalKind": "session-field",
       "key": "session-principal|server/routes.ts|server-session:adminEmail#8",
-      "source": "server/routes.ts:1511",
+      "source": "server/routes.ts:1509",
       "owner": "core-platform"
     },
     {
@@ -126224,7 +126224,7 @@
       "id": "server-session:adminEmail",
       "principalKind": "session-field",
       "key": "session-principal|server/routes.ts|server-session:adminEmail#9",
-      "source": "server/routes.ts:2888",
+      "source": "server/routes.ts:2886",
       "owner": "core-platform"
     },
     {
@@ -126232,7 +126232,7 @@
       "id": "server-session:customerEmail",
       "principalKind": "session-field",
       "key": "session-principal|server/routes.ts|server-session:customerEmail#0",
-      "source": "server/routes.ts:5840",
+      "source": "server/routes.ts:5838",
       "owner": "core-platform"
     },
     {
@@ -126240,7 +126240,7 @@
       "id": "server-session:customerEmail",
       "principalKind": "session-field",
       "key": "session-principal|server/routes.ts|server-session:customerEmail#1",
-      "source": "server/routes.ts:5860",
+      "source": "server/routes.ts:5858",
       "owner": "core-platform"
     },
     {
@@ -126248,7 +126248,7 @@
       "id": "server-session:customerEmail",
       "principalKind": "session-field",
       "key": "session-principal|server/routes.ts|server-session:customerEmail#2",
-      "source": "server/routes.ts:5913",
+      "source": "server/routes.ts:5911",
       "owner": "core-platform"
     },
     {
@@ -126256,7 +126256,7 @@
       "id": "server-session:customerEmail",
       "principalKind": "session-field",
       "key": "session-principal|server/routes.ts|server-session:customerEmail#3",
-      "source": "server/routes.ts:5976",
+      "source": "server/routes.ts:5974",
       "owner": "core-platform"
     },
     {
@@ -126264,7 +126264,7 @@
       "id": "server-session:customerEmail",
       "principalKind": "session-field",
       "key": "session-principal|server/routes.ts|server-session:customerEmail#4",
-      "source": "server/routes.ts:5976",
+      "source": "server/routes.ts:5974",
       "owner": "core-platform"
     },
     {
@@ -126272,7 +126272,7 @@
       "id": "server-session:customerEmail",
       "principalKind": "session-field",
       "key": "session-principal|server/routes.ts|server-session:customerEmail#5",
-      "source": "server/routes.ts:6063",
+      "source": "server/routes.ts:6061",
       "owner": "core-platform"
     },
     {
@@ -126280,7 +126280,7 @@
       "id": "server-session:destroy",
       "principalKind": "session-field",
       "key": "session-principal|server/routes.ts|server-session:destroy#0",
-      "source": "server/routes.ts:5827",
+      "source": "server/routes.ts:5825",
       "owner": "core-platform"
     },
     {
@@ -126288,7 +126288,7 @@
       "id": "server-session:userId",
       "principalKind": "session-field",
       "key": "session-principal|server/routes.ts|server-session:userId#0",
-      "source": "server/routes.ts:5955",
+      "source": "server/routes.ts:5953",
       "owner": "core-platform"
     },
     {
@@ -133330,7 +133330,7 @@
       "effect": "read",
       "access": "sql",
       "key": "table-access|server/estimate-credit-consumption.ts|read:public.estimate_credit_reservations#0",
-      "source": "server/estimate-credit-consumption.ts:282",
+      "source": "server/estimate-credit-consumption.ts:286",
       "disposition": "known-legacy",
       "finding": "ARCH-AUTHORITY-001",
       "legacyExpiry": "the bounded-context repair that assigns explicit authority"
@@ -133341,7 +133341,7 @@
       "effect": "read",
       "access": "sql",
       "key": "table-access|server/estimate-credit-consumption.ts|read:public.estimate_credit_reservations#1",
-      "source": "server/estimate-credit-consumption.ts:298",
+      "source": "server/estimate-credit-consumption.ts:302",
       "disposition": "known-legacy",
       "finding": "ARCH-AUTHORITY-001",
       "legacyExpiry": "the bounded-context repair that assigns explicit authority"
@@ -133352,7 +133352,7 @@
       "effect": "read",
       "access": "sql",
       "key": "table-access|server/estimate-credit-consumption.ts|read:public.estimate_credit_reservations#2",
-      "source": "server/estimate-credit-consumption.ts:385",
+      "source": "server/estimate-credit-consumption.ts:391",
       "disposition": "known-legacy",
       "finding": "ARCH-AUTHORITY-001",
       "legacyExpiry": "the bounded-context repair that assigns explicit authority"
@@ -133374,7 +133374,7 @@
       "effect": "read",
       "access": "sql",
       "key": "table-access|server/estimate-credit-consumption.ts|read:public.estimate_credits#1",
-      "source": "server/estimate-credit-consumption.ts:298",
+      "source": "server/estimate-credit-consumption.ts:302",
       "disposition": "known-legacy",
       "finding": "ARCH-AUTHORITY-001",
       "legacyExpiry": "the bounded-context repair that assigns explicit authority"
@@ -133385,7 +133385,7 @@
       "effect": "read",
       "access": "sql",
       "key": "table-access|server/estimate-credit-consumption.ts|read:public.estimate_credits#2",
-      "source": "server/estimate-credit-consumption.ts:385",
+      "source": "server/estimate-credit-consumption.ts:391",
       "disposition": "known-legacy",
       "finding": "ARCH-AUTHORITY-001",
       "legacyExpiry": "the bounded-context repair that assigns explicit authority"
@@ -133396,7 +133396,7 @@
       "effect": "read",
       "access": "sql",
       "key": "table-access|server/estimate-credit-consumption.ts|read:public.estimate_credits#3",
-      "source": "server/estimate-credit-consumption.ts:515",
+      "source": "server/estimate-credit-consumption.ts:521",
       "disposition": "known-legacy",
       "finding": "ARCH-AUTHORITY-001",
       "legacyExpiry": "the bounded-context repair that assigns explicit authority"
@@ -133429,7 +133429,7 @@
       "effect": "read",
       "access": "sql",
       "key": "table-access|server/estimate-credit-consumption.ts|read:public.users#2",
-      "source": "server/estimate-credit-consumption.ts:298",
+      "source": "server/estimate-credit-consumption.ts:302",
       "disposition": "known-legacy",
       "finding": "ARCH-AUTHORITY-001",
       "legacyExpiry": "the bounded-context repair that assigns explicit authority"
@@ -133440,7 +133440,7 @@
       "effect": "read",
       "access": "sql",
       "key": "table-access|server/estimate-credit-consumption.ts|read:public.users#3",
-      "source": "server/estimate-credit-consumption.ts:385",
+      "source": "server/estimate-credit-consumption.ts:391",
       "disposition": "known-legacy",
       "finding": "ARCH-AUTHORITY-001",
       "legacyExpiry": "the bounded-context repair that assigns explicit authority"
@@ -133451,7 +133451,7 @@
       "effect": "read",
       "access": "sql",
       "key": "table-access|server/estimate-credit-consumption.ts|read:public.users#4",
-      "source": "server/estimate-credit-consumption.ts:515",
+      "source": "server/estimate-credit-consumption.ts:521",
       "disposition": "known-legacy",
       "finding": "ARCH-AUTHORITY-001",
       "legacyExpiry": "the bounded-context repair that assigns explicit authority"
@@ -133484,7 +133484,7 @@
       "effect": "write",
       "access": "sql",
       "key": "table-access|server/estimate-credit-consumption.ts|write:public.estimate_credit_reservations#2",
-      "source": "server/estimate-credit-consumption.ts:213",
+      "source": "server/estimate-credit-consumption.ts:216",
       "disposition": "known-legacy",
       "finding": "ARCH-AUTHORITY-001",
       "legacyExpiry": "the bounded-context repair that assigns explicit authority"
@@ -133495,7 +133495,7 @@
       "effect": "write",
       "access": "sql",
       "key": "table-access|server/estimate-credit-consumption.ts|write:public.estimate_credit_reservations#3",
-      "source": "server/estimate-credit-consumption.ts:282",
+      "source": "server/estimate-credit-consumption.ts:286",
       "disposition": "known-legacy",
       "finding": "ARCH-AUTHORITY-001",
       "legacyExpiry": "the bounded-context repair that assigns explicit authority"
@@ -133506,7 +133506,7 @@
       "effect": "write",
       "access": "sql",
       "key": "table-access|server/estimate-credit-consumption.ts|write:public.estimate_credit_reservations#4",
-      "source": "server/estimate-credit-consumption.ts:298",
+      "source": "server/estimate-credit-consumption.ts:302",
       "disposition": "known-legacy",
       "finding": "ARCH-AUTHORITY-001",
       "legacyExpiry": "the bounded-context repair that assigns explicit authority"
@@ -133517,7 +133517,7 @@
       "effect": "write",
       "access": "sql",
       "key": "table-access|server/estimate-credit-consumption.ts|write:public.estimate_credit_reservations#5",
-      "source": "server/estimate-credit-consumption.ts:385",
+      "source": "server/estimate-credit-consumption.ts:391",
       "disposition": "known-legacy",
       "finding": "ARCH-AUTHORITY-001",
       "legacyExpiry": "the bounded-context repair that assigns explicit authority"
@@ -133539,7 +133539,7 @@
       "effect": "write",
       "access": "sql",
       "key": "table-access|server/estimate-credit-consumption.ts|write:public.estimate_credits#1",
-      "source": "server/estimate-credit-consumption.ts:298",
+      "source": "server/estimate-credit-consumption.ts:302",
       "disposition": "known-legacy",
       "finding": "ARCH-AUTHORITY-001",
       "legacyExpiry": "the bounded-context repair that assigns explicit authority"
@@ -133550,7 +133550,7 @@
       "effect": "write",
       "access": "sql",
       "key": "table-access|server/estimate-credit-consumption.ts|write:public.estimate_credits#2",
-      "source": "server/estimate-credit-consumption.ts:385",
+      "source": "server/estimate-credit-consumption.ts:391",
       "disposition": "known-legacy",
       "finding": "ARCH-AUTHORITY-001",
       "legacyExpiry": "the bounded-context repair that assigns explicit authority"
@@ -133561,7 +133561,7 @@
       "effect": "write",
       "access": "sql",
       "key": "table-access|server/estimate-credit-consumption.ts|write:public.estimate_free_uses#0",
-      "source": "server/estimate-credit-consumption.ts:213",
+      "source": "server/estimate-credit-consumption.ts:216",
       "disposition": "known-legacy",
       "finding": "ARCH-AUTHORITY-001",
       "legacyExpiry": "the bounded-context repair that assigns explicit authority"
@@ -133572,7 +133572,7 @@
       "effect": "write",
       "access": "sql",
       "key": "table-access|server/estimate-credit-consumption.ts|write:public.estimate_free_uses#1",
-      "source": "server/estimate-credit-consumption.ts:298",
+      "source": "server/estimate-credit-consumption.ts:302",
       "disposition": "known-legacy",
       "finding": "ARCH-AUTHORITY-001",
       "legacyExpiry": "the bounded-context repair that assigns explicit authority"
@@ -133583,7 +133583,7 @@
       "effect": "write",
       "access": "sql",
       "key": "table-access|server/estimate-credit-consumption.ts|write:public.estimate_free_uses#2",
-      "source": "server/estimate-credit-consumption.ts:385",
+      "source": "server/estimate-credit-consumption.ts:391",
       "disposition": "known-legacy",
       "finding": "ARCH-AUTHORITY-001",
       "legacyExpiry": "the bounded-context repair that assigns explicit authority"
@@ -133605,7 +133605,7 @@
       "effect": "write",
       "access": "sql",
       "key": "table-access|server/estimate-credit-consumption.ts|write:public.skip#1",
-      "source": "server/estimate-credit-consumption.ts:385",
+      "source": "server/estimate-credit-consumption.ts:391",
       "disposition": "known-legacy",
       "finding": "ARCH-AUTHORITY-001",
       "legacyExpiry": "the bounded-context repair that assigns explicit authority"
@@ -133627,7 +133627,7 @@
       "effect": "write",
       "access": "sql",
       "key": "table-access|server/estimate-credit-consumption.ts|write:public.users#1",
-      "source": "server/estimate-credit-consumption.ts:298",
+      "source": "server/estimate-credit-consumption.ts:302",
       "disposition": "known-legacy",
       "finding": "ARCH-AUTHORITY-001",
       "legacyExpiry": "the bounded-context repair that assigns explicit authority"
@@ -133638,7 +133638,7 @@
       "effect": "write",
       "access": "sql",
       "key": "table-access|server/estimate-credit-consumption.ts|write:public.users#2",
-      "source": "server/estimate-credit-consumption.ts:385",
+      "source": "server/estimate-credit-consumption.ts:391",
       "disposition": "known-legacy",
       "finding": "ARCH-AUTHORITY-001",
       "legacyExpiry": "the bounded-context repair that assigns explicit authority"
@@ -150806,7 +150806,7 @@
       "effect": "read",
       "access": "drizzle",
       "key": "table-access|server/routes.ts|read:certificates#0",
-      "source": "server/routes.ts:4055",
+      "source": "server/routes.ts:4053",
       "owner": "core-platform"
     },
     {
@@ -150815,7 +150815,7 @@
       "effect": "read",
       "access": "drizzle",
       "key": "table-access|server/routes.ts|read:certificates#1",
-      "source": "server/routes.ts:10525",
+      "source": "server/routes.ts:10523",
       "owner": "core-platform"
     },
     {
@@ -150824,7 +150824,7 @@
       "effect": "read",
       "access": "drizzle",
       "key": "table-access|server/routes.ts|read:certificates#2",
-      "source": "server/routes.ts:10609",
+      "source": "server/routes.ts:10607",
       "owner": "core-platform"
     },
     {
@@ -150833,7 +150833,7 @@
       "effect": "read",
       "access": "drizzle",
       "key": "table-access|server/routes.ts|read:certificates#3",
-      "source": "server/routes.ts:12205",
+      "source": "server/routes.ts:12203",
       "owner": "core-platform"
     },
     {
@@ -150842,7 +150842,7 @@
       "effect": "read",
       "access": "drizzle",
       "key": "table-access|server/routes.ts|read:igPostQueue#0",
-      "source": "server/routes.ts:10514",
+      "source": "server/routes.ts:10512",
       "owner": "core-platform"
     },
     {
@@ -150851,7 +150851,7 @@
       "effect": "read",
       "access": "drizzle",
       "key": "table-access|server/routes.ts|read:igPostQueue#1",
-      "source": "server/routes.ts:10592",
+      "source": "server/routes.ts:10590",
       "owner": "core-platform"
     },
     {
@@ -150860,7 +150860,7 @@
       "effect": "read",
       "access": "drizzle",
       "key": "table-access|server/routes.ts|read:igPostQueue#2",
-      "source": "server/routes.ts:11882",
+      "source": "server/routes.ts:11880",
       "owner": "core-platform"
     },
     {
@@ -150869,7 +150869,7 @@
       "effect": "read",
       "access": "drizzle",
       "key": "table-access|server/routes.ts|read:igPostQueue#3",
-      "source": "server/routes.ts:11983",
+      "source": "server/routes.ts:11981",
       "owner": "core-platform"
     },
     {
@@ -150878,7 +150878,7 @@
       "effect": "read",
       "access": "drizzle",
       "key": "table-access|server/routes.ts|read:igPostQueue#4",
-      "source": "server/routes.ts:12046",
+      "source": "server/routes.ts:12044",
       "owner": "core-platform"
     },
     {
@@ -150887,7 +150887,7 @@
       "effect": "read",
       "access": "drizzle",
       "key": "table-access|server/routes.ts|read:igPostQueue#5",
-      "source": "server/routes.ts:12090",
+      "source": "server/routes.ts:12088",
       "owner": "core-platform"
     },
     {
@@ -150896,7 +150896,7 @@
       "effect": "read",
       "access": "drizzle",
       "key": "table-access|server/routes.ts|read:igPostQueue#6",
-      "source": "server/routes.ts:12156",
+      "source": "server/routes.ts:12154",
       "owner": "core-platform"
     },
     {
@@ -150905,7 +150905,7 @@
       "effect": "read",
       "access": "drizzle",
       "key": "table-access|server/routes.ts|read:igSettings#0",
-      "source": "server/routes.ts:10513",
+      "source": "server/routes.ts:10511",
       "owner": "core-platform"
     },
     {
@@ -150914,7 +150914,7 @@
       "effect": "read",
       "access": "drizzle",
       "key": "table-access|server/routes.ts|read:igSettings#1",
-      "source": "server/routes.ts:10563",
+      "source": "server/routes.ts:10561",
       "owner": "core-platform"
     },
     {
@@ -150923,7 +150923,7 @@
       "effect": "read",
       "access": "tagged-sql",
       "key": "table-access|server/routes.ts|read:public.__expr__#0",
-      "source": "server/routes.ts:4058",
+      "source": "server/routes.ts:4056",
       "owner": "core-platform"
     },
     {
@@ -150932,7 +150932,7 @@
       "effect": "read",
       "access": "tagged-sql",
       "key": "table-access|server/routes.ts|read:public.ai_override_audit#0",
-      "source": "server/routes.ts:7584",
+      "source": "server/routes.ts:7582",
       "owner": "core-platform"
     },
     {
@@ -150941,7 +150941,7 @@
       "effect": "read",
       "access": "tagged-sql",
       "key": "table-access|server/routes.ts|read:public.ai_override_audit#1",
-      "source": "server/routes.ts:7585",
+      "source": "server/routes.ts:7583",
       "owner": "core-platform"
     },
     {
@@ -150950,7 +150950,7 @@
       "effect": "read",
       "access": "tagged-sql",
       "key": "table-access|server/routes.ts|read:public.ai_override_audit#2",
-      "source": "server/routes.ts:7588",
+      "source": "server/routes.ts:7586",
       "owner": "core-platform"
     },
     {
@@ -150959,7 +150959,7 @@
       "effect": "read",
       "access": "tagged-sql",
       "key": "table-access|server/routes.ts|read:public.ai_override_audit#3",
-      "source": "server/routes.ts:7589",
+      "source": "server/routes.ts:7587",
       "owner": "core-platform"
     },
     {
@@ -150968,7 +150968,7 @@
       "effect": "read",
       "access": "sql",
       "key": "table-access|server/routes.ts|read:public.audit_log#0",
-      "source": "server/routes.ts:4612",
+      "source": "server/routes.ts:4610",
       "owner": "core-platform"
     },
     {
@@ -150977,7 +150977,7 @@
       "effect": "read",
       "access": "sql",
       "key": "table-access|server/routes.ts|read:public.audit_log#1",
-      "source": "server/routes.ts:10716",
+      "source": "server/routes.ts:10714",
       "owner": "core-platform"
     },
     {
@@ -150986,7 +150986,7 @@
       "effect": "read",
       "access": "sql",
       "key": "table-access|server/routes.ts|read:public.audit_log#2",
-      "source": "server/routes.ts:11780",
+      "source": "server/routes.ts:11778",
       "owner": "core-platform"
     },
     {
@@ -150995,7 +150995,7 @@
       "effect": "read",
       "access": "sql",
       "key": "table-access|server/routes.ts|read:public.cards#0",
-      "source": "server/routes.ts:7662",
+      "source": "server/routes.ts:7660",
       "owner": "core-platform"
     },
     {
@@ -151004,7 +151004,7 @@
       "effect": "read",
       "access": "sql",
       "key": "table-access|server/routes.ts|read:public.certificates#0",
-      "source": "server/routes.ts:1407",
+      "source": "server/routes.ts:1405",
       "owner": "core-platform"
     },
     {
@@ -151013,7 +151013,7 @@
       "effect": "read",
       "access": "sql",
       "key": "table-access|server/routes.ts|read:public.certificates#1",
-      "source": "server/routes.ts:2440",
+      "source": "server/routes.ts:2438",
       "owner": "core-platform"
     },
     {
@@ -151022,7 +151022,7 @@
       "effect": "read",
       "access": "sql",
       "key": "table-access|server/routes.ts|read:public.certificates#10",
-      "source": "server/routes.ts:7662",
+      "source": "server/routes.ts:7660",
       "owner": "core-platform"
     },
     {
@@ -151031,7 +151031,7 @@
       "effect": "read",
       "access": "sql",
       "key": "table-access|server/routes.ts|read:public.certificates#11",
-      "source": "server/routes.ts:7677",
+      "source": "server/routes.ts:7675",
       "owner": "core-platform"
     },
     {
@@ -151040,7 +151040,7 @@
       "effect": "read",
       "access": "sql",
       "key": "table-access|server/routes.ts|read:public.certificates#12",
-      "source": "server/routes.ts:7710",
+      "source": "server/routes.ts:7708",
       "owner": "core-platform"
     },
     {
@@ -151049,7 +151049,7 @@
       "effect": "read",
       "access": "sql",
       "key": "table-access|server/routes.ts|read:public.certificates#13",
-      "source": "server/routes.ts:7743",
+      "source": "server/routes.ts:7741",
       "owner": "core-platform"
     },
     {
@@ -151058,7 +151058,7 @@
       "effect": "read",
       "access": "sql",
       "key": "table-access|server/routes.ts|read:public.certificates#14",
-      "source": "server/routes.ts:9405",
+      "source": "server/routes.ts:9403",
       "owner": "core-platform"
     },
     {
@@ -151067,7 +151067,7 @@
       "effect": "read",
       "access": "sql",
       "key": "table-access|server/routes.ts|read:public.certificates#15",
-      "source": "server/routes.ts:9425",
+      "source": "server/routes.ts:9423",
       "owner": "core-platform"
     },
     {
@@ -151076,7 +151076,7 @@
       "effect": "read",
       "access": "sql",
       "key": "table-access|server/routes.ts|read:public.certificates#16",
-      "source": "server/routes.ts:9429",
+      "source": "server/routes.ts:9427",
       "owner": "core-platform"
     },
     {
@@ -151085,7 +151085,7 @@
       "effect": "read",
       "access": "sql",
       "key": "table-access|server/routes.ts|read:public.certificates#17",
-      "source": "server/routes.ts:9464",
+      "source": "server/routes.ts:9462",
       "owner": "core-platform"
     },
     {
@@ -151094,7 +151094,7 @@
       "effect": "read",
       "access": "sql",
       "key": "table-access|server/routes.ts|read:public.certificates#18",
-      "source": "server/routes.ts:9467",
+      "source": "server/routes.ts:9465",
       "owner": "core-platform"
     },
     {
@@ -151103,7 +151103,7 @@
       "effect": "read",
       "access": "sql",
       "key": "table-access|server/routes.ts|read:public.certificates#19",
-      "source": "server/routes.ts:9518",
+      "source": "server/routes.ts:9516",
       "owner": "core-platform"
     },
     {
@@ -151112,7 +151112,7 @@
       "effect": "read",
       "access": "sql",
       "key": "table-access|server/routes.ts|read:public.certificates#2",
-      "source": "server/routes.ts:2706",
+      "source": "server/routes.ts:2704",
       "owner": "core-platform"
     },
     {
@@ -151121,7 +151121,7 @@
       "effect": "read",
       "access": "sql",
       "key": "table-access|server/routes.ts|read:public.certificates#20",
-      "source": "server/routes.ts:9531",
+      "source": "server/routes.ts:9529",
       "owner": "core-platform"
     },
     {
@@ -151130,7 +151130,7 @@
       "effect": "read",
       "access": "sql",
       "key": "table-access|server/routes.ts|read:public.certificates#21",
-      "source": "server/routes.ts:9540",
+      "source": "server/routes.ts:9538",
       "owner": "core-platform"
     },
     {
@@ -151139,7 +151139,7 @@
       "effect": "read",
       "access": "sql",
       "key": "table-access|server/routes.ts|read:public.certificates#22",
-      "source": "server/routes.ts:9549",
+      "source": "server/routes.ts:9547",
       "owner": "core-platform"
     },
     {
@@ -151148,7 +151148,7 @@
       "effect": "read",
       "access": "sql",
       "key": "table-access|server/routes.ts|read:public.certificates#23",
-      "source": "server/routes.ts:9574",
+      "source": "server/routes.ts:9572",
       "owner": "core-platform"
     },
     {
@@ -151157,7 +151157,7 @@
       "effect": "read",
       "access": "sql",
       "key": "table-access|server/routes.ts|read:public.certificates#24",
-      "source": "server/routes.ts:9648",
+      "source": "server/routes.ts:9646",
       "owner": "core-platform"
     },
     {
@@ -151166,7 +151166,7 @@
       "effect": "read",
       "access": "sql",
       "key": "table-access|server/routes.ts|read:public.certificates#25",
-      "source": "server/routes.ts:9684",
+      "source": "server/routes.ts:9682",
       "owner": "core-platform"
     },
     {
@@ -151175,7 +151175,7 @@
       "effect": "read",
       "access": "sql",
       "key": "table-access|server/routes.ts|read:public.certificates#26",
-      "source": "server/routes.ts:9730",
+      "source": "server/routes.ts:9728",
       "owner": "core-platform"
     },
     {
@@ -151184,7 +151184,7 @@
       "effect": "read",
       "access": "sql",
       "key": "table-access|server/routes.ts|read:public.certificates#27",
-      "source": "server/routes.ts:9770",
+      "source": "server/routes.ts:9768",
       "owner": "core-platform"
     },
     {
@@ -151193,7 +151193,7 @@
       "effect": "read",
       "access": "sql",
       "key": "table-access|server/routes.ts|read:public.certificates#28",
-      "source": "server/routes.ts:9833",
+      "source": "server/routes.ts:9831",
       "owner": "core-platform"
     },
     {
@@ -151202,7 +151202,7 @@
       "effect": "read",
       "access": "sql",
       "key": "table-access|server/routes.ts|read:public.certificates#29",
-      "source": "server/routes.ts:9865",
+      "source": "server/routes.ts:9863",
       "owner": "core-platform"
     },
     {
@@ -151211,7 +151211,7 @@
       "effect": "read",
       "access": "sql",
       "key": "table-access|server/routes.ts|read:public.certificates#3",
-      "source": "server/routes.ts:3053",
+      "source": "server/routes.ts:3051",
       "owner": "core-platform"
     },
     {
@@ -151220,7 +151220,7 @@
       "effect": "read",
       "access": "sql",
       "key": "table-access|server/routes.ts|read:public.certificates#30",
-      "source": "server/routes.ts:9922",
+      "source": "server/routes.ts:9920",
       "owner": "core-platform"
     },
     {
@@ -151229,7 +151229,7 @@
       "effect": "read",
       "access": "sql",
       "key": "table-access|server/routes.ts|read:public.certificates#31",
-      "source": "server/routes.ts:9934",
+      "source": "server/routes.ts:9932",
       "owner": "core-platform"
     },
     {
@@ -151238,7 +151238,7 @@
       "effect": "read",
       "access": "sql",
       "key": "table-access|server/routes.ts|read:public.certificates#32",
-      "source": "server/routes.ts:9959",
+      "source": "server/routes.ts:9957",
       "owner": "core-platform"
     },
     {
@@ -151247,7 +151247,7 @@
       "effect": "read",
       "access": "sql",
       "key": "table-access|server/routes.ts|read:public.certificates#33",
-      "source": "server/routes.ts:10058",
+      "source": "server/routes.ts:10056",
       "owner": "core-platform"
     },
     {
@@ -151256,7 +151256,7 @@
       "effect": "read",
       "access": "sql",
       "key": "table-access|server/routes.ts|read:public.certificates#34",
-      "source": "server/routes.ts:10201",
+      "source": "server/routes.ts:10199",
       "owner": "core-platform"
     },
     {
@@ -151265,7 +151265,7 @@
       "effect": "read",
       "access": "sql",
       "key": "table-access|server/routes.ts|read:public.certificates#35",
-      "source": "server/routes.ts:10779",
+      "source": "server/routes.ts:10777",
       "owner": "core-platform"
     },
     {
@@ -151274,7 +151274,7 @@
       "effect": "read",
       "access": "sql",
       "key": "table-access|server/routes.ts|read:public.certificates#36",
-      "source": "server/routes.ts:10820",
+      "source": "server/routes.ts:10818",
       "owner": "core-platform"
     },
     {
@@ -151283,7 +151283,7 @@
       "effect": "read",
       "access": "sql",
       "key": "table-access|server/routes.ts|read:public.certificates#37",
-      "source": "server/routes.ts:10866",
+      "source": "server/routes.ts:10864",
       "owner": "core-platform"
     },
     {
@@ -151292,7 +151292,7 @@
       "effect": "read",
       "access": "sql",
       "key": "table-access|server/routes.ts|read:public.certificates#38",
-      "source": "server/routes.ts:10919",
+      "source": "server/routes.ts:10917",
       "owner": "core-platform"
     },
     {
@@ -151301,7 +151301,7 @@
       "effect": "read",
       "access": "sql",
       "key": "table-access|server/routes.ts|read:public.certificates#39",
-      "source": "server/routes.ts:10972",
+      "source": "server/routes.ts:10970",
       "owner": "core-platform"
     },
     {
@@ -151310,7 +151310,7 @@
       "effect": "read",
       "access": "sql",
       "key": "table-access|server/routes.ts|read:public.certificates#4",
-      "source": "server/routes.ts:3753",
+      "source": "server/routes.ts:3751",
       "owner": "core-platform"
     },
     {
@@ -151319,7 +151319,7 @@
       "effect": "read",
       "access": "sql",
       "key": "table-access|server/routes.ts|read:public.certificates#40",
-      "source": "server/routes.ts:11278",
+      "source": "server/routes.ts:11276",
       "owner": "core-platform"
     },
     {
@@ -151328,7 +151328,7 @@
       "effect": "read",
       "access": "sql",
       "key": "table-access|server/routes.ts|read:public.certificates#5",
-      "source": "server/routes.ts:4433",
+      "source": "server/routes.ts:4431",
       "owner": "core-platform"
     },
     {
@@ -151337,7 +151337,7 @@
       "effect": "read",
       "access": "sql",
       "key": "table-access|server/routes.ts|read:public.certificates#6",
-      "source": "server/routes.ts:4970",
+      "source": "server/routes.ts:4968",
       "owner": "core-platform"
     },
     {
@@ -151346,7 +151346,7 @@
       "effect": "read",
       "access": "sql",
       "key": "table-access|server/routes.ts|read:public.certificates#7",
-      "source": "server/routes.ts:6146",
+      "source": "server/routes.ts:6144",
       "owner": "core-platform"
     },
     {
@@ -151355,7 +151355,7 @@
       "effect": "read",
       "access": "sql",
       "key": "table-access|server/routes.ts|read:public.certificates#8",
-      "source": "server/routes.ts:6313",
+      "source": "server/routes.ts:6311",
       "owner": "core-platform"
     },
     {
@@ -151364,7 +151364,7 @@
       "effect": "read",
       "access": "sql",
       "key": "table-access|server/routes.ts|read:public.certificates#9",
-      "source": "server/routes.ts:6561",
+      "source": "server/routes.ts:6559",
       "owner": "core-platform"
     },
     {
@@ -151373,7 +151373,7 @@
       "effect": "read",
       "access": "sql",
       "key": "table-access|server/routes.ts|read:public.grading_sessions#0",
-      "source": "server/routes.ts:9518",
+      "source": "server/routes.ts:9516",
       "owner": "core-platform"
     },
     {
@@ -151382,7 +151382,7 @@
       "effect": "read",
       "access": "sql",
       "key": "table-access|server/routes.ts|read:public.grading_sessions#1",
-      "source": "server/routes.ts:9531",
+      "source": "server/routes.ts:9529",
       "owner": "core-platform"
     },
     {
@@ -151391,7 +151391,7 @@
       "effect": "read",
       "access": "sql",
       "key": "table-access|server/routes.ts|read:public.grading_sessions#2",
-      "source": "server/routes.ts:9540",
+      "source": "server/routes.ts:9538",
       "owner": "core-platform"
     },
     {
@@ -151400,7 +151400,7 @@
       "effect": "read",
       "access": "sql",
       "key": "table-access|server/routes.ts|read:public.grading_sessions#3",
-      "source": "server/routes.ts:9549",
+      "source": "server/routes.ts:9547",
       "owner": "core-platform"
     },
     {
@@ -151409,7 +151409,7 @@
       "effect": "read",
       "access": "sql",
       "key": "table-access|server/routes.ts|read:public.grading_sessions#4",
-      "source": "server/routes.ts:9574",
+      "source": "server/routes.ts:9572",
       "owner": "core-platform"
     },
     {
@@ -151418,7 +151418,7 @@
       "effect": "read",
       "access": "sql",
       "key": "table-access|server/routes.ts|read:public.ig_post_queue#0",
-      "source": "server/routes.ts:10599",
+      "source": "server/routes.ts:10597",
       "owner": "core-platform"
     },
     {
@@ -151436,7 +151436,7 @@
       "effect": "read",
       "access": "sql",
       "key": "table-access|server/routes.ts|read:public.print_batches#0",
-      "source": "server/routes.ts:4953",
+      "source": "server/routes.ts:4951",
       "owner": "core-platform"
     },
     {
@@ -151445,7 +151445,7 @@
       "effect": "read",
       "access": "sql",
       "key": "table-access|server/routes.ts|read:public.reel_analytics#0",
-      "source": "server/routes.ts:11377",
+      "source": "server/routes.ts:11375",
       "owner": "core-platform"
     },
     {
@@ -151454,7 +151454,7 @@
       "effect": "read",
       "access": "sql",
       "key": "table-access|server/routes.ts|read:public.reel_analytics#1",
-      "source": "server/routes.ts:11390",
+      "source": "server/routes.ts:11388",
       "owner": "core-platform"
     },
     {
@@ -151463,7 +151463,7 @@
       "effect": "read",
       "access": "sql",
       "key": "table-access|server/routes.ts|read:public.reel_analytics#2",
-      "source": "server/routes.ts:11556",
+      "source": "server/routes.ts:11554",
       "owner": "core-platform"
     },
     {
@@ -151472,7 +151472,7 @@
       "effect": "read",
       "access": "sql",
       "key": "table-access|server/routes.ts|read:public.reel_card_approvals#0",
-      "source": "server/routes.ts:11440",
+      "source": "server/routes.ts:11438",
       "owner": "core-platform"
     },
     {
@@ -151481,7 +151481,7 @@
       "effect": "read",
       "access": "sql",
       "key": "table-access|server/routes.ts|read:public.reel_card_approvals#1",
-      "source": "server/routes.ts:11586",
+      "source": "server/routes.ts:11584",
       "owner": "core-platform"
     },
     {
@@ -151490,7 +151490,7 @@
       "effect": "read",
       "access": "sql",
       "key": "table-access|server/routes.ts|read:public.scanner_capture_sessions#0",
-      "source": "server/routes.ts:9123",
+      "source": "server/routes.ts:9121",
       "owner": "core-platform"
     },
     {
@@ -151499,7 +151499,7 @@
       "effect": "read",
       "access": "sql",
       "key": "table-access|server/routes.ts|read:public.submission_items#0",
-      "source": "server/routes.ts:1407",
+      "source": "server/routes.ts:1405",
       "owner": "core-platform"
     },
     {
@@ -151508,7 +151508,7 @@
       "effect": "read",
       "access": "sql",
       "key": "table-access|server/routes.ts|read:public.submission_items#1",
-      "source": "server/routes.ts:2706",
+      "source": "server/routes.ts:2704",
       "owner": "core-platform"
     },
     {
@@ -151517,7 +151517,7 @@
       "effect": "read",
       "access": "sql",
       "key": "table-access|server/routes.ts|read:public.submission_items#2",
-      "source": "server/routes.ts:10779",
+      "source": "server/routes.ts:10777",
       "owner": "core-platform"
     },
     {
@@ -151526,7 +151526,7 @@
       "effect": "read",
       "access": "sql",
       "key": "table-access|server/routes.ts|read:public.submission_items#3",
-      "source": "server/routes.ts:10820",
+      "source": "server/routes.ts:10818",
       "owner": "core-platform"
     },
     {
@@ -151535,7 +151535,7 @@
       "effect": "read",
       "access": "sql",
       "key": "table-access|server/routes.ts|read:public.submission_items#4",
-      "source": "server/routes.ts:10866",
+      "source": "server/routes.ts:10864",
       "owner": "core-platform"
     },
     {
@@ -151544,7 +151544,7 @@
       "effect": "read",
       "access": "sql",
       "key": "table-access|server/routes.ts|read:public.submission_items#5",
-      "source": "server/routes.ts:10919",
+      "source": "server/routes.ts:10917",
       "owner": "core-platform"
     },
     {
@@ -151553,7 +151553,7 @@
       "effect": "read",
       "access": "sql",
       "key": "table-access|server/routes.ts|read:public.submission_items#6",
-      "source": "server/routes.ts:10972",
+      "source": "server/routes.ts:10970",
       "owner": "core-platform"
     },
     {
@@ -151571,7 +151571,7 @@
       "effect": "read",
       "access": "sql",
       "key": "table-access|server/routes.ts|read:public.submissions#1",
-      "source": "server/routes.ts:1407",
+      "source": "server/routes.ts:1405",
       "owner": "core-platform"
     },
     {
@@ -151580,7 +151580,7 @@
       "effect": "read",
       "access": "sql",
       "key": "table-access|server/routes.ts|read:public.submissions#10",
-      "source": "server/routes.ts:10972",
+      "source": "server/routes.ts:10970",
       "owner": "core-platform"
     },
     {
@@ -151589,7 +151589,7 @@
       "effect": "read",
       "access": "sql",
       "key": "table-access|server/routes.ts|read:public.submissions#2",
-      "source": "server/routes.ts:2706",
+      "source": "server/routes.ts:2704",
       "owner": "core-platform"
     },
     {
@@ -151598,7 +151598,7 @@
       "effect": "read",
       "access": "sql",
       "key": "table-access|server/routes.ts|read:public.submissions#3",
-      "source": "server/routes.ts:5866",
+      "source": "server/routes.ts:5864",
       "owner": "core-platform"
     },
     {
@@ -151607,7 +151607,7 @@
       "effect": "read",
       "access": "sql",
       "key": "table-access|server/routes.ts|read:public.submissions#4",
-      "source": "server/routes.ts:5916",
+      "source": "server/routes.ts:5914",
       "owner": "core-platform"
     },
     {
@@ -151616,7 +151616,7 @@
       "effect": "read",
       "access": "sql",
       "key": "table-access|server/routes.ts|read:public.submissions#5",
-      "source": "server/routes.ts:7662",
+      "source": "server/routes.ts:7660",
       "owner": "core-platform"
     },
     {
@@ -151625,7 +151625,7 @@
       "effect": "read",
       "access": "sql",
       "key": "table-access|server/routes.ts|read:public.submissions#6",
-      "source": "server/routes.ts:10779",
+      "source": "server/routes.ts:10777",
       "owner": "core-platform"
     },
     {
@@ -151634,7 +151634,7 @@
       "effect": "read",
       "access": "sql",
       "key": "table-access|server/routes.ts|read:public.submissions#7",
-      "source": "server/routes.ts:10820",
+      "source": "server/routes.ts:10818",
       "owner": "core-platform"
     },
     {
@@ -151643,7 +151643,7 @@
       "effect": "read",
       "access": "sql",
       "key": "table-access|server/routes.ts|read:public.submissions#8",
-      "source": "server/routes.ts:10866",
+      "source": "server/routes.ts:10864",
       "owner": "core-platform"
     },
     {
@@ -151652,7 +151652,7 @@
       "effect": "read",
       "access": "sql",
       "key": "table-access|server/routes.ts|read:public.submissions#9",
-      "source": "server/routes.ts:10919",
+      "source": "server/routes.ts:10917",
       "owner": "core-platform"
     },
     {
@@ -151661,7 +151661,7 @@
       "effect": "read",
       "access": "sql",
       "key": "table-access|server/routes.ts|read:public.the#0",
-      "source": "server/routes.ts:1904",
+      "source": "server/routes.ts:1902",
       "owner": "core-platform"
     },
     {
@@ -151679,7 +151679,7 @@
       "effect": "read",
       "access": "sql",
       "key": "table-access|server/routes.ts|read:public.users#0",
-      "source": "server/routes.ts:2302",
+      "source": "server/routes.ts:2300",
       "owner": "core-platform"
     },
     {
@@ -151688,7 +151688,7 @@
       "effect": "read",
       "access": "sql",
       "key": "table-access|server/routes.ts|read:public.users#1",
-      "source": "server/routes.ts:3779",
+      "source": "server/routes.ts:3777",
       "owner": "core-platform"
     },
     {
@@ -151697,7 +151697,7 @@
       "effect": "read",
       "access": "sql",
       "key": "table-access|server/routes.ts|read:public.users#2",
-      "source": "server/routes.ts:5957",
+      "source": "server/routes.ts:5955",
       "owner": "core-platform"
     },
     {
@@ -151706,7 +151706,7 @@
       "effect": "read",
       "access": "sql",
       "key": "table-access|server/routes.ts|read:public.users#3",
-      "source": "server/routes.ts:7662",
+      "source": "server/routes.ts:7660",
       "owner": "core-platform"
     },
     {
@@ -151715,7 +151715,7 @@
       "effect": "read",
       "access": "sql",
       "key": "table-access|server/routes.ts|read:public.users#4",
-      "source": "server/routes.ts:8808",
+      "source": "server/routes.ts:8806",
       "owner": "core-platform"
     },
     {
@@ -151724,7 +151724,7 @@
       "effect": "unclassified",
       "access": "sql-unclassified",
       "key": "table-access|server/routes.ts|unclassified:query#0",
-      "source": "server/routes.ts:7591",
+      "source": "server/routes.ts:7589",
       "owner": "core-platform"
     },
     {
@@ -151733,7 +151733,7 @@
       "effect": "unclassified",
       "access": "sql-unclassified",
       "key": "table-access|server/routes.ts|unclassified:sql.raw(`UPDATE certificates SET ${setClauses}, updated_at = NOW() WHERE id = ${id}`)#0",
-      "source": "server/routes.ts:6931",
+      "source": "server/routes.ts:6929",
       "owner": "core-platform"
     },
     {
@@ -151742,7 +151742,7 @@
       "effect": "unclassified",
       "access": "sql-unclassified",
       "key": "table-access|server/routes.ts|unclassified:sql`SELECT 1 AS ok`#0",
-      "source": "server/routes.ts:2187",
+      "source": "server/routes.ts:2185",
       "owner": "core-platform"
     },
     {
@@ -151751,7 +151751,7 @@
       "effect": "write",
       "access": "drizzle",
       "key": "table-access|server/routes.ts|write:auditLog#0",
-      "source": "server/routes.ts:2202",
+      "source": "server/routes.ts:2200",
       "owner": "core-platform"
     },
     {
@@ -151760,7 +151760,7 @@
       "effect": "write",
       "access": "drizzle",
       "key": "table-access|server/routes.ts|write:auditLog#1",
-      "source": "server/routes.ts:5890",
+      "source": "server/routes.ts:5888",
       "owner": "core-platform"
     },
     {
@@ -151769,7 +151769,7 @@
       "effect": "write",
       "access": "drizzle",
       "key": "table-access|server/routes.ts|write:auditLog#2",
-      "source": "server/routes.ts:5937",
+      "source": "server/routes.ts:5935",
       "owner": "core-platform"
     },
     {
@@ -151778,7 +151778,7 @@
       "effect": "write",
       "access": "drizzle",
       "key": "table-access|server/routes.ts|write:auditLog#3",
-      "source": "server/routes.ts:10897",
+      "source": "server/routes.ts:10895",
       "owner": "core-platform"
     },
     {
@@ -151787,7 +151787,7 @@
       "effect": "write",
       "access": "drizzle",
       "key": "table-access|server/routes.ts|write:auditLog#4",
-      "source": "server/routes.ts:11003",
+      "source": "server/routes.ts:11001",
       "owner": "core-platform"
     },
     {
@@ -151796,7 +151796,7 @@
       "effect": "write",
       "access": "drizzle",
       "key": "table-access|server/routes.ts|write:auditLog#5",
-      "source": "server/routes.ts:11255",
+      "source": "server/routes.ts:11253",
       "owner": "core-platform"
     },
     {
@@ -151805,7 +151805,7 @@
       "effect": "write",
       "access": "drizzle",
       "key": "table-access|server/routes.ts|write:auditLog#6",
-      "source": "server/routes.ts:11298",
+      "source": "server/routes.ts:11296",
       "owner": "core-platform"
     },
     {
@@ -151814,7 +151814,7 @@
       "effect": "write",
       "access": "drizzle",
       "key": "table-access|server/routes.ts|write:auditLog#7",
-      "source": "server/routes.ts:11504",
+      "source": "server/routes.ts:11502",
       "owner": "core-platform"
     },
     {
@@ -151823,7 +151823,7 @@
       "effect": "write",
       "access": "drizzle",
       "key": "table-access|server/routes.ts|write:igPostQueue#0",
-      "source": "server/routes.ts:11848",
+      "source": "server/routes.ts:11846",
       "owner": "core-platform"
     },
     {
@@ -151832,7 +151832,7 @@
       "effect": "write",
       "access": "drizzle",
       "key": "table-access|server/routes.ts|write:igPostQueue#1",
-      "source": "server/routes.ts:11865",
+      "source": "server/routes.ts:11863",
       "owner": "core-platform"
     },
     {
@@ -151841,7 +151841,7 @@
       "effect": "write",
       "access": "drizzle",
       "key": "table-access|server/routes.ts|write:igPostQueue#2",
-      "source": "server/routes.ts:11948",
+      "source": "server/routes.ts:11946",
       "owner": "core-platform"
     },
     {
@@ -151850,7 +151850,7 @@
       "effect": "write",
       "access": "drizzle",
       "key": "table-access|server/routes.ts|write:igPostQueue#3",
-      "source": "server/routes.ts:12012",
+      "source": "server/routes.ts:12010",
       "owner": "core-platform"
     },
     {
@@ -151859,7 +151859,7 @@
       "effect": "write",
       "access": "drizzle",
       "key": "table-access|server/routes.ts|write:igPostQueue#4",
-      "source": "server/routes.ts:12068",
+      "source": "server/routes.ts:12066",
       "owner": "core-platform"
     },
     {
@@ -151868,7 +151868,7 @@
       "effect": "write",
       "access": "drizzle",
       "key": "table-access|server/routes.ts|write:igPostQueue#5",
-      "source": "server/routes.ts:12116",
+      "source": "server/routes.ts:12114",
       "owner": "core-platform"
     },
     {
@@ -151877,7 +151877,7 @@
       "effect": "write",
       "access": "drizzle",
       "key": "table-access|server/routes.ts|write:igPostQueue#6",
-      "source": "server/routes.ts:12168",
+      "source": "server/routes.ts:12166",
       "owner": "core-platform"
     },
     {
@@ -151886,7 +151886,7 @@
       "effect": "write",
       "access": "drizzle",
       "key": "table-access|server/routes.ts|write:igPostQueue#7",
-      "source": "server/routes.ts:12245",
+      "source": "server/routes.ts:12243",
       "owner": "core-platform"
     },
     {
@@ -151895,7 +151895,7 @@
       "effect": "write",
       "access": "drizzle",
       "key": "table-access|server/routes.ts|write:igSettings#0",
-      "source": "server/routes.ts:10565",
+      "source": "server/routes.ts:10563",
       "owner": "core-platform"
     },
     {
@@ -151904,7 +151904,7 @@
       "effect": "write",
       "access": "drizzle",
       "key": "table-access|server/routes.ts|write:igSettings#1",
-      "source": "server/routes.ts:10567",
+      "source": "server/routes.ts:10565",
       "owner": "core-platform"
     },
     {
@@ -151913,7 +151913,7 @@
       "effect": "write",
       "access": "sql",
       "key": "table-access|server/routes.ts|write:public.ai_grade_corrections#0",
-      "source": "server/routes.ts:7472",
+      "source": "server/routes.ts:7470",
       "owner": "core-platform"
     },
     {
@@ -151922,7 +151922,7 @@
       "effect": "write",
       "access": "sql",
       "key": "table-access|server/routes.ts|write:public.ai_override_audit#0",
-      "source": "server/routes.ts:7536",
+      "source": "server/routes.ts:7534",
       "owner": "core-platform"
     },
     {
@@ -151931,7 +151931,7 @@
       "effect": "write",
       "access": "sql",
       "key": "table-access|server/routes.ts|write:public.ai_override_audit#1",
-      "source": "server/routes.ts:7559",
+      "source": "server/routes.ts:7557",
       "owner": "core-platform"
     },
     {
@@ -151940,7 +151940,7 @@
       "effect": "write",
       "access": "sql",
       "key": "table-access|server/routes.ts|write:public.audit_log#0",
-      "source": "server/routes.ts:2046",
+      "source": "server/routes.ts:2044",
       "owner": "core-platform"
     },
     {
@@ -151949,7 +151949,7 @@
       "effect": "write",
       "access": "sql",
       "key": "table-access|server/routes.ts|write:public.audit_log#1",
-      "source": "server/routes.ts:3675",
+      "source": "server/routes.ts:3673",
       "owner": "core-platform"
     },
     {
@@ -151958,7 +151958,7 @@
       "effect": "write",
       "access": "sql",
       "key": "table-access|server/routes.ts|write:public.audit_log#2",
-      "source": "server/routes.ts:4721",
+      "source": "server/routes.ts:4719",
       "owner": "core-platform"
     },
     {
@@ -151967,7 +151967,7 @@
       "effect": "write",
       "access": "sql",
       "key": "table-access|server/routes.ts|write:public.audit_log#3",
-      "source": "server/routes.ts:4760",
+      "source": "server/routes.ts:4758",
       "owner": "core-platform"
     },
     {
@@ -151976,7 +151976,7 @@
       "effect": "write",
       "access": "sql",
       "key": "table-access|server/routes.ts|write:public.audit_log#4",
-      "source": "server/routes.ts:6778",
+      "source": "server/routes.ts:6776",
       "owner": "core-platform"
     },
     {
@@ -151985,7 +151985,7 @@
       "effect": "write",
       "access": "sql",
       "key": "table-access|server/routes.ts|write:public.audit_log#5",
-      "source": "server/routes.ts:7134",
+      "source": "server/routes.ts:7132",
       "owner": "core-platform"
     },
     {
@@ -151994,7 +151994,7 @@
       "effect": "write",
       "access": "sql",
       "key": "table-access|server/routes.ts|write:public.audit_log#6",
-      "source": "server/routes.ts:8522",
+      "source": "server/routes.ts:8520",
       "owner": "core-platform"
     },
     {
@@ -152003,7 +152003,7 @@
       "effect": "write",
       "access": "sql",
       "key": "table-access|server/routes.ts|write:public.audit_log#7",
-      "source": "server/routes.ts:10415",
+      "source": "server/routes.ts:10413",
       "owner": "core-platform"
     },
     {
@@ -152012,7 +152012,7 @@
       "effect": "write",
       "access": "sql",
       "key": "table-access|server/routes.ts|write:public.certificates#0",
-      "source": "server/routes.ts:1904",
+      "source": "server/routes.ts:1902",
       "owner": "core-platform"
     },
     {
@@ -152021,7 +152021,7 @@
       "effect": "write",
       "access": "sql",
       "key": "table-access|server/routes.ts|write:public.certificates#1",
-      "source": "server/routes.ts:3666",
+      "source": "server/routes.ts:3664",
       "owner": "core-platform"
     },
     {
@@ -152030,7 +152030,7 @@
       "effect": "write",
       "access": "sql",
       "key": "table-access|server/routes.ts|write:public.certificates#10",
-      "source": "server/routes.ts:8129",
+      "source": "server/routes.ts:8127",
       "owner": "core-platform"
     },
     {
@@ -152039,7 +152039,7 @@
       "effect": "write",
       "access": "sql",
       "key": "table-access|server/routes.ts|write:public.certificates#11",
-      "source": "server/routes.ts:8187",
+      "source": "server/routes.ts:8185",
       "owner": "core-platform"
     },
     {
@@ -152048,7 +152048,7 @@
       "effect": "write",
       "access": "sql",
       "key": "table-access|server/routes.ts|write:public.certificates#12",
-      "source": "server/routes.ts:8296",
+      "source": "server/routes.ts:8294",
       "owner": "core-platform"
     },
     {
@@ -152057,7 +152057,7 @@
       "effect": "write",
       "access": "sql",
       "key": "table-access|server/routes.ts|write:public.certificates#13",
-      "source": "server/routes.ts:8401",
+      "source": "server/routes.ts:8399",
       "owner": "core-platform"
     },
     {
@@ -152066,7 +152066,7 @@
       "effect": "write",
       "access": "sql",
       "key": "table-access|server/routes.ts|write:public.certificates#14",
-      "source": "server/routes.ts:8507",
+      "source": "server/routes.ts:8505",
       "owner": "core-platform"
     },
     {
@@ -152075,7 +152075,7 @@
       "effect": "write",
       "access": "sql",
       "key": "table-access|server/routes.ts|write:public.certificates#15",
-      "source": "server/routes.ts:8633",
+      "source": "server/routes.ts:8631",
       "owner": "core-platform"
     },
     {
@@ -152084,7 +152084,7 @@
       "effect": "write",
       "access": "sql",
       "key": "table-access|server/routes.ts|write:public.certificates#16",
-      "source": "server/routes.ts:8699",
+      "source": "server/routes.ts:8697",
       "owner": "core-platform"
     },
     {
@@ -152093,7 +152093,7 @@
       "effect": "write",
       "access": "sql",
       "key": "table-access|server/routes.ts|write:public.certificates#17",
-      "source": "server/routes.ts:8714",
+      "source": "server/routes.ts:8712",
       "owner": "core-platform"
     },
     {
@@ -152102,7 +152102,7 @@
       "effect": "write",
       "access": "sql",
       "key": "table-access|server/routes.ts|write:public.certificates#18",
-      "source": "server/routes.ts:10194",
+      "source": "server/routes.ts:10192",
       "owner": "core-platform"
     },
     {
@@ -152111,7 +152111,7 @@
       "effect": "write",
       "access": "sql",
       "key": "table-access|server/routes.ts|write:public.certificates#19",
-      "source": "server/routes.ts:10405",
+      "source": "server/routes.ts:10403",
       "owner": "core-platform"
     },
     {
@@ -152120,7 +152120,7 @@
       "effect": "write",
       "access": "sql",
       "key": "table-access|server/routes.ts|write:public.certificates#2",
-      "source": "server/routes.ts:4109",
+      "source": "server/routes.ts:4107",
       "owner": "core-platform"
     },
     {
@@ -152129,7 +152129,7 @@
       "effect": "write",
       "access": "sql",
       "key": "table-access|server/routes.ts|write:public.certificates#20",
-      "source": "server/routes.ts:10484",
+      "source": "server/routes.ts:10482",
       "owner": "core-platform"
     },
     {
@@ -152138,7 +152138,7 @@
       "effect": "write",
       "access": "sql",
       "key": "table-access|server/routes.ts|write:public.certificates#21",
-      "source": "server/routes.ts:10995",
+      "source": "server/routes.ts:10993",
       "owner": "core-platform"
     },
     {
@@ -152147,7 +152147,7 @@
       "effect": "write",
       "access": "sql",
       "key": "table-access|server/routes.ts|write:public.certificates#22",
-      "source": "server/routes.ts:11291",
+      "source": "server/routes.ts:11289",
       "owner": "core-platform"
     },
     {
@@ -152156,7 +152156,7 @@
       "effect": "write",
       "access": "sql",
       "key": "table-access|server/routes.ts|write:public.certificates#3",
-      "source": "server/routes.ts:5689",
+      "source": "server/routes.ts:5687",
       "owner": "core-platform"
     },
     {
@@ -152165,7 +152165,7 @@
       "effect": "write",
       "access": "sql",
       "key": "table-access|server/routes.ts|write:public.certificates#4",
-      "source": "server/routes.ts:6772",
+      "source": "server/routes.ts:6770",
       "owner": "core-platform"
     },
     {
@@ -152174,7 +152174,7 @@
       "effect": "write",
       "access": "sql",
       "key": "table-access|server/routes.ts|write:public.certificates#5",
-      "source": "server/routes.ts:7109",
+      "source": "server/routes.ts:7107",
       "owner": "core-platform"
     },
     {
@@ -152183,7 +152183,7 @@
       "effect": "write",
       "access": "sql",
       "key": "table-access|server/routes.ts|write:public.certificates#6",
-      "source": "server/routes.ts:7407",
+      "source": "server/routes.ts:7405",
       "owner": "core-platform"
     },
     {
@@ -152192,7 +152192,7 @@
       "effect": "write",
       "access": "sql",
       "key": "table-access|server/routes.ts|write:public.certificates#7",
-      "source": "server/routes.ts:7859",
+      "source": "server/routes.ts:7857",
       "owner": "core-platform"
     },
     {
@@ -152201,7 +152201,7 @@
       "effect": "write",
       "access": "sql",
       "key": "table-access|server/routes.ts|write:public.certificates#8",
-      "source": "server/routes.ts:8016",
+      "source": "server/routes.ts:8014",
       "owner": "core-platform"
     },
     {
@@ -152210,7 +152210,7 @@
       "effect": "write",
       "access": "sql",
       "key": "table-access|server/routes.ts|write:public.certificates#9",
-      "source": "server/routes.ts:8028",
+      "source": "server/routes.ts:8026",
       "owner": "core-platform"
     },
     {
@@ -152219,7 +152219,7 @@
       "effect": "write",
       "access": "sql",
       "key": "table-access|server/routes.ts|write:public.grading_sessions#0",
-      "source": "server/routes.ts:7435",
+      "source": "server/routes.ts:7433",
       "owner": "core-platform"
     },
     {
@@ -152228,7 +152228,7 @@
       "effect": "write",
       "access": "sql",
       "key": "table-access|server/routes.ts|write:public.reel_analytics#0",
-      "source": "server/routes.ts:11497",
+      "source": "server/routes.ts:11495",
       "owner": "core-platform"
     },
     {
@@ -152237,7 +152237,7 @@
       "effect": "write",
       "access": "sql",
       "key": "table-access|server/routes.ts|write:public.reel_analytics#1",
-      "source": "server/routes.ts:11563",
+      "source": "server/routes.ts:11561",
       "owner": "core-platform"
     },
     {
@@ -152246,7 +152246,7 @@
       "effect": "write",
       "access": "sql",
       "key": "table-access|server/routes.ts|write:public.reel_card_approvals#0",
-      "source": "server/routes.ts:11613",
+      "source": "server/routes.ts:11611",
       "owner": "core-platform"
     },
     {
@@ -152255,7 +152255,7 @@
       "effect": "write",
       "access": "sql",
       "key": "table-access|server/routes.ts|write:public.reel_card_approvals#1",
-      "source": "server/routes.ts:11631",
+      "source": "server/routes.ts:11629",
       "owner": "core-platform"
     },
     {
@@ -152264,7 +152264,7 @@
       "effect": "write",
       "access": "sql",
       "key": "table-access|server/routes.ts|write:public.submissions#0",
-      "source": "server/routes.ts:5883",
+      "source": "server/routes.ts:5881",
       "owner": "core-platform"
     },
     {
@@ -152273,7 +152273,7 @@
       "effect": "write",
       "access": "sql",
       "key": "table-access|server/routes.ts|write:public.submissions#1",
-      "source": "server/routes.ts:5929",
+      "source": "server/routes.ts:5927",
       "owner": "core-platform"
     },
     {
@@ -152282,7 +152282,7 @@
       "effect": "write",
       "access": "sql",
       "key": "table-access|server/routes.ts|write:public.submissions#2",
-      "source": "server/routes.ts:5984",
+      "source": "server/routes.ts:5982",
       "owner": "core-platform"
     },
     {
@@ -152291,7 +152291,7 @@
       "effect": "write",
       "access": "sql",
       "key": "table-access|server/routes.ts|write:public.submissions#3",
-      "source": "server/routes.ts:10888",
+      "source": "server/routes.ts:10886",
       "owner": "core-platform"
     },
     {
@@ -154246,7 +154246,7 @@
       "effect": "read",
       "access": "sql",
       "key": "table-access|server/scan-ingest-service.ts|read:public.certificate_image_evidence#1",
-      "source": "server/scan-ingest-service.ts:686",
+      "source": "server/scan-ingest-service.ts:688",
       "owner": "scanner-platform"
     },
     {
@@ -154255,7 +154255,7 @@
       "effect": "read",
       "access": "sql",
       "key": "table-access|server/scan-ingest-service.ts|read:public.certificate_image_evidence#2",
-      "source": "server/scan-ingest-service.ts:843",
+      "source": "server/scan-ingest-service.ts:846",
       "owner": "scanner-platform"
     },
     {
@@ -154264,7 +154264,7 @@
       "effect": "read",
       "access": "sql",
       "key": "table-access|server/scan-ingest-service.ts|read:public.certificate_image_evidence#3",
-      "source": "server/scan-ingest-service.ts:1021",
+      "source": "server/scan-ingest-service.ts:1030",
       "owner": "scanner-platform"
     },
     {
@@ -154291,7 +154291,7 @@
       "effect": "read",
       "access": "sql",
       "key": "table-access|server/scan-ingest-service.ts|read:public.certificates#10",
-      "source": "server/scan-ingest-service.ts:1629",
+      "source": "server/scan-ingest-service.ts:1646",
       "owner": "scanner-platform"
     },
     {
@@ -154327,7 +154327,7 @@
       "effect": "read",
       "access": "sql",
       "key": "table-access|server/scan-ingest-service.ts|read:public.certificates#5",
-      "source": "server/scan-ingest-service.ts:667",
+      "source": "server/scan-ingest-service.ts:669",
       "owner": "scanner-platform"
     },
     {
@@ -154336,7 +154336,7 @@
       "effect": "read",
       "access": "sql",
       "key": "table-access|server/scan-ingest-service.ts|read:public.certificates#6",
-      "source": "server/scan-ingest-service.ts:754",
+      "source": "server/scan-ingest-service.ts:756",
       "owner": "scanner-platform"
     },
     {
@@ -154345,7 +154345,7 @@
       "effect": "read",
       "access": "sql",
       "key": "table-access|server/scan-ingest-service.ts|read:public.certificates#7",
-      "source": "server/scan-ingest-service.ts:823",
+      "source": "server/scan-ingest-service.ts:826",
       "owner": "scanner-platform"
     },
     {
@@ -154354,7 +154354,7 @@
       "effect": "read",
       "access": "sql",
       "key": "table-access|server/scan-ingest-service.ts|read:public.certificates#8",
-      "source": "server/scan-ingest-service.ts:1291",
+      "source": "server/scan-ingest-service.ts:1308",
       "owner": "scanner-platform"
     },
     {
@@ -154363,7 +154363,7 @@
       "effect": "read",
       "access": "sql",
       "key": "table-access|server/scan-ingest-service.ts|read:public.certificates#9",
-      "source": "server/scan-ingest-service.ts:1547",
+      "source": "server/scan-ingest-service.ts:1564",
       "owner": "scanner-platform"
     },
     {
@@ -154381,7 +154381,7 @@
       "effect": "unclassified",
       "access": "sql-unclassified",
       "key": "table-access|server/scan-ingest-service.ts|unclassified:\"SELECT pg_advisory_unlock($1)\"#0",
-      "source": "server/scan-ingest-service.ts:650",
+      "source": "server/scan-ingest-service.ts:652",
       "owner": "scanner-platform"
     },
     {
@@ -154390,7 +154390,7 @@
       "effect": "unclassified",
       "access": "sql-unclassified",
       "key": "table-access|server/scan-ingest-service.ts|unclassified:\"SELECT pg_try_advisory_lock($1) AS locked\"#0",
-      "source": "server/scan-ingest-service.ts:638",
+      "source": "server/scan-ingest-service.ts:640",
       "owner": "scanner-platform"
     },
     {
@@ -154408,7 +154408,7 @@
       "effect": "write",
       "access": "sql",
       "key": "table-access|server/scan-ingest-service.ts|write:public.audit_log#1",
-      "source": "server/scan-ingest-service.ts:1455",
+      "source": "server/scan-ingest-service.ts:1472",
       "owner": "scanner-platform"
     },
     {
@@ -154417,7 +154417,7 @@
       "effect": "write",
       "access": "sql",
       "key": "table-access|server/scan-ingest-service.ts|write:public.audit_log#2",
-      "source": "server/scan-ingest-service.ts:1654",
+      "source": "server/scan-ingest-service.ts:1671",
       "owner": "scanner-platform"
     },
     {
@@ -154462,7 +154462,7 @@
       "effect": "write",
       "access": "sql",
       "key": "table-access|server/scan-ingest-service.ts|write:public.certificates#4",
-      "source": "server/scan-ingest-service.ts:1413",
+      "source": "server/scan-ingest-service.ts:1430",
       "owner": "scanner-platform"
     },
     {
@@ -154471,7 +154471,7 @@
       "effect": "write",
       "access": "sql",
       "key": "table-access|server/scan-ingest-service.ts|write:public.certificates#5",
-      "source": "server/scan-ingest-service.ts:1437",
+      "source": "server/scan-ingest-service.ts:1454",
       "owner": "scanner-platform"
     },
     {
@@ -154480,7 +154480,7 @@
       "effect": "write",
       "access": "sql",
       "key": "table-access|server/scan-ingest-service.ts|write:public.certificates#6",
-      "source": "server/scan-ingest-service.ts:1644",
+      "source": "server/scan-ingest-service.ts:1661",
       "owner": "scanner-platform"
     },
     {
@@ -161214,7 +161214,7 @@
       "delay": "5000",
       "lifecycle": "untracked",
       "key": "timer|scripts/ci/run-disposable-integration.mjs|setTimeout:() => { if (settled || !kill(\"SIGKILL\") || settled) return; timer = setTimeout(() => terminationUnknown(new Error(\"child did not close after SIGKILL\")), 5000); timer.unref(); }#0",
-      "source": "scripts/ci/run-disposable-integration.mjs:299",
+      "source": "scripts/ci/run-disposable-integration.mjs:300",
       "owner": "engineering-test-platform"
     },
     {
@@ -161224,7 +161224,7 @@
       "delay": "60_000",
       "lifecycle": "untracked",
       "key": "timer|scripts/ci/run-disposable-integration.mjs|setTimeout:() => { timedOut = true; controller.abort(); }#0",
-      "source": "scripts/ci/run-disposable-integration.mjs:397",
+      "source": "scripts/ci/run-disposable-integration.mjs:398",
       "owner": "engineering-test-platform"
     },
     {
@@ -161234,7 +161234,7 @@
       "delay": "20_000",
       "lifecycle": "untracked",
       "key": "timer|scripts/ci/run-disposable-integration.mjs|setTimeout:() => startup.abort(new Error(\"owned MinIO startup timed out\"))#0",
-      "source": "scripts/ci/run-disposable-integration.mjs:105",
+      "source": "scripts/ci/run-disposable-integration.mjs:106",
       "owner": "engineering-test-platform"
     },
     {
@@ -161244,7 +161244,7 @@
       "delay": "5000",
       "lifecycle": "untracked",
       "key": "timer|scripts/ci/run-disposable-integration.mjs|setTimeout:() => terminationUnknown(new Error(\"child did not close after SIGKILL\"))#0",
-      "source": "scripts/ci/run-disposable-integration.mjs:301",
+      "source": "scripts/ci/run-disposable-integration.mjs:302",
       "owner": "engineering-test-platform"
     },
     {
@@ -162118,7 +162118,7 @@
       "delay": "timeoutMs",
       "lifecycle": "untracked",
       "key": "timer|server/scan-ingest-service.ts|setTimeout:() => r(\"timeout\")#0",
-      "source": "server/scan-ingest-service.ts:1595",
+      "source": "server/scan-ingest-service.ts:1612",
       "owner": "scanner-platform"
     },
     {
@@ -162128,7 +162128,7 @@
       "delay": "500",
       "lifecycle": "untracked",
       "key": "timer|server/scan-ingest-service.ts|setTimeout:resolve#0",
-      "source": "server/scan-ingest-service.ts:643",
+      "source": "server/scan-ingest-service.ts:645",
       "owner": "scanner-platform"
     },
     {

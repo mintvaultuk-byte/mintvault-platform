@@ -2,6 +2,40 @@
 
 **Baseline:** `09beacaa5bc03f8e80e4c7e59232df6fc466b7cb`
 
+## Approved image-core packet — 2026-09-05
+
+Pre-wave cecbd8288d591d101bf60c124e5779ea65a54458; retain root's two post-checkpoint
+H1 evidence edits and unrelated vault-worlds. OWNER-IMAGE explicitly approved by the
+existing owner record; no deployment/schema/live object authority. CRITICAL/HOSTILE
+preflight. Graph-first source verification and independent Terra reproduce exactly
+WAA-IMAGE-001/002,2failed/178filtered against owned PG17 and in-memory R2. Root sole writer.
+
+Exact runtime files: server/routes.ts and server/scan-ingest-service.ts (explicitly added
+to existing image-node scope). Preserve manual source pointers while publishing derived
+displays through the existing durable coordinator/finalizer. Do not simply refresh a
+stale expected back pointer: both original-pointer CAS checks must survive when original
+updates are omitted. Non-manual scanner processing, immutable evidence admission, frozen
+grading, source-byte verification and existing finalizer policy remain unchanged.
+Return exact item-buffer hash/bytes/media type keyed by the committed object key; the
+route's replacement audit must name and describe the SAME display object, with no extra
+post-commit storage read/failure window. Source fallback remains exact when no display
+can be generated. No schema, dependency, provider, direct R2/B2 or scanner redesign.
+
+Tests: tests/certificate-update-route.test.ts, tests/certificate-image-upload-audit.test.ts
+and existing manual-image/object-write integration tests only as needed. Retain the two
+failing behaviors; strengthen bytes/type/hash identity and manual original preservation.
+Exercise second-side failure with durable first-side audit and retry, genuine source-CAS
+conflicts, defaults/non-manual behavior, no object deletion. Independent changed-surface
+verification/mutation required; exact-candidate and remaining phone-writer proof stay open.
+Mechanical architecture snapshot regeneration only if required; no allowance growth.
+Budget: two runtime files, existing tests/records, targeted matrix; no new control folders.
+
+Parent aggregate scope now honestly includes both route/pipeline files. Its completion
+depends on the existing Admin-print and legacy-AI repairs to serialize shared-file
+integration; those dependencies are not waived or falsely marked complete. This bounded
+nested image-core node has its own satisfied owner/finding prerequisites, runs with the
+root as the only writer, and cannot close the parent aggregate or release gate by itself.
+
 ## Approved UTC repair packet — 2026-09-05
 
 Pre-wave checkpoint15101b2844187aa184198d5116e2898463dfae61, pushed non-force;

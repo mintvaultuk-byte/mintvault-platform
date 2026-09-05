@@ -45,13 +45,12 @@ vi.mock("../server/db", () => ({
   },
 }));
 
-// R2 is never exercised — this suite posts no images.
-/** R2 is stubbed, but the calls are RECORDED: M-3 asserts that a same-key
- *  replacement uploads the new object and does NOT delete it afterwards. */
+/** Real route/image processing and PostgreSQL; synthetic object bytes stay in memory. */
 const r2Calls = vi.hoisted(() => ({
   uploads: [] as Array<{ key: string; bytes: number }>,
   deletes: [] as string[],
   objects: new Map<string, Buffer>(),
+  beforeCreate: null as ((key: string) => Promise<void>) | null,
 }));
 vi.mock("../server/r2", () => ({
   uploadToR2: vi.fn(async (k: string, buf: Buffer) => {
@@ -63,6 +62,7 @@ vi.mock("../server/r2", () => ({
     r2Calls.objects.delete(k);
   }),
   uploadCreateOnlyToR2: vi.fn(async (key: string, body: Buffer) => {
+    await r2Calls.beforeCreate?.(key);
     if (r2Calls.objects.has(key)) throw new Error("conditional create collision");
     r2Calls.objects.set(key, Buffer.from(body));
   }),
@@ -442,6 +442,7 @@ beforeEach(async () => {
   r2Calls.uploads.length = 0;
   r2Calls.deletes.length = 0;
   r2Calls.objects.clear();
+  r2Calls.beforeCreate = null;
   r2Calls.objects.set("images/MV1/front.png", await pngBuffer(10, 10, 10));
   r2Calls.objects.set("images/MV1/back.png", await pngBuffer(20, 20, 20));
 });
@@ -1833,8 +1834,7 @@ describe("Task 7: a semantically-equal numeric grading echo is tolerated", () =>
 // M-3 — image replacement always leaves truthful audit evidence
 // ─────────────────────────────────────────────────────────────────────────────
 
-/** Two DISTINCT real PNGs with the SAME extension, so the deterministic R2 key
- *  is identical while the object content genuinely differs. */
+/** Small real images exercise the encoder and immutable object identity. */
 async function pngBuffer(r: number, g: number, b: number): Promise<Buffer> {
   const sharp = (await import("sharp")).default;
   return await sharp({
@@ -1860,6 +1860,17 @@ async function putMultipart(
     body: form,
   });
   return { status: res.status, json: await res.json().catch(() => null) };
+}
+
+async function expectReplacementObjectIdentity(rep: {
+  r2Key: string; contentSha256: string; bytes: number; contentType: string;
+}) {
+  const body = r2Calls.objects.get(rep.r2Key);
+  expect(body, "audit key must name an existing immutable object").toBeDefined();
+  expect(rep.contentSha256).toBe(createHash("sha256").update(body!).digest("hex"));
+  expect(rep.bytes).toBe(body!.length);
+  const sharp = (await import("sharp")).default;
+  expect(rep.contentType).toBe(`image/${(await sharp(body!).metadata()).format}`);
 }
 
 describe("M-3: a same-path image replacement is auditable", () => {
@@ -1892,12 +1903,13 @@ describe("M-3: a same-path image replacement is auditable", () => {
     expect(rep.pathChanged).toBe(true);
     expect(rep.contentSha256).toMatch(/^[0-9a-f]{64}$/);
     expect(rep.bytes).toBeGreaterThan(0);
-    expect(rep.contentType).toBe("image/jpeg");
+    expect(rep.contentType).toBe("image/png");
     const namedObject = r2Calls.objects.get(rep.r2Key);
     expect(namedObject, "the audit must name an object that was actually committed").toBeDefined();
     expect(rep.contentSha256, "the audit hash must describe the object identified by r2Key").toBe(
       createHash("sha256").update(namedObject!).digest("hex")
     );
+    await expectReplacementObjectIdentity(rep);
     expect((await readCert()).frontImagePath).toBe(rep.r2Key);
   });
 
@@ -1911,6 +1923,7 @@ describe("M-3: a same-path image replacement is auditable", () => {
     const events = (await readAudits()).filter((a: any) => a.action === "certificate_image_replaced");
     expect(events).toHaveLength(1);
     expect((events[0].details as any).imageReplacements[0].side).toBe("back");
+    await expectReplacementObjectIdentity(events[0].details.imageReplacements[0]);
   });
 
   it("front AND back in one request are both recorded", async () => {
@@ -1924,6 +1937,91 @@ describe("M-3: a same-path image replacement is auditable", () => {
     expect(events).toHaveLength(1);
     const sides = (events[0].details as any).imageReplacements.map((r: any) => r.side).sort();
     expect(sides).toEqual(["back", "front"]);
+    for (const rep of events[0].details.imageReplacements) await expectReplacementObjectIdentity(rep);
+    const cert = await readCert();
+    expect(cert.gradingFrontOriginal).toMatch(/\/manual-revisions\/[0-9a-f-]{36}\/front_original\.jpg$/);
+    expect(cert.gradingBackOriginal).toMatch(/\/manual-revisions\/[0-9a-f-]{36}\/back_original\.jpg$/);
+    const originals = (await pool.query<{ object_key: string }>(
+      `SELECT i.object_key FROM object_write_items i JOIN object_write_operations o ON o.id = i.operation_id
+        WHERE o.operation_kind = 'CERTIFICATE_IMAGE_REVISION' ORDER BY i.object_key`
+    )).rows.map((row) => row.object_key);
+    expect(originals.sort()).toEqual([cert.gradingFrontOriginal, cert.gradingBackOriginal].sort());
+    expect([...r2Calls.objects.keys()].filter((key) => /\/revisions\/[^/]+\/(front|back)_original\.jpg$/.test(key))).toEqual([]);
+  });
+
+  it("a back-only attachment without a front audits the exact original JPEG fallback", async () => {
+    const id = await certId();
+    await pool.query(`UPDATE certificates SET front_image_path = NULL, grading_front_original = NULL WHERE id = $1`, [id]);
+    expect((await putMultipart(id, {}, [
+      { field: "backImage", filename: "back.png", type: "image/png", buffer: await pngBuffer(4, 5, 6) },
+    ])).status).toBe(200);
+    const events = (await readAudits()).filter((a: { action: string }) => a.action === "certificate_image_replaced");
+    expect(events).toHaveLength(1);
+    const rep = events[0].details.imageReplacements[0];
+    expect(rep.r2Key).toBe((await readCert()).gradingBackOriginal);
+    expect(rep.contentType).toBe("image/jpeg");
+    await expectReplacementObjectIdentity(rep);
+  });
+
+  it.each(["front", "back"] as const)("manual derivatives retain the %s original CAS guard", async (side) => {
+    const id = await certId();
+    let injected = false;
+    r2Calls.beforeCreate = async (key) => {
+      if (injected || key.includes("/manual-revisions/")) return;
+      injected = true;
+      await pool.query(`UPDATE certificates SET grading_${side}_original = $1 WHERE id = $2`, [`concurrent/${side}.jpg`, id]);
+    };
+    expect((await putMultipart(id, {}, [
+      { field: "frontImage", filename: "front.png", type: "image/png", buffer: await pngBuffer(1, 2, 3) },
+    ])).status).toBe(500);
+    expect(injected).toBe(true);
+    const cert = await readCert();
+    expect(side === "front" ? cert.gradingFrontOriginal : cert.gradingBackOriginal).toBe(`concurrent/${side}.jpg`);
+    expect(cert.frontImagePath).toBe("images/MV1/front.png");
+    expect(cert.backImagePath).toBe("images/MV1/back.png");
+    expect((await readAudits()).filter((a: { action: string }) => a.action === "certificate_image_replaced")).toHaveLength(0);
+  });
+
+  it("a second-side failure retains first-side durable audit and permits a guarded failed-side retry", async () => {
+    const id = await certId();
+    r2Calls.beforeCreate = async (key) => {
+      if (key.includes("/manual-revisions/") && key.endsWith("/back_original.jpg")) throw new Error("injected back storage failure");
+    };
+    expect((await putMultipart(id, {}, [
+      { field: "frontImage", filename: "front.png", type: "image/png", buffer: await pngBuffer(1, 2, 3) },
+      { field: "backImage", filename: "back.png", type: "image/png", buffer: await pngBuffer(4, 5, 6) },
+    ])).status).toBe(500);
+    const partial = await readCert();
+    expect(partial.gradingFrontOriginal).toMatch(/\/manual-revisions\/.+\/front_original\.jpg$/);
+    expect(partial.gradingBackOriginal).toBeNull();
+    const audits = await readAudits();
+    expect(audits.filter((a: { action: string }) => a.action === "image_attached_manual")).toHaveLength(1);
+    expect(audits.filter((a: { action: string }) => a.action === "certificate_image_derivatives_generated")).toHaveLength(1);
+    expect(audits.filter((a: { action: string }) => a.action === "certificate_image_replaced")).toHaveLength(0);
+    expect(r2Calls.objects.has(partial.gradingFrontOriginal)).toBe(true);
+    r2Calls.beforeCreate = null;
+    expect((await putMultipart(id, {}, [
+      { field: "backImage", filename: "retry.png", type: "image/png", buffer: await pngBuffer(4, 5, 6) },
+    ])).status).toBe(200);
+    const recovered = await readCert();
+    expect(recovered.gradingFrontOriginal).toBe(partial.gradingFrontOriginal);
+    expect(recovered.gradingBackOriginal).toMatch(/\/manual-revisions\/.+\/back_original\.jpg$/);
+    expect(r2Calls.deletes).toEqual([]);
+  });
+
+  it("ordinary scanner processing still publishes its original derivative slots", async () => {
+    const id = await certId();
+    const { uploadImagesToCert } = await import("../server/scan-ingest-service");
+    const result = await uploadImagesToCert(id, await pngBuffer(1, 2, 3), await pngBuffer(4, 5, 6));
+    const cert = await readCert();
+    expect(cert.gradingFrontOriginal).toBe(result.objectKeys.front_original);
+    expect(cert.gradingBackOriginal).toBe(result.objectKeys.back_original);
+    expect(cert.gradingFrontOriginal).toMatch(/\/revisions\/.+\/front_original\.jpg$/);
+    expect(cert.gradingBackOriginal).toMatch(/\/revisions\/.+\/back_original\.jpg$/);
+    for (const key of [result.objectKeys.front_original, result.objectKeys.back_original]) {
+      const identity = result.objectIdentities[key];
+      await expectReplacementObjectIdentity({ r2Key: key, contentSha256: identity.sha256, bytes: identity.bytes, contentType: identity.contentType });
+    }
   });
 
   it("an immutable replacement does not delete either the new or prior object during the request", async () => {

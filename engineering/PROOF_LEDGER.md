@@ -1,5 +1,16 @@
 # Engineering proof ledger
 
+## 2026-09-05 WAA-IMAGE-001/002 local repair
+
+[Image packet, exact hashes and recovery limitations](../.claude/controlled-code-lead/tasks/white-ace-assurance-repository-20260904/task-ledger.md):
+manual canonical original pointers preserved with both source CAS guards; audit tuple
+identifies its exact stored PNG/JPEG body. Root route185/185, clean exact-lock and
+independent owned-PG17/synthetic-R2 matrix235/235, zero skips. Four independent mutations
+fail; exact restoration passes. Typecheck/build/unchanged345 ratchet/scoped lint pass;
+8455-record architecture delta is source-coordinate-only. FIXED_WIP, not final candidate
+or phone/full-writer proof. Forward recovery is proven; same-key direct-service replay
+is not claimed. No deployment, shared migration, live credentials or real object deletion.
+
 ## 2026-09-05 WAA-CREDIT-001 UTC-day repair
 
 [Exact packet, red/green commands, hashes and limitations](../.claude/controlled-code-lead/tasks/white-ace-assurance-repository-20260904/task-ledger.md):

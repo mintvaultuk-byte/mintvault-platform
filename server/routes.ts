@@ -1147,17 +1147,11 @@ export async function handleCertificateMetadataUpdate(req: any, res: any): Promi
     }
 
     // ── M-3 · IMAGE REPLACEMENT MUST LEAVE TRUTHFUL AUDIT EVIDENCE ────────
-    // R2 keys are DETERMINISTIC (`images/{certId}/front.jpg`), so re-uploading
-    // a front image with the same extension replaces the OBJECT while the
-    // stored path STRING is unchanged. The committed-field diff therefore saw
-    // no change, the no-op early return fired, and a customer's card image was
-    // swapped with no audit row at all — the trail said nothing happened.
-    //
-    // Recorded per replacement below and audited unconditionally further down,
-    // whether or not any metadata column also changed. The evidence is the
-    // CONTENT identity (sha256 of the uploaded bytes + size + mime), not a
-    // fabricated path change: the audit states that the image content was
-    // replaced, and says explicitly when the path did not move.
+    // Manual originals and derived displays are separate immutable objects.
+    // Record each replacement even if no metadata field changed, and bind the
+    // key/hash/size/type tuple to the exact named object (normally display PNG,
+    // not the uploaded/re-encoded source JPEG). Inner publication audits remain
+    // durable if a later side or the outer metadata transaction fails.
     type ImageReplacement = {
       side: "front" | "back";
       r2Key: string;
@@ -1205,14 +1199,18 @@ export async function handleCertificateMetadataUpdate(req: any, res: any): Promi
       if (attached.pipelineError) throw new Error(`image pipeline failed: ${attached.pipelineError}`);
       const displayColumn = side === "front" ? "front_display" : "back_display";
       const r2Key = attached.pipeline?.objectKeys[displayColumn] ?? attached.originalObjectKey;
+      const identity = attached.pipeline
+        ? attached.pipeline.objectIdentities[r2Key]
+        : { sha256: crypto.createHash("sha256").update(jpeg).digest("hex"), bytes: jpeg.length, contentType: "image/jpeg" };
+      if (!identity) throw new Error("committed image has no verified object identity");
       imageReplacements.push({
         side,
         r2Key,
         previousPath: previousPath ?? null,
         pathChanged: (previousPath ?? null) !== r2Key,
-        contentSha256: crypto.createHash("sha256").update(jpeg).digest("hex"),
-        bytes: jpeg.length,
-        contentType: "image/jpeg",
+        contentSha256: identity.sha256,
+        bytes: identity.bytes,
+        contentType: identity.contentType,
         originalFilename: file.originalname,
       });
     };
