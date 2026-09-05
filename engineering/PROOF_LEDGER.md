@@ -1,5 +1,16 @@
 # Engineering proof ledger
 
+## 2026-09-05 VQ S2a — fresh journalled estate and disposable CI
+
+[VQ packet](../.claude/controlled-code-lead/tasks/repository-architecture-recovery-20260904/vq-schema-recovery.md)
+records real TS CLI dry-run/apply16/replay0 against newly owned PostgreSQL17.10,
+exact checksums and durable constraints/row retention. Independent Sol25/25;
+final clean-lock52/52, zero skips. Both existing CI preparation paths now use the
+same namespaced runner with dedicated child-only test URL. Topology mutation test
+was red before wiring and is green; syntax67/reference127/architecture8310/lint
+and unchanged345 test diagnostic ratchet pass. No full helper/hosted PG16/image/
+historical/readiness claim. S2b/S3 and candidate/hostile/security vetoes remain OPEN.
+
 ## 2026-09-05 VQ S1 — isolated migration runner namespaces
 
 [VQ recovery packet](../.claude/controlled-code-lead/tasks/repository-architecture-recovery-20260904/vq-schema-recovery.md)

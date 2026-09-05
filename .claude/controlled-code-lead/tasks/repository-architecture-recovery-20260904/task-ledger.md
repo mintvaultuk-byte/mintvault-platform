@@ -2,6 +2,13 @@
 
 ## Current checkpoint and next bounded wave
 
+S2a fresh VQ/CI locally complete from pushed d7e957de51ec9b5138fe3eb9b42883223db8bcc6:
+unchanged16 SQL through actualCLI, checksummed journal/replay0 and durable row/
+constraint proof; both disposable CI paths no longer raw-loop VQ SQL. Independent
+25/25, clean52/52; exact packet/hashes preserved. WIP commit/push now, then S2b
+historical attestation/shipping/readiness contract. No shared migration/deploy;
+no full historical or software-complete claim. Restricted lane remains UNKNOWN.
+
 VQ S1 foundation locally complete from pushed c712e464: separate main/VQ journal,
 lock and CLI inventory through the existing runner; no historical SQL/schema/web
 change. Root78/independent31/final clean105 passed; exact-lock build PASS. Exact

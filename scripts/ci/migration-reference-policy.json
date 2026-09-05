@@ -9,6 +9,10 @@
     "add-mvgs-v2-columns-prod.sql": "legacy operator script input; not loaded by the numbered production runner"
   },
   "syntheticReferences": {
+    "0000_main.sql": "S1 synthetic main migration namespace fixture",
+    "0000_vq.sql": "S1 synthetic Vault Quest migration namespace fixture",
+    "0000_collision.sql": "S1 synthetic same-estate migration identity collision",
+    "0001_vq_forward.sql": "S1 synthetic Vault Quest scoped-forward fixture",
     "0001_alpha.sql": "invalid-width and duplicate-number fixture",
     "0001_x.sql": "synthetic migration planner and release-scope fixture",
     "0001_core.sql": "synthetic architecture-authority golden workspace fixture",

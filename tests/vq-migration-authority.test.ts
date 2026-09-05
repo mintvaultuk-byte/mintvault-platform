@@ -1,4 +1,5 @@
 import { createHash } from "node:crypto";
+import { execFileSync } from "node:child_process";
 import { join } from "node:path";
 import pg from "pg";
 import { afterAll, beforeAll, beforeEach, describe, expect, it } from "vitest";
@@ -176,4 +177,70 @@ describe("closed migration estate namespace", () => {
       (await client.query("SELECT to_regclass('public.vq_schema_migrations') journal")).rows[0].journal
     ).toBeNull();
   });
+});
+
+describe("fresh immutable VQ estate through the real CLI", () => {
+  it("journals all sixteen files exactly once and retains durable rows and constraints", async () => {
+    const fresh = await startPostgres17("vq-fresh-cli");
+    const db = new pg.Client({ connectionString: fresh.url });
+    await db.connect();
+    const run = (apply: boolean) =>
+      execFileSync(
+        process.execPath,
+        [
+          "node_modules/tsx/dist/cli.mjs",
+          "scripts/db/migrate.ts",
+          "--estate",
+          "vault-quest",
+          ...(apply ? ["--apply"] : []),
+        ],
+        {
+          encoding: "utf8",
+          env: {
+            PATH: process.env.PATH,
+            LANG: "C",
+            LC_ALL: "C",
+            NODE_ENV: "test",
+            MINTVAULT_MIGRATION_DATABASE_URL: fresh.url,
+          },
+          timeout: 30_000,
+        }
+      );
+    try {
+      expect(run(false)).toContain("16 pending");
+      expect((await db.query("SELECT to_regclass('public.vq_schema_migrations') journal")).rows[0].journal).toBeNull();
+      expect(run(true)).toContain("Applied 16:");
+      const files = listMigrationFiles(migrationProfile("vault-quest").migrationsDir);
+      const journal = (
+        await db.query(
+          "SELECT filename, checksum, status, completed_at IS NOT NULL completed FROM vq_schema_migrations ORDER BY filename"
+        )
+      ).rows;
+      expect(journal).toEqual(
+        files.map((f) => ({ filename: f.filename, checksum: f.checksum, status: "applied", completed: true }))
+      );
+      expect((await db.query("SELECT to_regclass('public.schema_migrations') journal")).rows[0].journal).toBeNull();
+      await db.query(
+        "INSERT INTO vq_feature_flags (feature, enabled) VALUES ('gen_action_pose', false), ('auto_paid_retry', false)"
+      );
+      await db.query(
+        "INSERT INTO vq_export_jobs (kind,owner_admin_id,idempotency_key,ids) VALUES ('test','synthetic-admin','fresh-proof','[1]')"
+      );
+      const before = (await db.query("SELECT * FROM vq_export_jobs")).rows;
+      expect(run(true)).toContain("Applied 0:");
+      expect((await db.query("SELECT * FROM vq_export_jobs")).rows).toEqual(before);
+      expect((await db.query("SELECT count(*)::int count FROM vq_schema_migrations")).rows[0].count).toBe(16);
+      await expect(
+        db.query(
+          "INSERT INTO vq_export_jobs (kind,owner_admin_id,idempotency_key) VALUES ('test','synthetic-admin','fresh-proof')"
+        )
+      ).rejects.toMatchObject({ code: "23505" });
+      await expect(db.query("UPDATE vq_export_jobs SET attempt_count=-1")).rejects.toMatchObject({ code: "23514" });
+      await expect(db.query("UPDATE vq_export_jobs SET ids='{}'")).rejects.toThrow();
+      expect((await db.query("SELECT * FROM vq_export_jobs")).rows).toEqual(before);
+    } finally {
+      await db.end();
+      await fresh.stop();
+    }
+  }, 60_000);
 });

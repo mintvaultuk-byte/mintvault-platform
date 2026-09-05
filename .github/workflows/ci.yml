@@ -424,12 +424,6 @@ jobs:
           # pgvector/pgvector image ships the extension files.
           psql "$TEST_DATABASE_URL" -v ON_ERROR_STOP=1 -c "CREATE EXTENSION IF NOT EXISTS vector;"
           npx drizzle-kit push --force
-          for migration in migrations-vq/*.sql; do
-            echo "[ci-db] applying ${migration}"
-            psql "$TEST_DATABASE_URL" -v ON_ERROR_STOP=1 -f "$migration" >/dev/null
-          done
-          psql "$TEST_DATABASE_URL" -v ON_ERROR_STOP=1 -tAc "SELECT pg_get_constraintdef(oid) FROM pg_constraint WHERE conname = 'vq_feature_flags_feature_check'" | grep -q "gen_action_pose"
-          psql "$TEST_DATABASE_URL" -v ON_ERROR_STOP=1 -tAc "SELECT pg_get_constraintdef(oid) FROM pg_constraint WHERE conname = 'vq_feature_flags_feature_check'" | grep -q "auto_paid_retry"
           # Project Control server must be reachable AND be PostgreSQL 17, and the admin role
           # must be able to CREATE DATABASE — otherwise the suites would fail deep inside
           # beforeAll with a less obvious message.
@@ -592,6 +586,14 @@ jobs:
               "CREATE TABLE IF NOT EXISTS certificates (id serial PRIMARY KEY, cert_id text, secret text)"
             psql "$full_set_admin" -v ON_ERROR_STOP=1 -c "ALTER TABLE certificates OWNER TO pn_migrator"
           done
+
+      - name: Journalled disposable Vault Quest migrations
+        run: MINTVAULT_MIGRATION_DATABASE_URL="$TEST_DATABASE_URL" node node_modules/tsx/dist/cli.mjs scripts/db/migrate.ts --estate vault-quest --apply
+
+      - name: Verify disposable Vault Quest feature vocabulary
+        run: |
+          psql "$TEST_DATABASE_URL" -v ON_ERROR_STOP=1 -tAc "SELECT pg_get_constraintdef(oid) FROM pg_constraint WHERE conname = 'vq_feature_flags_feature_check'" | grep -q "gen_action_pose"
+          psql "$TEST_DATABASE_URL" -v ON_ERROR_STOP=1 -tAc "SELECT pg_get_constraintdef(oid) FROM pg_constraint WHERE conname = 'vq_feature_flags_feature_check'" | grep -q "auto_paid_retry"
 
       # ── MVGS v1.4 immutability gate ────────────────────────────────────────
       # Runs BEFORE lint/typecheck/test so a freeze violation is the first thing

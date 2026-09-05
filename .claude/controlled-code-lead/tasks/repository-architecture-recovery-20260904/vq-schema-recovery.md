@@ -66,6 +66,59 @@ not replayed historical SQL or a restored in-memory fallback.
 
 ## Evidence
 
+## S2a exact fresh-estate / disposable-CI checkpoint
+
+Baseline `d7e957de51ec9b5138fe3eb9b42883223db8bcc6` pushed. Preflight remains
+CRITICAL/HOSTILE. Main agent has read all sixteen immutable SQL files. S2a writes
+only existing `tests/vq-migration-authority.test.ts`,
+`scripts/ci/prepare-engineering-governance-db.mjs`, `.github/workflows/ci.yml`,
+`scripts/ci/verify-ci-topology.mjs`, `tests/ci-proof-topology.test.ts`,
+`scripts/ci/migration-reference-policy.json` (exact synthetic S1 references), this
+packet and existing graph/task/issue/proof records, and generated architecture
+inventory if source locations change. No Docker/shipping/readiness/history writes
+yet: these require S2b's exact extension and retain their release vetoes.
+
+Fresh proof must execute the actual TS CLI against a newly owned empty cluster,
+journal all16 exact checksums, replay with zero effects, verify important durable
+constraints and retain existing rows. Disposable CI supplies migration authority
+only to the runner child, derived from its already-validated test URL. No inherited
+live alias is permitted locally. No broad --allow-destructive option or SQL edit.
+The original SQL remains immutable including historical comments; comments do not
+grant external execution authority. CI failure must remain blocking. Synthetic
+filenames in S1 get exact test-reference classification, never shipped identities.
+
+Recovery: revert CI wiring only if necessary while preserving SQL/history and S1
+namespace code. No shared schema changed, no backfill/adoption attested. Root sole
+writer and independent Sol proof; S2b/S3 remain open with no idle owner pause.
+
+S2a proof: root VQ9/9 and CI16/16; independent Sol25/25; final clean exact-lock
+52/52 (VQ9, CI16, architecture27), zero skips. The preliminary targeted red was
+1 failing newly required topology case with15 test-filter exclusions, not final
+proof. Final complete suites do not skip. Actual TS CLI executes all16 exact SQL
+files in owned PG17.10, dry-run creates no journal, replay applies0, durable rows
+remain identical, active idempotency/nonnegative attempts/bounded IDs still refuse
+invalid writes. No main journal created. Child env contains only owned migration
+URL, runtime PATH/locale and test mode. Independent child-authority review CLEAN.
+Architecture8310 PASS; test345 diagnostic ratchet unchanged; scoped lint0/0;
+JS syntax67 and migration references127 PASS. Four synthetic S1 names now have
+exact non-shipped classification. No snapshot/policy ownership relaxation.
+S1 production bundle is unchanged; its clean build remains scoped evidence, not
+new S2 image-shipping proof. Entire governance helper/PG16 hosted execution is
+not claimed; exact-SHA CI remains its own gate. Parent101/nested34 structurally
+valid NOT READY; ordinary postflight retains known unwaived vetoes.
+
+S2a independently verified SHA256:
+```text
+267dd3e4244340fcb2bbf9bf98b8d1d639d617212d8984995dd25e45a8900370 .github/workflows/ci.yml
+4d9c94aaedc1bbdaf5f1ffc14a034af002ff6f15a5cf5d604edc6f0424d31e9d scripts/ci/migration-reference-policy.json
+93c7641d1bce92d3a497f9f3d227affacb361d2a14ace52e446564ca2b872d80 scripts/ci/prepare-engineering-governance-db.mjs
+59107c9ad9fb7dec6316f873d4ad04f730b249195f4e9fc875e44922abaed74d scripts/ci/verify-ci-topology.mjs
+19ae0e6d40256c41923c181c331b8bd9c96b174e537ad61f5cd77bc495029fe7 tests/ci-proof-topology.test.ts
+625daf5c42bf1d3e7097048ee3e12b7e4c47cfcb0759cd231d67cbf61a308a34 tests/vq-migration-authority.test.ts
+```
+
+## S1 final proof
+
 S1 local implementation complete; not full VQ closure. Root78/78 across five
 migration suites; independent Sol31/31 across VQ/identity/scoped suites, zero skips.
 Final clean exact-lock six-suite105/105 includes architecture27; Vitest4.1.7,

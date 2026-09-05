@@ -2179,6 +2179,11 @@
       "depends_on": ["ARCH-SCHEMA-001", "OWNER-VQ-SCHEMA", "RECOVERY-VQ-SCHEMA", "REPAIR-CI-TOPOLOGY"],
       "addresses": ["ARCH-SCHEMA-001"],
       "write_scope": [
+        ".github/workflows/ci.yml",
+        "scripts/ci/prepare-engineering-governance-db.mjs",
+        "scripts/ci/verify-ci-topology.mjs",
+        "scripts/ci/migration-reference-policy.json",
+        "tests/ci-proof-topology.test.ts",
         "migrations-vq",
         "scripts/db",
         "drizzle-vq.config.ts",
@@ -2815,6 +2820,11 @@
         "Fresh and each historical estate converge through shipped runner; concurrent lock/checksum; required/optional readiness; no memory fallback"
       ],
       "evidence": [
+        {
+          "ref": "vq-schema-recovery.md S2a: independent25/25, clean52/52; actualCLI fresh16/replay0, disposable CI wiring; history/image/readiness remain OPEN",
+          "sha": "d7e957de51ec9b5138fe3eb9b42883223db8bcc6",
+          "observer": "sol-vq-s2a-verifier"
+        },
         {
           "ref": "vq-schema-recovery.md: S1 independent Sol31/31, clean105/105, source hashes; full estate/readiness/fallback/image/candidate proof OPEN",
           "sha": "c712e4647bf8cd01732370e10e0282e8e454ded1",

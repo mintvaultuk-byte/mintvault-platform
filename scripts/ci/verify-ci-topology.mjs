@@ -156,6 +156,7 @@ export function validateCiTopology({
   const partnerBrowserCommand =
     "node scripts/ci/run-disposable-integration.mjs --docker-context default --partner-browser-proof";
   const requiredCommands = [
+    'MINTVAULT_MIGRATION_DATABASE_URL="$TEST_DATABASE_URL" node node_modules/tsx/dist/cli.mjs scripts/db/migrate.ts --estate vault-quest --apply',
     "npm run architecture:check",
     "npm run check:tests",
     "npm run check:scripts",

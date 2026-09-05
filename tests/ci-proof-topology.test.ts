@@ -43,6 +43,20 @@ const realCiInput = () => ({
 });
 
 describe("hosted CI proof topology", () => {
+  it("requires the disposable VQ preparation to use the namespaced journalled runner", () => {
+    const command =
+      'MINTVAULT_MIGRATION_DATABASE_URL="$TEST_DATABASE_URL" node node_modules/tsx/dist/cli.mjs scripts/db/migrate.ts --estate vault-quest --apply';
+    for (const replacement of ["echo removed", `# ${command}`, `if false; then ${command}; fi`]) {
+      const input = realCiInput();
+      input.workflow = input.workflow.replace(command, replacement);
+      expect(validateCiTopology(input)).toContain(`workflow does not execute ${command}`);
+    }
+    const helper = readFileSync("scripts/ci/prepare-engineering-governance-db.mjs", "utf8");
+    expect(helper).not.toContain('readdirSync("migrations-vq")');
+    expect(helper).toContain('"--estate", "vault-quest", "--apply"');
+    expect(helper).toContain("MINTVAULT_MIGRATION_DATABASE_URL: sharedTestUrl");
+    expect(realCiInput().workflow).not.toContain("for migration in migrations-vq/*.sql");
+  });
   it.each([
     { kind: "Admin", target: "admin", title: "Super Admin" },
     { kind: "Partner", target: "partner", title: "Partner" },
