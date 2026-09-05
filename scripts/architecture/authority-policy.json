@@ -102,6 +102,7 @@
     { "prefix": "client/src/pages/dev-admin-shell-geometry-harness.tsx", "owner": "development-fixtures" },
     { "prefix": "client/src/pages/dev-growth-command-visual-harness.tsx", "owner": "development-fixtures" },
     { "prefix": "server/vault-quest/", "owner": "vault-quest-platform" },
+    { "prefix": "server/lib/vq-schema-contract.ts", "owner": "vault-quest-platform" },
     { "prefix": "client/src/vault-quest/", "owner": "vault-quest-platform" },
     { "prefix": "client/src/pages/vault-reports/", "owner": "vault-quest-platform" },
     { "prefix": "server/command-centre/", "owner": "command-centre-platform" },

@@ -117,6 +117,64 @@ S2a independently verified SHA256:
 625daf5c42bf1d3e7097048ee3e12b7e4c47cfcb0759cd231d67cbf61a308a34 tests/vq-migration-authority.test.ts
 ```
 
+## S2b catalog foundation manifest
+
+Baseline `4d25602cc67d1dc87a00abf6f7b687dfe5413e27` pushed, exact draftPR336 verified;
+CI33996842266/governance33996842214/33996840294 in progress. S2b starts with a
+read-only foundation, not historical writes: add exactly
+`server/lib/vq-schema-contract.ts` and `tests/vq-historical-baseline.test.ts`.
+The former owns a deterministic public VQ catalog projection/fingerprint with no
+connection, filesystem, provider or environment access. Include columns/types/
+defaults/nullability, constraint definitions/validation, indexes/validity, sequence
+configuration/ownership and triggers; exclude only the exact migration journal/
+baseline receipt metadata. Do not fingerprint row content or secrets.
+
+Existing16 immutableSQL applied to helper-owned PG17.10 supplies baseline evidence;
+missing/partial/altered shapes must differ, data changes must not. Pin source-file
+hashes and observed structural fingerprint after review, not a duplicated DDL or
+large schema fixture. This helper alone grants no historical adoption/readiness.
+Add exact file ownership in `scripts/architecture/authority-policy.json`, normal
+generated architecture inventory, and test/app inventory count/hash only in
+`scripts/ci/typecheck-baselines/tests.json` and `scripts/ci/typecheck-baselines/architecture.json`. Existing
+graph/task/issue/proof records may update. No legacy allowlist/diagnostic waiver.
+Rollback is removal of an unused pure helper/test, with no shared database change.
+
+Further S2b writes require another exact extension after independent design review:
+new0016 baseline receipt and namespaced historical mode, runtime classification/
+grants matching immutable0121, shipping and required readiness. Main0121 must run
+before VQ metadata exists on a fresh full image; never edit/replay its immutable
+classification list. VQ metadata gets read-only runtime grants, not wider money/
+auth/Partner powers. Later export migration reservation must move0016→0017 before
+the0016receipt is authored. These are plans, not executed changes or closed gates.
+
+Catalog scope is the current26 business relations and their owned sequences, not
+every possible future VQ standalone sequence/function/type. Actual0000–0015 SQL
+creates no such standalone object. Grants, data-seeding, migration execution and
+historical adoption are expressly outside this foundation. Terra independently
+verified16/16 and exact26/source-digest/schema-fingerprint plus narrow owner rule;
+no extractor/legacy/adoption change. Root separately observed identical catalog
+hash on newly owned PG16.13 and17.10. Temporary clusters were stopped and their
+own synthetic data directories removed by their lifecycle, with no user data.
+
+Final clean-lock68/68 (catalog16, VQ runner9, CI16, architecture27), zero skips.
+Root TypeScript and scoped lint0/0 pass; architecture8310 unchanged, no generated
+snapshot diff needed because the unused pure SQL helper adds no executable query
+site. Inventory507tests/820app files changes counts/hashes only; existing diagnostic
+allowances are untouched. Initial UNPROVEN fingerprint refusal was deliberate
+baseline measurement, not a software defect or permission to auto-adopt future
+schema changes. Full Opus/candidate/readiness/history/grant gates remain OPEN.
+Final test345/architecture3 diagnostic ratchets pass, no additions or baseline
+fingerprint allowances. Ordinary postflight retains the same managed-CLAUDE/npm
+egress/dirty/protected-review vetoes and graph warning; no acceptance override.
+Source SHA256:
+```text
+37e9b557a5fb39c0bfdc95f521b6f68093f36b59baab67e74fbf9c2e44addb11 server/lib/vq-schema-contract.ts
+27ffd83e40554a3005d07bb04d4a503e0e21d46bd71f0ee402f53e4c7ca95c57 tests/vq-historical-baseline.test.ts
+```
+The next metadata design is evaluating an existing migration-only schema to avoid
+0121's public-table classification conflict. No namespace change has been applied;
+the earlier ordering proposal is not an irrevocable implementation decision.
+
 ## S1 final proof
 
 S1 local implementation complete; not full VQ closure. Root78/78 across five

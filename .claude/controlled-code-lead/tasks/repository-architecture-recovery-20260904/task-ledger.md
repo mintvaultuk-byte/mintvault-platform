@@ -2,6 +2,13 @@
 
 ## Current checkpoint and next bounded wave
 
+2026-09-06 catalogfoundation locally proven from pushed4d25602c: same read-only
+fingerprint on ownedPG16.13/17.10, actual26 businessrelations, independent16/16 and
+clean68/68. No history/permission/runtimewrites; helper remains unused. WIPcheckpoint
+then metadata namespace decision and historical recovery. Existingpublic metadata
+plan meets immutable0121 classification conflict; investigate only that exact
+integration contract, not a broad audit or restricted security claim.
+
 S2a fresh VQ/CI locally complete from pushed d7e957de51ec9b5138fe3eb9b42883223db8bcc6:
 unchanged16 SQL through actualCLI, checksummed journal/replay0 and durable row/
 constraint proof; both disposable CI paths no longer raw-loop VQ SQL. Independent

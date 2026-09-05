@@ -2179,6 +2179,12 @@
       "depends_on": ["ARCH-SCHEMA-001", "OWNER-VQ-SCHEMA", "RECOVERY-VQ-SCHEMA", "REPAIR-CI-TOPOLOGY"],
       "addresses": ["ARCH-SCHEMA-001"],
       "write_scope": [
+        "server/lib/vq-schema-contract.ts",
+        "tests/vq-historical-baseline.test.ts",
+        "scripts/ci/typecheck-baselines/architecture.json",
+        "scripts/architecture/authority-policy.json",
+        "scripts/architecture/generated/architecture-authority.json",
+        "scripts/ci/typecheck-baselines/tests.json",
         ".github/workflows/ci.yml",
         "scripts/ci/prepare-engineering-governance-db.mjs",
         "scripts/ci/verify-ci-topology.mjs",
@@ -2820,6 +2826,11 @@
         "Fresh and each historical estate converge through shipped runner; concurrent lock/checksum; required/optional readiness; no memory fallback"
       ],
       "evidence": [
+        {
+          "ref": "vq-schema-recovery.md catalog foundation: independentTerra16/16, clean68/68; PG16.13/17.10 same26-relation fingerprint; historical writes/readiness remain OPEN",
+          "sha": "4d25602cc67d1dc87a00abf6f7b687dfe5413e27",
+          "observer": "terra-vq-catalog-verifier"
+        },
         {
           "ref": "vq-schema-recovery.md S2a: independent25/25, clean52/52; actualCLI fresh16/replay0, disposable CI wiring; history/image/readiness remain OPEN",
           "sha": "d7e957de51ec9b5138fe3eb9b42883223db8bcc6",

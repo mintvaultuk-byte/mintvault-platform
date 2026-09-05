@@ -1,5 +1,16 @@
 # Engineering proof ledger
 
+## 2026-09-06 VQ catalog foundation
+
+[Existing VQ packet](../.claude/controlled-code-lead/tasks/repository-architecture-recovery-20260904/vq-schema-recovery.md)
+pins a pure current-relation/owned-sequence structural fingerprint to unchanged
+0000–0015 SQL. Owned PostgreSQL16.13 and17.10 produce identical fingerprint for26
+business tables; independent Terra16/16, clean-lock68/68 across four affected
+suites, zero skips. Mutation tests distinguish structural change from row updates.
+TypeScript/lint/architecture PASS; two file-count/hash inventory updates only.
+This unused helper does not yet attest historical data, authorize migrations,
+grant permissions, ship VQ SQL or change readiness. Those gates remain OPEN.
+
 ## 2026-09-05 VQ S2a — fresh journalled estate and disposable CI
 
 [VQ packet](../.claude/controlled-code-lead/tasks/repository-architecture-recovery-20260904/vq-schema-recovery.md)
