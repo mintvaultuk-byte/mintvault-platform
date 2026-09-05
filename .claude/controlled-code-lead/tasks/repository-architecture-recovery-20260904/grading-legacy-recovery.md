@@ -1,5 +1,51 @@
 # Legacy AI grading recovery packet
 
+## 2026-09-05 carry-forward checkpoint
+
+Current baseline `aa4ec14a273da779f550fd4bb777ca1616d5e518`, pushed to draft PR336.
+The retirement was already implemented in80a20611; no product reimplementation or
+new audit is required. Independent Terra reran the unchanged five-case tombstone
+suite under scrubbed Node20:5/5 PASS. This proves exact source composition and
+typed responses plus a synthetic Express pre-parser request harness; the harness
+uses an admitting auth stub and is NOT proof of real Admin login/global middleware
+in the whole application. Existing normal Admin login proof remains separately
+recorded in pricing/Partner/Admin packets. Final candidate composition stays OPEN.
+
+Root reviewed exact source and hash continuity. Current TypeScript/scoped pricing
+lint/build and106pricing regressions are recorded in pricing-recovery.md; they are
+not relabelled full legacy integration proof. Clean legacy+architecture rerun is
+recorded below. Initial clean architecture red was a stale copied policy/inventory
+fixture, not product failure: synchronize the three committed inventory files,
+without adoption or waiver, and rerun. All release/security/hostile vetoes retained.
+After inventory sync the same test exposed three genuinely stale expectations:
+retired guide£19 and two snake_case Admin fields. Add exact test-only scope
+`tests/architecture-authority.test.ts`: assert the retained illustrative£120 AST
+currency record and the actual camelCase price/max-value expressions. The normal
+authority gate and hostile extraction mutations are unchanged; never restore stale
+product prices to satisfy the test. This wave writes existing recovery/graph/task/
+issue/proof records plus those three test expectations. Rollback is proof-only;
+never restore retired implementations. No new folder/framework/baseline waiver.
+
+Final clean and independent Sol32/32 (architecture27/tombstone5), zero skips.
+Independent three-line expectation review CLEAN; no gate/extractor/mutation change.
+Architecture test SHA256:
+`ba4d853f2c239c3ba9e45a38d4080f4796bb1bd9fac634dd5c7824ebe2f5a726`.
+Original sandboxed independent listener attempt is environment failure, not proof;
+approved local-loopback rerun is authoritative. Final candidate/hostile gates stay
+OPEN. Parent101/nested34 validation and ordinary postflight recorded at checkpoint.
+Checkpoint: scoped lint0errors/0warnings; graph valid NOT READY. Ordinary postflight
+retains managed-CLAUDE/npm-egress/dirty/protected-review failures and graph warning.
+No acceptance override. Recovery approval is PROVEN under standing owner authority;
+repair/proof remain IN_PROGRESS until immutable-candidate requirements are met.
+
+Source SHA-256:
+```text
+7b65089bc0d557c8418feb0472167443b4b63d70d55c97f8d2b7e6145bbe2ad7 server/routes.ts
+f0b6d4ae620a3a70e46e572f339db84f6a968197687cfa8d374321bd8d2551fb server/lib/retired-ai-grading.ts
+59c333cb8575354d90ec5fcf7c76e2872474d8bd56fc6d2a70bc2e53d827d32a tests/legacy-ai-route-tombstone.test.ts
+5e4532faf873df5fb7e1ab6191b9ce4979e6cee957ee80856217bf10e964deaa client/src/components/certificate-form.tsx
+```
+
 **Wave:** `REPAIR-LEGACY-AI`
 **Pre-wave checkpoint:** `c3534c856be747e7e66459559d875e3ff3d6f109`
 **Pre-wave tree:** clean

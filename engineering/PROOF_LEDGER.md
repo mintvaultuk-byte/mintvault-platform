@@ -1,5 +1,15 @@
 # Engineering proof ledger
 
+## 2026-09-05 pricing/legacy integration carry-forward
+
+[Existing legacy packet](../.claude/controlled-code-lead/tasks/repository-architecture-recovery-20260904/grading-legacy-recovery.md)
+now binds the previously implemented retirement to current source hashes and
+independent proof. Three stale pricing expectations in the architecture test were
+corrected to the actual reviewed currency/camelCase records; no production change
+or gate weakening. Clean and independent Sol32/32 (architecture27/tombstone5), zero
+skips. Actual-source plus synthetic Express proof is not full-app authentication
+or final candidate proof. Already-fixed legacy work was not reimplemented.
+
 ## 2026-09-05 pricing P3 — real HTTP-to-receipt proof
 
 [Pricing packet](../.claude/controlled-code-lead/tasks/repository-architecture-recovery-20260904/pricing-recovery.md)

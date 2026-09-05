@@ -2,6 +2,15 @@
 
 ## Current checkpoint and next bounded wave
 
+Pricing P3 aa4ec14a273da779f550fd4bb777ca1616d5e518 pushed and exact draftPR336
+head verified. Existing legacy retirement carried forward without product edits;
+three stale architecture-test price/field expectations reproduced and corrected.
+Clean/independent32/32; recovery/source hashes and proof limits in existing legacy
+packet. Wave-end WIP commit/push next, then RECOVERY-VQ-SCHEMA. Source-verified16VQ
+SQL files remain outside shipped main runner/readiness. Owner approval stands;
+root adjudicates required/enabled behavior preservation rather than silently
+disabling an already-mounted component to pass readiness. No shared DB/deployment.
+
 Pricing P1–P3 is locally FIXED_WIP. P2d checkpoint43ca275757e93cc981e9d0091fc4d62c6003dc0d
 is pushed to draftPR336. P3 reproduced/fixed two purchased-turnaround defects plus
 one held-out invalid snapshot edge. Independent18/18, clean six-suite106/106 and

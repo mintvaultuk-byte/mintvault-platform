@@ -348,7 +348,7 @@ describe("architecture topology authority", () => {
         }),
         expect.objectContaining({
           category: "pricing-authority",
-          id: expect.stringContaining("£19"),
+          id: "literal:£120",
           source: expect.stringContaining("client/src/data/guides.ts:"),
         }),
         expect.objectContaining({
@@ -359,13 +359,13 @@ describe("architecture topology authority", () => {
         expect.objectContaining({
           category: "pricing-authority",
           pricingKind: "currency-bearing-jsx-expression",
-          expression: "tier.max_value_gbp.toLocaleString()",
+          expression: "tier.maxValueGbp.toLocaleString()",
           source: expect.stringContaining("client/src/pages/admin-pricing.tsx:"),
         }),
         expect.objectContaining({
           category: "pricing-authority",
           pricingKind: "currency-bearing-jsx-expression",
-          expression: expect.stringContaining("tier.price_per_card"),
+          expression: expect.stringContaining("tier.pricePerCard"),
           source: expect.stringContaining("client/src/pages/admin-pricing.tsx:"),
         }),
         expect.objectContaining({

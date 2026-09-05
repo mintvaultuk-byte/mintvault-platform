@@ -1500,11 +1500,11 @@
       "kind": "OWNER_GATE",
       "title": "Approve pre-wave legacy AI recovery packet",
       "severity": "NONE",
-      "status": "IN_PROGRESS",
+      "status": "PROVEN",
       "agent_mode": "LEAD",
       "agent_id": "codex-lead",
       "workspace": "shared",
-      "depends_on": ["ARCH-LEGACY-AI-001"],
+      "depends_on": ["OWNER-GRADING-LEGACY"],
       "addresses": [],
       "write_scope": [
         ".claude/controlled-code-lead/tasks/repository-architecture-recovery-20260904/grading-legacy-recovery.md"
@@ -2061,7 +2061,7 @@
       "proof_required": [
         "Owner-selected separate retirement of analyze-v1-legacy and grade-with-ai; both are authenticated unconditional typed 410 tombstones mounted before every legacy route-local feature/AI-rate/upload/body/grading-domain-DB/R2/provider/grading/prediction/evidence/audit effect, while bounded global middleware, authentication, and supported grading identities remain unchanged"
       ],
-      "evidence": [],
+      "evidence": [{"ref": "grading-legacy-recovery.md: already implemented80a20611, independent Terra5/5 current unchanged source; exact hashes and synthetic-vs-full-mount limits retained, candidate/hostile gates OPEN", "sha": "aa4ec14a273da779f550fd4bb777ca1616d5e518", "observer": "Terra h1b_runner independent; root source verification"}],
       "invalidated_by": ["Legacy path", "feature flag", "provider", "grading command", "object lifecycle"],
       "vetoes_release": false
     },
@@ -2704,7 +2704,7 @@
       "kind": "PROOF",
       "title": "Independently prove legacy AI disposition and effect boundary",
       "severity": "HIGH",
-      "status": "OPEN",
+      "status": "IN_PROGRESS",
       "agent_mode": "READ_ONLY",
       "agent_id": "grading-provider-verifier",
       "workspace": "read_only",
@@ -2714,7 +2714,7 @@
       "proof_required": [
         "Feature-on and adversarial multipart requests prove both exact legacy identities are unconditional typed 410 tombstones after authentication and before every legacy route-local feature/AI-rate/upload/body/grading-domain-DB/R2/provider/grading/prediction/evidence/audit effect; bounded global middleware and supported grading identities remain reachable"
       ],
-      "evidence": [],
+      "evidence": [{"ref": "grading-legacy-recovery.md: already implemented80a20611, independent Terra5/5 current unchanged source; exact hashes and synthetic-vs-full-mount limits retained, candidate/hostile gates OPEN", "sha": "aa4ec14a273da779f550fd4bb777ca1616d5e518", "observer": "Terra h1b_runner independent; root source verification"}],
       "invalidated_by": ["Candidate SHA", "feature flag", "route", "provider", "grading", "object"],
       "vetoes_release": true
     },
