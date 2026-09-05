@@ -35,6 +35,19 @@ export const ADMIN_BROWSER_PROOF_CHECKS = Object.freeze([
   "post-logout-refusal",
 ]);
 export function validateAdminBrowserReport(report, token) {
+  return validateBrowserReport(report, token, ADMIN_BROWSER_PROOF_CHECKS, "admin");
+}
+export const PARTNER_BROWSER_PROOF_CHECKS = Object.freeze(
+  ["owner", "manager", "finance"].flatMap((role) =>
+    ["login", "identity", "dashboard", "team-permission", "logout", "post-logout-refusal"].map(
+      (check) => `${role}-${check}`
+    )
+  )
+);
+export function validatePartnerBrowserReport(report, token) {
+  return validateBrowserReport(report, token, PARTNER_BROWSER_PROOF_CHECKS, "partner");
+}
+function validateBrowserReport(report, token, expectedChecks, kind) {
   let url;
   try {
     url = new URL(report?.url);
@@ -52,14 +65,15 @@ export function validateAdminBrowserReport(report, token) {
     url.hash ||
     report?.schemaVersion !== 1 ||
     report.runId !== token ||
+    (report.kind ?? "admin") !== kind ||
     typeof report.browser !== "string" ||
     !report.browser ||
-    report.passed !== ADMIN_BROWSER_PROOF_CHECKS.length ||
+    report.passed !== expectedChecks.length ||
     report.failed !== 0 ||
     report.skipped !== 0 ||
     !Array.isArray(report.checks) ||
-    report.checks.length !== ADMIN_BROWSER_PROOF_CHECKS.length ||
-    !ADMIN_BROWSER_PROOF_CHECKS.every(
+    report.checks.length !== expectedChecks.length ||
+    !expectedChecks.every(
       (name, index) => report.checks[index]?.name === name && report.checks[index]?.status === "passed"
     )
   )
@@ -311,7 +325,7 @@ export function childStatus(result) {
 /** Await close, not only exit; uncertainty must retain the resources it uses. */
 export function stopOwnedChild(
   child,
-  { closed = false, graceMs = 2000, killMs = 2000, initialSignal = "SIGTERM" } = {}
+  { closed = false, graceMs = 2000, killMs = 2000, initialSignal = "SIGTERM", closeOwnedPipes = false } = {}
 ) {
   if (closed) return Promise.resolve(true);
   return new Promise((resolve) => {
@@ -346,6 +360,18 @@ export function stopOwnedChild(
     };
     child.once("close", onClose);
     child.once("error", onError);
+    if (closeOwnedPipes) {
+      // Chrome descendants can retain its stderr after the browser exits. Once
+      // CDP discovery is over, explicitly close our owned read ends. Node still
+      // requires actual child termination before it emits child `close`.
+      try {
+        child.stdout?.destroy();
+        child.stderr?.destroy();
+      } catch {
+        finish(false);
+        return;
+      }
+    }
     terminate(initialSignal, graceMs, () => terminate("SIGKILL", killMs, () => finish(false)));
   });
 }
@@ -408,7 +434,8 @@ export function parse(argv) {
   let context,
     prepare = false,
     r2Proof = false,
-    adminBrowserProof = false;
+    adminBrowserProof = false,
+    partnerBrowserProof = false;
   const selection = [],
     targets = [];
   for (let index = 0; index < argv.length; index += 1) {
@@ -423,6 +450,9 @@ export function parse(argv) {
     } else if (arg === "--admin-browser-proof") {
       if (adminBrowserProof) throw new Error("duplicate browser target");
       adminBrowserProof = true;
+    } else if (arg === "--partner-browser-proof") {
+      if (partnerBrowserProof) throw new Error("duplicate Partner browser target");
+      partnerBrowserProof = true;
     } else if (arg === "--r2-proof") {
       if (r2Proof) throw new Error("duplicate object-store target");
       r2Proof = true;
@@ -432,10 +462,16 @@ export function parse(argv) {
       selection.push(arg);
     } else throw new Error(`unknown argument: ${arg}`);
   }
-  if (adminBrowserProof) {
+  if (adminBrowserProof || partnerBrowserProof) {
+    if (adminBrowserProof && partnerBrowserProof) throw new Error("browser targets are exclusive");
     if (!context || r2Proof || prepare || selection.length)
       throw new Error("--admin-browser-proof requires only an explicit Docker context");
-    return { context, prepare: false, selection: [], adminBrowserProof: true };
+    return {
+      context,
+      prepare: false,
+      selection: [],
+      ...(partnerBrowserProof ? { partnerBrowserProof: true } : { adminBrowserProof: true }),
+    };
   }
   if (r2Proof) {
     if (!context || prepare || selection.length) throw new Error("--r2-proof requires only an explicit Docker context");
@@ -462,7 +498,7 @@ export function preparationExports(text, serviceEnv) {
   return result;
 }
 export async function main(argv = process.argv.slice(2), deps = {}) {
-  const { context, prepare, selection, r2Proof, adminBrowserProof } = parse(argv);
+  const { context, prepare, selection, r2Proof, adminBrowserProof, partnerBrowserProof } = parse(argv);
   const driver = deps.driver || dockerDriver(context);
   const controller = new AbortController(),
     signalSource = deps.signalSource || process;
@@ -511,8 +547,8 @@ export async function main(argv = process.argv.slice(2), deps = {}) {
     console.log(
       `[disposable-ci] owned run ${services.token}; PG16 port=${services.env.MINTVAULT_TEST_PG16_PORT}, PG17 port=${services.env.MINTVAULT_TEST_PG17_PORT}`
     );
-    if (adminBrowserProof) {
-      const reportPath = join(temp, "admin-browser-proof.json");
+    if (adminBrowserProof || partnerBrowserProof) {
+      const reportPath = join(temp, partnerBrowserProof ? "partner-browser-proof.json" : "admin-browser-proof.json");
       let timedOut = false;
       const timeout = setTimeout(() => {
         timedOut = true;
@@ -522,12 +558,24 @@ export async function main(argv = process.argv.slice(2), deps = {}) {
       let outcome;
       try {
         outcome = await runChild(
-          ["--import", "tsx", "scripts/command-centre-runtime-harness.ts", "--browser-proof", reportPath],
+          [
+            "--import",
+            "tsx",
+            "scripts/command-centre-runtime-harness.ts",
+            partnerBrowserProof ? "--partner-browser-proof" : "--browser-proof",
+            reportPath,
+          ],
           controlledEnvironment(process.env, {
             MINTVAULT_COMMAND_CENTRE_RUNTIME_AUDIT: "1",
             MINTVAULT_COMMAND_CENTRE_RUNTIME_ADMIN_URL: `postgresql://postgres:postgres@127.0.0.1:${services.env.MINTVAULT_TEST_PG17_PORT}/postgres`,
-            MINTVAULT_COMMAND_CENTRE_RUNTIME_ADMIN_PASSWORD: randomBytes(24).toString("hex"),
-            MINTVAULT_COMMAND_CENTRE_RUNTIME_ADMIN_PIN: String(10000000 + (randomBytes(4).readUInt32BE() % 90000000)),
+            ...(partnerBrowserProof
+              ? { MINTVAULT_PARTNER_BROWSER_PASSWORD: randomBytes(24).toString("hex") }
+              : {
+                  MINTVAULT_COMMAND_CENTRE_RUNTIME_ADMIN_PASSWORD: randomBytes(24).toString("hex"),
+                  MINTVAULT_COMMAND_CENTRE_RUNTIME_ADMIN_PIN: String(
+                    10000000 + (randomBytes(4).readUInt32BE() % 90000000)
+                  ),
+                }),
             MINTVAULT_BROWSER_PROOF_RUN_ID: services.token,
           }),
           deps.spawnProcess,
@@ -543,7 +591,10 @@ export async function main(argv = process.argv.slice(2), deps = {}) {
         throw failure;
       }
       if (signalCode || timedOut || childStatus(outcome)) return signalCode || 1;
-      const report = validateAdminBrowserReport(JSON.parse(readFileSync(reportPath, "utf8")), services.token);
+      const report = (partnerBrowserProof ? validatePartnerBrowserReport : validateAdminBrowserReport)(
+        JSON.parse(readFileSync(reportPath, "utf8")),
+        services.token
+      );
       console.log(`[disposable-ci] ${JSON.stringify(report)}`);
       return 0;
     }

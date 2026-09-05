@@ -8,16 +8,16 @@
     "migration": 169,
     "migration-lineage": 6,
     "object-writer": 89,
-    "pricing-authority": 1769,
+    "pricing-authority": 1774,
     "provider-adapter": 135,
-    "role-authority": 724,
+    "role-authority": 733,
     "route-middleware": 61,
     "route-mount": 69,
     "schema-object": 3,
     "server-route": 987,
     "session-principal": 585,
     "table": 360,
-    "table-access": 3184,
+    "table-access": 3209,
     "timer": 97
   },
   "records": [
@@ -14455,6 +14455,46 @@
       "category": "pricing-authority",
       "id": "literal:$1",
       "pricingKind": "currency-bearing-literal",
+      "key": "pricing-authority|scripts/ci/partner-browser-fixture.ts|literal:$1#0",
+      "source": "scripts/ci/partner-browser-fixture.ts:96",
+      "owner": "engineering-test-platform"
+    },
+    {
+      "category": "pricing-authority",
+      "id": "literal:$1",
+      "pricingKind": "currency-bearing-literal",
+      "key": "pricing-authority|scripts/ci/partner-browser-fixture.ts|literal:$1#1",
+      "source": "scripts/ci/partner-browser-fixture.ts:100",
+      "owner": "engineering-test-platform"
+    },
+    {
+      "category": "pricing-authority",
+      "id": "literal:$1",
+      "pricingKind": "currency-bearing-literal",
+      "key": "pricing-authority|scripts/ci/partner-browser-fixture.ts|literal:$1#2",
+      "source": "scripts/ci/partner-browser-fixture.ts:105",
+      "owner": "engineering-test-platform"
+    },
+    {
+      "category": "pricing-authority",
+      "id": "literal:$1",
+      "pricingKind": "currency-bearing-literal",
+      "key": "pricing-authority|scripts/ci/partner-browser-fixture.ts|literal:$1#3",
+      "source": "scripts/ci/partner-browser-fixture.ts:109",
+      "owner": "engineering-test-platform"
+    },
+    {
+      "category": "pricing-authority",
+      "id": "literal:$1",
+      "pricingKind": "currency-bearing-literal",
+      "key": "pricing-authority|scripts/ci/partner-browser-fixture.ts|literal:$1#4",
+      "source": "scripts/ci/partner-browser-fixture.ts:113",
+      "owner": "engineering-test-platform"
+    },
+    {
+      "category": "pricing-authority",
+      "id": "literal:$1",
+      "pricingKind": "currency-bearing-literal",
       "key": "pricing-authority|scripts/ci/partner-suite-verdict.mjs|literal:$1#0",
       "source": "scripts/ci/partner-suite-verdict.mjs:40",
       "disposition": "known-legacy",
@@ -14466,7 +14506,7 @@
       "id": "literal:$1",
       "pricingKind": "currency-bearing-literal",
       "key": "pricing-authority|scripts/command-centre-runtime-harness.ts|literal:$1#0",
-      "source": "scripts/command-centre-runtime-harness.ts:203",
+      "source": "scripts/command-centre-runtime-harness.ts:207",
       "owner": "engineering-test-platform"
     },
     {
@@ -14474,7 +14514,7 @@
       "id": "literal:$1",
       "pricingKind": "currency-bearing-literal",
       "key": "pricing-authority|scripts/command-centre-runtime-harness.ts|literal:$1#1",
-      "source": "scripts/command-centre-runtime-harness.ts:236",
+      "source": "scripts/command-centre-runtime-harness.ts:240",
       "owner": "engineering-test-platform"
     },
     {
@@ -14482,7 +14522,7 @@
       "id": "literal:$1",
       "pricingKind": "currency-bearing-literal",
       "key": "pricing-authority|scripts/command-centre-runtime-harness.ts|literal:$1#2",
-      "source": "scripts/command-centre-runtime-harness.ts:272",
+      "source": "scripts/command-centre-runtime-harness.ts:276",
       "owner": "engineering-test-platform"
     },
     {
@@ -14490,7 +14530,7 @@
       "id": "literal:$2",
       "pricingKind": "currency-bearing-literal",
       "key": "pricing-authority|scripts/command-centre-runtime-harness.ts|literal:$2#0",
-      "source": "scripts/command-centre-runtime-harness.ts:203",
+      "source": "scripts/command-centre-runtime-harness.ts:207",
       "owner": "engineering-test-platform"
     },
     {
@@ -14498,7 +14538,7 @@
       "id": "literal:$2",
       "pricingKind": "currency-bearing-literal",
       "key": "pricing-authority|scripts/command-centre-runtime-harness.ts|literal:$2#1",
-      "source": "scripts/command-centre-runtime-harness.ts:236",
+      "source": "scripts/command-centre-runtime-harness.ts:240",
       "owner": "engineering-test-platform"
     },
     {
@@ -14506,7 +14546,7 @@
       "id": "literal:$3",
       "pricingKind": "currency-bearing-literal",
       "key": "pricing-authority|scripts/command-centre-runtime-harness.ts|literal:$3#0",
-      "source": "scripts/command-centre-runtime-harness.ts:203",
+      "source": "scripts/command-centre-runtime-harness.ts:207",
       "owner": "engineering-test-platform"
     },
     {
@@ -14514,7 +14554,7 @@
       "id": "literal:$4",
       "pricingKind": "currency-bearing-literal",
       "key": "pricing-authority|scripts/command-centre-runtime-harness.ts|literal:$4#0",
-      "source": "scripts/command-centre-runtime-harness.ts:203",
+      "source": "scripts/command-centre-runtime-harness.ts:207",
       "owner": "engineering-test-platform"
     },
     {
@@ -26219,7 +26259,7 @@
       "optionsAuthority": "<dynamic:{ signal: runtimeRequestSignal(signal) }>",
       "callsiteAuthorities": [
         {
-          "source": "scripts/command-centre-runtime-harness.ts:454",
+          "source": "scripts/command-centre-runtime-harness.ts:468",
           "urlAuthority": "http://127.0.0.1:<dynamic:port>/health",
           "httpMethod": "GET",
           "timeoutSignal": "runtimeRequestSignal(signal)",
@@ -26228,7 +26268,7 @@
         }
       ],
       "key": "provider-adapter|scripts/command-centre-runtime-harness.ts|fetch:http://127.0.0.1:#0",
-      "source": "scripts/command-centre-runtime-harness.ts:256",
+      "source": "scripts/command-centre-runtime-harness.ts:260",
       "owner": "engineering-test-platform"
     },
     {
@@ -26242,7 +26282,7 @@
       "optionsAuthority": "<dynamic:{ signal: runtimeRequestSignal(signal) }>",
       "callsiteAuthorities": [
         {
-          "source": "scripts/command-centre-runtime-harness.ts:455",
+          "source": "scripts/command-centre-runtime-harness.ts:470",
           "urlAuthority": "http://127.0.0.1:<dynamic:port>/api/admin/command/dashboard",
           "httpMethod": "GET",
           "timeoutSignal": "runtimeRequestSignal(signal)",
@@ -26251,7 +26291,7 @@
         }
       ],
       "key": "provider-adapter|scripts/command-centre-runtime-harness.ts|fetch:http://127.0.0.1:#1",
-      "source": "scripts/command-centre-runtime-harness.ts:297",
+      "source": "scripts/command-centre-runtime-harness.ts:301",
       "owner": "engineering-test-platform"
     },
     {
@@ -26265,7 +26305,7 @@
       "optionsAuthority": "<dynamic:{ signal: runtimeRequestSignal(signal), method: \"POST\", headers: { \"content-type\": \"application/json\" }, body: JSON.stringify({ password }), }>",
       "callsiteAuthorities": [
         {
-          "source": "scripts/command-centre-runtime-harness.ts:455",
+          "source": "scripts/command-centre-runtime-harness.ts:470",
           "urlAuthority": "http://127.0.0.1:<dynamic:port>/api/admin/login",
           "httpMethod": "POST",
           "timeoutSignal": "runtimeRequestSignal(signal)",
@@ -26274,7 +26314,7 @@
         }
       ],
       "key": "provider-adapter|scripts/command-centre-runtime-harness.ts|fetch:http://127.0.0.1:#2",
-      "source": "scripts/command-centre-runtime-harness.ts:304",
+      "source": "scripts/command-centre-runtime-harness.ts:308",
       "owner": "engineering-test-platform"
     },
     {
@@ -26288,7 +26328,7 @@
       "optionsAuthority": "<dynamic:{ signal: runtimeRequestSignal(signal), method: \"POST\", headers: { \"content-type\": \"application/json\", cookie: pendingCookie }, body: JSON.stringify({ pin }), }>",
       "callsiteAuthorities": [
         {
-          "source": "scripts/command-centre-runtime-harness.ts:455",
+          "source": "scripts/command-centre-runtime-harness.ts:470",
           "urlAuthority": "http://127.0.0.1:<dynamic:port>/api/admin/pin",
           "httpMethod": "POST",
           "timeoutSignal": "runtimeRequestSignal(signal)",
@@ -26297,7 +26337,7 @@
         }
       ],
       "key": "provider-adapter|scripts/command-centre-runtime-harness.ts|fetch:http://127.0.0.1:#3",
-      "source": "scripts/command-centre-runtime-harness.ts:312",
+      "source": "scripts/command-centre-runtime-harness.ts:316",
       "owner": "engineering-test-platform"
     },
     {
@@ -26311,7 +26351,7 @@
       "optionsAuthority": "<dynamic:{ signal: runtimeRequestSignal(signal), headers: { cookie: authenticatedCookie }, }>",
       "callsiteAuthorities": [
         {
-          "source": "scripts/command-centre-runtime-harness.ts:455",
+          "source": "scripts/command-centre-runtime-harness.ts:470",
           "urlAuthority": "http://127.0.0.1:<dynamic:port>/api/admin/command/dashboard",
           "httpMethod": "GET",
           "timeoutSignal": "runtimeRequestSignal(signal)",
@@ -26320,7 +26360,7 @@
         }
       ],
       "key": "provider-adapter|scripts/command-centre-runtime-harness.ts|fetch:http://127.0.0.1:#4",
-      "source": "scripts/command-centre-runtime-harness.ts:320",
+      "source": "scripts/command-centre-runtime-harness.ts:324",
       "owner": "engineering-test-platform"
     },
     {
@@ -30061,6 +30101,42 @@
     },
     {
       "category": "role-authority",
+      "id": "role:hex",
+      "roleKind": "definition-or-mapping",
+      "declaration": "runtimeRole",
+      "key": "role-authority|scripts/ci/partner-browser-fixture.ts|role:hex#0",
+      "source": "scripts/ci/partner-browser-fixture.ts:86",
+      "owner": "engineering-test-platform"
+    },
+    {
+      "category": "role-authority",
+      "id": "role:PARTNER_FINANCE_VIEWER",
+      "roleKind": "definition-or-mapping",
+      "declaration": "role",
+      "key": "role-authority|scripts/ci/partner-browser-fixture.ts|role:PARTNER_FINANCE_VIEWER#0",
+      "source": "scripts/ci/partner-browser-fixture.ts:24",
+      "owner": "engineering-test-platform"
+    },
+    {
+      "category": "role-authority",
+      "id": "role:PARTNER_MANAGER",
+      "roleKind": "definition-or-mapping",
+      "declaration": "role",
+      "key": "role-authority|scripts/ci/partner-browser-fixture.ts|role:PARTNER_MANAGER#0",
+      "source": "scripts/ci/partner-browser-fixture.ts:19",
+      "owner": "engineering-test-platform"
+    },
+    {
+      "category": "role-authority",
+      "id": "role:PARTNER_OWNER",
+      "roleKind": "definition-or-mapping",
+      "declaration": "role",
+      "key": "role-authority|scripts/ci/partner-browser-fixture.ts|role:PARTNER_OWNER#0",
+      "source": "scripts/ci/partner-browser-fixture.ts:15",
+      "owner": "engineering-test-platform"
+    },
+    {
+      "category": "role-authority",
       "id": "role:PARTNER_ADMIN_DATABASE_URL",
       "roleKind": "definition-or-mapping",
       "declaration": "MANAGED_DATABASE_ENVIRONMENT_KEYS",
@@ -30817,6 +30893,51 @@
       "disposition": "known-legacy",
       "finding": "ARCH-AUTHORITY-001",
       "legacyExpiry": "the bounded-context repair that assigns explicit authority"
+    },
+    {
+      "category": "role-authority",
+      "id": "capability:partner.dashboard.view",
+      "roleKind": "capability-consumer",
+      "declaration": "<anonymous>",
+      "key": "role-authority|scripts/command-centre-mobile-layout-check.mjs|capability:partner.dashboard.view#0",
+      "source": "scripts/command-centre-mobile-layout-check.mjs:239",
+      "owner": "engineering-test-platform"
+    },
+    {
+      "category": "role-authority",
+      "id": "capability:partner.users.view",
+      "roleKind": "capability-consumer",
+      "declaration": "<anonymous>",
+      "key": "role-authority|scripts/command-centre-mobile-layout-check.mjs|capability:partner.users.view#0",
+      "source": "scripts/command-centre-mobile-layout-check.mjs:240",
+      "owner": "engineering-test-platform"
+    },
+    {
+      "category": "role-authority",
+      "id": "role:PARTNER_FINANCE_VIEWER",
+      "roleKind": "definition-or-mapping",
+      "declaration": "roles",
+      "key": "role-authority|scripts/command-centre-mobile-layout-check.mjs|role:PARTNER_FINANCE_VIEWER#0",
+      "source": "scripts/command-centre-mobile-layout-check.mjs:190",
+      "owner": "engineering-test-platform"
+    },
+    {
+      "category": "role-authority",
+      "id": "role:PARTNER_MANAGER",
+      "roleKind": "definition-or-mapping",
+      "declaration": "roles",
+      "key": "role-authority|scripts/command-centre-mobile-layout-check.mjs|role:PARTNER_MANAGER#0",
+      "source": "scripts/command-centre-mobile-layout-check.mjs:190",
+      "owner": "engineering-test-platform"
+    },
+    {
+      "category": "role-authority",
+      "id": "role:PARTNER_OWNER",
+      "roleKind": "definition-or-mapping",
+      "declaration": "roles",
+      "key": "role-authority|scripts/command-centre-mobile-layout-check.mjs|role:PARTNER_OWNER#0",
+      "source": "scripts/command-centre-mobile-layout-check.mjs:190",
+      "owner": "engineering-test-platform"
     },
     {
       "category": "role-authority",
@@ -130589,6 +130710,231 @@
     },
     {
       "category": "table-access",
+      "id": "read:public.partner_organisations",
+      "effect": "read",
+      "access": "sql",
+      "key": "table-access|scripts/ci/partner-browser-fixture.ts|read:public.partner_organisations#0",
+      "source": "scripts/ci/partner-browser-fixture.ts:141",
+      "owner": "engineering-test-platform"
+    },
+    {
+      "category": "table-access",
+      "id": "read:public.partner_roles",
+      "effect": "read",
+      "access": "sql",
+      "key": "table-access|scripts/ci/partner-browser-fixture.ts|read:public.partner_roles#0",
+      "source": "scripts/ci/partner-browser-fixture.ts:108",
+      "owner": "engineering-test-platform"
+    },
+    {
+      "category": "table-access",
+      "id": "read:public.partner_roles",
+      "effect": "read",
+      "access": "sql",
+      "key": "table-access|scripts/ci/partner-browser-fixture.ts|read:public.partner_roles#1",
+      "source": "scripts/ci/partner-browser-fixture.ts:108",
+      "owner": "engineering-test-platform"
+    },
+    {
+      "category": "table-access",
+      "id": "read:public.partner_roles",
+      "effect": "read",
+      "access": "sql",
+      "key": "table-access|scripts/ci/partner-browser-fixture.ts|read:public.partner_roles#2",
+      "source": "scripts/ci/partner-browser-fixture.ts:108",
+      "owner": "engineering-test-platform"
+    },
+    {
+      "category": "table-access",
+      "id": "read:public.pg_roles",
+      "effect": "read",
+      "access": "sql",
+      "key": "table-access|scripts/ci/partner-browser-fixture.ts|read:public.pg_roles#0",
+      "source": "scripts/ci/partner-browser-fixture.ts:136",
+      "owner": "engineering-test-platform"
+    },
+    {
+      "category": "table-access",
+      "id": "read:public.pg_tables",
+      "effect": "read",
+      "access": "sql",
+      "key": "table-access|scripts/ci/partner-browser-fixture.ts|read:public.pg_tables#0",
+      "source": "scripts/ci/partner-browser-fixture.ts:54",
+      "owner": "engineering-test-platform"
+    },
+    {
+      "category": "table-access",
+      "id": "unclassified:\"BEGIN\"",
+      "effect": "unclassified",
+      "access": "sql-unclassified",
+      "key": "table-access|scripts/ci/partner-browser-fixture.ts|unclassified:\"BEGIN\"#0",
+      "source": "scripts/ci/partner-browser-fixture.ts:94",
+      "owner": "engineering-test-platform"
+    },
+    {
+      "category": "table-access",
+      "id": "unclassified:\"COMMIT\"",
+      "effect": "unclassified",
+      "access": "sql-unclassified",
+      "key": "table-access|scripts/ci/partner-browser-fixture.ts|unclassified:\"COMMIT\"#0",
+      "source": "scripts/ci/partner-browser-fixture.ts:125",
+      "owner": "engineering-test-platform"
+    },
+    {
+      "category": "table-access",
+      "id": "unclassified:\"ROLLBACK\"",
+      "effect": "unclassified",
+      "access": "sql-unclassified",
+      "key": "table-access|scripts/ci/partner-browser-fixture.ts|unclassified:\"ROLLBACK\"#0",
+      "source": "scripts/ci/partner-browser-fixture.ts:152",
+      "owner": "engineering-test-platform"
+    },
+    {
+      "category": "table-access",
+      "id": "unclassified:` CREATE TABLE users (id varchar PRIMARY KEY, email varchar UNIQUE, role varchar(20) NOT NULL DEFAULT 'customer'); CREATE TABLE submissions (id serial PRIMARY KEY, user_id varch...",
+      "effect": "unclassified",
+      "access": "sql-unclassified",
+      "key": "table-access|scripts/ci/partner-browser-fixture.ts|unclassified:` CREATE TABLE users (id varchar PRIMARY KEY, email varchar UNIQUE, role varchar(20) NOT NULL DEFAULT 'customer'); CREATE TABLE submissions (id serial PRIMARY KEY, user_id varch...#0",
+      "source": "scripts/ci/partner-browser-fixture.ts:59",
+      "owner": "engineering-test-platform"
+    },
+    {
+      "category": "table-access",
+      "id": "unclassified:`CREATE ROLE ${runtimeRole} LOGIN PASSWORD '${runtimePassword}' NOSUPERUSER NOCREATEDB NOCREATEROLE NOBYPASSRLS`",
+      "effect": "unclassified",
+      "access": "sql-unclassified",
+      "key": "table-access|scripts/ci/partner-browser-fixture.ts|unclassified:`CREATE ROLE ${runtimeRole} LOGIN PASSWORD '${runtimePassword}' NOSUPERUSER NOCREATEDB NOCREATEROLE NOBYPASSRLS`#0",
+      "source": "scripts/ci/partner-browser-fixture.ts:89",
+      "owner": "engineering-test-platform"
+    },
+    {
+      "category": "table-access",
+      "id": "unclassified:`GRANT partner_runtime TO ${runtimeRole}`",
+      "effect": "unclassified",
+      "access": "sql-unclassified",
+      "key": "table-access|scripts/ci/partner-browser-fixture.ts|unclassified:`GRANT partner_runtime TO ${runtimeRole}`#0",
+      "source": "scripts/ci/partner-browser-fixture.ts:92",
+      "owner": "engineering-test-platform"
+    },
+    {
+      "category": "table-access",
+      "id": "write:public.partner_feature_flags",
+      "effect": "write",
+      "access": "sql",
+      "key": "table-access|scripts/ci/partner-browser-fixture.ts|write:public.partner_feature_flags#0",
+      "source": "scripts/ci/partner-browser-fixture.ts:120",
+      "owner": "engineering-test-platform"
+    },
+    {
+      "category": "table-access",
+      "id": "write:public.partner_feature_flags",
+      "effect": "write",
+      "access": "sql",
+      "key": "table-access|scripts/ci/partner-browser-fixture.ts|write:public.partner_feature_flags#1",
+      "source": "scripts/ci/partner-browser-fixture.ts:120",
+      "owner": "engineering-test-platform"
+    },
+    {
+      "category": "table-access",
+      "id": "write:public.partner_locations",
+      "effect": "write",
+      "access": "sql",
+      "key": "table-access|scripts/ci/partner-browser-fixture.ts|write:public.partner_locations#0",
+      "source": "scripts/ci/partner-browser-fixture.ts:99",
+      "owner": "engineering-test-platform"
+    },
+    {
+      "category": "table-access",
+      "id": "write:public.partner_organisations",
+      "effect": "write",
+      "access": "sql",
+      "key": "table-access|scripts/ci/partner-browser-fixture.ts|write:public.partner_organisations#0",
+      "source": "scripts/ci/partner-browser-fixture.ts:95",
+      "owner": "engineering-test-platform"
+    },
+    {
+      "category": "table-access",
+      "id": "write:public.partner_user_locations",
+      "effect": "write",
+      "access": "sql",
+      "key": "table-access|scripts/ci/partner-browser-fixture.ts|write:public.partner_user_locations#0",
+      "source": "scripts/ci/partner-browser-fixture.ts:113",
+      "owner": "engineering-test-platform"
+    },
+    {
+      "category": "table-access",
+      "id": "write:public.partner_user_locations",
+      "effect": "write",
+      "access": "sql",
+      "key": "table-access|scripts/ci/partner-browser-fixture.ts|write:public.partner_user_locations#1",
+      "source": "scripts/ci/partner-browser-fixture.ts:113",
+      "owner": "engineering-test-platform"
+    },
+    {
+      "category": "table-access",
+      "id": "write:public.partner_user_locations",
+      "effect": "write",
+      "access": "sql",
+      "key": "table-access|scripts/ci/partner-browser-fixture.ts|write:public.partner_user_locations#2",
+      "source": "scripts/ci/partner-browser-fixture.ts:113",
+      "owner": "engineering-test-platform"
+    },
+    {
+      "category": "table-access",
+      "id": "write:public.partner_user_roles",
+      "effect": "write",
+      "access": "sql",
+      "key": "table-access|scripts/ci/partner-browser-fixture.ts|write:public.partner_user_roles#0",
+      "source": "scripts/ci/partner-browser-fixture.ts:108",
+      "owner": "engineering-test-platform"
+    },
+    {
+      "category": "table-access",
+      "id": "write:public.partner_user_roles",
+      "effect": "write",
+      "access": "sql",
+      "key": "table-access|scripts/ci/partner-browser-fixture.ts|write:public.partner_user_roles#1",
+      "source": "scripts/ci/partner-browser-fixture.ts:108",
+      "owner": "engineering-test-platform"
+    },
+    {
+      "category": "table-access",
+      "id": "write:public.partner_user_roles",
+      "effect": "write",
+      "access": "sql",
+      "key": "table-access|scripts/ci/partner-browser-fixture.ts|write:public.partner_user_roles#2",
+      "source": "scripts/ci/partner-browser-fixture.ts:108",
+      "owner": "engineering-test-platform"
+    },
+    {
+      "category": "table-access",
+      "id": "write:public.partner_users",
+      "effect": "write",
+      "access": "sql",
+      "key": "table-access|scripts/ci/partner-browser-fixture.ts|write:public.partner_users#0",
+      "source": "scripts/ci/partner-browser-fixture.ts:104",
+      "owner": "engineering-test-platform"
+    },
+    {
+      "category": "table-access",
+      "id": "write:public.partner_users",
+      "effect": "write",
+      "access": "sql",
+      "key": "table-access|scripts/ci/partner-browser-fixture.ts|write:public.partner_users#1",
+      "source": "scripts/ci/partner-browser-fixture.ts:104",
+      "owner": "engineering-test-platform"
+    },
+    {
+      "category": "table-access",
+      "id": "write:public.partner_users",
+      "effect": "write",
+      "access": "sql",
+      "key": "table-access|scripts/ci/partner-browser-fixture.ts|write:public.partner_users#2",
+      "source": "scripts/ci/partner-browser-fixture.ts:104",
+      "owner": "engineering-test-platform"
+    },
+    {
+      "category": "table-access",
       "id": "read:public.certificates",
       "effect": "read",
       "access": "sql",
@@ -130637,7 +130983,7 @@
       "effect": "read",
       "access": "sql",
       "key": "table-access|scripts/command-centre-runtime-harness.ts|read:public.pg_stat_activity#0",
-      "source": "scripts/command-centre-runtime-harness.ts:271",
+      "source": "scripts/command-centre-runtime-harness.ts:275",
       "owner": "engineering-test-platform"
     },
     {
@@ -130646,7 +130992,7 @@
       "effect": "unclassified",
       "access": "sql-unclassified",
       "key": "table-access|scripts/command-centre-runtime-harness.ts|unclassified:` /* The fixture owns only the relations read by the rendered Command Centre and real admin login. It deliberately does not run Drizzle: the local PostgreSQL estate lacks pgvect...#0",
-      "source": "scripts/command-centre-runtime-harness.ts:134",
+      "source": "scripts/command-centre-runtime-harness.ts:138",
       "owner": "engineering-test-platform"
     },
     {
@@ -130655,7 +131001,7 @@
       "effect": "unclassified",
       "access": "sql-unclassified",
       "key": "table-access|scripts/command-centre-runtime-harness.ts|unclassified:`CREATE DATABASE ${quoteIdentifier(database)}`#0",
-      "source": "scripts/command-centre-runtime-harness.ts:404",
+      "source": "scripts/command-centre-runtime-harness.ts:415",
       "owner": "engineering-test-platform"
     },
     {
@@ -130664,7 +131010,7 @@
       "effect": "unclassified",
       "access": "sql-unclassified",
       "key": "table-access|scripts/command-centre-runtime-harness.ts|unclassified:`DROP DATABASE IF EXISTS ${quoteIdentifier(database)}`#0",
-      "source": "scripts/command-centre-runtime-harness.ts:275",
+      "source": "scripts/command-centre-runtime-harness.ts:279",
       "owner": "engineering-test-platform"
     },
     {
@@ -130673,7 +131019,7 @@
       "effect": "write",
       "access": "sql",
       "key": "table-access|scripts/command-centre-runtime-harness.ts|write:public.cert_counter#0",
-      "source": "scripts/command-centre-runtime-harness.ts:207",
+      "source": "scripts/command-centre-runtime-harness.ts:211",
       "owner": "engineering-test-platform"
     },
     {
@@ -130682,7 +131028,7 @@
       "effect": "write",
       "access": "sql",
       "key": "table-access|scripts/command-centre-runtime-harness.ts|write:public.certificates#0",
-      "source": "scripts/command-centre-runtime-harness.ts:214",
+      "source": "scripts/command-centre-runtime-harness.ts:218",
       "owner": "engineering-test-platform"
     },
     {
@@ -130691,7 +131037,7 @@
       "effect": "write",
       "access": "sql",
       "key": "table-access|scripts/command-centre-runtime-harness.ts|write:public.command_centre_runtime_audit_marker#0",
-      "source": "scripts/command-centre-runtime-harness.ts:226",
+      "source": "scripts/command-centre-runtime-harness.ts:230",
       "owner": "engineering-test-platform"
     },
     {
@@ -130700,7 +131046,7 @@
       "effect": "write",
       "access": "sql",
       "key": "table-access|scripts/command-centre-runtime-harness.ts|write:public.partner_connector_records#0",
-      "source": "scripts/command-centre-runtime-harness.ts:226",
+      "source": "scripts/command-centre-runtime-harness.ts:230",
       "owner": "engineering-test-platform"
     },
     {
@@ -130709,7 +131055,7 @@
       "effect": "write",
       "access": "sql",
       "key": "table-access|scripts/command-centre-runtime-harness.ts|write:public.partner_feature_flags#0",
-      "source": "scripts/command-centre-runtime-harness.ts:235",
+      "source": "scripts/command-centre-runtime-harness.ts:239",
       "owner": "engineering-test-platform"
     },
     {
@@ -130718,7 +131064,7 @@
       "effect": "write",
       "access": "sql",
       "key": "table-access|scripts/command-centre-runtime-harness.ts|write:public.partner_organisations#0",
-      "source": "scripts/command-centre-runtime-harness.ts:226",
+      "source": "scripts/command-centre-runtime-harness.ts:230",
       "owner": "engineering-test-platform"
     },
     {
@@ -130727,7 +131073,7 @@
       "effect": "write",
       "access": "sql",
       "key": "table-access|scripts/command-centre-runtime-harness.ts|write:public.partner_security_events#0",
-      "source": "scripts/command-centre-runtime-harness.ts:226",
+      "source": "scripts/command-centre-runtime-harness.ts:230",
       "owner": "engineering-test-platform"
     },
     {
@@ -130736,7 +131082,7 @@
       "effect": "write",
       "access": "sql",
       "key": "table-access|scripts/command-centre-runtime-harness.ts|write:public.partner_stations#0",
-      "source": "scripts/command-centre-runtime-harness.ts:226",
+      "source": "scripts/command-centre-runtime-harness.ts:230",
       "owner": "engineering-test-platform"
     },
     {
@@ -130745,7 +131091,7 @@
       "effect": "write",
       "access": "sql",
       "key": "table-access|scripts/command-centre-runtime-harness.ts|write:public.partner_submissions#0",
-      "source": "scripts/command-centre-runtime-harness.ts:226",
+      "source": "scripts/command-centre-runtime-harness.ts:230",
       "owner": "engineering-test-platform"
     },
     {
@@ -130754,7 +131100,7 @@
       "effect": "write",
       "access": "sql",
       "key": "table-access|scripts/command-centre-runtime-harness.ts|write:public.partner_users#0",
-      "source": "scripts/command-centre-runtime-harness.ts:226",
+      "source": "scripts/command-centre-runtime-harness.ts:230",
       "owner": "engineering-test-platform"
     },
     {
@@ -130763,7 +131109,7 @@
       "effect": "write",
       "access": "sql",
       "key": "table-access|scripts/command-centre-runtime-harness.ts|write:public.print_batches#0",
-      "source": "scripts/command-centre-runtime-harness.ts:219",
+      "source": "scripts/command-centre-runtime-harness.ts:223",
       "owner": "engineering-test-platform"
     },
     {
@@ -130772,7 +131118,7 @@
       "effect": "write",
       "access": "sql",
       "key": "table-access|scripts/command-centre-runtime-harness.ts|write:public.submissions#0",
-      "source": "scripts/command-centre-runtime-harness.ts:208",
+      "source": "scripts/command-centre-runtime-harness.ts:212",
       "owner": "engineering-test-platform"
     },
     {
@@ -130781,7 +131127,7 @@
       "effect": "write",
       "access": "sql",
       "key": "table-access|scripts/command-centre-runtime-harness.ts|write:public.transfer_verifications#0",
-      "source": "scripts/command-centre-runtime-harness.ts:222",
+      "source": "scripts/command-centre-runtime-harness.ts:226",
       "owner": "engineering-test-platform"
     },
     {
@@ -130790,7 +131136,7 @@
       "effect": "write",
       "access": "sql",
       "key": "table-access|scripts/command-centre-runtime-harness.ts|write:public.users#0",
-      "source": "scripts/command-centre-runtime-harness.ts:202",
+      "source": "scripts/command-centre-runtime-harness.ts:206",
       "owner": "engineering-test-platform"
     },
     {
@@ -161154,7 +161500,7 @@
       "delay": "graceMs",
       "lifecycle": "untracked",
       "key": "timer|scripts/ci/run-disposable-integration.mjs|setTimeout:() => { if (settled || !kill(\"SIGKILL\") || settled) return; timer = setTimeout(() => terminationUnknown(new Error(\"child did not close after SIGKILL\")), 5000); timer.unref(); }#0",
-      "source": "scripts/ci/run-disposable-integration.mjs:382",
+      "source": "scripts/ci/run-disposable-integration.mjs:408",
       "owner": "engineering-test-platform"
     },
     {
@@ -161164,7 +161510,7 @@
       "delay": "60_000",
       "lifecycle": "untracked",
       "key": "timer|scripts/ci/run-disposable-integration.mjs|setTimeout:() => { timedOut = true; controller.abort(); }#0",
-      "source": "scripts/ci/run-disposable-integration.mjs:489",
+      "source": "scripts/ci/run-disposable-integration.mjs:525",
       "owner": "engineering-test-platform"
     },
     {
@@ -161174,7 +161520,7 @@
       "delay": "180_000",
       "lifecycle": "untracked",
       "key": "timer|scripts/ci/run-disposable-integration.mjs|setTimeout:() => { timedOut = true; controller.abort(); }#1",
-      "source": "scripts/ci/run-disposable-integration.mjs:517",
+      "source": "scripts/ci/run-disposable-integration.mjs:553",
       "owner": "engineering-test-platform"
     },
     {
@@ -161184,7 +161530,7 @@
       "delay": "wait",
       "lifecycle": "untracked",
       "key": "timer|scripts/ci/run-disposable-integration.mjs|setTimeout:() => finish(false)#0",
-      "source": "scripts/ci/run-disposable-integration.mjs:339",
+      "source": "scripts/ci/run-disposable-integration.mjs:353",
       "owner": "engineering-test-platform"
     },
     {
@@ -161194,7 +161540,7 @@
       "delay": "20_000",
       "lifecycle": "untracked",
       "key": "timer|scripts/ci/run-disposable-integration.mjs|setTimeout:() => startup.abort(new Error(\"owned MinIO startup timed out\"))#0",
-      "source": "scripts/ci/run-disposable-integration.mjs:147",
+      "source": "scripts/ci/run-disposable-integration.mjs:161",
       "owner": "engineering-test-platform"
     },
     {
@@ -161204,7 +161550,7 @@
       "delay": "5000",
       "lifecycle": "untracked",
       "key": "timer|scripts/ci/run-disposable-integration.mjs|setTimeout:() => terminationUnknown(new Error(\"child did not close after SIGKILL\"))#0",
-      "source": "scripts/ci/run-disposable-integration.mjs:384",
+      "source": "scripts/ci/run-disposable-integration.mjs:410",
       "owner": "engineering-test-platform"
     },
     {
@@ -161214,7 +161560,7 @@
       "delay": "wait",
       "lifecycle": "untracked",
       "key": "timer|scripts/ci/run-disposable-integration.mjs|setTimeout:next#0",
-      "source": "scripts/ci/run-disposable-integration.mjs:345",
+      "source": "scripts/ci/run-disposable-integration.mjs:359",
       "owner": "engineering-test-platform"
     },
     {
@@ -161224,7 +161570,7 @@
       "delay": "15_000",
       "lifecycle": "untracked",
       "key": "timer|scripts/command-centre-mobile-layout-check.mjs|setTimeout:() => { pending.delete(id); reject(new Error(`CDP ${method} timed out`)); }#0",
-      "source": "scripts/command-centre-mobile-layout-check.mjs:273",
+      "source": "scripts/command-centre-mobile-layout-check.mjs:400",
       "owner": "engineering-test-platform"
     },
     {
@@ -161234,7 +161580,7 @@
       "delay": "10_000",
       "lifecycle": "untracked",
       "key": "timer|scripts/command-centre-mobile-layout-check.mjs|setTimeout:() => { socket.terminate(); reject(new Error(\"CDP connection timed out\")); }#0",
-      "source": "scripts/command-centre-mobile-layout-check.mjs:245",
+      "source": "scripts/command-centre-mobile-layout-check.mjs:372",
       "owner": "engineering-test-platform"
     },
     {
@@ -161244,7 +161590,7 @@
       "delay": "10_000",
       "lifecycle": "untracked",
       "key": "timer|scripts/command-centre-mobile-layout-check.mjs|setTimeout:() => reject(new Error(`Chrome did not expose CDP for ${label}`))#0",
-      "source": "scripts/command-centre-mobile-layout-check.mjs:222",
+      "source": "scripts/command-centre-mobile-layout-check.mjs:349",
       "owner": "engineering-test-platform"
     },
     {
@@ -161254,7 +161600,7 @@
       "delay": "100",
       "lifecycle": "untracked",
       "key": "timer|scripts/command-centre-mobile-layout-check.mjs|setTimeout:resolve#0",
-      "source": "scripts/command-centre-mobile-layout-check.mjs:85",
+      "source": "scripts/command-centre-mobile-layout-check.mjs:88",
       "owner": "engineering-test-platform"
     },
     {
@@ -161264,7 +161610,7 @@
       "delay": "20",
       "lifecycle": "untracked",
       "key": "timer|scripts/command-centre-mobile-layout-check.mjs|setTimeout:resolve#1",
-      "source": "scripts/command-centre-mobile-layout-check.mjs:314",
+      "source": "scripts/command-centre-mobile-layout-check.mjs:441",
       "owner": "engineering-test-platform"
     },
     {
@@ -161274,7 +161620,7 @@
       "delay": "250",
       "lifecycle": "untracked",
       "key": "timer|scripts/command-centre-runtime-harness.ts|setTimeout:resolve#0",
-      "source": "scripts/command-centre-runtime-harness.ts:261",
+      "source": "scripts/command-centre-runtime-harness.ts:265",
       "owner": "engineering-test-platform"
     },
     {

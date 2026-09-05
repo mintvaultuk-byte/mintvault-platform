@@ -79,6 +79,7 @@
     { "prefix": "scripts/command-centre-runtime-harness.ts", "owner": "engineering-test-platform" },
     { "prefix": "scripts/ci/run-disposable-integration.mjs", "owner": "engineering-test-platform" },
     { "prefix": "scripts/ci/run-r2-object-store-proof.mjs", "owner": "engineering-test-platform" },
+    { "prefix": "scripts/ci/partner-browser-fixture.ts", "owner": "engineering-test-platform" },
     { "prefix": "server/partner/", "owner": "partner-platform" },
     { "prefix": "client/src/components/partner/", "owner": "partner-platform" },
     { "prefix": "client/src/pages/partner/", "owner": "partner-platform" },

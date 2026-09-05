@@ -153,6 +153,8 @@ export function validateCiTopology({
   const steps = check.steps;
   const browserCommand =
     "node scripts/ci/run-disposable-integration.mjs --docker-context default --admin-browser-proof";
+  const partnerBrowserCommand =
+    "node scripts/ci/run-disposable-integration.mjs --docker-context default --partner-browser-proof";
   const requiredCommands = [
     "npm run architecture:check",
     "npm run check:tests",
@@ -165,6 +167,7 @@ export function validateCiTopology({
     "npm run test:scanner:critical",
     "node scripts/ci/run-disposable-integration.mjs --docker-context default --r2-proof",
     browserCommand,
+    partnerBrowserCommand,
   ];
   for (const command of requiredCommands) {
     if (!steps.some((step) => executes(step, command))) errors.push(`workflow does not execute ${command}`);
@@ -184,9 +187,14 @@ export function validateCiTopology({
   const browser = steps.findIndex((step) => executes(step, browserCommand));
   if (!(browser > build && browser < node22))
     errors.push("Admin browser proof must run after Build and before Node 22");
+  const partnerBrowser = steps.findIndex((step) => executes(step, partnerBrowserCommand));
+  if (!(partnerBrowser > build && partnerBrowser < node22))
+    errors.push("Partner browser proof must run after Build and before Node 22");
   if (node20 < 0) errors.push("workflow lacks enabled exact root Node 20.20.2 setup");
   const rootCommandIndexes = requiredCommands
-    .filter((item) => item !== "npm run test:scanner:critical" && item !== browserCommand)
+    .filter(
+      (item) => item !== "npm run test:scanner:critical" && item !== browserCommand && item !== partnerBrowserCommand
+    )
     .map((command) => ({ command, index: steps.findIndex((step) => executes(step, command)) }));
   if (!(
     node20 >= 0 &&

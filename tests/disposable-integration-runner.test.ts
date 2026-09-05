@@ -16,6 +16,8 @@ import {
   R2_PROOF_CHECKS,
   ADMIN_BROWSER_PROOF_CHECKS,
   validateAdminBrowserReport,
+  PARTNER_BROWSER_PROOF_CHECKS,
+  validatePartnerBrowserReport,
   stopOwnedChild,
 } from "../scripts/ci/run-disposable-integration.mjs";
 import { objectProofEnvironment } from "../scripts/ci/run-r2-object-store-proof.mjs";
@@ -56,6 +58,20 @@ function fakeDriver({ failSecondStart = false, unowned = false } = {}) {
 }
 
 describe("disposable integration runner", () => {
+  it("closing owned pipes does not stand in for actual child termination", async () => {
+    const child = new EventEmitter() as EventEmitter & { kill: () => boolean; stderr: { destroy: () => void } };
+    const destroy = vi.fn();
+    child.stderr = { destroy };
+    child.kill = () => true;
+    expect(await stopOwnedChild(child, { closeOwnedPipes: true, graceMs: 1, killMs: 1 })).toBe(false);
+    expect(destroy).toHaveBeenCalledOnce();
+  });
+  it("installs the close observer before closing the owned browser pipe", async () => {
+    const child = new EventEmitter() as EventEmitter & { kill: () => boolean; stderr: { destroy: () => void } };
+    child.stderr = { destroy: () => child.emit("close", 0) };
+    child.kill = () => false;
+    expect(await stopOwnedChild(child, { closeOwnedPipes: true, graceMs: 1, killMs: 1 })).toBe(true);
+  });
   it("awaits delayed close when kill returns false after process exit", async () => {
     const child = new EventEmitter() as EventEmitter & { kill: (signal: string) => boolean };
     child.kill = () => {
@@ -128,6 +144,78 @@ describe("disposable integration runner", () => {
     ])
       expect(() => validateAdminBrowserReport({ ...report, ...delta }, "owned-run")).toThrow();
   });
+  it("requires an exclusive Partner browser target and its complete distinct report", () => {
+    expect(parse(["--docker-context", "owned", "--partner-browser-proof"])).toEqual({
+      context: "owned",
+      prepare: false,
+      selection: [],
+      partnerBrowserProof: true,
+    });
+    for (const args of [
+      ["--r2-proof"],
+      ["--prepare"],
+      ["--all"],
+      ["tests/a.test.ts"],
+      ["--partner-browser-proof"],
+      ["--admin-browser-proof"],
+    ])
+      expect(() => parse(["--docker-context", "owned", "--partner-browser-proof", ...args])).toThrow();
+    const report = {
+      schemaVersion: 1,
+      kind: "partner",
+      runId: "owned-run",
+      url: "http://127.0.0.1:41003/",
+      browser: "Chrome/test",
+      passed: 18,
+      failed: 0,
+      skipped: 0,
+      checks: PARTNER_BROWSER_PROOF_CHECKS.map((name: string) => ({ name, status: "passed" })),
+    };
+    expect(validatePartnerBrowserReport(report, "owned-run")).toBe(report);
+    expect(() => validateAdminBrowserReport(report, "owned-run")).toThrow();
+    for (const delta of [
+      { kind: "admin" },
+      { kind: undefined },
+      { runId: "stale" },
+      { passed: 17 },
+      { skipped: 1 },
+      { failed: 1 },
+      { checks: report.checks.slice(1) },
+      { checks: [...report.checks].reverse() },
+      { checks: report.checks.map((check) => ({ ...check, status: "skipped" })) },
+    ])
+      expect(() => validatePartnerBrowserReport({ ...report, ...delta }, "owned-run")).toThrow();
+  });
+  it.each([0, 1, 75])(
+    "Partner browser child status %i requires its own proof and retains unknown termination",
+    async (code) => {
+      const driver = fakeDriver();
+      const fakeSpawn = (_command: string, args: string[], options: { env: Record<string, string> }) => {
+        expect(args.slice(0, 4)).toEqual([
+          "--import",
+          "tsx",
+          "scripts/command-centre-runtime-harness.ts",
+          "--partner-browser-proof",
+        ]);
+        expect(options.env.MINTVAULT_PARTNER_BROWSER_PASSWORD).toMatch(/^[a-f0-9]{48}$/);
+        for (const key of [
+          "MINTVAULT_COMMAND_CENTRE_RUNTIME_ADMIN_PASSWORD",
+          "MINTVAULT_COMMAND_CENTRE_RUNTIME_ADMIN_PIN",
+          "PARTNER_DATABASE_URL",
+          "STRIPE_SECRET_KEY",
+        ])
+          expect(options.env).not.toHaveProperty(key);
+        const child = new EventEmitter();
+        queueMicrotask(() => child.emit("close", code));
+        return child;
+      };
+      const run = main(["--docker-context", "owned", "--partner-browser-proof"], { driver, spawnProcess: fakeSpawn });
+      if (code === 0) await expect(run).rejects.toThrow("ENOENT");
+      else if (code === 75) await expect(run).rejects.toThrow("retain owned services");
+      else expect(await run).toBe(1);
+      expect(driver.removed).toHaveLength(code === 75 ? 0 : 2);
+    }
+  );
   it.each([0, 1, 75])(
     "Admin browser child status %i is not accepted without proof and unknown closure retains services",
     async (code) => {

@@ -4,9 +4,14 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { pathToFileURL } from "node:url";
 import WebSocket from "ws";
-import { ADMIN_BROWSER_PROOF_CHECKS, stopOwnedChild } from "./ci/run-disposable-integration.mjs";
+import {
+  ADMIN_BROWSER_PROOF_CHECKS,
+  PARTNER_BROWSER_PROOF_CHECKS,
+  stopOwnedChild,
+} from "./ci/run-disposable-integration.mjs";
 
-const runtimeProof = process.argv[2] === "--runtime-proof";
+const partnerProof = process.argv[2] === "--partner-runtime-proof";
+const runtimeProof = partnerProof || process.argv[2] === "--runtime-proof";
 let runtimeUrl, reportPath;
 if (runtimeProof) {
   runtimeUrl = new URL(process.argv[3]);
@@ -70,9 +75,7 @@ const onSignal = () => cancellation.abort(new Error("Browser proof cancelled"));
 process.on("SIGINT", onSignal);
 process.on("SIGTERM", onSignal);
 
-async function proveRuntime(send, sessionId) {
-  const checks = [];
-  const passed = (name) => checks.push({ name, status: "passed" });
+function runtimeBrowserClient(send, sessionId) {
   const evaluate = async (expression) => {
     const result = await send("Runtime.evaluate", { expression, returnByValue: true, awaitPromise: true }, sessionId);
     if (result.exceptionDetails) throw new Error("Browser evaluation failed (values intentionally not logged)");
@@ -100,6 +103,13 @@ async function proveRuntime(send, sessionId) {
     );
     await evaluate(`document.querySelector('[data-testid="${testId}"]').click()`);
   };
+  return { evaluate, until, fill, click };
+}
+
+async function proveRuntime(send, sessionId) {
+  const checks = [];
+  const passed = (name) => checks.push({ name, status: "passed" });
+  const { evaluate, until, fill, click } = runtimeBrowserClient(send, sessionId);
   await send("Page.navigate", { url: `${runtimeUrl}admin/login?next=%2Fadmin%2Fcommand` }, sessionId);
   await until("!!document.querySelector('[data-testid=\"input-admin-password\"]')", "rendered login");
   passed("rendered-login");
@@ -162,6 +172,123 @@ async function proveRuntime(send, sessionId) {
   const version = await send("Browser.getVersion");
   return {
     schemaVersion: 1,
+    runId: process.env.MINTVAULT_BROWSER_PROOF_RUN_ID,
+    url: runtimeUrl.href,
+    browser: version.product,
+    passed: checks.length,
+    failed: 0,
+    skipped: 0,
+    checks,
+  };
+}
+
+async function provePartnerRuntime(send, sessionId) {
+  const { evaluate, until, fill, click } = runtimeBrowserClient(send, sessionId);
+  const identities = JSON.parse(process.env.MINTVAULT_PARTNER_BROWSER_FIXTURE ?? "null");
+  const tenantId = process.env.MINTVAULT_PARTNER_BROWSER_TENANT;
+  const password = process.env.MINTVAULT_PARTNER_BROWSER_PASSWORD;
+  const roles = ["PARTNER_OWNER", "PARTNER_MANAGER", "PARTNER_FINANCE_VIEWER"];
+  const labels = ["Partner Owner", "Partner Manager", "Finance Viewer"];
+  const names = ["owner", "manager", "finance"];
+  if (
+    !Array.isArray(identities) ||
+    identities.length !== roles.length ||
+    !password ||
+    password.length < 16 ||
+    !/^[a-f0-9-]{36}$/.test(tenantId ?? "") ||
+    !identities.every(
+      (identity, i) =>
+        identity.role === roles[i] &&
+        /^[a-f0-9-]{36}$/.test(identity.id) &&
+        identity.email === `${names[i]}@partner-browser.example.test`
+    )
+  )
+    throw new Error("Synthetic Partner browser identity fixture is missing or invalid");
+  const checks = [];
+  const read = (path) =>
+    evaluate(
+      `fetch(${JSON.stringify(path)}, { credentials:'include' }).then(async r => ({status:r.status,body:await r.json()}))`
+    );
+  for (const [index, identity] of identities.entries()) {
+    const passed = (suffix) => checks.push({ name: `${names[index]}-${suffix}`, status: "passed" });
+    await send("Page.navigate", { url: `${runtimeUrl}partner/login` }, sessionId);
+    await until(
+      "location.pathname === '/partner/login' && !!document.querySelector('[data-testid=\"input-email\"]')",
+      "Partner login"
+    );
+    await fill("input-email", identity.email);
+    await fill("input-password", password);
+    await click("button-login-submit");
+    await until(
+      "location.pathname === '/partner/dashboard' && !!document.querySelector('[data-testid=\"partner-shop-floor-dashboard\"]')",
+      `${names[index]} dashboard`
+    );
+    const { cookies } = await send("Network.getCookies", { urls: [runtimeUrl.href] }, sessionId);
+    if (!cookies.some((cookie) => cookie.name === "mv.partner.sid" && cookie.httpOnly))
+      throw new Error("Real Partner login did not create its HttpOnly session cookie");
+    passed("login");
+    const me = await read("/api/partner/me");
+    if (
+      me.status !== 200 ||
+      me.body.userId !== identity.id ||
+      me.body.tenantId !== tenantId ||
+      me.body.role !== labels[index] ||
+      me.body.organisationName !== "Synthetic Browser Shop" ||
+      me.body.mfaPassed !== true ||
+      !Array.isArray(me.body.permissions) ||
+      !me.body.permissions.includes("partner.dashboard.view") ||
+      me.body.permissions.includes("partner.users.view") !== index < 2
+    )
+      throw new Error(`Server-derived ${names[index]} identity/permissions did not match the migrated fixture`);
+    passed("identity");
+    const dashboard = await read("/api/partner/dashboard");
+    const operations = await read("/api/partner/dashboard/operations");
+    const credits = await read("/api/partner/credits");
+    if (
+      dashboard.status !== 200 ||
+      dashboard.body.org?.id !== tenantId ||
+      dashboard.body.locationCount !== 1 ||
+      operations.status !== 200 ||
+      operations.body.locations?.length !== 1 ||
+      operations.body.stations?.length !== 0 ||
+      operations.body.counts?.needsScan !== 0 ||
+      credits.status !== 200 ||
+      credits.body.summary?.configured !== false
+    )
+      throw new Error(`Partner ${names[index]} dashboard dependencies did not return the owned fixture`);
+    if (index === 0) {
+      const readiness = await read("/api/partner/onboarding-readiness");
+      if (readiness.status !== 200 || typeof readiness.body.operational?.overall?.ready !== "boolean")
+        throw new Error("Partner owner readiness dependency did not return authoritative data");
+    }
+    await until("!!document.querySelector('[data-testid=\"grid-operations\"]')", "rendered Partner operational data");
+    passed("dashboard");
+    const team = await read("/api/partner/users");
+    if (
+      team.status !== (index < 2 ? 200 : 403) ||
+      (index < 2 &&
+        (!Array.isArray(team.body.users) ||
+          team.body.users.length !== 3 ||
+          !identities.every((expected) => team.body.users.some((user) => user.id === expected.id))))
+    )
+      throw new Error(`Partner ${names[index]} team permission did not fail/allow as migrated`);
+    passed("team-permission");
+    await click("button-sign-out");
+    await until(
+      "location.pathname === '/partner/login' && !!document.querySelector('[data-testid=\"input-email\"]')",
+      "Partner logout"
+    );
+    passed("logout");
+    if ((await read("/api/partner/me")).status !== 401 || (await read("/api/partner/dashboard")).status !== 401)
+      throw new Error(`Logged-out ${names[index]} retained Partner access`);
+    passed("post-logout-refusal");
+  }
+  if (!PARTNER_BROWSER_PROOF_CHECKS.every((name, index) => checks[index]?.name === name))
+    throw new Error("Incomplete Partner browser proof");
+  const version = await send("Browser.getVersion");
+  return {
+    schemaVersion: 1,
+    kind: "partner",
     runId: process.env.MINTVAULT_BROWSER_PROOF_RUN_ID,
     url: runtimeUrl.href,
     browser: version.product,
@@ -296,7 +423,7 @@ async function render(className, label) {
         ).catch(() => {});
       });
       await send("Fetch.enable", { patterns: [{ urlPattern: "*", requestStage: "Request" }] }, sessionId);
-      return await proveRuntime(send, sessionId);
+      return await (partnerProof ? provePartnerRuntime(send, sessionId) : proveRuntime(send, sessionId));
     }
     await send(
       "Emulation.setDeviceMetricsOverride",
@@ -318,7 +445,7 @@ async function render(className, label) {
     cancellation.signal.removeEventListener("abort", cancelPending);
     cancelPending();
     if (socket?.readyState === WebSocket.OPEN) socket.close();
-    browserClosureConfirmed = await stopOwnedChild(child, { closed });
+    browserClosureConfirmed = await stopOwnedChild(child, { closed, closeOwnedPipes: true });
   }
 }
 

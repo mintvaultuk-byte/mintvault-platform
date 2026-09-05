@@ -1,5 +1,92 @@
 # Hygiene launch / first repair wave evidence
 
+## H1i — owned realistic Partner browser proof, 2026-09-05
+
+Baseline c35e0d2839b067bfda94b7d1453ebd116d31b60b plus exact H1i manifest. Root sole
+writer; Terra read-only bootstrap discovery/CI classification, Sol independent
+changed-surface and real-process/browser verification. Existing graph continues;
+no new audit, auth-product edits, migration SQL edits, framework or dependencies.
+
+Fixed exclusive --partner-browser-proof uses the existing owned PG16/vector+PG17
+runner and existing runtime/CDP lifecycle. New empty prefixed Partner DB, actual
+first-shop and cumulative RBAC migrations under non-superuser pn_migrator, generated
+restricted runtime login inheriting partner_runtime, real RLS unscoped zero-row check.
+Owner/Manager/Finance are deterministic ACTIVE synthetic users with process-only
+generated password/MFA key; actual login/forms/cookie/session/routes, no seed route,
+principal injection or Admin session reuse. Main/admin/Partner share only that owned
+DB; connector/providers unset. Browser page egress restricted to owned app origin.
+
+First fixture insert failed on invented city/postcode/country column names; corrected
+to actual0105 address_city/address_postcode/address_country. First browser run
+ee8dfdb1-24fd-4acc-8f99-271095953a4c passed18 but exposed incomplete RBAC catalogue.
+Added existing0073/0085/0092/0098 and0045 dependency, using established helper core
+prerequisite. Exact DB-vs-canonical role/permission/mapping parity then reproduced
+missing Owner purchase grant:0083 had preceded0034 in the inherited list. Numeric
+filename sorting on the combined list fixed the real order; no hand-seeded grant,
+duplicate migration, weakened parity assertion or changed production behavior.
+
+Root pure pg-connection-string parse proved ?host=remote.invalid overrides a
+loopback-looking URL (no remote connection attempted). Five query/fragment negative
+tests failed; both owned fixture/maintenance URL guards now reject search/hash.
+No inherited .env, provider credential or shared URL was read or used.
+
+Root ordered-fixture browser7fbca66e-1ee8-4026-83ae-ec15f6e45bff:18/0/0 at59925.
+Independent6ed2df7a-a284-47c8-a4ea-fb1439815d5d and clean2d33584b-e49e-493d-9248-1bf73ddf5b59
+then reproduced exit0/stdio-close uncertainty; neither emitted accepted success.
+Chrome crash handler inherited stderr after the main browser exited. Root added
+opt-in owned-pipe closure for Chrome only, after installing close listeners. Actual
+child close remains required; test with no exit/close remains red. Sol held-out real
+parent/grandchild control: old helper returnedfalse after parentexit0, closing owned
+stderr yielded close; new option confirmed actual event order exit→close. No blanket
+kill, arbitrary process deletion, timeout inflation or exit-only success.
+
+Final independent Sol run7a9f3a2a-4d59-4f3f-850f-f87b3738a23a:
+18passed/0failed/0skipped, exit0, exact-label containers0, app63923/Chrome63952 absent.
+Final clean exact-lock run0b958e5c-12e9-4b55-a880-6d44b7905b2c at60631:
+18/0/0, exit0, exact-label containers0. Chrome152.0.7977.76, pinned Node20.20.2.
+Both prove each real login, server-derived identity, actual dashboard + dependency
+reads, Owner/Manager team200 vs Finance403, logout and401 afterwards. Root retained
+Admin regression1cf31236-df14-4026-b5c2-6042f27db831 at60776:7/0/0, containers0.
+Original CSS negative control still overflows885px at320px; candidate remains320px,
+card256px/minWidth0/wrapanywhere. This is not physical/current-browser hardware proof.
+Actual final Partner cancellation3cea660a-4671-46e9-8455-4a6932334174 sendsSIGTERM at
+Chrome startup: runner143, app65154/Chrome65164 absent, exact-label containers0,
+no success report. Nested cleanup remains awaited after the owned-pipe repair.
+
+Clean exact-lock /private/tmp/mintvault-h1ef-clean.x3NRtE (Vitest4.1.7): complete
+runner49 + runtime26 + topology15 + architecture27 =117/117, zero skips. Intermediate
+116/117 was stale copied generated architecture coordinates; copying the matching
+reviewed root snapshot fixed it, with no test change. Root scoped lint0errors/0warnings;
+scripts11 and tests345 existing diagnostics unchanged. Only script entry inventory
+51→52 and exact digest updated; no diagnostic allowance added. Syntax67modules, CI
+topology enabled/non-optional/postBuild-preNode22 mutation checks, architecture8498
+records/zero violations. New fixture receives an exact test-platform owner, not a
+broad script exception. Package/lock unchanged and cmp matches clean copy.
+
+After independent/root process absence checks and both retained PG17 connection
+counts0, only the four exact-label PG containers/volumes from6ed2df7a/2d33584b were
+removed through the existing ownership-checking cleanup. Synthetic data is disposable,
+not recoverable product data. Report/profile evidence directories remain; no backup,
+worktree, unrelated folder or Chrome crash-handler process was deleted.
+
+Source hashes (SHA256, proof-time exact WIP on c35 baseline):
+- scripts/ci/partner-browser-fixture.ts:390f343639fd357951a6e0e96a26a362417a2afe228193056656935e8b167a67
+- scripts/ci/run-disposable-integration.mjs:2a9bae8c1d20028aab00aa2a1c00e8d90ceaea27780509e0fe94a2941862d1a5
+- scripts/command-centre-runtime-harness.ts:e5d89f9431469eb8c20bf19f913acf091646d2a76bace8335c37b7f0089aa9d3
+- scripts/command-centre-mobile-layout-check.mjs:7cd709da4eddb011af6257949e31f975706f061801137ff87769a898cee9a329
+- tests/command-centre-runtime-harness.test.ts:966586d926a41cd8d9a22b36fdd803848506cadc05ec5aed60fcf18669c617f7
+- tests/disposable-integration-runner.test.ts:7f8ed7d1ebad82d1cd826384a0bde862650f02c30f044a353e8f57ff0957d4a2
+- scripts/ci/verify-ci-topology.mjs:00daf7063130179632fb6b24ca9b548d276c9ea94e34a3cd8c6d647e48a7d80b
+- tests/ci-proof-topology.test.ts:9a824d245232060707eb29090ad670e37d5adf3a15aa44eb59cde1b435cea90b
+
+Limits: Partner fixture is intentionally scoped, not a full application schema;
+unrelated background worker missing-schema messages do not establish runtime readiness.
+Supply checkout, full Scanner/Card Job/writer, MFA enrollment, cross-tenant mutation,
+physical hardware and final exact-candidate hostile/security/release gates remain
+separate graph requirements. Governance-only postflight staysred for managed CLAUDE
+drift/npm-egress/dirtytree/branch protected-area review; no --run/--accept-protected
+or release closure claimed. Graph remains structurally valid101+34, NOT READY.
+
 ## H1h — finite owned Super Admin browser proof, 2026-09-05
 
 Exact preceding image SHA bc8bc3c6 hosted CI33969351459/job101314988029:

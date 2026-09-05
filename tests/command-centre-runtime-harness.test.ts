@@ -13,6 +13,13 @@ import {
   runtimeRequestSignal,
 } from "../scripts/command-centre-runtime-harness";
 import { startPostgres17, type DisposablePostgres17 } from "./helpers/postgres17-cluster";
+import { randomUUID } from "node:crypto";
+import { PARTNER_PERMISSIONS, ROLE_LABELS, ROLE_PERMISSIONS } from "../server/partner/permissions";
+import {
+  PARTNER_BROWSER_DB_PREFIX,
+  assertPartnerBrowserDatabase,
+  seedPartnerBrowserDatabase,
+} from "../scripts/ci/partner-browser-fixture";
 
 let runtimeAdminDatabaseUrl = "";
 let localPostgres: DisposablePostgres17 | undefined;
@@ -32,6 +39,62 @@ afterAll(async () => {
 });
 
 describe("Command Centre rendered-runtime harness safety", () => {
+  it("bootstraps a separate empty Partner fixture with migrated roles and restricted runtime identity", async () => {
+    const database = `${PARTNER_BROWSER_DB_PREFIX}${process.pid}_${randomUUID().slice(0, 8)}`;
+    const url = new URL(runtimeAdminDatabaseUrl);
+    url.pathname = `/${database}`;
+    assertPartnerBrowserDatabase(url.toString());
+    const admin = new Client({ connectionString: runtimeAdminDatabaseUrl });
+    await admin.connect();
+    await admin.query(`CREATE DATABASE "${database}"`);
+    try {
+      const fixture = await seedPartnerBrowserDatabase(url.toString(), "synthetic-browser-password-123");
+      expect(fixture.identities.map((identity) => identity.role)).toEqual([
+        "PARTNER_OWNER",
+        "PARTNER_MANAGER",
+        "PARTNER_FINANCE_VIEWER",
+      ]);
+      expect(new URL(fixture.runtimeUrl).pathname).toBe(url.pathname);
+      expect(new URL(fixture.runtimeUrl).username).not.toBe(url.username);
+      const runtime = new Client({ connectionString: fixture.runtimeUrl });
+      await runtime.connect();
+      try {
+        const roles = await runtime.query("SELECT code,label FROM partner_roles ORDER BY code");
+        expect(roles.rows).toEqual(
+          Object.entries(ROLE_LABELS)
+            .sort(([a], [b]) => a.localeCompare(b))
+            .map(([code, label]) => ({ code, label }))
+        );
+        const permissions = await runtime.query("SELECT code FROM partner_permissions ORDER BY code");
+        expect(permissions.rows.map((row) => row.code)).toEqual([...PARTNER_PERMISSIONS].sort());
+        const mappings = await runtime.query(
+          "SELECT r.code role,p.code permission FROM partner_role_permissions rp JOIN partner_roles r ON r.id=rp.role_id JOIN partner_permissions p ON p.id=rp.permission_id"
+        );
+        expect(mappings.rows.map((row) => `${row.role}:${row.permission}`).sort()).toEqual(
+          Object.entries(ROLE_PERMISSIONS)
+            .flatMap(([role, permissions]) => permissions.map((permission) => `${role}:${permission}`))
+            .sort()
+        );
+      } finally {
+        await runtime.end();
+      }
+      await expect(seedPartnerBrowserDatabase(url.toString(), "synthetic-browser-password-123")).rejects.toThrow(
+        "non-empty"
+      );
+    } finally {
+      await admin.query(`DROP DATABASE "${database}" WITH (FORCE)`);
+      await admin.end();
+    }
+  }, 120_000);
+  it.each([
+    "postgresql://remote.invalid:5432/mintvault_partner_browser_runtime_safe",
+    "postgresql://127.0.0.1:5432/postgres",
+    "postgresql://127.0.0.1/mintvault_partner_browser_runtime_safe",
+    "postgresql://127.0.0.1:61234/mintvault_partner_browser_runtime_safe?host=remote.invalid",
+    "postgresql://127.0.0.1:61234/mintvault_partner_browser_runtime_safe#ignored",
+  ])("refuses a foreign Partner fixture database %s", (url) => {
+    expect(() => assertPartnerBrowserDatabase(url)).toThrow();
+  });
   it("bounds requests and propagates cancellation", () => {
     const parent = new AbortController();
     const signal = runtimeRequestSignal(parent.signal);
@@ -86,6 +149,9 @@ describe("Command Centre rendered-runtime harness safety", () => {
     "postgresql://tester@ep-remote.neon.tech:55433/postgres",
     "postgresql://tester@127.0.0.1:55433/mintvault_vq_phase10_local",
     "postgresql://tester@127.0.0.1/postgres",
+    "postgresql://tester@127.0.0.1:61234/postgres?host=remote.invalid&port=5432",
+    "postgresql://tester@127.0.0.1:61234/postgres?database=unowned",
+    "postgresql://tester@127.0.0.1:61234/postgres#ignored",
   ])("fails closed for unsafe maintenance authority %s", (unsafeUrl) => {
     expect(() => assertDisposableRuntimeAdminDatabaseUrl(unsafeUrl)).toThrow();
   });

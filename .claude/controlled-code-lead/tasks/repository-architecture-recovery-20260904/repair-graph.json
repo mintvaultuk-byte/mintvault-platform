@@ -1363,7 +1363,8 @@
         "hygiene-repair-manifest.md H1a: pinned omit-dev dependency tree excludes build-only toolchain while retaining native runtime modules; builder CSS and complete production image proof remain required",
         "hygiene-repair-manifest.md H1b: owned CI-pinned PG16/vector and PG17, process-only preparation exports, per-suite topology, non-vacuous real Partner runner and independently verified failure/cancellation cleanup; hygiene-wave-proof.md retains local results, not release closure",
         "hygiene-repair-manifest.md H1c: exclusive owned pinned MinIO with synthetic process-only configuration, exact-identity eleven-check report, real adapter transport/integrity/conditional/replay proof, independent bounded child-close/cleanup verification and failure-blocking hosted wiring; exact-candidate hosted proof remains required",
-        "hygiene-repair-manifest.md H1h: finite owned Admin browser seven-check flow, synthetic env, verified close/cancellation/retention, strict report and hosted after-Build/preNode22 command. Partner browser and final exact-SHA gates remain open."
+        "hygiene-repair-manifest.md H1h: finite owned Admin browser seven-check flow, synthetic env, verified close/cancellation/retention, strict report and hosted after-Build/preNode22 command. Final exact-SHA gates remain open.",
+        "hygiene-repair-manifest.md H1i: separate owned Partner database, non-superuser real cumulative migrations and exact catalogue parity, restricted runtime, real three-role eighteen-check browser report, inherited-stderr closure/refusal controls and mandatory hosted wiring; no whole-application/release claim"
       ],
       "evidence": [
         {
@@ -1375,6 +1376,11 @@
           "ref": "hygiene-wave-proof.md H1d/e/f/g: clean tracked inventory parity; clean exact-lock Admin126/126 and operational6/6; PDF old/new declaration red-green; a6670fc4 hosted architecture/lint/type gates pass, test5 failures and image vulnerability veto remain; H1c subsequent WIP hashes and independent local11-check proof recorded separately, not candidate closure",
           "sha": "a6670fc4456e6b4185d3a735b189ef9f86f667b2",
           "observer": "codex-lead with independent scoped Luna/Terra/Sol observations"
+        },
+        {
+          "ref": "hygiene-wave-proof.md H1i: independent Sol and clean exact-lock real18/18, Admin7/7 regression, clean controls117/117, catalogue ordering and owned-stderr closure red-green, exact eight source hashes; no hosted/security/release closure",
+          "sha": "c35e0d2839b067bfda94b7d1453ebd116d31b60b",
+          "observer": "Sol h1c_lifecycle independent, codex-lead integration"
         },
         {
           "ref": "hygiene-wave-proof.md H1h: root/independent Sol/clean exact-lock real7/7, clean controls101/101, cancellation run d23aaab2 closed both PIDs/container cleanup0, delayed-close defect repaired; exact seven file hashes retained, no hosted/release closure",
@@ -2516,6 +2522,11 @@
         "Exact runtime invokes isolated Partner, Scanner, scripts/tests typechecks and shipped migration proof; skip and injected failure make gate red"
       ],
       "evidence": [
+        {
+          "ref": "hygiene-wave-proof.md H1i: independent Sol and clean exact-lock real18/18, Admin7/7 regression, clean controls117/117, catalogue ordering and owned-stderr closure red-green, exact eight source hashes; no hosted/security/release closure",
+          "sha": "c35e0d2839b067bfda94b7d1453ebd116d31b60b",
+          "observer": "Sol h1c_lifecycle independent, codex-lead integration"
+        },
         {
           "ref": "hygiene-wave-proof.md H1h: root/independent Sol/clean exact-lock real7/7, clean controls101/101, cancellation run d23aaab2 closed both PIDs/container cleanup0, delayed-close defect repaired; exact seven file hashes retained, no hosted/release closure",
           "sha": "bc8bc3c6118f079d7843f3733bbf1a380b0a1f08",

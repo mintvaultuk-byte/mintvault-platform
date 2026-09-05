@@ -8,10 +8,11 @@
  */
 import { spawn, type ChildProcess } from "node:child_process";
 import { createServer } from "node:net";
-import { randomUUID } from "node:crypto";
+import { randomUUID, randomBytes } from "node:crypto";
 import { Client } from "pg";
 import bcrypt from "bcryptjs";
 import { controlledEnvironment, runChild, stopOwnedChild } from "./ci/run-disposable-integration.mjs";
+import { PARTNER_BROWSER_DB_PREFIX, seedPartnerBrowserDatabase } from "./ci/partner-browser-fixture";
 
 export const COMMAND_CENTRE_RUNTIME_AUDIT_ENV = "MINTVAULT_COMMAND_CENTRE_RUNTIME_AUDIT";
 export const COMMAND_CENTRE_RUNTIME_DB_PREFIX = "mintvault_command_centre_runtime_";
@@ -31,9 +32,9 @@ export function runtimeProcessEnvironment(
 
 const LOOPBACK_HOSTS = new Set(["127.0.0.1", "localhost", "::1"]);
 
-function runtimeDatabaseName(value: string): string {
+function runtimeDatabaseName(value: string, partner = false): string {
   const name = value.replace(/[^a-z0-9_]/gi, "_").toLowerCase();
-  if (!name.startsWith(COMMAND_CENTRE_RUNTIME_DB_PREFIX)) {
+  if (!name.startsWith(partner ? PARTNER_BROWSER_DB_PREFIX : COMMAND_CENTRE_RUNTIME_DB_PREFIX)) {
     throw new Error("Command Centre runtime harness database name is not allowlisted.");
   }
   return name;
@@ -60,13 +61,16 @@ function assertLoopbackPostgresUrl(raw: string): URL {
   if (!url.port) {
     throw new Error("Command Centre runtime harness requires an explicitly configured PostgreSQL port.");
   }
+  // pg-connection-string accepts query overrides (including host/database).
+  // A loopback-looking authority must never redirect the actual driver elsewhere.
+  if (url.search || url.hash) throw new Error("Disposable PostgreSQL URLs may not carry query overrides or fragments.");
   return url;
 }
 
 /** Fail closed before either bootstrapping or starting the application. */
-export function assertDisposableRuntimeDatabaseUrl(raw: string): URL {
+export function assertDisposableRuntimeDatabaseUrl(raw: string, partner = false): URL {
   const url = assertLoopbackPostgresUrl(raw);
-  runtimeDatabaseName(decodeURIComponent(url.pathname).replace(/^\//, ""));
+  runtimeDatabaseName(decodeURIComponent(url.pathname).replace(/^\//, ""), partner);
   return url;
 }
 
@@ -91,10 +95,10 @@ function requireRuntimeAdminDatabaseUrl(): URL {
   return assertDisposableRuntimeAdminDatabaseUrl(raw);
 }
 
-function databaseUrl(authority: URL, database: string): string {
+function databaseUrl(authority: URL, database: string, partner = false): string {
   const url = new URL(authority.toString());
   url.pathname = `/${database}`;
-  return assertDisposableRuntimeDatabaseUrl(url.toString()).toString();
+  return assertDisposableRuntimeDatabaseUrl(url.toString(), partner).toString();
 }
 
 /** Synthetic credentials are deliberately supplied only to the disposable
@@ -263,8 +267,8 @@ async function waitForHealth(port: number, process: ChildProcess, signal?: Abort
   throw new Error("Timed out waiting for the Command Centre test runtime.");
 }
 
-async function dropRuntimeDatabase(maintenanceUrl: string, database: string): Promise<void> {
-  runtimeDatabaseName(database);
+async function dropRuntimeDatabase(maintenanceUrl: string, database: string, partner = false): Promise<void> {
+  runtimeDatabaseName(database, partner);
   const admin = new Client({ connectionString: maintenanceUrl });
   await admin.connect();
   try {
@@ -338,15 +342,21 @@ async function main(): Promise<number> {
   if (process.env[COMMAND_CENTRE_RUNTIME_AUDIT_ENV] !== "1") {
     throw new Error(`${COMMAND_CENTRE_RUNTIME_AUDIT_ENV}=1 is required; this harness never runs implicitly.`);
   }
-  const runtimeAdminPassword = requireRuntimeCredential(RUNTIME_ADMIN_PASSWORD_ENV);
-  const runtimeAdminPin = requireRuntimeCredential(RUNTIME_ADMIN_PIN_ENV);
+  const partnerBrowserProof = process.argv.includes("--partner-browser-proof");
+  if (partnerBrowserProof && process.argv.includes("--browser-proof"))
+    throw new Error("Browser fixtures are exclusive");
+  const partnerPassword = partnerBrowserProof ? requireRuntimeCredential("MINTVAULT_PARTNER_BROWSER_PASSWORD") : "";
+  const runtimeAdminPassword = partnerBrowserProof ? "" : requireRuntimeCredential(RUNTIME_ADMIN_PASSWORD_ENV);
+  const runtimeAdminPin = partnerBrowserProof ? "" : requireRuntimeCredential(RUNTIME_ADMIN_PIN_ENV);
   const runtimeAdminDatabaseUrl = requireRuntimeAdminDatabaseUrl();
   // This is an audit-only process argument, not a product feature switch. It
   // lets the rendered audit prove the existing server-side kill switch with the
   // same local-only database safeguards as the enabled runtime.
   const commandCentreEnabled = !process.argv.includes("--feature-off");
-  const browserProof = process.argv.includes("--browser-proof");
-  const browserReport = browserProof ? process.argv[process.argv.indexOf("--browser-proof") + 1] : undefined;
+  const browserProof = process.argv.includes("--browser-proof") || partnerBrowserProof;
+  const browserReport = browserProof
+    ? process.argv[process.argv.indexOf(partnerBrowserProof ? "--partner-browser-proof" : "--browser-proof") + 1]
+    : undefined;
   if (
     browserProof &&
     (!commandCentreEnabled ||
@@ -356,10 +366,11 @@ async function main(): Promise<number> {
   ) {
     throw new Error("Browser proof requires its owned run identity, report path and enabled fixture.");
   }
-  const database = runtimeDatabaseName(`${COMMAND_CENTRE_RUNTIME_DB_PREFIX}${process.pid}_${randomUUID().slice(0, 8)}`);
+  const prefix = partnerBrowserProof ? PARTNER_BROWSER_DB_PREFIX : COMMAND_CENTRE_RUNTIME_DB_PREFIX;
+  const database = runtimeDatabaseName(`${prefix}${process.pid}_${randomUUID().slice(0, 8)}`, partnerBrowserProof);
   const maintenanceUrl = runtimeAdminDatabaseUrl.toString();
-  const runtimeUrl = databaseUrl(runtimeAdminDatabaseUrl, database);
-  assertDisposableRuntimeDatabaseUrl(runtimeUrl);
+  const runtimeUrl = databaseUrl(runtimeAdminDatabaseUrl, database, partnerBrowserProof);
+  assertDisposableRuntimeDatabaseUrl(runtimeUrl, partnerBrowserProof);
   let app: ChildProcess | undefined;
   let appClosed = false;
   let databaseCreated = false;
@@ -393,7 +404,7 @@ async function main(): Promise<number> {
         retainResources = true;
         console.error(`[command-centre-runtime-harness] app closure unknown; retain database ${database}`);
       }
-      if (databaseCreated && !retainResources) await dropRuntimeDatabase(maintenanceUrl, database);
+      if (databaseCreated && !retainResources) await dropRuntimeDatabase(maintenanceUrl, database, partnerBrowserProof);
     })());
 
   let exitCode: number;
@@ -406,15 +417,18 @@ async function main(): Promise<number> {
     } finally {
       await admin.end();
     }
-    await seedRuntimeDatabase(runtimeUrl, runtimeAdminPassword, runtimeAdminPin, commandCentreEnabled);
+    const partnerFixture = partnerBrowserProof ? await seedPartnerBrowserDatabase(runtimeUrl, partnerPassword) : null;
+    if (!partnerFixture)
+      await seedRuntimeDatabase(runtimeUrl, runtimeAdminPassword, runtimeAdminPin, commandCentreEnabled);
     const port = await unusedPort();
     const childEnvironment = runtimeProcessEnvironment(process.env, {
       PORT: String(port),
       APP_URL: `http://localhost:${port}`,
       MINTVAULT_DATABASE_URL: runtimeUrl,
       PARTNER_ADMIN_DATABASE_URL: runtimeUrl,
-      PARTNER_DATABASE_URL: runtimeUrl,
-      PARTNER_CONNECTOR_DATABASE_URL: runtimeUrl,
+      PARTNER_DATABASE_URL: partnerFixture?.runtimeUrl ?? runtimeUrl,
+      PARTNER_CONNECTOR_DATABASE_URL: partnerBrowserProof ? "" : runtimeUrl,
+      PARTNER_MFA_ENC_KEY: partnerBrowserProof ? randomBytes(32).toString("hex") : undefined,
       SUPER_ADMIN_EMAILS: RUNTIME_ADMIN_EMAIL,
       SESSION_SECRET: "command-centre-runtime-test-session-secret",
       SIGNED_URL_SECRET: "command-centre-runtime-test-signed-url-secret",
@@ -452,24 +466,27 @@ async function main(): Promise<number> {
       requestShutdown(1);
     });
     await waitForHealth(port, app, browserController.signal);
-    await verifyCommandCentreRuntime(
-      port,
-      commandCentreEnabled,
-      runtimeAdminPassword,
-      runtimeAdminPin,
-      browserController.signal
-    );
+    if (!partnerBrowserProof)
+      await verifyCommandCentreRuntime(
+        port,
+        commandCentreEnabled,
+        runtimeAdminPassword,
+        runtimeAdminPin,
+        browserController.signal
+      );
     console.log(`COMMAND_CENTRE_RUNTIME_READY=http://localhost:${port}`);
     console.log(`COMMAND_CENTRE_RUNTIME_CHILD_PID=${app.pid}`);
     console.log(`COMMAND_CENTRE_RUNTIME_COMMAND_CENTRE_ENABLED=${commandCentreEnabled}`);
     console.log(
-      "COMMAND_CENTRE_RUNTIME_AUTH=synthetic two-step Super Admin fixture (credentials intentionally not logged)"
+      partnerBrowserProof
+        ? "PARTNER_BROWSER_RUNTIME_AUTH=synthetic migration-seeded Owner/Manager/Finance fixture"
+        : "COMMAND_CENTRE_RUNTIME_AUTH=synthetic two-step Super Admin fixture (credentials intentionally not logged)"
     );
     if (browserProof) {
       const outcome = await runChild(
         [
           "scripts/command-centre-mobile-layout-check.mjs",
-          "--runtime-proof",
+          partnerBrowserProof ? "--partner-runtime-proof" : "--runtime-proof",
           `http://127.0.0.1:${port}/`,
           browserReport!,
         ],
@@ -477,6 +494,13 @@ async function main(): Promise<number> {
           [RUNTIME_ADMIN_PASSWORD_ENV]: runtimeAdminPassword,
           [RUNTIME_ADMIN_PIN_ENV]: runtimeAdminPin,
           MINTVAULT_BROWSER_PROOF_RUN_ID: process.env.MINTVAULT_BROWSER_PROOF_RUN_ID,
+          ...(partnerFixture
+            ? {
+                MINTVAULT_PARTNER_BROWSER_PASSWORD: partnerPassword,
+                MINTVAULT_PARTNER_BROWSER_FIXTURE: JSON.stringify(partnerFixture.identities),
+                MINTVAULT_PARTNER_BROWSER_TENANT: partnerFixture.tenantId,
+              }
+            : {}),
         }),
         undefined,
         browserController.signal

@@ -2,6 +2,32 @@
 
 ## Current checkpoint and next bounded wave
 
+H1i now locally verified on baseline c35e0d2839b067bfda94b7d1453ebd116d31b60b:
+real Partner browser18/18 independently and clean exact-lock, Admin7/7 regression,
+clean four-suite117/117 (zero skips). Reproduced fixture catalogue ordering and Chrome
+inherited-stderr closure defects repaired; five URL override/fragment controls red→green.
+No product or migration SQL edited. See hygiene-wave-proof.md for exact run IDs,
+hashes, limitations and retained evidence. Root checkpoint/push pending; then observe
+that exact CI and continue existing approved graph packets without a scheduled pause.
+
+c35 primary CI33971119218 is terminal FAILURE:7426pass/1fail/5skip,491pass/1fail files.
+Single failure is restricted claim-ownership behavior; HY-SECURITY UNKNOWN, no reroute.
+Image101319694573 fails fixable HIGH/CRITICAL vulnerability gate; dependent runtime
+steps skipped. Build/browser/isolated Partner/Audit/Scanner downstream skipped in app
+job101319694681; earlier local proof does not promote those skips. Governance33971119235
+FAILURE and33971117272 SUCCESS. Independent Terra only classified outcomes, no security
+investigation. Release remains NOT READY; Goal ACTIVE, heartbeat PAUSED, no deploy.
+Older checkpoint paragraphs below are retained history, not current-state claims.
+
+H1h is now checkpointed and pushed at c35e0d2839b067bfda94b7d1453ebd116d31b60b,
+existing draft PR336. New exact-SHA primary CI33971119218; governance33971119235/
+33971117272 in progress. Prior image SHA bc8bc3c6 has7413pass/5skip/0fail across492
+test files, isolated Partner/object-store/Build success; Audit and image gates remain
+red, Scanner downstream skipped. No security/flake/candidate veto waived. Terra
+h1b_runner has a bounded read-only realistic Partner browser bootstrap follow-up;
+root remains sole writer and must materialize its exact packet before implementation.
+This post-checkpoint receipt is the only owned WIP; vault-worlds remains untouched.
+
 Current H1h wave: baseline/image checkpoint bc8bc3c6118f079d7843f3733bbf1a380b0a1f08
 pushed non-force to same-repository draft PR336. A push trust check initially refused;
 read-only origin/PR owner/ADMIN-permission verification established exact destination,

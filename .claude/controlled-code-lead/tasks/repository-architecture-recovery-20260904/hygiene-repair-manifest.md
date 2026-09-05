@@ -1,5 +1,60 @@
 # Hygiene repair manifest — authorized launch
 
+## H1i — owned realistic Partner browser fixture (current packet)
+
+Baseline c35e0d2839b067bfda94b7d1453ebd116d31b60b, H1h independently verified/pushed;
+only its post-checkpoint ledger receipt and unrelated vault-worlds are dirty. Existing
+REPAIR-CI-TOPOLOGY/PROOF-CI continue; no auth/token investigation or product change.
+Terra discovered the existing realistic-role/migration/bootstrap contract. Root source
+adjudication selects PARTNER_MIGRATIONS_WITH_FIRST_SHOP rather than the smaller RBAC-only
+list: the actual dashboard also reads credit availability and owner address readiness.
+Keep real0034 RBAC migration; never call seedPartnerRbac or inject a session/principal.
+Actual first browser18/18 exposed a fixture catalogue warning (one missing role,
+four permissions,17 mappings), not a product repair. Add the existing cumulative
+0073/0085/0092/0098 migrations as in partner-rbac-migration.test.ts, with the existing
+helper supplying0073's core prerequisite; add0045 for actual dashboard station reads.
+No SQL migration/protected-column definition changes. Verify exact catalogue parity
+instead of certifying an incomplete fixture from successful login alone.
+Root parity red reproduced the missing Owner purchase mapping; use numeric filename
+order on the combined existing migration list, not repeat0034 or invent grants.
+Root string-only driver inspection also reproduced query host/database overrides;
+five negative URL controls failed before the bounded no-query/no-fragment guards.
+Independent and clean browser runs reproduced main-process exit0 with inherited
+stderr still held by a Chrome crash handler. Add opt-in owned-pipe closure to the
+existing stopOwnedChild helper for Chrome only, while still awaiting actual child
+close; no timeout inflation or exit-only success. Require held-out real process
+control and repeated Partner/Admin regression before closing this packet.
+
+Root sole writer. Exact files: existing scripts/ci/run-disposable-integration.mjs,
+scripts/command-centre-runtime-harness.ts, scripts/command-centre-mobile-layout-check.mjs,
+tests/disposable-integration-runner.test.ts, tests/command-centre-runtime-harness.test.ts;
+one bounded new test fixture module scripts/ci/partner-browser-fixture.ts, reusing
+tests/helpers/partner-realistic-db.ts without changing migration SQL. CI workflow,
+verify-ci-topology/test, exact architecture policy/generated records and test/script
+inventory metadata may be updated only as required by this fixed proof target.
+
+Exclusive --partner-browser-proof creates a separate randomly prefixed database in
+owned PG17, never upgrades/drops Admin fixture tables. Seed only fresh owned schema,
+run real migrations as pn_migrator (non-superuser), and give the app a distinct
+restricted synthetic login inheriting partner_runtime. Main/admin and Partner URLs
+refer to the same owned database; no inherited connector/provider credentials.
+Seed deterministic ACTIVE organisation/location and Owner/Manager/Finance users via
+the established fixture SQL contract with process-only generated password/key values.
+Only portal/login flags enabled. Actual server/index.ts and real browser login/forms,
+server-derived identities, scoped dashboard and Owner/Manager team access vs Finance403,
+logout and refusal must pass; no Admin cookie reuse, runtime seed route or auth bypass.
+Inherited H1h close/cancellation/report/retention controls remain mandatory.
+
+Proof: negative target/report/prefix/environment tests; owned real PG role/migration
+inspection and actual browser flow for all three identities; independent changed-
+surface verification; retain Admin/CSS regression. Any missing fixture dependency is
+reproduced and supplied through its existing authority, never masked by skipping the
+request. This is a Partner bootstrap/RBAC proof, not supply checkout, full scanner/
+Card Job/writer or final release proof; those graph nodes remain mandatory.
+Rollback is the exact test-wiring diff; clean only confirmed-owned resources after
+child close. No shared migration, secret read, external object write, deployment or
+destructive worktree/data operation. Graph structure validated before implementation.
+
 ## H1h — finite local Super Admin browser proof (current packet)
 
 Baseline bc8bc3c6118f079d7843f3733bbf1a380b0a1f08. Image checkpoint pushed to the
