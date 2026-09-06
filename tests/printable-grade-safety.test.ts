@@ -25,7 +25,7 @@ import { createHash } from "node:crypto";
 import { readFileSync } from "node:fs";
 import { UnprintableGradeError, checkPrintableGrade, parseStoredGrade } from "../shared/printable-grade";
 import { isNonNumericGrade } from "../shared/schema";
-import { generateLabelPNG } from "../server/labels";
+import { generateLabelPDF, generateLabelPNG } from "../server/labels";
 import { currentPrintOutputBlock } from "../server/lib/print-output-eligibility";
 
 /** A complete, production-shaped numeric certificate. */
@@ -281,6 +281,28 @@ describe("legitimate labels are UNCHANGED (protected label design)", () => {
   it("the back label still renders for a valid certificate", async () => {
     const png = await generateLabelPNG(numericCert(), "back");
     expect(png.length).toBeGreaterThan(1000);
+  });
+});
+
+describe("real label PDFs retain their physical dimensions", () => {
+  it.each(["front", "back", "both"] as const)("renders a complete %s PDF with embedded label images", async (side) => {
+    for (const cert of [numericCert(), authOnlyCert()]) {
+      const pdf = await generateLabelPDF(cert, side);
+      const source = pdf.toString("latin1");
+      expect(source.startsWith("%PDF-")).toBe(true);
+      expect(source.trimEnd().endsWith("%%EOF")).toBe(true);
+      const boxes = [...source.matchAll(/\/MediaBox\s*\[([^\]]+)\]/g)];
+      expect(boxes).toHaveLength(1);
+      const [x, y, width, height] = boxes[0][1].trim().split(/\s+/).map(Number);
+      expect([x, y]).toEqual([0, 0]);
+      // Preserve the renderer's established 2.83465 pt/mm conversion, not a
+      // freshly rounded conversion that would change historical PDF geometry.
+      expect(width).toBe(198.4255);
+      expect(height).toBe(side === "both" ? 113.386 : 56.693);
+      expect(source.match(/\/Type\s*\/Page\b/g)).toHaveLength(1);
+      expect((source.match(/\/Subtype\s*\/Image\b/g) ?? []).length).toBeGreaterThanOrEqual(side === "both" ? 2 : 1);
+      expect(pdf.length).toBeGreaterThan(1000);
+    }
   });
 });
 

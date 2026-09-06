@@ -1,5 +1,38 @@
 # Change manifest — architecture recovery Phase 2
 
+## Owner-authorised image dependency extension — 2026-09-06 (current)
+
+Owner explicitly authorised the remaining application/bundled-npm correction
+after the hosted Debian0/Node22 receipt, with no further permission stops for
+this task. Baseline16052f1bc9783a86395f1b9f89993ba22d6ee094; root sole writer;
+Engineering OS preflight CRITICAL/HOSTILE. No new broad review or J2 activation.
+Exact executable scope: Dockerfile production npm upgrade11.19.1 with scripts
+disabled and cache cleaned; package.json/package-lock.json sharp0.35.4 and exact
+ip-address10.3.1 transitive override; tests/printable-grade-safety.test.ts adds
+real label-PDF physical/page/image checks without editing golden expectations.
+Compiler-reproduced extension: type-only Sharp Metadata/OutputInfo imports in
+server/image-processing.ts, server/lib/image-evidence.ts and
+server/vault-quest/ai/image-integrity.ts; prove emitted runtime code unchanged.
+Existing manifest/issue/proof ledgers record the outcome. No source behavior,
+CI gate, migration, credential, deployment or frozen-MVGS change is authorised.
+
+Preserve both Node20.20.2 digests and apt package lists/cleanup. npm11.19.1 supports
+Node ^20.17.0; npm12 requires newer Node and is rejected. Retaining patched npm
+preserves the existing exact-image npm-ls check without a CI/runtime-tools redesign.
+sharp0.35.4 supports Node>=20.9 and bundles libvips8.18.6 (@img1.3.3); supporting
+native/wasm lock changes are dependency closure, not unrelated package upgrades.
+ip-address10.3.1 is the reported patched minimum within its parent's ^10.2 range;
+the override prevents the resolver unnecessarily jumping to10.7.0 in this repair.
+Rollback: scoped code revert of this extension only; no deployed state changed.
+
+Proof invalidators are Dockerfile, this dependency lock and native rendering.
+Run real PNG/TIFF and label/PDF tests on pinned Node20 in the existing isolated
+clean-lock workspace; preserve Linux/x64 goldens and their platform limitation.
+Then push scoped WIP and require exact-SHA native image/SBOM/unchanged Trivy and
+readiness evidence. Local image capacity remains genuinely insufficient; record
+hosted evidence separately, never relabel it as local build/scan proof. Restricted
+claim investigation stays UNKNOWN and must not be rerouted or swept into testing.
+
 ## Owner-directed image OS correction — 2026-09-06 (current)
 
 Baseline391ab5211d03a75b0bf05e7bff6489fda0a131a1, same feature branch/draftPR336.

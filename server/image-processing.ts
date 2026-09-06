@@ -2,7 +2,7 @@
  * MintVault Image Processing
  * Auto-crop, image variant generation, and quality checks for grading images.
  */
-import sharp from "sharp";
+import sharp, { type OutputInfo } from "sharp";
 
 // Trading card corner radius as percentage of the SHORTER dimension.
 // 3% of min(width, height) — e.g. ~46 px on a 1520×2097 image. Spec
@@ -1234,7 +1234,7 @@ export async function autoCrop(
 
     // Pass 1: Aggressive trim (threshold 80 — catches subtle yellow-on-white card borders)
     let trimBuf: Buffer;
-    let trimInfo: sharp.OutputInfo;
+    let trimInfo: OutputInfo;
     try {
       const result = await sharp(workBuffer)
         .trim({ background: { r: 255, g: 255, b: 255 }, threshold: 80 })

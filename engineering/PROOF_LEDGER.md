@@ -1,5 +1,48 @@
 # Engineering proof ledger
 
+## 2026-09-06 authorised production-image dependency correction
+
+Owner approved dependency/runtime-npm extension at baseline16052f1b. Exact scope
+and rollback are in change-manifest.md. Independent Terra reviewed final lock and
+PDF assertions: ACCEPT/no gate weakening (source review, not independent execution).
+Production npm11.19.1 supports pinned Node20.20.2 and preserves existing npm-ls CI;
+latest npm12 was rejected because its Node floor is incompatible. Local exact npm
+version command returned11.19.1 using a fresh task cache after existing user cache
+EACCES; no existing cache was deleted or force-overwritten.
+
+Application runtime observed in the isolated clean-lock workspace:
+Node20.20.2, sharp0.35.4, libvips8.18.6, express-rate-limit's ip-address10.3.1.
+Lock SHA2567ac3346473f61c40cf9d718cb40710414a0048d50083d3772f0effb28882eba0
+matches root and clean workspace. Source: official sharp0.35.4 changelog and
+[upstream advisory](https://github.com/lovell/sharp/security/advisories/GHSA-f88m-g3jw-g9cj),
+plus `npm view npm@11 version engines dependencies.tar dependencies.pacote --json`.
+
+Pinned Node20 / clean-lock Vitest4.1.7 command:
+`node node_modules/vitest/vitest.mjs run tests/dockerignore-build-context.test.ts tests/label-font-integrity.test.ts tests/certificate-label-snapshot-authority.test.ts tests/print-artifact-capacity.test.ts tests/printable-grade-safety.test.ts tests/image-evidence.test.ts tests/lide400-profile.test.ts`
+PASS107, existing Linux/x64-only golden tests skipped2 on macOS (not new skips).
+New real PDF cases exercise numeric/auth labels front/back/both: PDF header/EOF,
+one page, historical physical boxes and embedded images. First new assertions
+failed because 72/25.4 differed from established2.83465 conversion; corrected
+fixtures to exact historical points, no renderer or golden change.
+
+Clean production build PASS3366 modules; this is WIP source with baseline GIT_SHA
+supplied, not an exact-candidate image. Initial tsc found four TS2503 diagnostics
+after sharp's export-type change; three files now use explicit type imports.
+Type-erased CommonJS/ES2022 output is byte-identical before/after in all three:
+image-processing6adf9bef611aef9f036a9791504a8552d904cfdc11f8d3ae50a1b72fe62c62a3;
+image-evidence d85633777723f16d76e4b2bd2d0e6bd2957c86ed444b6d6839d94e7a8e888b1f;
+VQ image-integrity ad397cfeab7e67b87dc71dafc5b540ad93d784e8ffd3adacc46ba5d75871903c.
+Final main tsc PASS; scoped ESLint0 errors/5 pre-existing any warnings. After the
+type imports, image-evidence3/LiDE8/VQ image-integrity27/label52 re-run:88 PASS,
+two existing platform skips. Typecheck debt ratchet and exact-SHA hosted image
+proof pending; no runtime source behavior changed by the type repair.
+
+Postflight remains red for existing managed-CLAUDE/package-egress/dirty/protected
+branch acceptance; no accept-protected bypass or restricted whole-suite execution.
+Local amd64 image/Trivy proof still not run: host available1.5GiB. Hosted native
+image must supply separate build/scan/readiness proof; no local Total0 is claimed.
+No deploy/Fly/shared migration/secrets/MVGS edit or merge. Parked J2 untouched.
+
 ## 2026-09-06 owner-directed Docker OS vulnerability WIP
 
 Hosted result for pushed `a60605f1b2e859e2fe9457278483d9674ac94ada`:

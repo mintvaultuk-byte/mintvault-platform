@@ -24,7 +24,7 @@
  * A frame only fails "insufficient variance" when MULTIPLE of these signals
  * agree it's flat — never from brightness alone.
  */
-import sharp from "sharp";
+import sharp, { type Metadata, type OutputInfo } from "sharp";
 
 export type ImageIntegrityCode =
   | "empty_buffer"
@@ -101,7 +101,7 @@ export async function validateImageIntegrity(buf: Buffer | null | undefined, opt
     return { ok: false, code: "unsupported_format", reason: "The generated file is not a supported image format." };
   }
 
-  let meta: sharp.Metadata;
+  let meta: Metadata;
   try {
     meta = await sharp(buf).metadata();
   } catch {
@@ -136,7 +136,7 @@ export async function validateImageIntegrity(buf: Buffer | null | undefined, opt
   }
 
   // ── Bounded-size pixel analysis ──────────────────────────────────────────
-  let raw: { data: Buffer; info: sharp.OutputInfo };
+  let raw: { data: Buffer; info: OutputInfo };
   try {
     raw = await sharp(buf)
       .resize({ width: ANALYSIS_MAX_DIM, height: ANALYSIS_MAX_DIM, fit: "inside" })

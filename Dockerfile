@@ -99,6 +99,10 @@ RUN apt-get update && apt-get upgrade -y --no-install-recommends && apt-get inst
     libvips \
     && rm -rf /var/lib/apt/lists/*
 
+# Patch the base image's bundled npm without changing Node or the build toolchain.
+# npm 12 requires newer Node; this exact npm 11 release supports Node 20.20.2.
+RUN npm install --global npm@11.19.1 --ignore-scripts && npm cache clean --force
+
 WORKDIR /app
 
 # Copy production-only node_modules (including the compiled canvas binary), built app, brand assets,

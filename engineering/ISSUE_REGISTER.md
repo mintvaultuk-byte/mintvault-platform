@@ -1,5 +1,15 @@
 # Engineering issue register
 
+## 2026-09-06 authorised image dependency continuation
+
+REM-SUPPLY-001 IN_PROGRESS: owner authorised remaining Node-package correction.
+Production npm11.19.1, application sharp0.35.4/libvips8.18.6 and transitive
+ip-address10.3.1; unchanged Node digest/apt/Trivy gate. Three type-only import
+compatibility repairs have byte-identical runtime output. Local targeted107 PASS,
+two existing platform skips; final affected/hosted proofs pending. Not FIXED yet.
+No renewed dependency approval required. Local image capacity and restricted
+claim investigation remain separate proof limitations, not waived by approval.
+
 ## 2026-09-06 owner-directed hosted image correction
 
 REM-SUPPLY-001: two-line apt upgrade WIP under unchanged Node20.20.2 digest;
