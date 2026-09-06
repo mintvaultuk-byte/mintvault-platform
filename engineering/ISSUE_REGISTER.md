@@ -1,5 +1,13 @@
 # Engineering issue register
 
+## 2026-09-06 owner-directed hosted image correction
+
+REM-SUPPLY-001: two-line apt upgrade WIP under unchanged Node20.20.2 digest;
+independent diff review and clean-lock supporting46 tests pass. Local amd64/Trivy
+proof remains blocked by host capacity, hosted exact-SHA scan pending; not FIXED.
+No Trivy waiver and no deployment. Claim-ownership request remains restricted/
+UNKNOWN, not presumed test flakiness. See proof ledger for exact limitations.
+
 ## 2026-09-06 job composition foundation
 
 ARCH-COMP-001 remains OPEN overall. Unused J1 registry is locally FIXED_WIP with

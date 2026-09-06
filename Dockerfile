@@ -2,7 +2,7 @@
 FROM node:20.20.2-slim@sha256:2cf067cfed83d5ea958367df9f966191a942351a2df77d6f0193e162b5febfc0 AS builder
 
 # System libs required to compile canvas and sharp native modules
-RUN apt-get update && apt-get install -y \
+RUN apt-get update && apt-get upgrade -y --no-install-recommends && apt-get install -y \
     build-essential \
     libcairo2-dev \
     libpango1.0-dev \
@@ -89,7 +89,7 @@ RUN npm prune --omit=dev && npm cache clean --force
 FROM node:20.20.2-slim@sha256:2cf067cfed83d5ea958367df9f966191a942351a2df77d6f0193e162b5febfc0 AS production
 
 # Runtime libs for canvas (label/PDF generation) and sharp (image processing)
-RUN apt-get update && apt-get install -y \
+RUN apt-get update && apt-get upgrade -y --no-install-recommends && apt-get install -y \
     libcairo2 \
     libpango-1.0-0 \
     libpangocairo-1.0-0 \

@@ -1,5 +1,42 @@
 # Engineering proof ledger
 
+## 2026-09-06 owner-directed Docker OS vulnerability WIP
+
+Baseline391ab5211d03a75b0bf05e7bff6489fda0a131a1; REM-SUPPLY-001 stays OPEN for
+this exact-image proof. Independent Terra confirms exactly two apt-line changes:
+upgrade base packages before installing the unchanged lists, unchanged cleanup,
+Node20.20.2 and digest. Dockerfile SHA256:
+19f3a2e8385621749987b5c99cadc026f3c2726474137ead277c963c5847699a.
+Old/new digest and exact scope are in the existing change-manifest.md current
+Docker section. No workflow/Trivy severity/ignore changes. Unfinished J2 remains
+uncommitted and excluded from this scoped WIP commit/image context.
+
+Clean-lock pinned Node20 supporting tests (not rebuilt-image proof):
+`node node_modules/vitest/vitest.mjs run tests/dockerignore-build-context.test.ts tests/label-font-integrity.test.ts tests/certificate-label-snapshot-authority.test.ts tests/print-artifact-capacity.test.ts`
+Output: four files/46 tests PASS, zero skips (Docker9/fonts11/label19/capacity7).
+
+Local linux/amd64 build/Trivy/native-runtime proof BLOCKED before image build by
+host storage. Read-only `df -h /private/tmp` output: host1.6GiB available (100%
+rounded capacity). Dedicated Docker `system df`: images10.62GB/build cache5.303GB;
+retained schema image2.72GB and production1.27GB. VM `df -h /var/lib/docker` shows
+8.6G virtual free, but that sparse disk is backed by the nearly-full host volume.
+No safe space for an additional amd64 builder/runtime plus Trivy DB was established.
+No build or scan was launched and NO `Total: 0` result is claimed. No cache/image/
+worktree/data deletion. Dedicated VM was restarted for read-only capacity checks
+then gracefully stopped; all data retained, no running containers/volumes created.
+
+Required deferred local commands (NOT executed):
+`docker --context colima-mintvault-remediation-20260905 build --platform linux/amd64 --target production --build-arg GIT_SHA=<exact-candidate> -t mintvault-osfix:<exact-candidate> <isolated-exact-source-context>`
+`trivy image --scanners vuln --vuln-type os,library --severity HIGH,CRITICAL --ignore-unfixed --exit-code 1 --format table --timeout 10m mintvault-osfix:<exact-candidate>`
+Required Trivy version0.70.0 matches pinned hosted action. Exact hosted build/scan
+is next via owner-authorised WIP push; local and hosted claims stay distinct.
+Owner excluded migration application: no local positive readiness schema prepared.
+No redeploy/Fly, shared migration, secret/MVGS change or main merge.
+
+The separately requested claim-ownership investigation/full-suite/stress proof
+remains platform-restricted/UNKNOWN. It was not inspected, run or rerouted through
+another model/tool. No product correctness or test-isolation root cause is claimed.
+
 ## 2026-09-06 unused job registry foundation
 
 [Existing phased plan J1](../.claude/controlled-code-lead/tasks/repository-architecture-recovery-20260904/phased-repair-plan.md)

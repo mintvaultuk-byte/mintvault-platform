@@ -1,5 +1,31 @@
 # Change manifest — architecture recovery Phase 2
 
+## Owner-directed image OS correction — 2026-09-06 (current)
+
+Baseline391ab5211d03a75b0bf05e7bff6489fda0a131a1, same feature branch/draftPR336.
+Owner reprioritised REM-SUPPLY-001 exact image proof ahead of unfinished J2 work.
+Root sole writer; independent Terra Docker-only review. Preflight CRITICAL/HOSTILE.
+Exact source scope: Dockerfile only, adding apt-get upgrade -y --no-install-recommends
+between update and install in both existing stages. Preserve package lists and apt
+cleanup byte-for-byte. No Node change, new package, ignore list or vulnerability
+gate modification. Existing issue/proof ledger and this manifest hold evidence.
+
+Old digest (both stages): sha256:2cf067cfed83d5ea958367df9f966191a942351a2df77d6f0193e162b5febfc0
+New digest (both stages): sha256:2cf067cfed83d5ea958367df9f966191a942351a2df77d6f0193e162b5febfc0
+Tag remains node:20.20.2-slim. Upgrade apt packages, not the pinned Node image.
+
+Local image context is the existing clean-lock workspace containing checkpoint391
+source plus this Dockerfile only; unrelated unfinished J2 source/graph/tests and
+untracked docs/planning/vault-worlds must not enter this commit or proof image.
+Proof target: linux/amd64 production build, exact Trivy0.70.0 os,library HIGH/CRITICAL
+ignore-unfixed scan with exit-code1, unchanged native/label/PDF and boot probes,
+then exact-SHA hosted vulnerability-step green. No claim before observed results.
+No deploy/Fly/shared migration/secrets/MVGS/main merge. Migration application is
+excluded by the new instruction; pre-schema ready503 is permitted but cannot be
+misreported as positive ready200. Existing positive harness needs schema application.
+No claim-lane/full-suite investigation: its platform restriction remains in force.
+Rollback is code-only before deployment; no system/database rollback is performed.
+
 > Historical boundary: this file describes Phase 2 only. The current working tree also
 > contains the later owner-authorized Admin identity/session product repair. Its exact
 > boundary is `admin-session-change-manifest.md` and `admin-session-file-manifest.md`;
