@@ -17,6 +17,8 @@ import {
   VQ_BASELINE_MIGRATION_SET_SHA256,
   VQ_SCHEMA_CATALOG_SQL,
   vqSchemaFingerprint,
+  VQ_RUNTIME_MIGRATIONS,
+  evaluateVqRuntimeEvidence,
 } from "../server/lib/vq-schema-contract";
 import { startPostgres17, type DisposablePostgres17 } from "./helpers/postgres17-cluster";
 
@@ -55,6 +57,117 @@ async function withHistorical(work: (client: pg.Client, url: string) => Promise<
     await owned.stop();
   }
 }
+
+describe("unused pure VQ runtime evidence contract", () => {
+  const fresh = () => ({
+    journalPresent: true,
+    receiptPresent: true,
+    catalogFingerprint: VQ_BASELINE_FINGERPRINT,
+    runtimeAuthorityReady: true,
+    journal: listMigrationFiles(migrationProfile("vault-quest").migrationsDir).map(({ filename, checksum }) => ({
+      filename,
+      checksum,
+      status: "applied",
+      completed: true,
+    })),
+    receipts: [] as Array<Record<string, unknown>>,
+  });
+  const historical = () => ({
+    ...fresh(),
+    journal: fresh().journal.filter((row) => row.filename === VQ_BASELINE_AUTHORITY_FILE),
+    receipts: [
+      {
+        baseline_id: "vq-0000-0015-v1",
+        evidence_kind: "observed_schema-v1",
+        source_sha256: VQ_BASELINE_MIGRATION_SET_SHA256,
+        schema_sha256: VQ_BASELINE_FINGERPRINT,
+        observed: true,
+        observer: "synthetic-migration-owner",
+      },
+    ],
+  });
+
+  it("pins deeply frozen release expectations to every actual shipped SQL checksum", () => {
+    expect(VQ_RUNTIME_MIGRATIONS).toEqual(fresh().journal.map(({ filename, checksum }) => ({ filename, checksum })));
+    expect(Object.isFrozen(VQ_RUNTIME_MIGRATIONS)).toBe(true);
+    expect(VQ_RUNTIME_MIGRATIONS.every(Object.isFrozen)).toBe(true);
+  });
+
+  it("accepts only complete fresh execution or exact observed historical lineage", () => {
+    expect(evaluateVqRuntimeEvidence(fresh())).toEqual({ ready: true, lineage: "fresh" });
+    expect(evaluateVqRuntimeEvidence(historical())).toEqual({ ready: true, lineage: "historical" });
+    expect(evaluateVqRuntimeEvidence({ ...fresh(), journal: fresh().journal.reverse() })).toEqual({
+      ready: true,
+      lineage: "fresh",
+    });
+  });
+
+  it("refuses every missing, changed, duplicate or incomplete execution row", () => {
+    for (let index = 0; index < fresh().journal.length; index++) {
+      for (const mutation of [
+        (rows: ReturnType<typeof fresh>["journal"]) => rows.splice(index, 1),
+        (rows: ReturnType<typeof fresh>["journal"]) => rows.push({ ...rows[index] }),
+        (rows: ReturnType<typeof fresh>["journal"]) => {
+          rows[index].checksum = "0".repeat(64);
+        },
+        (rows: ReturnType<typeof fresh>["journal"]) => {
+          rows[index].status = "applying";
+        },
+        (rows: ReturnType<typeof fresh>["journal"]) => {
+          rows[index].completed = false;
+        },
+        (rows: ReturnType<typeof fresh>["journal"]) => {
+          rows[index].filename = "unknown.sql";
+        },
+      ]) {
+        const evidence = fresh();
+        mutation(evidence.journal);
+        expect(evaluateVqRuntimeEvidence(evidence)).toEqual({ ready: false, lineage: null });
+      }
+    }
+  });
+
+  it("refuses mixed, empty, forged or incomplete historical evidence", () => {
+    const history = historical();
+    for (const evidence of [
+      { ...history, journal: fresh().journal },
+      { ...history, journal: [] },
+      { ...history, receipts: [] },
+      { ...history, receipts: [...history.receipts, ...history.receipts] },
+      ...Object.keys(history.receipts[0]).map((key) => ({
+        ...history,
+        receipts: [{ ...history.receipts[0], [key]: null }],
+      })),
+      { ...history, receipts: [{ ...history.receipts[0], observer: " " }] },
+      { ...history, receipts: [{ ...history.receipts[0], extra: true }] },
+      { ...history, journal: [{ ...history.journal[0], completed: false }] },
+      { ...history, journal: [{ ...history.journal[0], checksum: "0".repeat(64) }] },
+    ])
+      expect(evaluateVqRuntimeEvidence(evidence)).toEqual({ ready: false, lineage: null });
+  });
+
+  it("never treats unavailable or malformed observations as readiness", () => {
+    for (const evidence of [
+      null,
+      {},
+      [],
+      true,
+      ...[
+        "journalPresent",
+        "receiptPresent",
+        "runtimeAuthorityReady",
+        "catalogFingerprint",
+        "journal",
+        "receipts",
+      ].flatMap((key) => [null, undefined, "true", false].map((value) => ({ ...fresh(), [key]: value }))),
+      { ...fresh(), catalogFingerprint: "0".repeat(64) },
+      { ...fresh(), journal: [null] },
+      { ...fresh(), receipts: [null] },
+      { ...fresh(), journal: fresh().journal.map((row) => ({ ...row, completed: "true" })) },
+    ])
+      expect(evaluateVqRuntimeEvidence(evidence)).toEqual({ ready: false, lineage: null });
+  });
+});
 
 describe("honest historical VQ admission", () => {
   const release = () => listMigrationFiles(migrationProfile("vault-quest").migrationsDir);

@@ -2,6 +2,14 @@
 
 ## Current checkpoint and next bounded wave
 
+S3b53e5088a7f1d9869dd8676feb2e15229a27c643f is pushed/draftPR336 exact head verified.
+S3c1 unused evidence foundation: root52/clean52, independentSol28 held-out+17 hashes,
+tests typecheck345 unchanged/lint0 pass; final clean architecture+CI+Docker58/58
+passes after idle test VM graceful stop, closing the resource timeout without any
+test weakening. Clean build3366 PASS; exact hashes and limits in existingVQpacket.
+WIP checkpoint/push then required runtime observation/readiness and durable-only
+fallback waves. Runtime/release/hostile/restricted/hosted CI remain OPEN.
+
 S3b from pushed a0e25b16: production-image VQ shipping/CI proof wired, exact context
 closure and schema-tool NFC timestamp prerequisite repaired after real reproduction.
 Root and independent Terra actual image main86/VQ17/replay0 pass. Clean50

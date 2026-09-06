@@ -2,6 +2,11 @@
 
 ## 2026-09-06 VQ schema authority checkpoint
 
+S3b53e5088a is pushed. S3c1 pure unused evidence foundation independently proven
+with root/clean52 and Sol28 adversarial cases. The old architecture timeout closes
+with clean58/58 after graceful idle-VM stop, no test change. ARCH-SCHEMA-001 stays
+IN_PROGRESS until runtime observation/required readiness/fallback and final gates.
+
 S3b continues ARCH-SCHEMA-001 from pusheda0e25b16: image shipping/guarded CI setup
 and one field's Drizzle timezone authority repaired with reproduced failures.
 Actual local main86/VQ17/replay0 proof passes; clean50/type/build pass. Retain the

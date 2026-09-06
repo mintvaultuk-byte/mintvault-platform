@@ -109,3 +109,109 @@ export function vqSchemaFingerprint(catalog: unknown): string {
   if (!Array.isArray(catalog)) throw new Error("VQ schema catalog must be an array");
   return createHash("sha256").update(canonical(catalog)).digest("hex");
 }
+
+/** Release expectations from shipped SQL, not evidence that a database executed it.
+ * The source-binding regression requires deliberate review of any future inventory change. */
+export const VQ_RUNTIME_MIGRATIONS = Object.freeze(
+  [
+    ["0000_next_mister_fear.sql", "60f8f33892af3ac17bf655abedfa738640fb533e26a85b2dc59678cc9e5a116b"],
+    ["0001_equal_iron_fist.sql", "fe8593c6892a96b1c23eddd301ebbc34a1fb93acd079e4329128bc584625b83a"],
+    ["0002_blushing_overlord.sql", "349768bc6fbec8ec985ed45d63fa61a6089c816612f5fb9c7a09b32b120d9794"],
+    ["0003_character_bible.sql", "1f5dbbfa88a3b6bb1988869c0eefba94663f72d601c4b8e7feba376709a0d06d"],
+    ["0004_reference_pack.sql", "77819cf686d6aae4cdc92a22cc87b50cb40e6fc082142fde71893c0db7e3aa26"],
+    ["0005_identity_score.sql", "6630614731470e46850d62155c6da7e00f47c1be8e40296afec6cd0173eb0479"],
+    ["0006_description_status.sql", "10181eb21e268cba90abe2238a8a52282c897e02a071cbbaaa3bbb6141ba7562"],
+    ["0007_production_studio.sql", "15e584b05face7df6be3f913b6691b14eab5758fa4fa059746f43b2e7ebfa321"],
+    ["0008_export_jobs.sql", "cd4f2bb1667c75865a499fde9c28f8e80e24752e135540c2b6ea0517ba987808"],
+    ["0009_generation_requests.sql", "a17116bf4172b5f10c15a7e4ecf62edb5421d9560802eb65e1348e4a42e2f3f0"],
+    ["0010_artwork_revisions.sql", "7c76b3f2d9d6f77482d348e8b18733d6f2d7255bf4f37fe3ac19db8f0176810d"],
+    ["0011_feature_flags.sql", "25c0bdc2824d3a032c34bbd180a9b43ce37760a8f32f8e5a2d612ec98ac915c1"],
+    ["0012_export_job_payload.sql", "e580371eab1414f52ebf1ba0a0094d5422b60d8671c0d37b35dd8ffd4f18a488"],
+    ["0013_vq_config.sql", "592fa277248dd596915b6ce438bc157be53c742483b4a74a8020a33d0a755ac1"],
+    ["0014_artwork_revision_events.sql", "98ac4d21adb8b6ae59349ae4d4cf1a15c76f70ed48448a4d31bfffa5c83d4244"],
+    ["0015_feature_flags_generation_types.sql", "f5eb672c08938969ad1fc2ded107d3aeb76c6c7176ebad3d29dcdd2b5a79995f"],
+    ["0016_schema_baseline_authority.sql", "fbc741ee9356f7c30f44bee7d4e99ce8f0a1048d5522aa2be7130349abc175c6"],
+  ].map(([filename, checksum]) => Object.freeze({ filename, checksum }))
+);
+
+function evidenceRecord(value: unknown, keys: readonly string[]): value is Record<string, unknown> {
+  return (
+    value !== null &&
+    typeof value === "object" &&
+    !Array.isArray(value) &&
+    Object.keys(value).length === keys.length &&
+    keys.every((key) => Object.hasOwn(value, key))
+  );
+}
+
+/** Pure, unused admission predicate. Observation must come from one real runtime
+ * query, never migration credentials, inferred history, cached success or defaults.
+ * `completed`/`observed` are explicit SQL non-null predicates, not coerced timestamps. */
+export function evaluateVqRuntimeEvidence(evidence: unknown): {
+  readonly ready: boolean;
+  readonly lineage: "fresh" | "historical" | null;
+} {
+  const denied = { ready: false, lineage: null } as const;
+  if (
+    !evidenceRecord(evidence, [
+      "journalPresent",
+      "receiptPresent",
+      "catalogFingerprint",
+      "runtimeAuthorityReady",
+      "journal",
+      "receipts",
+    ]) ||
+    evidence.journalPresent !== true ||
+    evidence.receiptPresent !== true ||
+    evidence.catalogFingerprint !== VQ_BASELINE_FINGERPRINT ||
+    evidence.runtimeAuthorityReady !== true ||
+    !Array.isArray(evidence.journal) ||
+    !Array.isArray(evidence.receipts)
+  )
+    return denied;
+
+  const journal = new Map<string, string>();
+  for (const row of evidence.journal) {
+    if (
+      !evidenceRecord(row, ["filename", "checksum", "status", "completed"]) ||
+      typeof row.filename !== "string" ||
+      typeof row.checksum !== "string" ||
+      row.status !== "applied" ||
+      row.completed !== true ||
+      journal.has(row.filename)
+    )
+      return denied;
+    journal.set(row.filename, row.checksum);
+  }
+
+  if (evidence.receipts.length === 0) {
+    return journal.size === VQ_RUNTIME_MIGRATIONS.length &&
+      VQ_RUNTIME_MIGRATIONS.every((file) => journal.get(file.filename) === file.checksum)
+      ? { ready: true, lineage: "fresh" }
+      : denied;
+  }
+  if (evidence.receipts.length !== 1) return denied;
+  const receipt = evidence.receipts[0];
+  if (
+    !evidenceRecord(receipt, [
+      "baseline_id",
+      "evidence_kind",
+      "source_sha256",
+      "schema_sha256",
+      "observed",
+      "observer",
+    ]) ||
+    receipt.baseline_id !== VQ_BASELINE_ID ||
+    receipt.evidence_kind !== "observed_schema-v1" ||
+    receipt.source_sha256 !== VQ_BASELINE_MIGRATION_SET_SHA256 ||
+    receipt.schema_sha256 !== VQ_BASELINE_FINGERPRINT ||
+    receipt.observed !== true ||
+    typeof receipt.observer !== "string" ||
+    receipt.observer.trim() === ""
+  )
+    return denied;
+  const forward = VQ_RUNTIME_MIGRATIONS.filter((file) => Number(file.filename.slice(0, 4)) >= 16);
+  return journal.size === forward.length && forward.every((file) => journal.get(file.filename) === file.checksum)
+    ? { ready: true, lineage: "historical" }
+    : denied;
+}

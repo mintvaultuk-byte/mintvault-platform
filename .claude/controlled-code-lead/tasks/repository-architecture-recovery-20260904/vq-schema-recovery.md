@@ -2,6 +2,56 @@
 
 ## Current position (2026-09-06)
 
+S3b checkpoint53e5088a preserves independent actual image proof and its exact limits.
+Continue S3c1 below; do not rerun the completed image inventory or restart discovery.
+
+## S3c1 unused runtime-evidence foundation manifest
+
+Root alone edits server/lib/vq-schema-contract.ts and the existing
+tests/vq-historical-baseline.test.ts, plus this packet/graph/task/issue/proof records.
+No new source file, dependency, SQL, runner behavior, readiness activation, config
+manifest, role/permission change or fallback change. This foundation is unused.
+
+Add a deeply frozen current17-file filename/checksum evidence inventory copied from
+actual shipped immutable SQL and checked byte-for-byte by the existing test. It is
+a release expectation, never evidence of DB execution; any inventory/catalog change
+invalidates it and requires explicit review. Pure evaluator consumes one observed
+snapshot: both metadata relations present, journal/receipt rows, current catalog
+fingerprint and exact boolean runtime-authority verdict. Accept fresh17 executed
+with zero receipts OR one exact observed historical receipt with only0016 executed.
+Require every execution completed/applied and exact checksum; reject malformed,
+missing, duplicate, unknown, mixed, extra or partial evidence. No filesystem/DB
+access, privileged runner import, generated history or optimistic default in helper.
+Observation will be wired to real bounded runtime SQL in the next separate wave.
+
+Independent Sol attacks each branch and source/immutability binding; root runs
+existing historical/fresh regression suites on helper-owned PG and clean lock tree.
+Rollback is removal/revert of unused code only. Wave-end WIP commit/non-force push
+then S3c2 required readiness, then S3c3 durable-only exports. Keep all final vetoes.
+After completed image proofs, read-only Docker ps confirms the dedicated profile
+is idle. Normal graceful stop of mintvault-remediation-20260905 is allowed to
+release its4GiB RAM during native tests; preserve all disks/images/cache/state.
+No force stop, deletion, prune, other profile or shared service action.
+
+S3c1 proof: root52/52 and clean exact-lock52/52 historical/fresh/evidence tests,
+zero skips; independent Sol28/28 held-out pure attacks and separate17/17 filesystem
+hash/deep-freeze verification. Existing fingerprint/constants/catalog SQL unchanged.
+Typecheck tests345 existing diagnostics unchanged, scoped lint0/0, migration
+references127 unchanged, architecture8349 unchanged. Clean production build3366
+modules PASS; bundled runner238.6KiB includes the unused frozen expectation data.
+After graceful stop of the verified-idle4GiB VM, final clean architecture30+CI19+
+Docker9=58/58 PASS, zero skips; snapshot14.4s under unchanged30s limit. This closes
+the earlier local aggregate timeout gap, without altering test/timeouts or waivers.
+No old failed run is relabelled. Postflight/hosted/restricted/final Opus vetoes stay.
+
+Final source hashes:
+- server/lib/vq-schema-contract.ts:8e5ba7add886e3a6fa4b34d6ac82af6b7a20d55ba263d8ac3a895ef848f0f25d
+- tests/vq-historical-baseline.test.ts:0910e71a44293541ca812e62054a0b96984a75d583e7c1e81f19206901105cf6
+Exact53e5088a CI34020125580/governance34020125578/34020123788 were in progress
+at last observation, not green. No dependency on a new owner acknowledgement.
+
+## S3b retained execution record
+
 Resumed after owner continuation with4.8GiB free; HEAD remains pushed
 a0e25b16d412de12fe65be0f4417641308eb831b and S3b WIP preserved. Disk exhaustion
 previously prevented the checkpoint and the independently identified topology fix.

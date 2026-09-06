@@ -1,5 +1,16 @@
 # Engineering proof ledger
 
+## 2026-09-06 VQ unused runtime-evidence foundation
+
+[Existing VQ packet](../.claude/controlled-code-lead/tasks/repository-architecture-recovery-20260904/vq-schema-recovery.md)
+binds pushed53e5088a plus two exact source hashes. Root52/clean52 and independent
+Sol28 held-out attacks/17 exact source hashes pass. Frozen expectations do not
+claim execution; pure predicate admits only full fresh or exact attested history
+with explicit catalog/authority evidence. No runtime wiring/role/SQL change.
+Tests typecheck345 debt unchanged/lint0; clean architecture/CI/Docker58/58 pass
+after freeing verified-idle VM RAM, resolving the old timeout without weakening
+its30s limit. Clean production build3366 PASS. All whole-release/restricted/Opus/hosted vetoes retained.
+
 ## 2026-09-06 VQ production-image shipping continuation
 
 [Existing VQ packet](../.claude/controlled-code-lead/tasks/repository-architecture-recovery-20260904/vq-schema-recovery.md)
