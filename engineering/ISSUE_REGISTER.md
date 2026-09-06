@@ -1,5 +1,13 @@
 # Engineering issue register
 
+## 2026-09-06 job composition foundation
+
+ARCH-COMP-001 remains OPEN overall. Unused J1 registry is locally FIXED_WIP with
+independent Terra29 plus held-out drain/refusal, clean92 and unchanged type debt.
+New-helper synchronous-shutdown timer leak reproduced and fixed before use.
+No existing job has moved; broad server recovery, runtime activation and candidate
+proof remain OPEN. See phased plan J1 for exact manifest, hashes and next J2 gate.
+
 ## 2026-09-06 VQ schema authority checkpoint
 
 S3c3 from49c10d2e closes the in-scope memory fallback locally: independent

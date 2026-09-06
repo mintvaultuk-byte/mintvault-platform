@@ -4,8 +4,8 @@
   "contract": {
     "compilerVersion": "5.6.3",
     "configSha256": "07731a08e9e7bae444103835038ea9852ffef04e8688244e33fcaabbaa10ad7a",
-    "trackedFileCount": 820,
-    "trackedFilesSha256": "8fcbacafa6061ec16c763bab5106267e0fadbed0dfa586d79100c11d279f3abc",
+    "trackedFileCount": 821,
+    "trackedFilesSha256": "c49eb51e70e58601355919f7ca30d4c67bb9deb54a30664c0fdd29b67e96b6ed",
     "noCheckFileCount": 5,
     "noCheckFiles": [
       "client/src/pages/home-v2-integrated.tsx",

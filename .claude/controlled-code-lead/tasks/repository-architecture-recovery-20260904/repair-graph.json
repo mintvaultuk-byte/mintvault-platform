@@ -367,7 +367,7 @@
       "kind": "OWNER_GATE",
       "title": "Authorise behavior-preserving extraction across protected server boundaries",
       "severity": "NONE",
-      "status": "OWNER_DECISION",
+      "status": "PROVEN",
       "agent_mode": "EXTERNAL_OWNER",
       "agent_id": "repository-owner",
       "workspace": "external",
@@ -377,7 +377,13 @@
       "proof_required": [
         "Approve exact bounded-context extraction manifest covering protected route/storage/auth-adjacent files with no contract change"
       ],
-      "evidence": [],
+      "evidence": [
+        {
+          "ref": "owner-approval-record.md blanket approval; phased-repair-plan.md J1 exact unused foundation manifest; no protected business behavior/external action authorised beyond that record.",
+          "sha": "607c3518d36ca234ad83edfb914204136ad9cebd",
+          "observer": "repository-owner; codex-lead adjudication"
+        }
+      ],
       "invalidated_by": ["Extraction manifest", "protected boundary", "owner decision change"],
       "vetoes_release": true
     },
@@ -2177,7 +2183,7 @@
       "kind": "REPAIR",
       "title": "Unify shipped Vault Quest migration and component readiness authority",
       "severity": "HIGH",
-      "status": "IN_PROGRESS",
+      "status": "FIXED",
       "agent_mode": "LEAD",
       "agent_id": "codex-lead",
       "workspace": "shared",
@@ -2274,6 +2280,60 @@
       "vetoes_release": false
     },
     {
+      "id": "RECOVERY-JOB-FOUNDATION",
+      "phase": 2,
+      "kind": "OWNER_GATE",
+      "title": "Approve unused job registry foundation and code-only rollback",
+      "severity": "NONE",
+      "status": "PROVEN",
+      "agent_mode": "LEAD",
+      "agent_id": "codex-lead",
+      "workspace": "shared",
+      "depends_on": ["AUTH-BASELINE", "OWNER-SERVER-BOUNDARIES"],
+      "addresses": [],
+      "write_scope": [],
+      "proof_required": ["Unused helper only; no runtime caller, schedule, route or provider change; code-only rollback"],
+      "evidence": [{"ref": "phased-repair-plan.md active J1 exact manifest and recovery; independent Sol source/graph planning agrees unused foundation only, broader recovery remains OPEN", "sha": "607c3518d36ca234ad83edfb914204136ad9cebd", "observer": "sol-j1-planner; codex-lead adjudication"}],
+      "invalidated_by": ["Registry scope", "runtime caller", "recovery procedure"],
+      "vetoes_release": true
+    },
+    {
+      "id": "REPAIR-JOB-REGISTRY-FOUNDATION",
+      "phase": 4,
+      "kind": "REPAIR",
+      "title": "Add unused declarative job registry over existing process lifecycle",
+      "severity": "MEDIUM",
+      "status": "FIXED",
+      "agent_mode": "LEAD",
+      "agent_id": "codex-lead",
+      "workspace": "shared",
+      "depends_on": ["ARCH-COMP-001", "RECOVERY-JOB-FOUNDATION", "REPAIR-CI-TOPOLOGY", "REPAIR-SCHEMA-AUTHORITY"],
+      "addresses": ["ARCH-COMP-001"],
+      "write_scope": ["server/lib/job-registry.ts", "tests/job-composition.test.ts", "tests/architecture-authority.test.ts", "scripts/architecture/authority-policy.json", "scripts/architecture/generated/architecture-authority.json", "scripts/ci/typecheck-baselines/tests.json", "scripts/ci/typecheck-baselines/architecture.json"],
+      "proof_required": ["Whole-batch prevalidation, duplicate refusal, frozen timing, cadence/order/overlap parity, tracked drain, shutdown cancellation and error containment"],
+      "evidence": [{"ref": "phased-repair-plan.md J1 exact hashes: unused registry, independent Terra29 and held-out lifecycle, clean92/build/type/lint; shutdown-during-install red/green fixed; no caller or final proof", "sha": "607c3518d36ca234ad83edfb914204136ad9cebd", "observer": "terra-j1-independent; codex-lead"}],
+      "invalidated_by": ["Registry", "lifecycle", "runtime caller", "timing"],
+      "vetoes_release": false
+    },
+    {
+      "id": "PROOF-JOB-REGISTRY-FOUNDATION",
+      "phase": 6,
+      "kind": "PROOF",
+      "title": "Independently verify declarative job registry semantics",
+      "severity": "MEDIUM",
+      "status": "IN_PROGRESS",
+      "agent_mode": "READ_ONLY",
+      "agent_id": "job-registry-verifier",
+      "workspace": "read_only",
+      "depends_on": ["REPAIR-JOB-REGISTRY-FOUNDATION"],
+      "addresses": ["ARCH-COMP-001"],
+      "write_scope": [],
+      "proof_required": ["Actual existing lifecycle, fake-clock scheduling and held-out refusal/drain cases; unused-source and ownership proof"],
+      "evidence": [{"ref": "phased-repair-plan.md J1 exact source hashes and independent held-out lifecycle report; candidate-bound proof remains OPEN", "sha": "607c3518d36ca234ad83edfb914204136ad9cebd", "observer": "terra-j1-independent"}],
+      "invalidated_by": ["Candidate SHA", "registry", "lifecycle", "runtime caller"],
+      "vetoes_release": true
+    },
+    {
       "id": "REPAIR-JOB-FOUNDATION",
       "phase": 4,
       "kind": "REPAIR",
@@ -2283,13 +2343,15 @@
       "agent_mode": "LEAD",
       "agent_id": "codex-lead",
       "workspace": "shared",
-      "depends_on": ["ARCH-COMP-001", "OWNER-SERVER-BOUNDARIES", "RECOVERY-SERVER", "REPAIR-CI-TOPOLOGY"],
+      "depends_on": ["ARCH-COMP-001", "OWNER-SERVER-BOUNDARIES", "RECOVERY-SERVER", "REPAIR-CI-TOPOLOGY", "REPAIR-JOB-REGISTRY-FOUNDATION"],
       "addresses": ["ARCH-COMP-001"],
       "write_scope": [
         "server/index.ts",
         "server/lib/job-registry.ts",
         "server/routes.ts",
-        "tests/job-composition.test.ts"
+        "tests/job-composition.test.ts",
+        "scripts/architecture/authority-policy.json",
+        "scripts/architecture/generated/architecture-authority.json"
       ],
       "proof_required": [
         "Register existing jobs declaratively; move print reconciliation from route composition; lifecycle-track Scanner cleanup/capture expiry; preserve schedule/order/shutdown behavior"
@@ -3198,7 +3260,7 @@
       "agent_mode": "LEAD",
       "agent_id": "codex-lead",
       "workspace": "shared",
-      "depends_on": ["ROLLBACK-CANDIDATE"],
+      "depends_on": ["ROLLBACK-CANDIDATE", "PROOF-JOB-REGISTRY-FOUNDATION"],
       "addresses": [],
       "write_scope": [],
       "proof_required": [

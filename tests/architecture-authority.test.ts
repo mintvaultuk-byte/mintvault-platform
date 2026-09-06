@@ -28,6 +28,34 @@ async function architectureModule() {
   return import("../scripts/architecture/check-architecture.mjs");
 }
 
+describe("job registry foundation ownership", () => {
+  it("owns only the new registry and refuses its timer authority when that rule is removed", async () => {
+    const { buildArchitectureSnapshot } = await architectureModule();
+    const root = goldenWorkspace();
+    const policy = structuredClone(miniaturePolicy);
+    const actual = JSON.parse(readFileSync("scripts/architecture/authority-policy.json", "utf8"));
+    const rule = actual.ownerRules.find((entry: { prefix: string }) => entry.prefix === "server/lib/job-registry.ts");
+    expect(rule).toEqual({ prefix: "server/lib/job-registry.ts", owner: "core-platform" });
+    write(root, "server/lib/job-registry.ts", readFileSync("server/lib/job-registry.ts", "utf8"));
+    policy.ownerRules.push(rule);
+    const owned = buildArchitectureSnapshot(root, policy);
+    const records = owned.records.filter((entry) => entry.source.startsWith("server/lib/job-registry.ts:"));
+    expect(records.filter((entry) => entry.category === "job")).toHaveLength(1);
+    expect(records.filter((entry) => entry.category === "timer")).toHaveLength(1);
+    expect(records.every((entry) => entry.owner === "core-platform")).toBe(true);
+    policy.ownerRules.pop();
+    const refused = buildArchitectureSnapshot(root, policy);
+    expect(refused.violations).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          code: "UNOWNED_TOPOLOGY",
+          target: expect.stringContaining("server/lib/job-registry.ts"),
+        }),
+      ])
+    );
+  });
+});
+
 describe("architecture Git inventory parity", () => {
   it("excludes ignored local sources while retaining non-ignored new sources", async () => {
     const { buildArchitectureSnapshot } = await architectureModule();

@@ -2,6 +2,15 @@
 
 ## Current checkpoint and next bounded wave
 
+Current J1 unused job registry from pushed607c3518d36ca234ad83edfb914204136ad9cebd
+is locally independently FIXED_WIP: Terra29 plus held-out real lifecycle, clean92,
+build/tsc/lint and unchanged type debt pass. Exact hashes/limits and J2 contract in
+phased-repair-plan.md active J1 section; no extra recovery directory. WIP commit/
+push then J2 bounded source/schedule characterisation and recovery before moving
+print or tracking Scanner callbacks. Broader RECOVERY-SERVER remains OPEN.
+Existing idle-resume heartbeat restored ACTIVE every minute; active work continues
+without waiting for it. Preserve sole-writer and restricted/security/Opus vetoes.
+
 S3c3 from pushed49c10d2eb817d2382905e34492ead72f23d9a5fc is FIXED_WIP:
 durable-only exports, typed503 without render/upload on unavailable authority,
 preserved durable HTTP/download semantics and no legacy ops authority. Root and

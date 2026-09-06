@@ -3,7 +3,7 @@
   "counts": {
     "client-route": 173,
     "component": 9,
-    "job": 36,
+    "job": 37,
     "layer-exception": 4,
     "migration": 170,
     "migration-lineage": 6,
@@ -18,7 +18,7 @@
     "session-principal": 587,
     "table": 361,
     "table-access": 3271,
-    "timer": 96
+    "timer": 97
   },
   "records": [
     {
@@ -7245,6 +7245,17 @@
       "key": "job|server/jobs/weekly-reel.ts|trackInterval:tick#0",
       "source": "server/jobs/weekly-reel.ts:516",
       "owner": "runtime-jobs-platform"
+    },
+    {
+      "category": "job",
+      "id": "trackInterval:tick",
+      "installer": "trackInterval",
+      "cadence": "job.everyMs",
+      "lifecycle": "tracked",
+      "lock": "unclassified",
+      "key": "job|server/lib/job-registry.ts|trackInterval:tick#0",
+      "source": "server/lib/job-registry.ts:66",
+      "owner": "core-platform"
     },
     {
       "category": "job",
@@ -160829,6 +160840,16 @@
       "key": "timer|server/jobs/weekly-reel.ts|trackTimeout:() => { const tick = async () => { if (isShuttingDown()) return; const settings = await getAllSettings(); if (settings.pipeline_paused) { // Silent on the tick — pause is expect...#0",
       "source": "server/jobs/weekly-reel.ts:481",
       "owner": "runtime-jobs-platform"
+    },
+    {
+      "category": "timer",
+      "id": "trackTimeout:tick",
+      "timerKind": "retry-or-sleep",
+      "delay": "job.delayMs",
+      "lifecycle": "tracked",
+      "key": "timer|server/lib/job-registry.ts|trackTimeout:tick#0",
+      "source": "server/lib/job-registry.ts:65",
+      "owner": "core-platform"
     },
     {
       "category": "timer",

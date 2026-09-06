@@ -1,5 +1,82 @@
 # Phased multi-agent graph-loop architecture recovery plan
 
+## Active runtime foundation slice J1 — 2026-09-06
+
+J1 outcome: locally independently FIXED_WIP; checkpoint/push then J2 bounded
+callsite characterisation/recovery before activation. No new runtime caller.
+Independent Terra29/29 plus held-out in-memory actual lifecycle proof passes:
+atomic duplicate refusal, synchronous shutdown, reentrant duplicate installation,
+overlapping admitted work, refusal after shutdown and drain before pool closure.
+Root31/31 (registry29 + existing estimate lifecycle2). A new regression initially
+failed28/29 because immediate shutdown still armed two timers; loop-entry and
+pre-interval shutdown checks fixed it. This is an unused-helper development defect,
+not a deployed incident. Callback/reporter failures settle the original drain count;
+reporter failure logs only a generic message and validated job name.
+
+Final clean-lock Vitest4.1.7 registry29/lifecycle2/architecture33/CI19/Docker-context9
+=92/92, zero skips. Actual miniature owner-rule removal produces UNOWNED_TOPOLOGY;
+no legacy-authority waiver. Snapshot adds one helper timer and job record, not a
+runtime activation. Scoped lint0/0 and main tsc PASS. Tests ratchet344 existing
+diagnostics; architecture3, neither increased. Both initially rejected the two
+new file inventories; only count/hash fields updated, no fingerprints/config or
+nocheck allowance. Initial scrubbed PATH lacked npx; corrected pinned Node20 PATH
+then ran the real compiler. Clean production build3366 modules/runner245.6KiB PASS;
+no exact-candidate image claim (clean copy has no Git HEAD; WIP source only).
+
+Source SHA256 at baseline607c3518 plus J1 WIP:
+- server/lib/job-registry.ts:5a69e34ae723e881d811bf42a9f72c7b82c18f5bb453e0f89b6923298402823c
+- tests/job-composition.test.ts:43a4953a42fa30e8302bae327f9dfde7309f0382dfc6fabe80ffdedab48730c4
+- tests/architecture-authority.test.ts:c1c0c1d29a2cf5eb58db212b9f055f23406035e048f1767c88737507975e8f18
+- scripts/architecture/authority-policy.json:492dd1d825abe70624c18fe7e807eef25bae407b808c17f7d4a62f00d9ac75a5
+- scripts/architecture/generated/architecture-authority.json:bc01a1ac6b29d7b0c577d6cd777567949b1968d80a47778a84ba564c1a1ff3bf
+
+Graph104 structurally valid/NOT READY, candidate null; broad RECOVERY-SERVER still
+OPEN and J1 proof remains candidate-pending. Ordinary postflight stays red for
+existing managed-CLAUDE/package-egress/dirty/protected-branch acceptance; no bypass.
+Restricted HY-SECURITY UNKNOWN and final Opus/hosted/external gates remain open.
+Existing heartbeat restored ACTIVE at one-minute idle-resume cadence; no second
+writer, no imposed waiting between active waves. No external product side effects.
+
+Baseline607c3518d36ca234ad83edfb914204136ad9cebd is pushed, draftPR336 exact
+head verified; CI still in progress at observation. S3c3 closes durable fallback
+locally, not final schema/candidate proof. Continue ARCH-COMP-001 through existing
+REPAIR-JOB-FOUNDATION. Root sole writer; Sol read-only planning, Terra independent
+behavioral proof. Preflight CRITICAL/HOSTILE. Restricted HY-SECURITY stays UNKNOWN.
+
+J1 exact manifest: new server/lib/job-registry.ts and tests/job-composition.test.ts,
+exact ownership in scripts/architecture/authority-policy.json and its generated
+snapshot only if required; tests/architecture-authority.test.ts exact ownership
+refusal miniature; this existing plan/graph/task/issue/proof records.
+Inventory-only manifest extension: scripts/ci/typecheck-baselines/tests.json and
+architecture.json may update file count/hash for the two approved new source/test
+files only; never add diagnostic fingerprints, nochecks or compiler relaxations.
+No new directory/package, index/routes caller, scheduler migration, SQL/provider,
+credential access, business callback or schedule change in this foundation slice.
+It is intentionally unused until the next independently characterised wiring wave.
+
+The registry composes the existing lifecycle API, not a second drain counter or
+timer owner. Explicit named definitions declare immediate/delayed/no startup and
+optional independent interval. Validate the entire batch before effects, reject
+duplicate names including earlier installations, snapshot timing/callback fields,
+preserve overlap behavior, contain/report errors and refuse work after shutdown.
+All started work remains counted through settlement and every timer is cancelled
+by the existing shutdown path. No advisory locks are invented or removed.
+Proof: real lifecycle plus fake clock, startup/cadence/order and overlap parity,
+held pending jobs during shutdown, rejected/synchronous work, duplicate/invalid
+manifest atomic refusal, post-install input drift, shutdown/no later work, repeat
+installation refusal; independent held-out cases and clean-lock affected gates.
+
+RECOVERY-SERVER remains OPEN. A separate RECOVERY-JOB-FOUNDATION receipt scopes
+this unused J1 foundation: rollback is removal of unused code; there is no route
+order, actor/capability, import-cycle cut or dead code change to recover. Every later
+extraction requires its own characterisation/manifest before implementation. Owner
+approval stands; no broad server-recovery or runtime-drain completion claim is implied.
+J2 must capture actual existing registration order, intervals, startup delays,
+locks, feature checks and business callback bodies before moving any job. In
+particular print reconciliation currently starts in registerRoutes; Scanner staging
+cleanup/capture expiry currently lack active-job counting. No physical/provider
+action is permitted during their proof. Final Opus/CI/candidate vetoes remain open.
+
 ## Current entry point — senior remediation plan, 2026-09-05
 
 This section is the current **execution sequencing and hygiene addendum**, not another

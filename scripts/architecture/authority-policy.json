@@ -80,6 +80,7 @@
   ],
   "scanRoots": ["server", "client/src", "shared", "scripts", "migrations", "migrations-vq", "config/components"],
   "ownerRules": [
+    { "prefix": "server/lib/job-registry.ts", "owner": "core-platform" },
     { "prefix": "server/lib/vq-schema-contract.ts", "owner": "vault-quest-platform" },
     { "prefix": "scripts/db/vq-schema-recovery.ts", "owner": "vault-quest-platform" },
     { "prefix": "scripts/ci/prepare-vq-test-db.mjs", "owner": "engineering-test-platform" },

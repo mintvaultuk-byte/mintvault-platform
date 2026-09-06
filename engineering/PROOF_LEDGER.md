@@ -1,5 +1,14 @@
 # Engineering proof ledger
 
+## 2026-09-06 unused job registry foundation
+
+[Existing phased plan J1](../.claude/controlled-code-lead/tasks/repository-architecture-recovery-20260904/phased-repair-plan.md)
+binds607c3518 plus exact hashes. Terra29/29 and held-out actual lifecycle checks;
+clean-lock92/92, build, main tsc, scoped lint pass. Shutdown-during-install RED28/29
+fixed before activation. Tests344/architecture3 type diagnostics unchanged; only
+new file inventory count/hash updated. No app caller, DB/provider/migration/action.
+Graph104 valid/not ready; broad recovery and candidate/Opus/restricted gates OPEN.
+
 ## 2026-09-06 VQ durable-only export checkpoint
 
 [Existing VQ packet](../.claude/controlled-code-lead/tasks/repository-architecture-recovery-20260904/vq-schema-recovery.md)
