@@ -2,6 +2,12 @@
 
 ## Current checkpoint and next bounded wave
 
+S3c2 from pushed e77ede827d68a824db105943c4490fdf185684fa locally independently
+proven: required read-only VQ observation, main SQL unchanged, clean79+60/build,
+PG16/17 actual lineages, two delegation gaps reproduced/repaired. Exact hashes and
+proof limits are in existing VQ packet. Checkpoint/push then S3c3 durable-only
+exports with no owner pause. Whole-release/hosted/restricted/Opus vetoes stay OPEN.
+
 S3b53e5088a7f1d9869dd8676feb2e15229a27c643f is pushed/draftPR336 exact head verified.
 S3c1 unused evidence foundation: root52/clean52, independentSol28 held-out+17 hashes,
 tests typecheck345 unchanged/lint0 pass; final clean architecture+CI+Docker58/58

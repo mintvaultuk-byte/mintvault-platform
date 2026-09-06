@@ -1,5 +1,18 @@
 # Engineering proof ledger
 
+## 2026-09-06 VQ required runtime observation
+
+[Existing VQ packet](../.claude/controlled-code-lead/tasks/repository-architecture-recovery-20260904/vq-schema-recovery.md)
+binds e77ede827d68a824db105943c4490fdf185684fa plus exact source hashes. Required
+VQ observation uses runtime authority only; fresh/historical lineage, catalog and
+ACL drift fail closed. Two independently identified grant-delegation false greens
+reproduced and repaired. Root52/clean79; independent Sol12+2 targeted; clean PG16
+observation3 targeted; clean architecture/CI/Docker60 and build3366 pass. Unit
+observer is mocked only for orchestration; real PG proves unmocked VQ chain and
+global composition with main SQL alone stubbed. Type debt344, no baseline waiver.
+Terra3 focused+2 held-out import cases pass. Main SQL and legacy ownership unchanged.
+Graph valid101/not ready; postflight/hosted/restricted/Opus and fallback vetoes OPEN.
+
 ## 2026-09-06 VQ unused runtime-evidence foundation
 
 [Existing VQ packet](../.claude/controlled-code-lead/tasks/repository-architecture-recovery-20260904/vq-schema-recovery.md)

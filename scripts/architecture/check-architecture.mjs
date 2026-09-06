@@ -737,6 +737,10 @@ function resolvedSql(node, model, context, models, bindings = new Map(), seen = 
     if (typeof bound === "string") return bound;
     const initializer = model.constants.get(`${context}:${node.text}`) ?? model.constants.get(node.text);
     if (initializer) return resolvedSql(initializer, model, context, models, bindings, nextSeen);
+    const imported = importBindingFor(model, node.text, node);
+    const target = imported?.target ? models.get(imported.target) : null;
+    if (target)
+      return resolvedSql(target.constants.get(imported.imported), target, "<module>", models, new Map(), nextSeen);
   }
   return null;
 }

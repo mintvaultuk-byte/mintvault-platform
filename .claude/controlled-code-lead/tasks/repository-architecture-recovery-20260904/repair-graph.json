@@ -2184,6 +2184,9 @@
       "depends_on": ["ARCH-SCHEMA-001", "OWNER-VQ-SCHEMA", "RECOVERY-VQ-SCHEMA", "REPAIR-CI-TOPOLOGY"],
       "addresses": ["ARCH-SCHEMA-001"],
       "write_scope": [
+        "server/readiness.ts",
+        "config/components/index.ts",
+        "tests/release-readiness.test.ts",
         "shared/schema.ts",
         "tests/nfc-physical-lock-integrity.test.ts",
         ".dockerignore",
@@ -2222,6 +2225,11 @@
         "Checksummed advisory-locked runner, shipped inventory, owner-selected required/optional component manifest consumed by readiness, fresh and historic convergence, no fleet-unsafe fallback"
       ],
       "evidence": [
+        {
+          "ref": "vq-schema-recovery.md: S3c2 exact hashes; Sol actual PG17 fresh/history and orchestration, clean79+60/build; grant-option/admin-option false greens repaired; fallback/final vetoes OPEN.",
+          "sha": "e77ede827d68a824db105943c4490fdf185684fa",
+          "observer": "sol-s3c2-independent"
+        },
         {
           "ref": "vq-schema-recovery.md: S1 exact manifest; schema/readiness/fallback and final proof remain OPEN",
           "sha": "c712e4647bf8cd01732370e10e0282e8e454ded1",

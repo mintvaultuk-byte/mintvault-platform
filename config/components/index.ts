@@ -6,6 +6,7 @@ import { OBJECT_WRITE_COMPONENT } from "./object-write";
 import { PARTNER_OPERATIONS_COMPONENT } from "./partner-operations";
 import { PRINT_WORKFLOW_COMPONENT } from "./print-workflow";
 import { SCANNER_INGEST_COMPONENT } from "./scanner-ingest";
+import { VAULT_QUEST_COMPONENT } from "./vault-quest";
 
 export {
   COMMERCE_COMPONENT,
@@ -16,6 +17,7 @@ export {
   PARTNER_OPERATIONS_COMPONENT,
   PRINT_WORKFLOW_COMPONENT,
   SCANNER_INGEST_COMPONENT,
+  VAULT_QUEST_COMPONENT,
 };
 
 /** Canonical build-time index. The architecture gate proves it equals every manifest file on disk. */
@@ -28,4 +30,5 @@ export const COMPONENT_READINESS_MANIFESTS = Object.freeze([
   PARTNER_OPERATIONS_COMPONENT,
   PRINT_WORKFLOW_COMPONENT,
   SCANNER_INGEST_COMPONENT,
+  VAULT_QUEST_COMPONENT,
 ]);

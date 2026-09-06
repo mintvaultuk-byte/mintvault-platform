@@ -19,8 +19,10 @@ import {
   vqSchemaFingerprint,
   VQ_RUNTIME_MIGRATIONS,
   evaluateVqRuntimeEvidence,
+  VQ_RUNTIME_EVIDENCE_SQL,
 } from "../server/lib/vq-schema-contract";
 import { startPostgres17, type DisposablePostgres17 } from "./helpers/postgres17-cluster";
+import { checkVqRuntimeReadiness, checkReleaseReadiness, RELEASE_READINESS_SQL } from "../server/readiness";
 
 let cluster: DisposablePostgres17;
 let db: pg.Client;
@@ -58,7 +60,7 @@ async function withHistorical(work: (client: pg.Client, url: string) => Promise<
   }
 }
 
-describe("unused pure VQ runtime evidence contract", () => {
+describe("VQ runtime evidence contract", () => {
   const fresh = () => ({
     journalPresent: true,
     receiptPresent: true,
@@ -167,6 +169,168 @@ describe("unused pure VQ runtime evidence contract", () => {
     ])
       expect(evaluateVqRuntimeEvidence(evidence)).toEqual({ ready: false, lineage: null });
   });
+});
+
+describe("read-only runtime VQ observation", () => {
+  it("refuses malformed or unavailable query results without leaking details", async () => {
+    for (const rows of [[], [null], [true], [{ catalog: null }], [{ catalog: [] }, { catalog: [] }]]) {
+      expect(await checkVqRuntimeReadiness({ query: async () => ({ rows }) }, true)).toEqual({
+        ready: false,
+        queryFailed: true,
+      });
+    }
+    expect(
+      await checkVqRuntimeReadiness(
+        {
+          query: async () => {
+            throw new Error("secret database detail");
+          },
+        },
+        true
+      )
+    ).toEqual({ ready: false, queryFailed: true });
+  });
+  it.each([false, true])(
+    "observes actual low-privilege lineage (historical=%s)",
+    async (historical) => {
+      const owned = await startPostgres17("vq-runtime");
+      const owner = new pg.Client({ connectionString: owned.url });
+      await owner.connect();
+      let runtime: pg.Client | undefined;
+      try {
+        await owner.query(readFileSync("migrations/0121_main_runtime_role_authority.sql", "utf8"));
+        if (historical) for (const file of files) await owner.query(file.sql);
+        await applyMigrations(owner, listMigrationFiles(migrationProfile("vault-quest").migrationsDir), {
+          estate: "vault-quest",
+          historicalBaseline: historical,
+        });
+        await owner.query("CREATE ROLE vq_readiness_test LOGIN INHERIT; GRANT mintvault_app TO vq_readiness_test");
+        const url = new URL(owned.url);
+        url.username = "vq_readiness_test";
+        runtime = new pg.Client({ connectionString: url.toString() });
+        await runtime.connect();
+        const readiness = (client: pg.Client, production = true) =>
+          checkVqRuntimeReadiness(
+            {
+              query: (sql, params) => client.query(sql, params ? [...params] : undefined),
+            },
+            production
+          );
+        // Existing suites prove the main SQL. Only that result is stubbed here;
+        // the global combiner, VQ query, fingerprint and evaluator are all real.
+        const releaseReadiness = async (client: pg.Client) => {
+          const calls: string[] = [];
+          const result = await checkReleaseReadiness(
+            {
+              query: (sql, params) => {
+                calls.push(sql);
+                if (sql === RELEASE_READINESS_SQL)
+                  return Promise.resolve({
+                    rows: [{ ready: true, missing_relations: [], missing_migrations: [], missing_triggers: [] }],
+                  });
+                expect(sql).toBe(VQ_RUNTIME_EVIDENCE_SQL);
+                expect(params).toEqual([false]);
+                return client.query(sql, params ? [...params] : undefined);
+              },
+            },
+            { NODE_ENV: "test" }
+          );
+          expect(calls).toEqual([RELEASE_READINESS_SQL, VQ_RUNTIME_EVIDENCE_SQL]);
+          return result;
+        };
+        const observe = async () => {
+          const result = await runtime!.query(VQ_RUNTIME_EVIDENCE_SQL, [true]);
+          expect(result.rows).toHaveLength(1);
+          const { catalog, ...evidence } = result.rows[0];
+          return evaluateVqRuntimeEvidence({ ...evidence, catalogFingerprint: vqSchemaFingerprint(catalog) });
+        };
+        expect(await observe()).toEqual({ ready: true, lineage: historical ? "historical" : "fresh" });
+        expect(await readiness(runtime)).toEqual({ ready: true, queryFailed: false });
+        expect(await releaseReadiness(runtime)).toMatchObject({ ok: true, queryFailed: false, unavailableRuntime: [] });
+        expect(await readiness(owner)).toEqual({ ready: false, queryFailed: false });
+        expect(await readiness(owner, false)).toEqual({ ready: true, queryFailed: false });
+        for (const mutation of [
+          "GRANT DELETE ON vq_export_jobs TO mintvault_app",
+          "GRANT USAGE ON SCHEMA drizzle TO mintvault_app WITH GRANT OPTION",
+          "GRANT USAGE ON SCHEMA drizzle TO PUBLIC; REVOKE USAGE ON SCHEMA drizzle FROM mintvault_app",
+          "GRANT mintvault_app TO vq_readiness_test WITH ADMIN OPTION",
+          "GRANT UPDATE ON vq_card_revisions TO mintvault_app",
+          "GRANT SELECT ON drizzle.vq_schema_migrations TO vq_readiness_test",
+          "GRANT USAGE ON SEQUENCE drizzle.vq_schema_migrations_id_seq TO vq_readiness_test",
+          "GRANT SELECT ON vq_export_jobs TO PUBLIC",
+          "GRANT UPDATE(id) ON vq_card_revisions TO vq_readiness_test",
+          "ALTER ROLE vq_readiness_test CREATEDB",
+          "CREATE SEQUENCE public.vq_schema_migrations_id_seq",
+          "ALTER TABLE vq_export_jobs ALTER COLUMN attempt_count SET DEFAULT 9",
+          "UPDATE drizzle.vq_schema_migrations SET checksum=repeat('0',64)",
+          "UPDATE drizzle.vq_schema_migrations SET completed_at=NULL",
+          "UPDATE drizzle.vq_schema_migrations SET status='applying'",
+          "INSERT INTO drizzle.vq_schema_migrations(filename,checksum,status,completed_at) VALUES('0017_test_dependency.sql',repeat('0',64),'applied',now())",
+          ...(historical
+            ? [
+                "UPDATE drizzle.vq_schema_baselines SET observed_by=' '",
+                "ALTER TABLE drizzle.vq_schema_baselines DROP CONSTRAINT vq_schema_baselines_schema_sha256_check; UPDATE drizzle.vq_schema_baselines SET schema_sha256=repeat('0',64)",
+                "DELETE FROM drizzle.vq_schema_baselines",
+              ]
+            : [
+                `INSERT INTO drizzle.vq_schema_baselines(baseline_id,evidence_kind,source_sha256,schema_sha256,observed_by) VALUES('vq-0000-0015-v1','observed_schema-v1','${VQ_BASELINE_MIGRATION_SET_SHA256}','${VQ_BASELINE_FINGERPRINT}','synthetic')`,
+              ]),
+        ]) {
+          await owner.query("BEGIN");
+          try {
+            await owner.query(mutation);
+            // SET ROLE on the owner connection observes its own uncommitted DDL.
+            await owner.query("SET LOCAL ROLE vq_readiness_test");
+            const { catalog, ...evidence } = (await owner.query(VQ_RUNTIME_EVIDENCE_SQL, [true])).rows[0];
+            expect(
+              evaluateVqRuntimeEvidence({ ...evidence, catalogFingerprint: vqSchemaFingerprint(catalog) }),
+              mutation
+            ).toEqual({ ready: false, lineage: null });
+            expect(await readiness(owner), mutation).toEqual({ ready: false, queryFailed: false });
+            // LOGIN flags are production-only; all schema/evidence mutations
+            // must additionally veto the always-required development contract.
+            if (!mutation.includes("ALTER ROLE vq_readiness_test") && !mutation.includes("TO vq_readiness_test")) {
+              expect(await releaseReadiness(owner), mutation).toMatchObject({
+                ok: false,
+                queryFailed: false,
+                unavailableRuntime: ["vault_quest_database_authority"],
+              });
+            }
+          } finally {
+            await owner.query("ROLLBACK");
+          }
+          expect(await observe()).toEqual({ ready: true, lineage: historical ? "historical" : "fresh" });
+        }
+        for (const mutation of [
+          "DROP TABLE drizzle.vq_schema_baselines",
+          "REVOKE SELECT ON drizzle.vq_schema_migrations FROM mintvault_app",
+        ]) {
+          await owner.query("BEGIN");
+          try {
+            await owner.query(mutation);
+            await owner.query("SET LOCAL ROLE vq_readiness_test");
+            expect(await readiness(owner), mutation).toEqual({ ready: false, queryFailed: true });
+            expect(await releaseReadiness(owner), mutation).toMatchObject({
+              ok: false,
+              queryFailed: true,
+              unavailableRuntime: ["vault_quest_database_authority"],
+            });
+          } finally {
+            await owner.query("ROLLBACK");
+          }
+          expect(await readiness(runtime)).toEqual({ ready: true, queryFailed: false });
+        }
+        // Immutable 0016 forbids PUBLIC CREATE, not PUBLIC USAGE on drizzle.
+        await owner.query("GRANT USAGE ON SCHEMA drizzle TO PUBLIC");
+        expect(await readiness(runtime)).toEqual({ ready: true, queryFailed: false });
+      } finally {
+        await runtime?.end();
+        await owner.end();
+        await owned.stop();
+      }
+    },
+    60_000
+  );
 });
 
 describe("honest historical VQ admission", () => {

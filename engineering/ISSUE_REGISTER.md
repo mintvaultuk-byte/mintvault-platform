@@ -2,6 +2,12 @@
 
 ## 2026-09-06 VQ schema authority checkpoint
 
+S3c2 from e77ede827d68a824db105943c4490fdf185684fa: required VQ observation is
+locally independently proven (clean79 database/readiness,60 architecture/CI/context,
+PG16/17 targeted observations and build). Both new-query delegation gaps repaired
+after actual red proof. ARCH-SCHEMA-001 stays IN_PROGRESS for durable-only fallback,
+exact candidate and final gates; see current VQ packet. No new broad review.
+
 S3b53e5088a is pushed. S3c1 pure unused evidence foundation independently proven
 with root/clean52 and Sol28 adversarial cases. The old architecture timeout closes
 with clean58/58 after graceful idle-VM stop, no test change. ARCH-SCHEMA-001 stays

@@ -215,3 +215,128 @@ export function evaluateVqRuntimeEvidence(evidence: unknown): {
     ? { ready: true, lineage: "historical" }
     : denied;
 }
+
+export const VQ_APPEND_ONLY_RELATIONS = Object.freeze([
+  "vq_artwork_revision_events",
+  "vq_card_revisions",
+  "vq_character_revisions",
+] as const);
+
+/** One coherent read-only observation. Missing/unreadable metadata throws; callers
+ * must fail closed. LIMITs retain one excess row, never truncate excess into PASS.
+ * Privilege arrays use actual ACL vocabulary, including unknown future privileges. */
+export const VQ_RUNTIME_EVIDENCE_SQL = `
+WITH catalog_evidence AS (${VQ_SCHEMA_CATALOG_SQL}), app_role AS (
+  SELECT * FROM pg_catalog.pg_roles WHERE rolname='mintvault_app'
+), login_role AS (
+  SELECT * FROM pg_catalog.pg_roles WHERE rolname=current_user
+), business AS (
+  SELECT name, to_regclass('public.' || name) AS oid,
+    CASE WHEN name=ANY(ARRAY[${VQ_APPEND_ONLY_RELATIONS.map((name) => `'${name}'`).join(",")}])
+      THEN ARRAY['INSERT','SELECT']::text[] ELSE ARRAY['INSERT','SELECT','UPDATE']::text[] END AS privileges
+  FROM unnest(ARRAY[${VQ_BASELINE_RELATIONS.map((name) => `'${name}'`).join(",")}]) AS wanted(name)
+), owned_sequences AS (
+  SELECT DISTINCT s.oid FROM pg_catalog.pg_class s
+  JOIN pg_catalog.pg_namespace n ON n.oid=s.relnamespace
+  JOIN pg_catalog.pg_depend d ON d.classid='pg_catalog.pg_class'::regclass AND d.objid=s.oid
+    AND d.refclassid='pg_catalog.pg_class'::regclass AND d.deptype IN ('a','i')
+  JOIN business b ON b.oid=d.refobjid WHERE n.nspname='public' AND s.relkind='S'
+), wanted_objects AS (
+  SELECT oid, 'r'::"char" AS kind, privileges FROM business
+  UNION ALL SELECT oid, 'S'::"char", ARRAY['SELECT','USAGE']::text[] FROM owned_sequences
+  UNION ALL SELECT to_regclass('drizzle.vq_schema_migrations'), 'r'::"char", ARRAY['SELECT']::text[]
+  UNION ALL SELECT to_regclass('drizzle.vq_schema_baselines'), 'r'::"char", ARRAY['SELECT']::text[]
+  UNION ALL SELECT to_regclass('drizzle.vq_schema_migrations_id_seq'), 'S'::"char", ARRAY[]::text[]
+), objects AS (
+  SELECT w.oid, w.kind, w.privileges, c.relacl, c.relkind FROM wanted_objects w
+  LEFT JOIN pg_catalog.pg_class c ON c.oid=w.oid
+), journal AS (
+  SELECT COALESCE(jsonb_agg(jsonb_build_object('filename',filename,'checksum',checksum,
+    'status',status,'completed',completed_at IS NOT NULL) ORDER BY filename),'[]'::jsonb) AS value
+  FROM (SELECT filename,checksum,status,completed_at FROM drizzle.vq_schema_migrations ORDER BY filename LIMIT ${VQ_RUNTIME_MIGRATIONS.length + 1}) bounded
+), receipts AS (
+  SELECT COALESCE(jsonb_agg(jsonb_build_object('baseline_id',baseline_id,'evidence_kind',evidence_kind,
+    'source_sha256',source_sha256,'schema_sha256',schema_sha256,
+    'observed',observed_at IS NOT NULL,'observer',observed_by) ORDER BY baseline_id),'[]'::jsonb) AS value
+  FROM (SELECT baseline_id,evidence_kind,source_sha256,schema_sha256,observed_at,observed_by
+    FROM drizzle.vq_schema_baselines ORDER BY baseline_id LIMIT 2) bounded
+), authority AS (
+  SELECT EXISTS (
+    SELECT 1 FROM app_role app WHERE NOT app.rolcanlogin AND NOT app.rolinherit
+      AND NOT app.rolsuper AND NOT app.rolbypassrls AND NOT app.rolcreatedb
+      AND NOT app.rolcreaterole AND NOT app.rolreplication
+      AND NOT EXISTS(SELECT 1 FROM pg_catalog.pg_auth_members m WHERE m.member=app.oid)
+      AND NOT EXISTS(SELECT 1 FROM pg_catalog.pg_database d WHERE d.datdba=app.oid)
+      AND NOT EXISTS(SELECT 1 FROM pg_catalog.pg_namespace n WHERE n.nspowner=app.oid)
+      AND NOT EXISTS(SELECT 1 FROM pg_catalog.pg_class c WHERE c.relowner=app.oid)
+      AND NOT EXISTS(SELECT 1 FROM pg_catalog.pg_proc p WHERE p.proowner=app.oid)
+  ) AND (SELECT bool_and(o.oid IS NOT NULL AND o.relkind=o.kind AND
+    COALESCE((SELECT array_agg(a.privilege_type ORDER BY a.privilege_type)
+      FROM aclexplode(o.relacl) a WHERE a.grantee=(SELECT oid FROM app_role) AND NOT a.is_grantable),ARRAY[]::text[])
+      IS NOT DISTINCT FROM o.privileges
+    AND NOT EXISTS(SELECT 1 FROM aclexplode(o.relacl) a WHERE a.grantee=0
+      OR (a.grantee=(SELECT oid FROM app_role) AND a.is_grantable))
+  ) FROM objects o) IS TRUE
+  AND COALESCE(to_regclass('public.vq_schema_migrations'),to_regclass('public.vq_schema_baselines'),
+    to_regclass('public.vq_schema_migrations_id_seq')) IS NULL
+  AND NOT EXISTS(SELECT 1 FROM pg_catalog.pg_attribute c CROSS JOIN LATERAL aclexplode(c.attacl) a
+    WHERE c.attrelid IN (SELECT oid FROM objects) AND c.attnum>0 AND NOT c.attisdropped
+      AND a.grantee IN (0,(SELECT oid FROM app_role)))
+  AND has_schema_privilege((SELECT oid FROM app_role),'drizzle','USAGE') IS TRUE
+  AND EXISTS(SELECT 1 FROM pg_catalog.pg_namespace n WHERE n.nspname='drizzle'
+    AND (SELECT array_agg(a.privilege_type ORDER BY a.privilege_type) FROM aclexplode(n.nspacl) a
+      WHERE a.grantee=(SELECT oid FROM app_role) AND NOT a.is_grantable)=ARRAY['USAGE']::text[]
+    AND NOT EXISTS(SELECT 1 FROM aclexplode(n.nspacl) a
+      WHERE a.grantee=(SELECT oid FROM app_role) AND a.is_grantable))
+  AND NOT EXISTS(SELECT 1 FROM pg_catalog.pg_namespace n CROSS JOIN LATERAL aclexplode(n.nspacl) a
+    WHERE n.nspname IN ('public','drizzle') AND a.grantee IN (0,(SELECT oid FROM app_role)) AND a.privilege_type='CREATE')
+  AND ($1::boolean IS NOT TRUE OR EXISTS (
+    SELECT 1 FROM login_role login WHERE login.rolcanlogin AND login.rolinherit
+      AND NOT login.rolsuper AND NOT login.rolbypassrls AND NOT login.rolcreatedb
+      AND NOT login.rolcreaterole AND NOT login.rolreplication
+      AND pg_has_role(login.oid,(SELECT oid FROM app_role),'USAGE')
+      AND NOT EXISTS(SELECT 1 FROM pg_catalog.pg_auth_members m WHERE m.member=login.oid
+        AND (m.roleid<>(SELECT oid FROM app_role) OR m.admin_option))
+      AND NOT EXISTS(SELECT 1 FROM pg_catalog.pg_database d WHERE d.datdba=login.oid)
+      AND NOT EXISTS(SELECT 1 FROM pg_catalog.pg_namespace n WHERE n.nspowner=login.oid)
+      AND NOT EXISTS(SELECT 1 FROM pg_catalog.pg_class c WHERE c.relowner=login.oid)
+      AND NOT EXISTS(SELECT 1 FROM pg_catalog.pg_proc p WHERE p.proowner=login.oid)
+      AND NOT has_schema_privilege(login.oid,'public','CREATE')
+      AND NOT has_schema_privilege(login.oid,'drizzle','CREATE')
+      AND NOT EXISTS(SELECT 1 FROM pg_catalog.pg_namespace n CROSS JOIN LATERAL aclexplode(n.nspacl) a
+        WHERE n.nspname='drizzle' AND a.grantee=login.oid)
+      AND NOT EXISTS(SELECT 1 FROM objects o CROSS JOIN LATERAL aclexplode(o.relacl) a WHERE a.grantee=login.oid)
+      AND NOT EXISTS(SELECT 1 FROM pg_catalog.pg_attribute c CROSS JOIN LATERAL aclexplode(c.attacl) a
+        WHERE c.attrelid IN (SELECT oid FROM objects) AND c.attnum>0 AND NOT c.attisdropped AND a.grantee=login.oid)
+      AND (SELECT bool_and(CASE WHEN o.kind='S'
+        THEN has_sequence_privilege(login.oid,o.oid,p.name) IS NOT DISTINCT FROM (p.name=ANY(o.privileges))
+        ELSE has_table_privilege(login.oid,o.oid,p.name) IS NOT DISTINCT FROM (p.name=ANY(o.privileges)) END)
+        FROM objects o CROSS JOIN LATERAL unnest(CASE WHEN o.kind='S'
+          THEN ARRAY['SELECT','USAGE','UPDATE']::text[]
+          ELSE ARRAY['SELECT','INSERT','UPDATE','DELETE','TRUNCATE','REFERENCES','TRIGGER']::text[] END) p(name)
+      ) IS TRUE
+  )) AS ready
+)
+SELECT catalog_evidence.catalog, journal.value AS journal, receipts.value AS receipts,
+  to_regclass('drizzle.vq_schema_migrations') IS NOT NULL AS "journalPresent",
+  to_regclass('drizzle.vq_schema_baselines') IS NOT NULL AS "receiptPresent",
+  authority.ready AS "runtimeAuthorityReady"
+FROM catalog_evidence,journal,receipts,authority`;
+
+/** Uses only the supplied runtime connection; never falls back to migration authority. */
+export async function checkVqRuntimeReadiness(
+  queryable: { query: (text: string, params?: readonly unknown[]) => Promise<{ rows: unknown[] }> },
+  production: boolean
+): Promise<{ ready: boolean; queryFailed: boolean }> {
+  try {
+    const result = await queryable.query(VQ_RUNTIME_EVIDENCE_SQL, [production]);
+    if (result.rows.length !== 1 || !result.rows[0] || typeof result.rows[0] !== "object") {
+      return { ready: false, queryFailed: true };
+    }
+    const { catalog, ...evidence } = result.rows[0] as Record<string, unknown>;
+    const observation = evaluateVqRuntimeEvidence({ ...evidence, catalogFingerprint: vqSchemaFingerprint(catalog) });
+    return { ready: observation.ready, queryFailed: false };
+  } catch {
+    return { ready: false, queryFailed: true };
+  }
+}

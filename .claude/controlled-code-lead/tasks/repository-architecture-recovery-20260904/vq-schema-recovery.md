@@ -2,6 +2,121 @@
 
 ## Current position (2026-09-06)
 
+S3c2 locally independently proven from pushed e77ede827d68a824db105943c4490fdf185684fa.
+Checkpoint/push this wave, then S3c3 durable-only export retirement. No release claim.
+
+### S3c2 retained proof (2026-09-06)
+
+Required/enabled VQ now contributes exact17 estate migration expectations,26
+business relations and one stable runtime signal. Main SQL is byte-identical.
+One read-only VQ query uses the supplied runtime connection, checks current catalog,
+fresh/history execution/receipt evidence and role/object/schema ACLs. Unreadable or
+absent metadata refuses with queryFailed; observed-invalid evidence refuses without
+query error. No elevated pool, env/secret access, provider call or migration change.
+
+Sol independently identified two actual false greens in the new query: grantable
+drizzle USAGE and runtime membership ADMIN OPTION. Root reproduced each RED on
+both PG17 lineages and fixed both in this pass. Public-USAGE loss was separately
+tested and correctly refused with42501/queryFailed; that hypothesis was withdrawn.
+Malformed receipt test inputs initially hit existing DB CHECK safeguards before
+the observer; corrected synthetic fixtures exercise valid mixed history and an
+explicit owner-only constraint-drift mutation. No production constraint weakened.
+
+Proof split is explicit: DB-free12 tests mock only VQ observer results and prove
+global orchestration. Owned-PG tests run the actual query/fingerprint/evaluator
+and global combiner (only the separately proven main SQL result is stubbed), assert
+exact query identities/order/production flag and fail-closed diagnostic mapping.
+Production=true observer is exercised with a genuine low-privilege LOGIN; global
+composition positive uses NODE_ENV=test. No claim of whole-production readiness.
+
+Root52/52; clean exact-lock79/79 VQ history/namespace + release/main/print tests,
+zero skips. Clean PG16.13 selected observation3/3 passes (37 filtered), including
+both lineages and malformed/error cases. Sol independently12/12 unit and2/2 PG17
+lineages passes; its requested filter excludes38 other cases, not full-suite proof.
+The final synthetic future row reuses existing0017_test_dependency.sql; a prior
+59/60 aggregate correctly caught an unclassified newly invented fixture filename.
+No migration policy waiver was added. Final clean architecture32+CI19+Docker9 =
+60/60 PASS, zero skips, snapshot7.3s under unchanged30s timeout.
+
+Architecture imported-partial-SQL reproduction repaired by four-line bounded
+constant traversal; UNKNOWN/cycles/missing exports remain unclassified. Terra
+independent3/3 selected regressions plus2 held-out miniatures pass. Exact VQ file
+ownership only; zero legacy-authority diff. Snapshot adds the component and23
+query accesses, with line movement retained, no broad owner adoption/exception.
+Scoped lint0/0; tests typecheck344 existing diagnostics (one pre-existing mock-call
+diagnostic removed), no baseline change. Clean production build3366 modules PASS,
+bundled runner245.6KiB; this is a WIP-source build, not an exact release image.
+Initial sandbox build IPC EPERM is environment failure; permitted retry passes.
+
+Source SHA256:
+- server/lib/vq-schema-contract.ts:f07be896b518994d73679bbbe420579de74366295dbe1b9d6ee94bbf029779f8
+- server/readiness.ts:26612a78ba10c3b1100c1ae2e31688b8a0521624554254b4a17730031d4055fe
+- tests/vq-historical-baseline.test.ts:1335d50cca1c9a667d09456d6c1d784ac49d5dd26752c286da36880ab14aa709
+- tests/release-readiness.test.ts:945992620bfecb3f159983b970380e188576b4ca65737f899d3ee1b711d91b4e
+- tests/architecture-authority.test.ts:e9ac683b0eb8d6af52ce958537fe359e28e6ea45ea1a6fc9226f4d10399fbde9
+- scripts/architecture/check-architecture.mjs:1d98dd74acf5cbe832a7215a16c2a0e726698fa9c9d33876926a3f09a5aacff3
+- config/components/vault-quest.ts:1e362ffe340fd51b6f3af9272df400058537621bcaf140c69fa09a30bae7bb57
+- scripts/architecture/generated/architecture-authority.json:15525419f70c1470b14f087a116b0de49cc3b82bd29d772836cc48e54f4e4b41
+
+Graph valid101/NOT READY; candidate null. Postflight remains red for existing
+managed CLAUDE drift/package egress, dirty WIP and protected whole-branch acceptance;
+no bypass/accept-protected applied. Exact e77 PR336 head verified; terminal checks
+include failed CI, engineering and image checks, so no hosted-green claim.
+HY-SECURITY UNKNOWN, final Opus and exact-candidate/environment gates remain OPEN.
+Only owned synthetic PG resources cleaned; idle Docker profile remains stopped
+with all images/disks intact. No deployment/shared migration/live data touched.
+
+## S3c2 required runtime observation and readiness manifest
+
+Root alone writes server/lib/vq-schema-contract.ts (read-only SQL data),
+server/readiness.ts, new literal config/components/vault-quest.ts and existing index,
+scripts/architecture/authority-policy.json and its generated snapshot; existing
+tests/release-readiness.test.ts, tests/vq-historical-baseline.test.ts,
+tests/vq-migration-authority.test.ts and tests/architecture-authority.test.ts, plus
+existing graph/packet/task/issue/proof records. The one new component file is
+required by the existing component contract; no new directory/helper/dependency.
+
+Exact manifest extension: the architecture gate reproduces UNOWNED_TOPOLOGY for
+the imported VQ template query because resolvedSql follows local initializers but
+not imported partial SQL templates. Root may repair scripts/architecture/check-architecture.mjs
+and its existing regression test to follow imported constants with cycle guards,
+retaining unknown interpolation markers rather than evaluating code or adding a
+waiver. Preserve real schema-qualified reads and unresolved-dynamic diagnostics.
+The recovered query edges show readiness.ts is still an exact legacy surface.
+Keep the VQ observer with its SQL/evaluator in the existing VQ contract module,
+declare only that exact file vault-quest-platform-owned, and import it from main
+readiness. This introduces no file and adopts no historical readiness keys.
+
+Keep the existing main RELEASE_READINESS_SQL byte-identical. Add one separate
+coherent VQ observation statement using the same supplied runtime queryable, never
+an elevated pool/URL. Reuse actual catalog SQL; compute fingerprint in JS, require
+exactly one row and feed the pure predicate. The VQ observation checks metadata,
+fresh/history evidence and exact app/PUBLIC ACLs; production additionally checks
+current LOGIN role/memberships/nonownership/effective ACLs in that same snapshot.
+No pre-existence probe, fabricated empty metadata, optimistic timeout/default,
+grant/DDL/provider call. Missing/unreadable metadata gives queryFailed and stable
+vault_quest_database_authority unavailable; existing invalid evidence gives stable
+unavailable without leaking details. Main-only scoped SQL proofs stay scoped.
+
+VQ is required/enabled, sourceRoot server/vault-quest/ owned by vault-quest-platform.
+Append seventeen estate=vault-quest migration requirements at global14–30 and26
+public business relations at23–48, runtime signal at4; preserve all existing main
+projections and orders. Bind manifest migration filenames to frozen current17
+expectations. Control metadata is mandatory in its own observation, not added to
+the generic public-table relation inventory. Future inventory/role/catalog change
+invalidates this proof. No migration SQL, role mutation, route mount, fallback,
+production/shared DB, deployment or restricted-security investigation in this wave.
+
+Terra drafts only the SQL proposal; root owns all source changes. Sol independently
+reviews and attacks the implementation. Real helper-owned PG fresh/historical tests
+exercise low-privilege observation and missing/partial/mixed/checksum/catalog/ACL
+mutations. Pure global readiness regressions check stable failure and query errors.
+Restore mutations only within each owned synthetic database. Keep existing main and
+print role tests. Clean exact-lock/build/type/architecture then WIP commit/push.
+Required readiness is fail-closed; no COMPLETE or release claim. Rollback before
+activation is code-only; after activation forward-fix or withdraw traffic, never
+restore fleet-unsafe memory fallback. Durable export retirement remains next.
+
 S3b checkpoint53e5088a preserves independent actual image proof and its exact limits.
 Continue S3c1 below; do not rerun the completed image inventory or restart discovery.
 

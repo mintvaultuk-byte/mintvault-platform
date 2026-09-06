@@ -3,6 +3,7 @@ import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { spawnSync } from "node:child_process";
 import { describe, expect, it } from "vitest";
+import { VQ_BASELINE_RELATIONS, VQ_RUNTIME_MIGRATIONS } from "../server/lib/vq-schema-contract";
 import {
   COMPONENT_READINESS_MANIFESTS,
   COMPONENT_READINESS_REGISTRY,
@@ -160,7 +161,7 @@ describe("component readiness authority", () => {
     ]);
     expect(Object.isFrozen(compiled.requiredMigrationRequirements)).toBe(true);
     expect(compiled.requiredMigrationRequirements.every(Object.isFrozen)).toBe(true);
-    expect(COMPONENT_READINESS_REGISTRY.requiredMigrationRequirements).toEqual(
+    expect(COMPONENT_READINESS_REGISTRY.requiredMigrationRequirements.filter((item) => item.estate === "main")).toEqual(
       REQUIRED_RELEASE_MIGRATIONS.map((name) => ({ estate: "main", name }))
     );
   });
@@ -209,7 +210,7 @@ describe("component readiness authority", () => {
     expect(compileComponentReadinessRegistry([disabled]).requiredMigrationRequirements).toEqual([]);
   });
 
-  it("preserves every legacy readiness projection exactly and in order", () => {
+  it("preserves every pre-VQ readiness requirement exactly and in order", () => {
     expect([...REQUIRED_RELEASE_MIGRATIONS]).toEqual([
       "0077_partner_credential_lifecycle_hardening.sql",
       "0088_nfc_binding_integrity.sql",
@@ -226,7 +227,7 @@ describe("component readiness authority", () => {
       "0122_object_write_intent_reconciliation.sql",
       "0022_print_workflow_lifecycle.sql",
     ]);
-    expect([...REQUIRED_RELEASE_RELATIONS]).toEqual([
+    expect([...REQUIRED_RELEASE_RELATIONS].slice(0, 23)).toEqual([
       "public.schema_migrations",
       "public.certificates",
       "public.cert_counter",
@@ -281,6 +282,27 @@ describe("component readiness authority", () => {
       "CUSTOMER_NOTIFICATION_ENC_KEY_VERSION",
       "PARTNER_ADMIN_DATABASE_URL",
     ]);
+  });
+
+  it("requires the exact VQ estate and business relations without changing main migration identities", () => {
+    const component = COMPONENT_READINESS_MANIFESTS.find((item) => item.id === "vault-quest");
+    expect(component).toMatchObject({
+      releaseMode: "required",
+      runtimeState: "enabled",
+      owner: "vault-quest-platform",
+    });
+    expect(
+      COMPONENT_READINESS_REGISTRY.requiredMigrationRequirements.filter((item) => item.estate === "vault-quest")
+    ).toEqual(VQ_RUNTIME_MIGRATIONS.map((file) => ({ estate: "vault-quest", name: file.filename })));
+    expect([...REQUIRED_RELEASE_RELATIONS].slice(23)).toEqual(VQ_BASELINE_RELATIONS.map((name) => `public.${name}`));
+    expect(COMPONENT_READINESS_REGISTRY.runtimeSignals.vault_quest_database_authority).toBe(
+      "vault_quest_database_authority"
+    );
+    expect(
+      COMPONENT_READINESS_REGISTRY.requiredMigrationRequirements
+        .filter((item) => item.estate === "main")
+        .map((item) => item.name)
+    ).toEqual(REQUIRED_RELEASE_MIGRATIONS);
   });
 
   it("uses one canonical index and keeps disabled components out of runtime and readiness", () => {
@@ -368,7 +390,7 @@ describe("architecture topology authority", () => {
       expect.arrayContaining([
         expect.objectContaining({
           category: "migration",
-            source: "migrations-vq/0001_core.sql:1",
+          source: "migrations-vq/0001_core.sql:1",
           shippingDisposition: "shipped-numbered-vault-quest",
           lineage: "vault-quest-numbered-runner",
         }),
@@ -1074,6 +1096,35 @@ describe("architecture topology authority", () => {
     );
     expect(pay?.providerEffects.join(" ")).toMatch(/stripe:|object-writer/);
     expect(health?.providerEffects).toEqual(["delegated-or-none"]);
+  });
+
+  it("follows imported partial SQL constants without hiding unresolved queries or schema identity", async () => {
+    const { buildArchitectureSnapshot } = await architectureModule();
+    const root = goldenWorkspace();
+    const policy = structuredClone(miniaturePolicy);
+    policy.ownerRules.push({ prefix: "server/sql.ts", owner: "component-owner" });
+    write(
+      root,
+      "server/sql.ts",
+      "export const OBSERVE=`SELECT * FROM drizzle.vq_schema_migrations LIMIT ${inventory.length + 1}`; export const UNKNOWN=externalSql;\n"
+    );
+    write(
+      root,
+      "server/child.ts",
+      'import {OBSERVE as SQL,UNKNOWN} from "./sql"; export function childRouter(){queryable.query(SQL); queryable.query(UNKNOWN);}\n'
+    );
+    const snapshot = buildArchitectureSnapshot(root, policy);
+    const accesses = snapshot.records.filter((record) => record.category === "table-access");
+    expect(accesses).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({ id: "read:drizzle.vq_schema_migrations", access: "sql" }),
+        expect.objectContaining({ id: "unclassified:UNKNOWN", access: "sql-unclassified" }),
+      ])
+    );
+    expect(accesses.some((record) => record.id === "read:public.vq_schema_migrations")).toBe(false);
+    // This miniature component explicitly owns child.ts; UNKNOWN remains an
+    // unclassified record for drift adjudication, not an invented table read.
+    expect(accesses).toHaveLength(2);
   });
 
   it("connects routes to imported provider helpers instead of hiding delegated effects", async () => {

@@ -13,6 +13,8 @@ import { getPartnerAdminCapability } from "./partner/admin-capability";
 import { partnerOperationalReadAuthorityReady } from "./partner/operational-authority";
 import { objectWriteRuntimeInstalled } from "./lib/object-write-runtime-state";
 import { COMPONENT_READINESS_REGISTRY } from "./lib/component-readiness-registry";
+import { checkVqRuntimeReadiness } from "./lib/vq-schema-contract";
+export { checkVqRuntimeReadiness } from "./lib/vq-schema-contract";
 
 export const REQUIRED_RELEASE_MIGRATIONS = COMPONENT_READINESS_REGISTRY.requiredMigrations;
 export const REQUIRED_RELEASE_RELATIONS = COMPONENT_READINESS_REGISTRY.requiredRelations;
@@ -1028,6 +1030,7 @@ export async function checkReleaseReadiness(
   const partnerAdminUnavailable = partnerAdminReady
     ? []
     : [COMPONENT_READINESS_REGISTRY.runtimeSignals.partner_admin_database_authority];
+  const vqUnavailable = [COMPONENT_READINESS_REGISTRY.runtimeSignals.vault_quest_database_authority];
   try {
     const result = await queryable.query(RELEASE_READINESS_SQL, [
       [...REQUIRED_RELEASE_RELATIONS],
@@ -1045,12 +1048,13 @@ export async function checkReleaseReadiness(
         missingTriggers: [],
         missingConfiguration: configuration.missing,
         invalidConfiguration: configuration.invalid,
-        unavailableRuntime: [...runtime.unavailable, ...partnerAdminUnavailable],
+        unavailableRuntime: [...runtime.unavailable, ...partnerAdminUnavailable, ...vqUnavailable],
         queryFailed: true,
       };
     }
+    const vq = await checkVqRuntimeReadiness(queryable, production);
     return {
-      ok: row.ready === true && configuration.ok && runtime.ok && partnerAdminReady,
+      ok: row.ready === true && configuration.ok && runtime.ok && partnerAdminReady && vq.ready,
       missingRelations: row.missing_relations ?? [],
       missingMigrations: row.missing_migrations ?? [],
       missingTriggers: row.missing_triggers ?? [],
@@ -1062,8 +1066,9 @@ export async function checkReleaseReadiness(
           ? [COMPONENT_READINESS_REGISTRY.runtimeSignals.main_database_runtime_authority]
           : []),
         ...partnerAdminUnavailable,
+        ...(vq.ready ? [] : vqUnavailable),
       ],
-      queryFailed: false,
+      queryFailed: vq.queryFailed,
     };
   } catch {
     return {
@@ -1073,7 +1078,7 @@ export async function checkReleaseReadiness(
       missingTriggers: [],
       missingConfiguration: configuration.missing,
       invalidConfiguration: configuration.invalid,
-      unavailableRuntime: [...runtime.unavailable, ...partnerAdminUnavailable],
+      unavailableRuntime: [...runtime.unavailable, ...partnerAdminUnavailable, ...vqUnavailable],
       queryFailed: true,
     };
   }

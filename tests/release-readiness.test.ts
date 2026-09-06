@@ -1,4 +1,4 @@
-import { describe, expect, it, vi } from "vitest";
+import { beforeEach, describe, expect, it, vi } from "vitest";
 import {
   checkReleaseReadiness,
   checkReleaseConfiguration,
@@ -9,7 +9,32 @@ import {
   REQUIRED_RELEASE_TRIGGER_RELATIONS,
   REQUIRED_RELEASE_TRIGGERS,
   PAYMENT_FULFILMENT_READINESS_SQL,
+  RELEASE_READINESS_SQL,
+  checkVqRuntimeReadiness,
+  type ReadinessQueryable,
 } from "../server/readiness";
+// This DB-free suite proves combination of readiness results, not VQ SQL/catalog
+// validity. The actual injected-query observer is exercised unmocked on owned PG.
+vi.mock("../server/lib/vq-schema-contract", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("../server/lib/vq-schema-contract")>();
+  return {
+    ...actual,
+    checkVqRuntimeReadiness: vi.fn(),
+  };
+});
+
+beforeEach(() => vi.mocked(checkVqRuntimeReadiness).mockReset().mockResolvedValue({ ready: true, queryFailed: false }));
+const databaseQuery = (main: {
+  ready: boolean;
+  missing_relations: string[];
+  missing_migrations: string[];
+  missing_triggers: string[];
+  runtime_authority_ready?: boolean;
+}) =>
+  vi.fn<ReadinessQueryable["query"]>(async (sql) => {
+    if (sql === RELEASE_READINESS_SQL) return { rows: [main] };
+    throw new Error("Unexpected readiness query");
+  });
 
 describe("release readiness contract", () => {
   it("requires the journal, critical surfaces, scanner evidence and permanent-identity triggers", () => {
@@ -67,16 +92,12 @@ describe("release readiness contract", () => {
   });
 
   it("is ready only when the database returns a completely satisfied contract", async () => {
-    const query = vi.fn(async () => ({
-      rows: [
-        {
-          ready: true,
-          missing_relations: [],
-          missing_migrations: [],
-          missing_triggers: [],
-        },
-      ],
-    }));
+    const query = databaseQuery({
+      ready: true,
+      missing_relations: [],
+      missing_migrations: [],
+      missing_triggers: [],
+    });
 
     await expect(checkReleaseReadiness({ query })).resolves.toEqual({
       ok: true,
@@ -96,19 +117,17 @@ describe("release readiness contract", () => {
       false,
     ]);
     expect(query.mock.calls[0][0]).toMatch(/payment_fulfilment_contract[\s\S]+public\.grading_payment_fulfilments/);
+    expect(checkVqRuntimeReadiness).toHaveBeenCalledWith({ query }, false);
+    expect(query).toHaveBeenCalledTimes(1);
   });
 
   it("fails closed on missing contract members without leaking them into an HTTP response", async () => {
-    const query = vi.fn(async () => ({
-      rows: [
-        {
-          ready: false,
-          missing_relations: ["public.cert_counter"],
-          missing_migrations: ["0114_certificate_identity_authority.sql"],
-          missing_triggers: ["trg_certificate_number_immutable"],
-        },
-      ],
-    }));
+    const query = databaseQuery({
+      ready: false,
+      missing_relations: ["public.cert_counter"],
+      missing_migrations: ["0114_certificate_identity_authority.sql"],
+      missing_triggers: ["trg_certificate_number_immutable"],
+    });
     await expect(checkReleaseReadiness({ query })).resolves.toEqual({
       ok: false,
       missingRelations: ["public.cert_counter"],
@@ -199,9 +218,7 @@ describe("release readiness contract", () => {
   });
 
   it("combines database and configuration state without exposing configuration values", async () => {
-    const query = vi.fn(async () => ({
-      rows: [{ ready: true, missing_relations: [], missing_migrations: [], missing_triggers: [] }],
-    }));
+    const query = databaseQuery({ ready: true, missing_relations: [], missing_migrations: [], missing_triggers: [] });
     const env = completeProductionEnvironment();
     delete env.B2_APPLICATION_KEY;
 
@@ -238,17 +255,13 @@ describe("release readiness contract", () => {
   });
 
   it("surfaces main and Partner database authority failures as stable readiness names", async () => {
-    const query = vi.fn(async () => ({
-      rows: [
-        {
-          ready: false,
-          runtime_authority_ready: false,
-          missing_relations: [],
-          missing_migrations: [],
-          missing_triggers: [],
-        },
-      ],
-    }));
+    const query = databaseQuery({
+      ready: false,
+      runtime_authority_ready: false,
+      missing_relations: [],
+      missing_migrations: [],
+      missing_triggers: [],
+    });
     const env = completeProductionEnvironment();
     env.MINTVAULT_DATABASE_URL = "postgres://runtime:synthetic@db.invalid/mintvault";
     env.PARTNER_DATABASE_URL = "postgres://partner-runtime:synthetic@db.invalid/mintvault";
@@ -267,17 +280,13 @@ describe("release readiness contract", () => {
   });
 
   it("requires Partner admin authority even when the Partner Portal runtime is not configured", async () => {
-    const query = vi.fn(async () => ({
-      rows: [
-        {
-          ready: true,
-          runtime_authority_ready: true,
-          missing_relations: [],
-          missing_migrations: [],
-          missing_triggers: [],
-        },
-      ],
-    }));
+    const query = databaseQuery({
+      ready: true,
+      runtime_authority_ready: true,
+      missing_relations: [],
+      missing_migrations: [],
+      missing_triggers: [],
+    });
     const env = completeProductionEnvironment();
     expect(env.PARTNER_DATABASE_URL).toBeUndefined();
     await expect(
@@ -316,9 +325,7 @@ describe("release readiness contract", () => {
       unavailable: [],
     });
 
-    const query = vi.fn(async () => ({
-      rows: [{ ready: true, missing_relations: [], missing_migrations: [], missing_triggers: [] }],
-    }));
+    const query = databaseQuery({ ready: true, missing_relations: [], missing_migrations: [], missing_triggers: [] });
     await expect(
       checkReleaseReadiness({ query }, completeProductionEnvironment(), {
         partnerSharedRateLimitStoreInstalled: () => false,
@@ -330,5 +337,38 @@ describe("release readiness contract", () => {
       queryFailed: false,
       unavailableRuntime: ["partner_shared_rate_limit_store"],
     });
+  });
+  it("requires VQ readiness in every environment and keeps failure details private", async () => {
+    for (const env of [{ NODE_ENV: "test" }, completeProductionEnvironment()]) {
+      for (const queryFailed of [false, true]) {
+        const query = databaseQuery({
+          ready: true,
+          missing_relations: [],
+          missing_migrations: [],
+          missing_triggers: [],
+        });
+        vi.mocked(checkVqRuntimeReadiness).mockResolvedValueOnce({ ready: false, queryFailed });
+        const result = await checkReleaseReadiness({ query }, env, {
+          partnerSharedRateLimitStoreInstalled: () => true,
+          objectWriteRuntimeInstalled: () => true,
+          partnerAdminAuthorityReady: async () => true,
+        });
+        expect(result).toMatchObject({
+          ok: false,
+          queryFailed,
+          unavailableRuntime: ["vault_quest_database_authority"],
+        });
+        expect(checkVqRuntimeReadiness).toHaveBeenLastCalledWith({ query }, env.NODE_ENV === "production");
+      }
+    }
+    const query = databaseQuery({ ready: true, missing_relations: [], missing_migrations: [], missing_triggers: [] });
+    vi.mocked(checkVqRuntimeReadiness).mockRejectedValueOnce(new Error("secret database configuration"));
+    const result = await checkReleaseReadiness({ query }, { NODE_ENV: "test" });
+    expect(result).toMatchObject({
+      ok: false,
+      queryFailed: true,
+      unavailableRuntime: ["vault_quest_database_authority"],
+    });
+    expect(JSON.stringify(result)).not.toContain("secret");
   });
 });
