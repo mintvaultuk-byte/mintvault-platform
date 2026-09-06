@@ -2,6 +2,18 @@
 
 ## 2026-09-06 authorised production-image dependency correction
 
+Pushed3f41fdaee35834637e5c4090a6057f6c69125f05: run34027550638,
+image job101471117016 has Trivy step SUCCESS (Debian0, no vulnerability table),
+native file-type/sharp/canvas/PDFKit load PASS, uid1000, pre-schema503 PASS,
+main86/VQ17 migration and unchanged replay PASS. Post-schema /ready503 fails;
+SIGTERM proof skipped. PR merge checkout97a353e (feature3f41fdae into01d5e4da).
+Read-only CI diagnostics are being added to identify the failing readiness
+predicate; no speculative schema/role/product change. Whole image proof OPEN.
+Final local test-debt ratchet PASS344 existing diagnostics,1 removed. Its first
+attempt used the clean workspace's stale pre-J1 inventory; copied the two already
+committed J1 count/hash fields, proved file byte-equal to root, then reran. No new
+baseline waiver. Clean architecture8373 and CI19/Docker9 PASS after type imports.
+
 Owner approved dependency/runtime-npm extension at baseline16052f1b. Exact scope
 and rollback are in change-manifest.md. Independent Terra reviewed final lock and
 PDF assertions: ACCEPT/no gate weakening (source review, not independent execution).

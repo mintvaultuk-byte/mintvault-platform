@@ -1043,6 +1043,38 @@ jobs:
               })().catch(error => { console.error(error.message); process.exitCode = 1; });
             '
 
+      - name: Observe disposable database readiness as the runtime identity
+        run: |
+          set -euo pipefail
+          # Read-only diagnostics use the same source and low-privilege identity
+          # as the image. Keep the public /ready response generic and fail closed.
+          docker run --rm --network host \
+            -e NODE_ENV=test \
+            -e MINTVAULT_DATABASE_URL="postgres://mintvault_ci_runtime:synthetic@127.0.0.1:55440/amd64probe" \
+            --entrypoint node mv-amd64-schema-proof:ci --import tsx -e '
+              const { Client } = require("pg");
+              const r = require("./server/readiness.ts");
+              const v = require("./server/lib/vq-schema-contract.ts");
+              const db = new Client({ connectionString: process.env.MINTVAULT_DATABASE_URL });
+              (async () => {
+                await db.connect();
+                try {
+                  const main = await db.query(r.RELEASE_READINESS_SQL, [
+                    [...r.REQUIRED_RELEASE_RELATIONS], [...r.REQUIRED_RELEASE_MIGRATIONS],
+                    [...r.REQUIRED_RELEASE_TRIGGERS], [...r.REQUIRED_RELEASE_TRIGGER_RELATIONS], true,
+                  ]);
+                  console.log("Main readiness evidence: " + JSON.stringify(main.rows));
+                  const result = await db.query(v.VQ_RUNTIME_EVIDENCE_SQL, [true]);
+                  const { catalog, ...evidence } = result.rows[0];
+                  const catalogFingerprint = v.vqSchemaFingerprint(catalog);
+                  console.log("VQ readiness evidence: " + JSON.stringify({
+                    catalogFingerprint, runtimeAuthorityReady: evidence.runtimeAuthorityReady,
+                    ...v.evaluateVqRuntimeEvidence({ ...evidence, catalogFingerprint }),
+                  }));
+                } finally { await db.end(); }
+              })().catch(error => { console.error("Readiness diagnostic SQLSTATE: " + (error.code || "unknown")); process.exitCode = 1; });
+            '
+
       - name: Readiness succeeds on the authoritative schema; version reports this SHA
         run: |
           set -euo pipefail

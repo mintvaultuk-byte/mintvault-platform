@@ -2,6 +2,13 @@
 
 ## Owner-authorised image dependency extension — 2026-09-06 (current)
 
+Hosted follow-through:3f41fdae scan is green, but post-schema /ready returns503.
+Extend only .github/workflows/ci.yml with a read-only diagnostic against the
+existing disposable database using its real restricted runtime identity and
+canonical main/VQ readiness queries. No new migration, grant, provider call,
+public diagnostic route or readiness relaxation. This is evidence gathering for
+the reproduced image boot failure, not speculative product repair.
+
 Owner explicitly authorised the remaining application/bundled-npm correction
 after the hosted Debian0/Node22 receipt, with no further permission stops for
 this task. Baseline16052f1bc9783a86395f1b9f89993ba22d6ee094; root sole writer;
