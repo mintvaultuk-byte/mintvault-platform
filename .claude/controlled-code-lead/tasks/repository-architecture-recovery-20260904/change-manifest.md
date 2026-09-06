@@ -26,6 +26,13 @@ misreported as positive ready200. Existing positive harness needs schema applica
 No claim-lane/full-suite investigation: its platform restriction remains in force.
 Rollback is code-only before deployment; no system/database rollback is performed.
 
+Result receipt: pushed a60605f1b2e859e2fe9457278483d9674ac94ada, hosted run34024809130
+checked out PR merge547b36b0b9d9d758a7c19dbd4e886ed9051a8f3e. Native build passed;
+Trivy Debian0, Node packages22 (21HIGH/1CRITICAL), vulnerability step FAILED.
+Readiness probes skipped; local image proof still capacity-blocked. Remaining
+application ip-address/sharp and bundled npm findings are not repaired by apt.
+No expansion to dependency changes or gate weakening; see proof ledger receipt.
+
 > Historical boundary: this file describes Phase 2 only. The current working tree also
 > contains the later owner-authorized Admin identity/session product repair. Its exact
 > boundary is `admin-session-change-manifest.md` and `admin-session-file-manifest.md`;

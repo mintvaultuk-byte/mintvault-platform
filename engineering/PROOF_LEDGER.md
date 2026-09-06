@@ -2,6 +2,26 @@
 
 ## 2026-09-06 owner-directed Docker OS vulnerability WIP
 
+Hosted result for pushed `a60605f1b2e859e2fe9457278483d9674ac94ada`:
+[CI run 34024809130, image job 101463817570](https://github.com/mintvaultuk-byte/mintvault-platform/actions/runs/34024809130/job/101463817570).
+Checkout was GitHub's PR merge `547b36b0b9d9d758a7c19dbd4e886ed9051a8f3e`
+(feature a60605f1 into main 01d5e4da); not a feature-only local image proof.
+Both apt upgrade commands executed and native production image build succeeded.
+Exact log retrieval: `gh api repos/mintvaultuk-byte/mintvault-platform/actions/jobs/101463817570/logs`.
+Trivy0.70.0 output: `mv-amd64-proof:ci (debian 12.15) | debian | 0`;
+`Node.js (node-pkg)` / `Total: 22 (HIGH: 21, CRITICAL: 1)`; step exit1.
+Root cause in one sentence: the apt upgrade clears the reported Debian findings,
+but the image gate still fails on 22 fixable Node-package findings outside that
+OS-only correction, including two application dependencies and bundled npm.
+Application paths: ip-address10.2.0 (fixed10.3.1), sharp0.34.5 (fixed0.35.0).
+Bundled npm paths: brace-expansion3 findings, cross-spawn1, glob1, ip-address1,
+minimatch3, pacote1, sigstore1 and tar9; these account for the other20 findings.
+No dependency change, npm removal/update, ignore or scan weakening was made.
+The vulnerability step is NOT green; subsequent readiness probes were skipped.
+Further dependency/runtime-tool changes require scope adjudication beyond the
+owner's explicit two-line apt/digest correction. Local capacity remains blocked
+as below. Unfinished J2 and restricted claim work remain untouched.
+
 Baseline391ab5211d03a75b0bf05e7bff6489fda0a131a1; REM-SUPPLY-001 stays OPEN for
 this exact-image proof. Independent Terra confirms exactly two apt-line changes:
 upgrade base packages before installing the unchanged lists, unchanged cleanup,

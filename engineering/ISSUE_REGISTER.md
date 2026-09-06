@@ -4,7 +4,10 @@
 
 REM-SUPPLY-001: two-line apt upgrade WIP under unchanged Node20.20.2 digest;
 independent diff review and clean-lock supporting46 tests pass. Local amd64/Trivy
-proof remains blocked by host capacity, hosted exact-SHA scan pending; not FIXED.
+proof remains blocked by host capacity. Hosted run34024809130 at featurea60605f1
+(PR merge547b36b0) builds successfully: Debian0, Node packages22 (21HIGH/1CRITICAL).
+The vulnerability step fails; readiness was skipped. OS correction is evidenced,
+but image gate remains OPEN, not FIXED. Dependency scope requires adjudication.
 No Trivy waiver and no deployment. Claim-ownership request remains restricted/
 UNKNOWN, not presumed test flakiness. See proof ledger for exact limitations.
 
