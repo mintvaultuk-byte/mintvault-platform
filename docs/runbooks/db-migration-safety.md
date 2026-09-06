@@ -40,6 +40,31 @@ The image also includes the numbered SQL inventory at `/app/migrations`. Only
 unnumbered SQL files are intentionally excluded because the runner never executes them and rollback
 remains an explicit owner-approved operation.
 
+Vault Quest has a separate numbered inventory at `/app/migrations-vq` and the
+closed `--estate vault-quest` runner profile. Main remains the default. VQ uses
+`drizzle.vq_schema_migrations` and a separate advisory lock; a main journal row
+never satisfies a VQ requirement. Run main migrations first so `mintvault_app`
+exists before VQ's additive role/grant authority. Image CI applies and replays
+the bundled VQ runner and compares its own SQL checksums to completed journal rows.
+Shipping source inventory alone is not runtime-readiness or deployment proof.
+
+For a fresh, separately owner-approved VQ target, retain a dry-run before apply:
+
+```sh
+node /app/dist/migrate.cjs --estate vault-quest
+node /app/dist/migrate.cjs --estate vault-quest --apply
+```
+
+An existing unjournalled VQ schema must **not** replay old SQL. The explicit
+`--estate vault-quest --historical-baseline-v1 --apply` admission mode requires the
+exact immutable0000–0015 source digest and structural fingerprint, no existing VQ
+control metadata, and the restricted main-owned role. It executes only0016 and
+records one observed-schema receipt; the old16 files are attested, never reported
+as executed. Review the exact catalog/lineage/role checks and target evidence first.
+Quiesce application writers and competing operator DDL through admission. Refusal
+requires investigation/forward repair, not deleting metadata, editing old SQL or
+hand-inserting journal rows. This documentation grants no target execution approval.
+
 Normal application startup is unchanged:
 
 ```sh

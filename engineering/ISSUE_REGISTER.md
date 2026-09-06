@@ -2,6 +2,12 @@
 
 ## 2026-09-06 VQ schema authority checkpoint
 
+S3b continues ARCH-SCHEMA-001 from pusheda0e25b16: image shipping/guarded CI setup
+and one field's Drizzle timezone authority repaired with reproduced failures.
+Actual local main86/VQ17/replay0 proof passes; clean50/type/build pass. Retain the
+architecture aggregate timeout and exact-candidate/independent repeat limits in
+existingVQpacket. Required runtime/fallback and final release gates remain OPEN.
+
 ARCH-SCHEMA-001 remains IN_PROGRESS. S2c ecdac325 is pushed with honest fresh/history
 proof; S3a namespaced requirement foundation independently passes without changing
 main readiness. Shipping/runtime/fallback remain open. Terra reproduced the exact

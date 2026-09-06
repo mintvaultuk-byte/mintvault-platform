@@ -343,6 +343,37 @@ describe("architecture topology authority", () => {
       source: "config/components",
       target: "vault-quest:0001_core.sql",
     });
+    const vqPolicy = {
+      ...miniaturePolicy,
+      scanRoots: [...miniaturePolicy.scanRoots, "migrations-vq"],
+      ownerRules: [...miniaturePolicy.ownerRules, { prefix: "migrations-vq/", owner: "migration-owner" }],
+    };
+    write(root, "migrations-vq/0001_core.sql", "SELECT 1;\n");
+    const copy = "COPY --from=production-dependencies /app/migrations-vq/[0-9][0-9][0-9][0-9]*_*.sql ./migrations-vq/";
+    for (const docker of [
+      `FROM node AS production\n# ${copy}\n`,
+      `FROM node AS builder\n${copy}\nFROM node AS production\n`,
+    ]) {
+      write(root, "Dockerfile", docker);
+      expect(buildArchitectureSnapshot(root, vqPolicy).violations).toContainEqual({
+        code: "MISSING_REQUIRED_MIGRATION",
+        source: "config/components",
+        target: "vault-quest:0001_core.sql",
+      });
+    }
+    write(root, "Dockerfile", `FROM node AS production\n${copy}\n`);
+    const shipped = buildArchitectureSnapshot(root, vqPolicy);
+    expect(shipped.violations).toEqual([]);
+    expect(shipped.records).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          category: "migration",
+            source: "migrations-vq/0001_core.sql:1",
+          shippingDisposition: "shipped-numbered-vault-quest",
+          lineage: "vault-quest-numbered-runner",
+        }),
+      ])
+    );
     write(root, "config/components/core.ts", withEstate("drizzle"));
     expect(buildArchitectureSnapshot(root, miniaturePolicy).violations).toEqual(
       expect.arrayContaining([

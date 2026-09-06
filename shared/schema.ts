@@ -505,7 +505,7 @@ export const certificates = pgTable("certificates", {
   // the confirmation capability; these non-secret fields expose pending state.
   nfcLockPendingUid: text("nfc_lock_pending_uid"),
   nfcLockPendingMethod: text("nfc_lock_pending_method"),
-  nfcLockPendingAt: timestamp("nfc_lock_pending_at"),
+  nfcLockPendingAt: timestamp("nfc_lock_pending_at", { withTimezone: true }),
   nfcLockPendingBy: text("nfc_lock_pending_by"),
   nfcLastVerifiedAt: timestamp("nfc_last_verified_at"),
   nfcWrittenBy: text("nfc_written_by"),

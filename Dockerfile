@@ -109,6 +109,7 @@ COPY --from=production-dependencies /app/dist ./dist
 COPY --from=production-dependencies /app/public ./public
 COPY --from=production-dependencies /app/content/legal ./content/legal
 COPY --from=production-dependencies /app/migrations/[0-9][0-9][0-9][0-9]*_*.sql ./migrations/
+COPY --from=production-dependencies /app/migrations-vq/[0-9][0-9][0-9][0-9]*_*.sql ./migrations-vq/
 # Lineage exclusion declarations — the runner consults these at the identity guard; without
 # them a staging-lineage host fails closed on the three declared collisions.
 COPY --from=production-dependencies /app/migrations/lineage-exclusions.json ./migrations/

@@ -81,8 +81,12 @@ unresolved delegation remains visibly unclassified.
 Migration authority includes the main and Vault Quest lineages. Duplicate identities,
 including leading-zero aliases, checksum drift, malformed lineage-exclusion declarations,
 missing required migrations, and an unclassified migration reference fail the gate.
-Vault Quest migrations are deliberately labeled
-`unshipped-owner-decision-required`; they do not satisfy shipped readiness.
+Numbered Vault Quest migrations are classified `shipped-numbered-vault-quest`
+only when the exact numbered COPY appears in the production Docker stage. A
+removed/commented/wrong-stage copy leaves them unshipped. Requirements use closed
+main/VQ estate identities; a main filename cannot satisfy VQ. Image CI separately
+proves the actual bundled runner, image-owned SQL/checksum inventory and replay.
+Neither source classification nor shipping closes runtime-readiness or release gates.
 
 ## Commands and review flow
 

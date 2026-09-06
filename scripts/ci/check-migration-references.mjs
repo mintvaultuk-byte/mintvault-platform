@@ -27,9 +27,33 @@ function sqlFiles(root, directory) {
   return new Set(readdirSync(join(root, directory)).filter((name) => name.endsWith(".sql")));
 }
 
+/** Source inventory classification only; actual image/runner proof remains a separate CI gate. */
+export function shipsVaultQuestMigrations(root) {
+  const file = join(root, "Dockerfile");
+  if (!existsSync(file)) return false;
+  let production = false;
+  let copied = false;
+  for (const raw of readFileSync(file, "utf8").split(/\r?\n/)) {
+    const line = raw.trim();
+    if (/^FROM\s/i.test(line)) {
+      production = /\sAS\sproduction$/i.test(line);
+      copied = false;
+    } else if (
+      production &&
+      line === "COPY --from=production-dependencies /app/migrations-vq/[0-9][0-9][0-9][0-9]*_*.sql ./migrations-vq/"
+    ) {
+      copied = true;
+    }
+  }
+  return production && copied;
+}
+
 export function buildMigrationReferenceReport(root, policy) {
   const main = sqlFiles(root, "migrations");
   const vq = sqlFiles(root, "migrations-vq");
+  const shippedVq = new Set(
+    shipsVaultQuestMigrations(root) ? [...vq].filter((name) => MIGRATION_FILE_RE.test(name)) : []
+  );
   const shippedMain = new Set([...main].filter((name) => MIGRATION_FILE_RE.test(name)));
   const references = new Map();
   for (const file of [...walk(root, "tests"), ...walk(root, "scripts")].filter((name) =>
@@ -47,6 +71,7 @@ export function buildMigrationReferenceReport(root, policy) {
   for (const [name, files] of [...references].sort(([a], [b]) => a.localeCompare(b))) {
     let disposition = null;
     if (shippedMain.has(name)) disposition = "shipped-main";
+    else if (shippedVq.has(name)) disposition = "shipped-vault-quest";
     else if (vq.has(name)) disposition = policy.vqDirectoryDisposition;
     else if (Object.hasOwn(policy.legacyForwardFixtures, name)) {
       disposition = "legacy-forward-fixture-only";
@@ -72,7 +97,8 @@ export function buildMigrationReferenceReport(root, policy) {
     schemaVersion: 1,
     inventory: {
       shippedMain: shippedMain.size,
-      vqUnshippedOwnerDecision: vq.size,
+      shippedVaultQuest: shippedVq.size,
+      vqUnshippedOwnerDecision: vq.size - shippedVq.size,
       classifiedReferences: classifications.length,
     },
     classifications,
@@ -91,8 +117,8 @@ function runCli() {
   }
   console.log(
     `migration references classified: ${report.inventory.classifiedReferences}; ` +
-      `shipped=${report.inventory.shippedMain}, VQ=${report.inventory.vqUnshippedOwnerDecision} ` +
-      "(unshipped-owner-decision-required)"
+      `shipped-main=${report.inventory.shippedMain}, shipped-VQ=${report.inventory.shippedVaultQuest}, ` +
+      `VQ-unshipped=${report.inventory.vqUnshippedOwnerDecision}`
   );
 }
 if (process.argv[1] && resolve(process.argv[1]) === fileURLToPath(import.meta.url)) runCli();

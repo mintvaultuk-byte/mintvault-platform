@@ -1006,6 +1006,43 @@ jobs:
             psql -h 127.0.0.1 -p 55440 -U postgres -d amd64probe -v ON_ERROR_STOP=1 \
             -c "CREATE ROLE partner_ci_runtime LOGIN PASSWORD 'synthetic' INHERIT NOSUPERUSER NOBYPASSRLS NOCREATEDB NOCREATEROLE; GRANT partner_runtime TO partner_ci_runtime; CREATE ROLE mintvault_ci_runtime LOGIN PASSWORD 'synthetic' INHERIT NOSUPERUSER NOBYPASSRLS NOCREATEDB NOCREATEROLE; GRANT mintvault_app TO mintvault_ci_runtime"
 
+      - name: Prove production-image Vault Quest migrations and replay
+        run: |
+          set -euo pipefail
+          docker run --rm --network host \
+            -e NODE_ENV=production \
+            -e MINTVAULT_MIGRATION_DATABASE_URL="postgres://postgres:postgres@127.0.0.1:55440/amd64probe" \
+            --entrypoint node mv-amd64-proof:ci -e '
+              const assert = require("node:assert/strict");
+              const fs = require("node:fs");
+              const crypto = require("node:crypto");
+              const { spawnSync } = require("node:child_process");
+              const { Client } = require("pg");
+              const apply = () => {
+                const result = spawnSync(process.execPath, ["/app/dist/migrate.cjs", "--estate", "vault-quest", "--apply"], { stdio: "inherit", env: process.env });
+                assert.equal(result.status, 0, "bundled VQ runner failed");
+              };
+              (async () => {
+                const files = fs.readdirSync("/app/migrations-vq").filter(name => /^\d{4,}_.+\.sql$/.test(name)).sort();
+                assert.ok(files.length > 0, "VQ image inventory is empty");
+                const expected = files.map(filename => ({ filename, checksum: crypto.createHash("sha256").update(fs.readFileSync("/app/migrations-vq/" + filename)).digest("hex") }));
+                apply();
+                const db = new Client({ connectionString: process.env.MINTVAULT_MIGRATION_DATABASE_URL });
+                await db.connect();
+                try {
+                  const readJournal = async () => (await db.query("SELECT * FROM drizzle.vq_schema_migrations ORDER BY filename")).rows;
+                  const before = await readJournal();
+                  assert.deepEqual(before.map(({ filename, checksum }) => ({ filename, checksum })), expected);
+                  assert.ok(before.every(row => row.status === "applied" && row.completed_at !== null));
+                  assert.equal((await db.query("SELECT * FROM drizzle.vq_schema_baselines")).rowCount, 0, "fresh execution must not attest history");
+                  apply();
+                  assert.deepEqual(await readJournal(), before, "VQ replay changed execution history");
+                  assert.equal((await db.query("SELECT * FROM drizzle.vq_schema_baselines")).rowCount, 0);
+                  console.log("PASS image-owned VQ inventory, completed checksums, fresh history and replay: " + files.length);
+                } finally { await db.end(); }
+              })().catch(error => { console.error(error.message); process.exitCode = 1; });
+            '
+
       - name: Readiness succeeds on the authoritative schema; version reports this SHA
         run: |
           set -euo pipefail

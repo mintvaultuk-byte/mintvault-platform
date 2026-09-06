@@ -117,6 +117,11 @@ scripts/db/*
 # missing entry does not fail `npm run build` in CI — CI builds the whole repo — it fails only
 # inside the Dockerfile, i.e. at deploy time. tests/dockerignore-build-context.test.ts pins it.
 !scripts/db/read-only-session.ts
+!scripts/db/vq-schema-recovery.ts
+# The non-shipped schema-tool stage runs the same guarded db:push as local CI.
+!scripts/db/guard-db-push.ts
+!scripts/db/db-host-policy.ts
+!scripts/db/schema-registry.ts
 
 # ─── Project meta / documentation (not needed by build or runtime) ────
 docs

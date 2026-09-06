@@ -1,5 +1,18 @@
 # Engineering proof ledger
 
+## 2026-09-06 VQ production-image shipping continuation
+
+[Existing VQ packet](../.claude/controlled-code-lead/tasks/repository-architecture-recovery-20260904/vq-schema-recovery.md)
+binds a0e25b16 WIP source/image hashes. Root actual isolated PG/image proof applies
+main86/VQ17 and replay0, exact checksums/full unchanged journal/zero history receipts.
+Independent Terra actual repeat passes on separately owned isolated PG17; offline
+image inventory and context/topology proof independent. Reproduced missing guarded schema-tool inputs and one Drizzle
+timezone mismatch with immutable0118 fixed without SQL/behavior/shared DB changes.
+Clean-lock50/50, rootNFC22, typecheck/build pass. Architecture29/30 with unchanged
+30s wrapper timeout is a failed aggregate, not green. Arm64 WIP images are not an
+exact release candidate or amd64 proof. Runtime admission/fallback/Opus/HY-SECURITY
+and terminal-failed hosted CI remain OPEN. Owned synthetic databases cleaned only.
+
 ## 2026-09-06 VQ namespaced readiness foundation
 
 [Existing VQ packet](../.claude/controlled-code-lead/tasks/repository-architecture-recovery-20260904/vq-schema-recovery.md)

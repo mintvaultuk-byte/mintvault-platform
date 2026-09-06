@@ -162,6 +162,16 @@ describe("the Docker build context contains everything the build imports", () =>
     ).toEqual([]);
   });
 
+  it("includes the schema-tool guarded db:push entrypoint and configuration imports", () => {
+    const allow = new Set(allowlistedScripts());
+    const pkg = JSON.parse(readFileSync(join(ROOT, "package.json"), "utf8"));
+    expect(pkg.scripts["db:push"]).toBe("tsx scripts/db/guard-db-push.ts");
+    expect(allow.has("scripts/db/guard-db-push.ts")).toBe(true);
+    for (const dependency of relativeDeps("drizzle.config.ts").filter((path) => path.startsWith("scripts/"))) {
+      expect(allow.has(dependency), `schema-tool config import excluded: ${dependency}`).toBe(true);
+    }
+  });
+
   it("specifically re-admits read-only-session.ts, which migrate.ts needs", () => {
     // The exact omission that broke the first staging deploy of this landing.
     expect(readFileSync(join(ROOT, "scripts/db/migrate.ts"), "utf8")).toContain('from "./read-only-session"');
@@ -224,6 +234,16 @@ describe("the Docker build context excludes local private and agent state", () =
     expect(CI_WORKFLOW).toContain("--target schema-tool");
     expect(CI_WORKFLOW).toContain("run db:push -- --force");
     expect(CI_WORKFLOW).toContain("/app/dist/migrate.cjs --apply --allow-destructive");
+    expect(DOCKERFILE).toContain(
+      "COPY --from=production-dependencies /app/migrations-vq/[0-9][0-9][0-9][0-9]*_*.sql ./migrations-vq/"
+    );
+    expect(CI_WORKFLOW).toContain('["/app/dist/migrate.cjs", "--estate", "vault-quest", "--apply"]');
+    expect(CI_WORKFLOW.indexOf("Prove production-image Vault Quest migrations and replay")).toBeGreaterThan(
+      CI_WORKFLOW.indexOf("/app/dist/migrate.cjs --apply --allow-destructive")
+    );
+    expect(CI_WORKFLOW.indexOf("Prove production-image Vault Quest migrations and replay")).toBeLessThan(
+      CI_WORKFLOW.indexOf("Readiness succeeds on the authoritative schema")
+    );
     expect(amd64Job).not.toContain("CREATE TABLE IF NOT EXISTS certificates");
     expect(amd64Job.match(/docker run -d --name mv-amd64-boot/g)?.length).toBe(2);
     expect(amd64Job.match(/PARTNER_DATABASE_URL=/g)?.length).toBe(2);

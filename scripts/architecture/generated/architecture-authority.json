@@ -7297,8 +7297,8 @@
     {
       "category": "migration",
       "id": "0000_next_mister_fear.sql",
-      "shippingDisposition": "unshipped-owner-decision-required",
-      "lineage": "hand-applied-raw-sql-owner-decision",
+      "shippingDisposition": "shipped-numbered-vault-quest",
+      "lineage": "vault-quest-numbered-runner",
       "migrationNumber": "0",
       "sha256": "60f8f33892af3ac17bf655abedfa738640fb533e26a85b2dc59678cc9e5a116b",
       "key": "migration|migrations-vq/0000_next_mister_fear.sql|0000_next_mister_fear.sql#0",
@@ -7309,8 +7309,8 @@
     {
       "category": "migration",
       "id": "0001_equal_iron_fist.sql",
-      "shippingDisposition": "unshipped-owner-decision-required",
-      "lineage": "hand-applied-raw-sql-owner-decision",
+      "shippingDisposition": "shipped-numbered-vault-quest",
+      "lineage": "vault-quest-numbered-runner",
       "migrationNumber": "1",
       "sha256": "fe8593c6892a96b1c23eddd301ebbc34a1fb93acd079e4329128bc584625b83a",
       "key": "migration|migrations-vq/0001_equal_iron_fist.sql|0001_equal_iron_fist.sql#0",
@@ -7321,8 +7321,8 @@
     {
       "category": "migration",
       "id": "0002_blushing_overlord.sql",
-      "shippingDisposition": "unshipped-owner-decision-required",
-      "lineage": "hand-applied-raw-sql-owner-decision",
+      "shippingDisposition": "shipped-numbered-vault-quest",
+      "lineage": "vault-quest-numbered-runner",
       "migrationNumber": "2",
       "sha256": "349768bc6fbec8ec985ed45d63fa61a6089c816612f5fb9c7a09b32b120d9794",
       "key": "migration|migrations-vq/0002_blushing_overlord.sql|0002_blushing_overlord.sql#0",
@@ -7333,8 +7333,8 @@
     {
       "category": "migration",
       "id": "0003_character_bible.sql",
-      "shippingDisposition": "unshipped-owner-decision-required",
-      "lineage": "hand-applied-raw-sql-owner-decision",
+      "shippingDisposition": "shipped-numbered-vault-quest",
+      "lineage": "vault-quest-numbered-runner",
       "migrationNumber": "3",
       "sha256": "1f5dbbfa88a3b6bb1988869c0eefba94663f72d601c4b8e7feba376709a0d06d",
       "key": "migration|migrations-vq/0003_character_bible.sql|0003_character_bible.sql#0",
@@ -7345,8 +7345,8 @@
     {
       "category": "migration",
       "id": "0004_reference_pack.sql",
-      "shippingDisposition": "unshipped-owner-decision-required",
-      "lineage": "hand-applied-raw-sql-owner-decision",
+      "shippingDisposition": "shipped-numbered-vault-quest",
+      "lineage": "vault-quest-numbered-runner",
       "migrationNumber": "4",
       "sha256": "77819cf686d6aae4cdc92a22cc87b50cb40e6fc082142fde71893c0db7e3aa26",
       "key": "migration|migrations-vq/0004_reference_pack.sql|0004_reference_pack.sql#0",
@@ -7357,8 +7357,8 @@
     {
       "category": "migration",
       "id": "0005_identity_score.sql",
-      "shippingDisposition": "unshipped-owner-decision-required",
-      "lineage": "hand-applied-raw-sql-owner-decision",
+      "shippingDisposition": "shipped-numbered-vault-quest",
+      "lineage": "vault-quest-numbered-runner",
       "migrationNumber": "5",
       "sha256": "6630614731470e46850d62155c6da7e00f47c1be8e40296afec6cd0173eb0479",
       "key": "migration|migrations-vq/0005_identity_score.sql|0005_identity_score.sql#0",
@@ -7369,8 +7369,8 @@
     {
       "category": "migration",
       "id": "0006_description_status.sql",
-      "shippingDisposition": "unshipped-owner-decision-required",
-      "lineage": "hand-applied-raw-sql-owner-decision",
+      "shippingDisposition": "shipped-numbered-vault-quest",
+      "lineage": "vault-quest-numbered-runner",
       "migrationNumber": "6",
       "sha256": "10181eb21e268cba90abe2238a8a52282c897e02a071cbbaaa3bbb6141ba7562",
       "key": "migration|migrations-vq/0006_description_status.sql|0006_description_status.sql#0",
@@ -7381,8 +7381,8 @@
     {
       "category": "migration",
       "id": "0007_production_studio.sql",
-      "shippingDisposition": "unshipped-owner-decision-required",
-      "lineage": "hand-applied-raw-sql-owner-decision",
+      "shippingDisposition": "shipped-numbered-vault-quest",
+      "lineage": "vault-quest-numbered-runner",
       "migrationNumber": "7",
       "sha256": "15e584b05face7df6be3f913b6691b14eab5758fa4fa059746f43b2e7ebfa321",
       "key": "migration|migrations-vq/0007_production_studio.sql|0007_production_studio.sql#0",
@@ -7393,8 +7393,8 @@
     {
       "category": "migration",
       "id": "0008_export_jobs.sql",
-      "shippingDisposition": "unshipped-owner-decision-required",
-      "lineage": "hand-applied-raw-sql-owner-decision",
+      "shippingDisposition": "shipped-numbered-vault-quest",
+      "lineage": "vault-quest-numbered-runner",
       "migrationNumber": "8",
       "sha256": "cd4f2bb1667c75865a499fde9c28f8e80e24752e135540c2b6ea0517ba987808",
       "key": "migration|migrations-vq/0008_export_jobs.sql|0008_export_jobs.sql#0",
@@ -7405,8 +7405,8 @@
     {
       "category": "migration",
       "id": "0009_generation_requests.sql",
-      "shippingDisposition": "unshipped-owner-decision-required",
-      "lineage": "hand-applied-raw-sql-owner-decision",
+      "shippingDisposition": "shipped-numbered-vault-quest",
+      "lineage": "vault-quest-numbered-runner",
       "migrationNumber": "9",
       "sha256": "a17116bf4172b5f10c15a7e4ecf62edb5421d9560802eb65e1348e4a42e2f3f0",
       "key": "migration|migrations-vq/0009_generation_requests.sql|0009_generation_requests.sql#0",
@@ -7417,8 +7417,8 @@
     {
       "category": "migration",
       "id": "0010_artwork_revisions.sql",
-      "shippingDisposition": "unshipped-owner-decision-required",
-      "lineage": "hand-applied-raw-sql-owner-decision",
+      "shippingDisposition": "shipped-numbered-vault-quest",
+      "lineage": "vault-quest-numbered-runner",
       "migrationNumber": "10",
       "sha256": "7c76b3f2d9d6f77482d348e8b18733d6f2d7255bf4f37fe3ac19db8f0176810d",
       "key": "migration|migrations-vq/0010_artwork_revisions.sql|0010_artwork_revisions.sql#0",
@@ -7429,8 +7429,8 @@
     {
       "category": "migration",
       "id": "0011_feature_flags.sql",
-      "shippingDisposition": "unshipped-owner-decision-required",
-      "lineage": "hand-applied-raw-sql-owner-decision",
+      "shippingDisposition": "shipped-numbered-vault-quest",
+      "lineage": "vault-quest-numbered-runner",
       "migrationNumber": "11",
       "sha256": "25c0bdc2824d3a032c34bbd180a9b43ce37760a8f32f8e5a2d612ec98ac915c1",
       "key": "migration|migrations-vq/0011_feature_flags.sql|0011_feature_flags.sql#0",
@@ -7441,8 +7441,8 @@
     {
       "category": "migration",
       "id": "0012_export_job_payload.sql",
-      "shippingDisposition": "unshipped-owner-decision-required",
-      "lineage": "hand-applied-raw-sql-owner-decision",
+      "shippingDisposition": "shipped-numbered-vault-quest",
+      "lineage": "vault-quest-numbered-runner",
       "migrationNumber": "12",
       "sha256": "e580371eab1414f52ebf1ba0a0094d5422b60d8671c0d37b35dd8ffd4f18a488",
       "key": "migration|migrations-vq/0012_export_job_payload.sql|0012_export_job_payload.sql#0",
@@ -7453,8 +7453,8 @@
     {
       "category": "migration",
       "id": "0013_vq_config.sql",
-      "shippingDisposition": "unshipped-owner-decision-required",
-      "lineage": "hand-applied-raw-sql-owner-decision",
+      "shippingDisposition": "shipped-numbered-vault-quest",
+      "lineage": "vault-quest-numbered-runner",
       "migrationNumber": "13",
       "sha256": "592fa277248dd596915b6ce438bc157be53c742483b4a74a8020a33d0a755ac1",
       "key": "migration|migrations-vq/0013_vq_config.sql|0013_vq_config.sql#0",
@@ -7465,8 +7465,8 @@
     {
       "category": "migration",
       "id": "0014_artwork_revision_events.sql",
-      "shippingDisposition": "unshipped-owner-decision-required",
-      "lineage": "hand-applied-raw-sql-owner-decision",
+      "shippingDisposition": "shipped-numbered-vault-quest",
+      "lineage": "vault-quest-numbered-runner",
       "migrationNumber": "14",
       "sha256": "98ac4d21adb8b6ae59349ae4d4cf1a15c76f70ed48448a4d31bfffa5c83d4244",
       "key": "migration|migrations-vq/0014_artwork_revision_events.sql|0014_artwork_revision_events.sql#0",
@@ -7477,8 +7477,8 @@
     {
       "category": "migration",
       "id": "0015_feature_flags_generation_types.sql",
-      "shippingDisposition": "unshipped-owner-decision-required",
-      "lineage": "hand-applied-raw-sql-owner-decision",
+      "shippingDisposition": "shipped-numbered-vault-quest",
+      "lineage": "vault-quest-numbered-runner",
       "migrationNumber": "15",
       "sha256": "f5eb672c08938969ad1fc2ded107d3aeb76c6c7176ebad3d29dcdd2b5a79995f",
       "key": "migration|migrations-vq/0015_feature_flags_generation_types.sql|0015_feature_flags_generation_types.sql#0",
@@ -7489,8 +7489,8 @@
     {
       "category": "migration",
       "id": "0016_schema_baseline_authority.sql",
-      "shippingDisposition": "unshipped-owner-decision-required",
-      "lineage": "hand-applied-raw-sql-owner-decision",
+      "shippingDisposition": "shipped-numbered-vault-quest",
+      "lineage": "vault-quest-numbered-runner",
       "migrationNumber": "16",
       "sha256": "fbc741ee9356f7c30f44bee7d4e99ce8f0a1048d5522aa2be7130349abc175c6",
       "key": "migration|migrations-vq/0016_schema_baseline_authority.sql|0016_schema_baseline_authority.sql#0",
@@ -12182,7 +12182,7 @@
       "pricingKind": "source-or-projection",
       "expression": "\"currency-bearing-literal\"",
       "key": "pricing-authority|scripts/architecture/check-architecture.mjs|value:pricingKind#0",
-      "source": "scripts/architecture/check-architecture.mjs:2001",
+      "source": "scripts/architecture/check-architecture.mjs:2009",
       "disposition": "known-legacy",
       "finding": "ARCH-AUTHORITY-001",
       "legacyExpiry": "the bounded-context repair that assigns explicit authority"
@@ -12193,7 +12193,7 @@
       "pricingKind": "source-or-projection",
       "expression": "\"transport\"",
       "key": "pricing-authority|scripts/architecture/check-architecture.mjs|value:pricingKind#1",
-      "source": "scripts/architecture/check-architecture.mjs:2003",
+      "source": "scripts/architecture/check-architecture.mjs:2011",
       "disposition": "known-legacy",
       "finding": "ARCH-AUTHORITY-001",
       "legacyExpiry": "the bounded-context repair that assigns explicit authority"
@@ -12204,7 +12204,7 @@
       "pricingKind": "source-or-projection",
       "expression": "\"projection-import\"",
       "key": "pricing-authority|scripts/architecture/check-architecture.mjs|value:pricingKind#2",
-      "source": "scripts/architecture/check-architecture.mjs:2007",
+      "source": "scripts/architecture/check-architecture.mjs:2015",
       "disposition": "known-legacy",
       "finding": "ARCH-AUTHORITY-001",
       "legacyExpiry": "the bounded-context repair that assigns explicit authority"
@@ -12215,7 +12215,7 @@
       "pricingKind": "source-or-projection",
       "expression": "\"source-or-projection\"",
       "key": "pricing-authority|scripts/architecture/check-architecture.mjs|value:pricingKind#3",
-      "source": "scripts/architecture/check-architecture.mjs:2016",
+      "source": "scripts/architecture/check-architecture.mjs:2024",
       "disposition": "known-legacy",
       "finding": "ARCH-AUTHORITY-001",
       "legacyExpiry": "the bounded-context repair that assigns explicit authority"
@@ -12226,7 +12226,7 @@
       "pricingKind": "source-or-projection",
       "expression": "\"currency-bearing-jsx\"",
       "key": "pricing-authority|scripts/architecture/check-architecture.mjs|value:pricingKind#4",
-      "source": "scripts/architecture/check-architecture.mjs:2045",
+      "source": "scripts/architecture/check-architecture.mjs:2053",
       "disposition": "known-legacy",
       "finding": "ARCH-AUTHORITY-001",
       "legacyExpiry": "the bounded-context repair that assigns explicit authority"
@@ -12237,7 +12237,7 @@
       "pricingKind": "source-or-projection",
       "expression": "\"currency-bearing-jsx-expression\"",
       "key": "pricing-authority|scripts/architecture/check-architecture.mjs|value:pricingKind#5",
-      "source": "scripts/architecture/check-architecture.mjs:2056",
+      "source": "scripts/architecture/check-architecture.mjs:2064",
       "disposition": "known-legacy",
       "finding": "ARCH-AUTHORITY-001",
       "legacyExpiry": "the bounded-context repair that assigns explicit authority"
@@ -27769,7 +27769,7 @@
       "roleKind": "definition-or-mapping",
       "declaration": "<anonymous>",
       "key": "role-authority|scripts/architecture/check-architecture.mjs|role:admin#0",
-      "source": "scripts/architecture/check-architecture.mjs:946",
+      "source": "scripts/architecture/check-architecture.mjs:947",
       "disposition": "known-legacy",
       "finding": "ARCH-AUTHORITY-001",
       "legacyExpiry": "the bounded-context repair that assigns explicit authority"
@@ -27780,7 +27780,7 @@
       "roleKind": "definition-or-mapping",
       "declaration": "<anonymous>",
       "key": "role-authority|scripts/architecture/check-architecture.mjs|role:customer#0",
-      "source": "scripts/architecture/check-architecture.mjs:948",
+      "source": "scripts/architecture/check-architecture.mjs:949",
       "disposition": "known-legacy",
       "finding": "ARCH-AUTHORITY-001",
       "legacyExpiry": "the bounded-context repair that assigns explicit authority"
@@ -27791,7 +27791,7 @@
       "roleKind": "definition-or-mapping",
       "declaration": "<anonymous>",
       "key": "role-authority|scripts/architecture/check-architecture.mjs|role:partner#0",
-      "source": "scripts/architecture/check-architecture.mjs:947",
+      "source": "scripts/architecture/check-architecture.mjs:948",
       "disposition": "known-legacy",
       "finding": "ARCH-AUTHORITY-001",
       "legacyExpiry": "the bounded-context repair that assigns explicit authority"
@@ -27802,7 +27802,7 @@
       "roleKind": "definition-or-mapping",
       "declaration": "actor",
       "key": "role-authority|scripts/architecture/check-architecture.mjs|role:public-or-handler-enforced#0",
-      "source": "scripts/architecture/check-architecture.mjs:944",
+      "source": "scripts/architecture/check-architecture.mjs:945",
       "disposition": "known-legacy",
       "finding": "ARCH-AUTHORITY-001",
       "legacyExpiry": "the bounded-context repair that assigns explicit authority"
@@ -27813,7 +27813,7 @@
       "roleKind": "definition-or-mapping",
       "declaration": "middlewareActors",
       "key": "role-authority|scripts/architecture/check-architecture.mjs|role:public-or-handler-enforced#1",
-      "source": "scripts/architecture/check-architecture.mjs:1656",
+      "source": "scripts/architecture/check-architecture.mjs:1657",
       "disposition": "known-legacy",
       "finding": "ARCH-AUTHORITY-001",
       "legacyExpiry": "the bounded-context repair that assigns explicit authority"
@@ -27824,7 +27824,7 @@
       "roleKind": "definition-or-mapping",
       "declaration": "<anonymous>",
       "key": "role-authority|scripts/architecture/check-architecture.mjs|role:staff#0",
-      "source": "scripts/architecture/check-architecture.mjs:949",
+      "source": "scripts/architecture/check-architecture.mjs:950",
       "disposition": "known-legacy",
       "finding": "ARCH-AUTHORITY-001",
       "legacyExpiry": "the bounded-context repair that assigns explicit authority"
@@ -27835,7 +27835,7 @@
       "roleKind": "definition-or-mapping",
       "declaration": "<anonymous>",
       "key": "role-authority|scripts/architecture/check-architecture.mjs|role:super-admin#0",
-      "source": "scripts/architecture/check-architecture.mjs:945",
+      "source": "scripts/architecture/check-architecture.mjs:946",
       "disposition": "known-legacy",
       "finding": "ARCH-AUTHORITY-001",
       "legacyExpiry": "the bounded-context repair that assigns explicit authority"

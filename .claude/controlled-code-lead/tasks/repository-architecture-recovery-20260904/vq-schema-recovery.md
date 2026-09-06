@@ -2,10 +2,143 @@
 
 ## Current position (2026-09-06)
 
+Resumed after owner continuation with4.8GiB free; HEAD remains pushed
+a0e25b16d412de12fe65be0f4417641308eb831b and S3b WIP preserved. Disk exhaustion
+previously prevented the checkpoint and the independently identified topology fix.
+The fix now pins the exact parser-normalized reviewed image-proof body, alongside
+enabled/order checks; four regression mutations cover swallowed failure, dead apply,
+dead inventory assertion and dead replay assertion. No auto-adopt/diagnostic waiver.
+Body SHA256:2614741cc3f6302f3dce76a573e2c77dce61f0a0e192844a8e90c588e9278326.
+The graceful dedicated-profile restart recovered containerd without deleting data.
+Independent offline image inventory passes: all17 exact SQL hashes, uid1000,
+no scripts/development tools. Root actual fresh database execution/replay now passes
+after the exact CI prerequisite repairs recorded below; independent Terra repeat passes.
+The prior production build was arm64 WIP only; never exact candidate or amd64 proof.
+
+Bounded local environment recovery: read-only Docker ps confirms no running
+containers in dedicated profile mintvault-remediation-20260905. VM df shows11GiB
+available; kernel reports the vdb1 journal aborted during previous host exhaustion.
+Attempt only the normal graceful Colima restart of this exact idle test profile,
+which preserves its disk/state. No force flag, fsck, prune, reset, volume/image/data
+deletion, other profile or shared-service operation is authorised by this extension.
+If the preserved storage cannot recover, retain the image proof as UNKNOWN.
+
 S2c checkpoint `ecdac32562fa81c3d1cc6f3e633adb403aea169a` is pushed and
 verified as the existing draft PR336 head. Continue S3a below without owner pause.
 
 ## S3a namespaced readiness foundation manifest
+
+S3a is checkpointed/pushed as `a0e25b16`; S3b continues below.
+
+## S3b exact production-image shipping manifest
+
+Root alone changes `.dockerignore` (recovery module plus the three exact guarded
+schema-tool inputs: guard-db-push.ts, db-host-policy.ts and schema-registry.ts),
+`Dockerfile` (numbered VQ SQL copy only), `.github/workflows/ci.yml` (same-image
+VQ runner apply/replay and image-owned inventory/journal equality),
+`scripts/ci/verify-ci-topology.mjs`, `scripts/ci/check-migration-references.mjs`,
+existing `tests/dockerignore-build-context.test.ts`, `tests/ci-proof-topology.test.ts`,
+`tests/architecture-authority.test.ts`, `scripts/architecture/check-architecture.mjs`
+and generated snapshot. Keep classification backed by the exact production-stage
+COPY instruction, not a blanket policy rename; absent/commented/wrong-stage copy
+stays unshipped. Existing main classification and lineage remain unchanged.
+
+Update current operational guidance in `drizzle-vq.config.ts`,
+`docs/runbooks/db-migration-safety.md`,
+`.claude/controlled-code-lead/protected-systems.md`, and
+`docs/engineering/ARCHITECTURE_AUTHORITY.md` only for the canonical closed VQ runner;
+do not rewrite dated historical receipts or imply shared execution authorisation.
+Existing packet/graph/task/issue/proof records may update. No new helper/file,
+dependency, SQL, diagnostic waiver, runtime readiness activation or fallback change.
+
+The CI image proof runs after main migration authority and before positive boot.
+It executes the actual bundled VQ CLI twice with only child-process disposable
+migration authority, compares the image's own numbered filename/checksum inventory
+to completed journal rows, confirms no historical receipt, and proves replay leaves
+all journal fields identical. No raw SQL loop, fixture/history adoption, destructive
+VQ override or unprivileged web use of the migration credential. Node test code uses
+the image's installed pg and bundled runner, not host tsx or a handwritten schema.
+
+Local image proof uses the existing explicit disposable Docker context, exact source
+hashes and pinned image dependencies. Only a newly created uniquely named synthetic
+database/container may be stopped/removed; no older resource/worktree cleanup.
+Independent Terra/Sol inspect and prove these boundaries. Rollback is code/image
+revert before shared activation, never down-migration or historical replay. Retain
+required VQ readiness/fallback/Opus/candidate vetoes until their later proofs.
+
+S3b continuation reproduced a pre-existing CI setup defect: schema-tool's guarded
+npm db:push entrypoint is excluded from its build context. New existing-suite
+regression is RED (8pass/1fail). Admit only that guard and its host-policy/config
+imports, preserving local-host enforcement and production-stage script exclusion.
+Do not bypass the guard or replace the real shared/schema.ts setup with fixtures.
+
+Exact CI sequence after that fix reproduced0118 refusal on a newly owned empty
+database: shared/schema.ts declares nfcLockPendingAt as timestamp without time zone,
+while immutable0118 requires timestamptz. Extend this manifest to one field in
+shared/schema.ts and existing tests/nfc-physical-lock-integrity.test.ts. Align the
+Drizzle declaration to migration authority; add executable column-type regression
+and run existing NFC integrity proofs plus real image convergence. Do not alter
+0118 SQL/checksums, other timestamps, NFC state/permissions, or any shared database.
+This is a reproduced schema/CI prerequisite, not a reopened NFC or security audit.
+The later social schema writer now depends on this schema-authority wave to keep
+the shared/schema.ts write scope explicitly serialized; no new social work begins.
+
+### S3b continuation proof (2026-09-06)
+
+Root used no host database URL or inherited environment. Fresh network-isolated
+PG17 containers used generated test-only passwords, no host data mounts; proof
+children shared only the new container network namespace. Actual schema-tool
+guard rejects nonlocal synthetic host offline; permitted loopback shared/schema.ts
+push succeeds. Actual bundled main runner applies86; exact parser-extracted CI VQ
+body applies17, compares every image filename/checksum/completed status against
+the journal, requires zero historical receipts, then applies0 and proves every
+journal field unchanged. All newly owned containers/anonymous PG volumes removed
+in finally; no earlier image/cache/database cleanup. A transient initializer-socket
+readiness race in the temporary harness was corrected to TCP startup, not a product
+change. Independent Terra repeated the same exact CI sequence in a separate newly
+owned UUID-labelled isolated PG17 container: main86/VQ17/replay0, exact completed
+checksums/zero receipts/unchanged journal. Its label-validated cleanup succeeded.
+
+Production WIP arm64 image:
+sha256:6d114465970f3f894b574e3441f58c630559eaeae585b89933d3a76d90281616.
+Corrected schema-tool WIP arm64 image:
+sha256:868bc56c4ac471d13690decc6e47863c8e014108d0745be4fe28acb904711a91.
+Both bundled runners are byte-identical:
+49983e666cc9853260cccc19396f30419af271d3530c39af2b9ffe922df94478.
+Production image predates the one-field Drizzle correction; schema-tool contains
+it. This proves the unchanged runner and SQL against corrected real CI setup,
+not exact-candidate provenance, new production web bundle, amd64 or deployment.
+
+Root NFC22/22; independent Sol focused timezone1/1 plus held-out old/new constructor
+probe; final clean-lock CI19+Docker9+NFC22=50/50, zero skips. TypeScript PASS.
+Scoped lint0errors with one pre-existing shared/schema.ts:49 escape warning;
+changed test/gate files0/0. Schema-tool production build3366 modules PASS.
+Independent Sol CI19 plus four held-out disabled-proof mutations rejects all;
+Terra Docker9/9. Clean architecture29/30 passes; real snapshot test still exceeds
+unchanged30s timeout (33.1s latest,47s under contention). This is a failed aggregate,
+not PASS; standalone checker proof is separately recorded. No timeout weakening.
+Root standalone architecture checker exits0 with8349 records on the final source.
+Engineering postflight remains RED: existing managed CLAUDE section drift, npm
+package egress check, dirty WIP, protected-review requirement and stale local graph.
+No accept-protected override, blanket suite/security reroute or completion claim.
+Migration references127: main86/VQ17/unshipped0. Graph101 structurally valid,
+candidate null and NOT READY; required nested34 and all final vetoes retained.
+
+Exact changed inputs (SHA256):
+- .dockerignore:3cb2a742b653539846b255acfc1a263737574ed3962d90a36b78abea09a1a033
+- Dockerfile:ad39b7b05a8e93600bd2a243cb96713587086629240f4e557047d1267760cbe9
+- .github/workflows/ci.yml:cf739a5a6c1203f7029deed5585c415591de2aba641373d5b0abd19085f57fd4
+- shared/schema.ts:7fd0bf16920677fe6efaeb69d8ba8ec7c78660cb1d7d471754121c819f8a1302
+- tests/nfc-physical-lock-integrity.test.ts:13facf443d1f463315bfd834542eb2ecdeb49e0d167271bb19dd896d11921318
+- tests/dockerignore-build-context.test.ts:08dec1bd15cfd588d9d43ec728ac2dafd361976ca4c8520f2bfb32c64f2b7012
+- scripts/ci/verify-ci-topology.mjs:e17cee319545d1c4057313ac1cae90f5a970cd0585243b99277c6fa88fc1f72d
+- scripts/architecture/generated/architecture-authority.json:b84d0370ac5eec1a5b2faf1b3bf0361bb288b776de32d98987dfc7f489af7903
+Immutable0118 remains283db6996b02b2edbc34ba4f3fe0a373559c1f13ef735e30fbde55ef8f190960.
+Exact a0e25b16 hosted CI34000243858 and governance34000243879/34000241015 are
+terminal FAILURE. No restricted cause investigation or candidate-green claim.
+Next required runtime admission/fallback wave proceeds after WIP checkpoint/push.
+
+### S3a retained manifest and proof
 
 Baseline ecdac325; preflight CRITICAL/HOSTILE. Root alone edits exactly
 `server/lib/component-readiness-registry.ts`,

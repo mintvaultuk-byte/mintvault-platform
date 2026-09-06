@@ -15,7 +15,7 @@ import {
   MINIMUM_PARTNER_CRITICAL_ASSERTIONS,
   validatePartnerSuiteFloors,
 } from "../scripts/ci/partner-suite-verdict.mjs";
-import { buildMigrationReferenceReport } from "../scripts/ci/check-migration-references.mjs";
+import { buildMigrationReferenceReport, shipsVaultQuestMigrations } from "../scripts/ci/check-migration-references.mjs";
 import { trackedJavaScriptFiles, validateScriptSyntaxInventory } from "../scripts/ci/check-script-syntax.mjs";
 import {
   EXPECTED_SCANNER_FILES,
@@ -43,6 +43,59 @@ const realCiInput = () => ({
 });
 
 describe("hosted CI proof topology", () => {
+  it("requires the actual image VQ proof after main convergence and before positive boot", () => {
+    const name = "      - name: Prove production-image Vault Quest migrations and replay";
+    const error =
+      "production-image VQ inventory and replay proof must be enabled after main migration and before positive readiness";
+    for (const change of [
+      (source: string) => source.replace(name, name + "\n        if: false"),
+      (source: string) => source.replace(name, name + "\n        continue-on-error: true"),
+      (source: string) => source.replace(name, "      - name: Removed VQ proof"),
+      (source: string) =>
+        source.replace(
+          "})().catch(error => { console.error(error.message); process.exitCode = 1; });",
+          "})().catch(() => {});"
+        ),
+      (source: string) => source.replace("const apply = () => {", "const apply = () => { return;"),
+      (source: string) =>
+        source.replace(
+          'assert.deepEqual(await readJournal(), before, "VQ replay changed execution history");',
+          'if (false) assert.deepEqual(await readJournal(), before, "VQ replay changed execution history");'
+        ),
+      (source: string) =>
+        source.replace(
+          "assert.deepEqual(before.map(({ filename, checksum }) => ({ filename, checksum })), expected);",
+          "if (false) assert.deepEqual(before.map(({ filename, checksum }) => ({ filename, checksum })), expected);"
+        ),
+      (source: string) => {
+        const begin = source.indexOf(name);
+        return (
+          source.slice(0, begin) +
+          source.slice(begin).replace("--entrypoint node mv-amd64-proof:ci -e", "--entrypoint node another-image:ci -e")
+        );
+      },
+      (source: string) =>
+        source.replace(
+          '["/app/dist/migrate.cjs", "--estate", "vault-quest", "--apply"]',
+          '["/host/runner.ts", "--apply"]'
+        ),
+      (source: string) => {
+        const begin = source.indexOf(name);
+        const end = source.indexOf("      - name: Readiness succeeds", begin);
+        const block = source.slice(begin, end);
+        return source
+          .replace(block, "")
+          .replace(
+            "      - name: Converge the disposable database",
+            block + "      - name: Converge the disposable database"
+          );
+      },
+    ]) {
+      const input = realCiInput();
+      input.workflow = change(input.workflow);
+      expect(validateCiTopology(input)).toContain(error);
+    }
+  });
   it("requires the disposable main runtime prerequisite before VQ", () => {
     const command = "node --import tsx scripts/ci/prepare-vq-test-db.mjs";
     for (const replacement of ["echo removed", `# ${command}`, `if false; then ${command}; fi`]) {
@@ -371,13 +424,13 @@ describe("Partner and Scanner non-vacuity verdicts", () => {
 });
 
 describe("migration and TypeScript debt classification", () => {
-  it("classifies every real SQL reference without calling VQ shipped", () => {
+  it("classifies VQ as shipped only with its numbered production-image copy", () => {
     const policy = JSON.parse(readFileSync("scripts/ci/migration-reference-policy.json", "utf8"));
     const report = buildMigrationReferenceReport(process.cwd(), policy);
     expect(report.violations).toEqual([]);
-    expect(report.inventory).toMatchObject({ shippedMain: 86, vqUnshippedOwnerDecision: 17 });
+    expect(report.inventory).toMatchObject({ shippedMain: 86, shippedVaultQuest: 17, vqUnshippedOwnerDecision: 0 });
     expect(
-      report.classifications.filter((entry) => entry.disposition === "unshipped-owner-decision-required").length
+      report.classifications.filter((entry) => entry.disposition === "shipped-vault-quest").length
     ).toBeGreaterThan(0);
     expect(report.classifications).toEqual(
       expect.arrayContaining([
@@ -386,6 +439,50 @@ describe("migration and TypeScript debt classification", () => {
         expect.objectContaining({ name: "add-mvgs-v2-columns-prod.sql", disposition: "legacy-operator-unshipped" }),
       ])
     );
+  });
+
+  it("does not claim VQ shipping from a comment, wrong stage/path, or absent Docker copy", () => {
+    const root = mkdtempSync(join(tmpdir(), "mintvault-vq-shipping-"));
+    const copy = "COPY --from=production-dependencies /app/migrations-vq/[0-9][0-9][0-9][0-9]*_*.sql ./migrations-vq/";
+    const vqName = "0000_vq.sql";
+    for (const [file, source] of [
+      ["migrations/0000_main.sql", "SELECT 1;"],
+      [`migrations-vq/${vqName}`, "SELECT 1;"],
+      ["tests/proof.ts", `const name = ${JSON.stringify(vqName)};`],
+    ]) {
+      mkdirSync(dirname(join(root, file)), { recursive: true });
+      writeFileSync(join(root, file), source);
+    }
+    const policy = {
+      legacyForwardFixtures: {},
+      legacyOperatorReferences: {},
+      syntheticReferences: {},
+      historicalUnshippedReferences: {},
+      vqDirectoryDisposition: "unshipped-owner-decision-required",
+    };
+    expect(shipsVaultQuestMigrations(root)).toBe(false);
+    for (const source of [
+      "FROM node AS production\n",
+      `FROM node AS production\n# ${copy}\n`,
+      `FROM node AS builder\n${copy}\nFROM node AS production\n`,
+      `FROM node AS schema-tool\n${copy}\n`,
+      `FROM node AS production\n${copy.replace("/app/migrations-vq/", "/app/migrations/")}\n`,
+      `FROM node AS production\n${copy.replace("./migrations-vq/", "./migrations/")}\n`,
+    ]) {
+      writeFileSync(join(root, "Dockerfile"), source);
+      expect(shipsVaultQuestMigrations(root)).toBe(false);
+      expect(buildMigrationReferenceReport(root, policy).inventory).toMatchObject({
+        shippedVaultQuest: 0,
+        vqUnshippedOwnerDecision: 1,
+      });
+    }
+    writeFileSync(join(root, "Dockerfile"), `FROM node AS production\n${copy}\n`);
+    expect(shipsVaultQuestMigrations(root)).toBe(true);
+    const report = buildMigrationReferenceReport(root, policy);
+    expect(report.inventory).toMatchObject({ shippedVaultQuest: 1, vqUnshippedOwnerDecision: 0 });
+    expect(report.classifications).toEqual([
+      expect.objectContaining({ name: vqName, disposition: "shipped-vault-quest" }),
+    ]);
   });
 
   it("rejects a newly invented unshipped migration reference", () => {

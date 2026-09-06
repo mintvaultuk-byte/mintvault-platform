@@ -2,6 +2,7 @@
 import { readFileSync } from "node:fs";
 import { resolve } from "node:path";
 import { fileURLToPath } from "node:url";
+import { createHash } from "node:crypto";
 import { validateTypecheckConfiguration } from "./run-typecheck-ratchet.mjs";
 
 export const REQUIRED_PACKAGE_SCRIPTS = Object.freeze({
@@ -144,6 +145,40 @@ export function validateCiTopology({
   }
 
   const parsed = parseWorkflowTopology(workflow);
+  const image = parsed.jobs["amd64-release-proof"];
+  const imageSteps = image?.steps ?? [];
+  const mainImage = imageSteps.findIndex(
+    (step) =>
+      enabled(step) && step.name === "Converge the disposable database through real schema and migration authority"
+  );
+  const vqImage = imageSteps.findIndex(
+    (step) => enabled(step) && step.name === "Prove production-image Vault Quest migrations and replay"
+  );
+  const readyImage = imageSteps.findIndex(
+    (step) => enabled(step) && step.name === "Readiness succeeds on the authoritative schema; version reports this SHA"
+  );
+  const imageProof = vqImage >= 0 ? imageSteps[vqImage].run : "";
+  // Exact independently reviewed executable body; dead-code substrings are not proof.
+  // Changes require changed-surface review and actual image execution, not automatic adoption.
+  const imageProofSha256 = "2614741cc3f6302f3dce76a573e2c77dce61f0a0e192844a8e90c588e9278326";
+  if (
+    !image ||
+    !enabled(image) ||
+    image.hasRunDefaults ||
+    mainImage < 0 ||
+    vqImage <= mainImage ||
+    readyImage <= vqImage ||
+    createHash("sha256").update(imageProof).digest("hex") !== imageProofSha256 ||
+    !imageProof.startsWith("set -euo pipefail\n") ||
+    !imageProof.includes("--entrypoint node mv-amd64-proof:ci -e") ||
+    !imageProof.includes('["/app/dist/migrate.cjs", "--estate", "vault-quest", "--apply"]') ||
+    !imageProof.includes('assert.deepEqual(await readJournal(), before, "VQ replay changed execution history")') ||
+    !imageProof.includes("assert.deepEqual(before.map(({ filename, checksum }) => ({ filename, checksum })), expected)")
+  ) {
+    errors.push(
+      "production-image VQ inventory and replay proof must be enabled after main migration and before positive readiness"
+    );
+  }
   if (parsed.name !== "CI") errors.push("workflow name must remain CI");
   const check = parsed.jobs.check;
   if (!check) return [...errors, "workflow must retain jobs.check"];

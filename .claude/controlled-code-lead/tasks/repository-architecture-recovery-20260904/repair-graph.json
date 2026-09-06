@@ -2184,6 +2184,14 @@
       "depends_on": ["ARCH-SCHEMA-001", "OWNER-VQ-SCHEMA", "RECOVERY-VQ-SCHEMA", "REPAIR-CI-TOPOLOGY"],
       "addresses": ["ARCH-SCHEMA-001"],
       "write_scope": [
+        "shared/schema.ts",
+        "tests/nfc-physical-lock-integrity.test.ts",
+        ".dockerignore",
+        "scripts/ci/check-migration-references.mjs",
+        "tests/dockerignore-build-context.test.ts",
+        "docs/runbooks/db-migration-safety.md",
+        ".claude/controlled-code-lead/protected-systems.md",
+        "docs/engineering/ARCHITECTURE_AUTHORITY.md",
         "server/lib/component-readiness-registry.ts",
         "scripts/architecture/check-architecture.mjs",
         "tests/architecture-authority.test.ts",
@@ -2223,6 +2231,11 @@
           "ref": "vq-schema-recovery.md: S3a final hashes and independent Sol30/clean47 namespace foundation proof; image/runtime/fallback remain OPEN.",
           "sha": "ecdac32562fa81c3d1cc6f3e633adb403aea169a",
           "observer": "sol-s3a-independent"
+        },
+        {
+          "ref": "vq-schema-recovery.md: S3b source/image hashes; independent Terra real image main86/VQ17/replay0, clean50, topology held-out non-vacuity; architecture timeout and runtime/fallback/candidate vetoes retained.",
+          "sha": "a0e25b16d412de12fe65be0f4417641308eb831b",
+          "observer": "terra-s3b-independent"
         }
       ],
       "invalidated_by": [
@@ -2272,7 +2285,7 @@
       "agent_mode": "LEAD",
       "agent_id": "codex-lead",
       "workspace": "shared",
-      "depends_on": ["ARCH-SOCIAL-001", "OWNER-SOCIAL-PUBLICATION", "RECOVERY-SOCIAL", "REPAIR-JOB-FOUNDATION"],
+      "depends_on": ["ARCH-SOCIAL-001", "OWNER-SOCIAL-PUBLICATION", "RECOVERY-SOCIAL", "REPAIR-JOB-FOUNDATION", "REPAIR-SCHEMA-AUTHORITY"],
       "addresses": ["ARCH-SOCIAL-001"],
       "write_scope": [
         "migrations/0124_social_publication_state.sql",

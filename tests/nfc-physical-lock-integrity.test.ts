@@ -3,10 +3,15 @@ import { Client } from "pg";
 import { applyMigrations, listMigrationFiles } from "../scripts/db/migrate";
 import { startPostgres17, type DisposablePostgres17 } from "./helpers/postgres17-cluster";
 import { readFileSync } from "node:fs";
+import { certificates } from "../shared/schema";
 
 const FILENAMES = ["0116_nfc_physical_lock_integrity.sql", "0118_nfc_lock_intent_reconciliation.sql"];
 let cluster: DisposablePostgres17;
 let client: Client;
+
+it("declares the pending NFC lock timestamp with migration-owned timezone semantics", () => {
+  expect(certificates.nfcLockPendingAt.getSQLType()).toBe("timestamp with time zone");
+});
 
 function migrations() {
   return FILENAMES.map((filename) => {

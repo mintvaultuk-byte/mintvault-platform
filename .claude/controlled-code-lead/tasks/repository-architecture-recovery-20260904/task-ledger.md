@@ -2,6 +2,15 @@
 
 ## Current checkpoint and next bounded wave
 
+S3b from pushed a0e25b16: production-image VQ shipping/CI proof wired, exact context
+closure and schema-tool NFC timestamp prerequisite repaired after real reproduction.
+Root and independent Terra actual image main86/VQ17/replay0 pass. Clean50
+affected tests, NFC22 and TypeScript/build pass; architecture aggregate retains a
+30s timeout failure, not green. Exact hashes/image/proof limits in existingVQpacket.
+Checkpoint/push this scoped WIP then required VQ runtime readiness/fallback; no
+release/hosted-green claim, broad audit, shared migration or deployment. Exact a0
+CI/governance terminal failure; restricted HY-SECURITY and finalOpus remain OPEN.
+
 S3a from pushed ecdac32562fa81c3d1cc6f3e633adb403aea169a is locally independently
 proven: explicit closed estate/name readiness identities, main projection preserved,
 main lineage intact, VQ still unshipped. Root30/independent30/clean47 and buildPASS;

@@ -5,6 +5,7 @@ import { dirname, extname, join, resolve, sep } from "node:path";
 import { fileURLToPath } from "node:url";
 import { spawnSync } from "node:child_process";
 import ts from "typescript";
+import { shipsVaultQuestMigrations } from "../ci/check-migration-references.mjs";
 
 const ROUTE_METHODS = new Set(["get", "post", "put", "patch", "delete", "options", "head", "all"]);
 const SOURCE_EXTENSIONS = new Set([".ts", ".tsx", ".js", ".jsx", ".mjs", ".cjs"]);
@@ -2663,6 +2664,7 @@ export function buildArchitectureSnapshot(root, policy) {
   }
 
   const shippedMigrations = new Set();
+  const vqShipped = shipsVaultQuestMigrations(root);
   const migrationNumbers = new Map();
   for (const file of files.filter(
     (item) => (item.startsWith("migrations/") || item.startsWith("migrations-vq/")) && item.endsWith(".sql")
@@ -2673,8 +2675,9 @@ export function buildArchitectureSnapshot(root, policy) {
     let shippingDisposition = "legacy-forward-unshipped";
     let lineage = "excluded-from-numbered-runner";
     if (file.startsWith("migrations-vq/")) {
-      shippingDisposition = "unshipped-owner-decision-required";
-      lineage = "hand-applied-raw-sql-owner-decision";
+      shippingDisposition = match && vqShipped ? "shipped-numbered-vault-quest" : "unshipped-owner-decision-required";
+      lineage = "vault-quest-numbered-runner";
+      if (match && vqShipped) shippedMigrations.add(`vault-quest:${name}`);
     } else if (match) {
       shippingDisposition = "shipped-numbered";
       lineage = "main-numbered-runner";
