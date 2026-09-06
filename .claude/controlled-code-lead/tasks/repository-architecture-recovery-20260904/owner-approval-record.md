@@ -1,5 +1,34 @@
 # Owner approval record — blanket authorisation to proceed
 
+## 2026-09-06 standing permission instruction and stop
+
+The owner instructed in this task:
+
+> stop. add i into the process that this will now run without stopping for permissions
+
+The owner subsequently replied:
+
+> Proceed.
+
+That resumes permitted execution and lifts the owner's preceding stop instruction.
+It does not resolve a previously recorded system restriction or capacity limit;
+do not restart a monitor solely to retry unchanged blocked work.
+For subsequent execution, this is standing approval for all already-authorised,
+in-scope remediation and its normal implementation, verification and feature-branch
+checkpoint steps. Do not ask the owner to approve those actions again, wait for
+acknowledgement between waves, or stop merely because another ordinary in-scope
+defect needs repair. Use the existing approved choices and safest
+behaviour-preserving defaults; record decisions and continue.
+
+This changes repeated owner-consent handling, not technical access or safety policy.
+Required tool/sandbox reviews still apply; never bypass a platform denial or reroute
+restricted work through another model, task, provider or tool. Existing exclusions
+remain in force, including no deployment/Fly commands, shared database migrations,
+secret changes, frozen MVGS edits, main merge, force push or destructive cleanup.
+Do not infer new scope from standing approval. A material new owner decision,
+unavailable external dependency or hard system limit must be reported accurately,
+not represented as a routine permission request or as completed work.
+
 ## 2026-09-05 continuation and model routing
 
 The owner subsequently instructed in this task:
