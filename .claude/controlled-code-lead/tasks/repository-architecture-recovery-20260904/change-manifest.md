@@ -2,6 +2,17 @@
 
 ## Owner-authorised image dependency extension — 2026-09-06 (current)
 
+Terminal image receipt767c096d/run34028337627: unchanged Trivy step SUCCESS,
+Debian0/773 Node-package rows0. Read-only diagnostic identifies missing
+certificates.claim_code as the exact print readiness mismatch; /ready503 remains.
+No schema/product/readiness change follows because that dependency reaches the
+platform-restricted claim lane. Final evidence-only update is confined to this
+manifest and the existing issue/proof ledgers; parked J2 is excluded. Owner scope
+approval stands, but does not remove the system restriction/local capacity limit.
+Run34028337627 was allowed to finish before this documentation checkpoint:
+terminal FAILURE, Test FAILURE; CodeQL/secret scan/dependency review SUCCESS.
+This evidence-only commit does not change any executable, lock, schema or test.
+
 Hosted follow-through:3f41fdae scan is green, but post-schema /ready returns503.
 Extend only .github/workflows/ci.yml with a read-only diagnostic against the
 existing disposable database using its real restricted runtime identity and

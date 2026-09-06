@@ -2,6 +2,44 @@
 
 ## 2026-09-06 authorised production-image dependency correction
 
+Exact diagnostic candidate `767c096daab7413cedccd32be00e49ec2cd4c0d5`:
+[run34028337627 / image job101473250889](https://github.com/mintvaultuk-byte/mintvault-platform/actions/runs/34028337627/job/101473250889).
+GitHub tested PR merge d3ff64e (candidate767c096d into main01d5e4da), not a
+feature-only local image. Production image identity:
+`sha256:2d3cee441baa0d10745933bf0912dc496ea7c275381bd509deade7f3ce199d4d`.
+The unchanged Trivy action ed142fd0673e97e23eac54620cfb913e5ce36c25 / Trivy0.70.0
+step is SUCCESS: Debian12.15 row0; all773 Node-package rows0; sum0. The all-clean
+table has no literal `Total: 0` line; zero is the observed table sum, not invented
+verbatim output. Effective invocation is
+`trivy image --scanners vuln --vuln-type os,library --severity HIGH,CRITICAL --ignore-unfixed --exit-code 1 --format table --timeout 10m mv-amd64-proof:ci`.
+Exact hosted evidence retrieval:
+`gh api repos/mintvaultuk-byte/mintvault-platform/actions/jobs/101473250889/logs`.
+This is hosted native linux/amd64 proof, NOT the unexecuted local image proof.
+
+At10:49:26Z the read-only canonical predicate diagnostic returned exactly:
+`Print readiness failing clause: 7`
+`Print readiness mismatch: [{"relation_name":"certificates","column_name":"claim_code","expected_type":"text","actual_type":null,"actual_not_null":null}]`.
+Root cause of the image readiness failure in one sentence: the disposable
+authoritative schema lacks certificates.claim_code required by the existing print
+readiness contract, so post-schema /ready correctly stays503.
+Main missing migrations/triggers are empty and runtime authority is true; VQ is
+ready/fresh with matching fingerprint and runtime authority true. Do not interpret
+the shared contract's seven flagged relations as seven absent tables. No readiness
+requirement has been loosened and no schema repair has been attempted.
+
+This confirmed dependency reaches the previously platform-restricted claim lane.
+Do not investigate or repair it indirectly via schema, another tool/model/task,
+or full-suite execution. Claim correctness/isolation and remediation remain UNKNOWN.
+Owner approval is recorded and is not the missing permission; the platform
+restriction and insufficient local image-build storage are separate hard limits.
+Vulnerability subgate CLEARED on the above candidate; overall image/task NOT COMPLETE.
+Parked J2 remains untouched. At11:04:34Z the exact-candidate run was terminal
+FAILURE: image job FAILURE (positive readiness), Lint/Type Check/Test/Build job
+FAILURE with Test step FAILURE; CodeQL, secret scan and dependency review SUCCESS.
+Only job/step status was inspected for Test; no claim log, full-suite run or
+root-cause inference. This is not a green hosted test proof. Evidence-only
+checkpoint follows after terminal CI, so it does not cancel the candidate run.
+
 Pushed3f41fdaee35834637e5c4090a6057f6c69125f05: run34027550638,
 image job101471117016 has Trivy step SUCCESS (Debian0, no vulnerability table),
 native file-type/sharp/canvas/PDFKit load PASS, uid1000, pre-schema503 PASS,
@@ -54,8 +92,9 @@ image-evidence d85633777723f16d76e4b2bd2d0e6bd2957c86ed444b6d6839d94e7a8e888b1f;
 VQ image-integrity ad397cfeab7e67b87dc71dafc5b540ad93d784e8ffd3adacc46ba5d75871903c.
 Final main tsc PASS; scoped ESLint0 errors/5 pre-existing any warnings. After the
 type imports, image-evidence3/LiDE8/VQ image-integrity27/label52 re-run:88 PASS,
-two existing platform skips. Typecheck debt ratchet and exact-SHA hosted image
-proof pending; no runtime source behavior changed by the type repair.
+two existing platform skips. Typecheck debt ratchet subsequently PASS344 as above;
+exact-SHA whole-image proof remains failed on readiness, not vulnerability scanning.
+No runtime source behavior changed by the type repair.
 
 Postflight remains red for existing managed-CLAUDE/package-egress/dirty/protected
 branch acceptance; no accept-protected bypass or restricted whole-suite execution.

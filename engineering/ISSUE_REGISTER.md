@@ -2,11 +2,24 @@
 
 ## 2026-09-06 authorised image dependency continuation
 
-REM-SUPPLY-001 IN_PROGRESS: owner authorised remaining Node-package correction.
+REM-SUPPLY-001: vulnerability subgate CLEARED on pushed767c096d, hosted
+run34028337627/image101473250889: Debian0 and773 Node-package rows0 under the
+unchanged HIGH/CRITICAL fixable gate. Whole image acceptance remains OPEN:
+positive /ready503; canonical read-only diagnostic confirms absent
+certificates.claim_code. Its dependent repair reaches the previously restricted
+claim lane and cannot be rerouted. No claim root-cause or isolation proof exists.
+Local image/Trivy execution still capacity-blocked. Owner approval stands; these
+are system limitations, not a renewed approval request. No deployment/waiver.
+Run34028337627 reached terminal FAILURE at the11:04:34Z observation: Test step
+FAILURE as well as positive readiness. Test failure cause remains UNKNOWN because
+only status was inspected. CodeQL, secret scan and dependency review SUCCESS.
+
+Owner authorised remaining Node-package correction.
 Production npm11.19.1, application sharp0.35.4/libvips8.18.6 and transitive
 ip-address10.3.1; unchanged Node digest/apt/Trivy gate. Three type-only import
 compatibility repairs have byte-identical runtime output. Local targeted107 PASS,
-two existing platform skips; final affected/hosted proofs pending. Not FIXED yet.
+two existing platform skips; affected88 PASS/two existing skips; tsc/lint/build and
+type ratchet pass. Do not confuse vulnerability closure with whole-task completion.
 No renewed dependency approval required. Local image capacity and restricted
 claim investigation remain separate proof limitations, not waived by approval.
 
