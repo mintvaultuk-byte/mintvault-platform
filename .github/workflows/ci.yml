@@ -1064,6 +1064,24 @@ jobs:
                     [...r.REQUIRED_RELEASE_TRIGGERS], [...r.REQUIRED_RELEASE_TRIGGER_RELATIONS], true,
                   ]);
                   console.log("Main readiness evidence: " + JSON.stringify(main.rows));
+                  const clauses = r.PRINT_WORKFLOW_READINESS_SQL
+                    .slice("SELECT (".length, -") AS ready".length).split(/\n  AND /);
+                  for (const [index, clause] of clauses.entries()) {
+                    const check = await db.query("SELECT (" + clause + ") AS ready");
+                    if (check.rows[0].ready !== true) {
+                      console.log("Print readiness failing clause: " + index);
+                      // Expose only schema metadata for the canonical column/default
+                      // predicates, never row contents or configuration values.
+                      if (index === 7 || index === 8) {
+                        const body = clause.trim().slice("NOT EXISTS (".length, -1);
+                        const fields = index === 7
+                          ? "required.relation_name,required.column_name,required.expected_type,format_type(attribute.atttypid,attribute.atttypmod) AS actual_type,attribute.attnotnull AS actual_not_null"
+                          : "required.relation_name,required.column_name,pg_get_expr(default_row.adbin,default_row.adrelid) AS actual_default";
+                        const mismatch = await db.query(body.replace("SELECT 1 FROM (VALUES", "SELECT " + fields + " FROM (VALUES"));
+                        console.log("Print readiness mismatch: " + JSON.stringify(mismatch.rows));
+                      }
+                    }
+                  }
                   const result = await db.query(v.VQ_RUNTIME_EVIDENCE_SQL, [true]);
                   const { catalog, ...evidence } = result.rows[0];
                   const catalogFingerprint = v.vqSchemaFingerprint(catalog);

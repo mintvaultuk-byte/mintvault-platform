@@ -14,6 +14,14 @@ attempt used the clean workspace's stale pre-J1 inventory; copied the two alread
 committed J1 count/hash fields, proved file byte-equal to root, then reran. No new
 baseline waiver. Clean architecture8373 and CI19/Docker9 PASS after type imports.
 
+Diagnostic checkpoint0f84d6eeb7d8f1464225eb08aeddead18f21862b, run34027997605,
+job101472331421: canonical main query reports readyfalse and the seven print
+contract relations; missing migrations/triggers empty, runtime authority true.
+VQ readytrue/fresh, runtime authority true and exact baseline fingerprint match.
+No print-table absence is inferred: the shared structural predicate marks all
+seven together. Narrow read-only per-predicate metadata diagnostic follows;
+no schema, grant or readiness requirement has been changed.
+
 Owner approved dependency/runtime-npm extension at baseline16052f1b. Exact scope
 and rollback are in change-manifest.md. Independent Terra reviewed final lock and
 PDF assertions: ACCEPT/no gate weakening (source review, not independent execution).
