@@ -23,7 +23,6 @@ import {
 } from "../auth";
 import { recordAdminStepUp, clearAdminStepUp, ADMIN_STEP_UP_WINDOW_MINUTES } from "../lib/admin-step-up";
 import { createMagicToken, verifyMagicToken, requireCustomer } from "../customer-auth";
-import { sendMagicLink, sendPinResetLink } from "../email";
 import {
   hashPassword,
   verifyPassword,
@@ -37,14 +36,7 @@ import {
   logLoginAttempt,
   writeAuthAudit,
 } from "../account-auth";
-import {
-  sendWelcomeVerificationEmail,
-  sendAccountMagicLinkEmail,
-  sendPasswordResetEmail,
-  sendPasswordChangedEmail,
-  sendEmailChangedNotification,
-  sendAccountDeletedEmail,
-} from "../email";
+import { enqueueCustomerNotification } from "../customer-notification-outbox";
 import { requireAuth } from "../middleware/auth";
 import { db } from "../db";
 import { sql } from "drizzle-orm";
@@ -64,6 +56,7 @@ import {
   stampAuthSession,
 } from "../lib/auth-security";
 import { adminClientIpRateLimitKey } from "../lib/admin-client-ip";
+import { loadCustomerSessionAuthority, revokeCustomerSessions } from "../customer-session-authority";
 
 export function registerAuthRoutes(app: Express): void {
   const adminCredentialRateLimit = rateLimit({
@@ -99,7 +92,7 @@ export function registerAuthRoutes(app: Express): void {
         recordFailedLogin(req);
         await registerAdminPasswordFailure();
         await new Promise((resolve) => setTimeout(resolve, FAILED_LOGIN_DELAY_MS));
-        return res.status(401).json({ error: "Invalid credentials" });
+        return res.status(401).json({ error: "Invalid credentials", code: "admin_credential_rejected" });
       }
 
       clearLoginAttempts(req);
@@ -138,7 +131,7 @@ export function registerAuthRoutes(app: Express): void {
         recordFailedLogin(req);
         await registerAdminPasswordFailure();
         await new Promise((resolve) => setTimeout(resolve, FAILED_LOGIN_DELAY_MS));
-        return res.status(401).json({ error: "Invalid credentials" });
+        return res.status(401).json({ error: "Invalid credentials", code: "admin_credential_rejected" });
       }
 
       clearLoginAttempts(req);
@@ -190,7 +183,7 @@ export function registerAuthRoutes(app: Express): void {
       const adminUser = await storage.getUserByEmail(adminEmail);
       if (!adminUser || !(adminUser as { pinHash?: string }).pinHash) {
         await new Promise((resolve) => setTimeout(resolve, FAILED_LOGIN_DELAY_MS));
-        return res.status(401).json({ error: "Invalid credentials" });
+        return res.status(401).json({ error: "Invalid credentials", code: "admin_credential_rejected" });
       }
 
       const passwordCheck = await verifyAdminPassword(password, adminUser);
@@ -199,7 +192,9 @@ export function registerAuthRoutes(app: Express): void {
         const post = await registerFailure(adminEmail);
         await logPinEvent(adminEmail, false, post.locked ? "lockout_triggered" : "wrong_pin", ipH);
         await new Promise((resolve) => setTimeout(resolve, FAILED_LOGIN_DELAY_MS));
-        return res.status(post.locked ? 423 : 401).json({ error: "Invalid credentials" });
+        return res
+          .status(post.locked ? 423 : 401)
+          .json({ error: "Invalid credentials", code: "admin_credential_rejected" });
       }
 
       await resetFailures(adminEmail);
@@ -238,12 +233,14 @@ export function registerAuthRoutes(app: Express): void {
       const adminUser = await storage.getUserByEmail(ADMIN_EMAIL);
       if (!adminUser) {
         await new Promise((resolve) => setTimeout(resolve, FAILED_LOGIN_DELAY_MS));
-        return res.status(401).json({ error: "Invalid credentials" });
+        return res.status(401).json({ error: "Invalid credentials", code: "admin_credential_rejected" });
       }
       if (!(adminUser as any).pinHash) {
         // PIN not yet set — keep pendingAdmin flag in session, frontend
-        // routes the admin to /auth/pin/setup which uses pendingAdmin
-        // as the admin-context authorisation flag.
+        // routes the admin to /auth/pin/setup. The explicit setup flag and
+        // fresh pending-session timestamp are both required by that endpoint.
+        (req.session as any).pinSetupRequired = true;
+        await adminSessionSave(req);
         return res.json({ step: "PIN_SETUP_REQUIRED" });
       }
 
@@ -266,7 +263,7 @@ export function registerAuthRoutes(app: Express): void {
           clearPendingAdmin(req);
           return res.status(401).json({ error: "Too many failed attempts, please start again" });
         }
-        return res.status(401).json({ error: "Invalid credentials" });
+        return res.status(401).json({ error: "Invalid credentials", code: "admin_credential_rejected" });
       }
 
       clearPinAttempts(req);
@@ -317,6 +314,8 @@ export function registerAuthRoutes(app: Express): void {
   });
 
   app.get("/api/admin/session", async (req, res) => {
+    res.set("Cache-Control", "private, no-store");
+    res.vary("Cookie");
     const status = classifyAdminSession(req);
     if (status.authenticated) {
       const adminUser = await storage.getUserByEmail(ADMIN_EMAIL);
@@ -408,7 +407,7 @@ export function registerAuthRoutes(app: Express): void {
         const { currentPassphrase, newPassphrase, confirmPassphrase, pin } = req.body || {};
         if (!(await verifyAdminPinConfirmation(req, pin))) {
           await new Promise((resolve) => setTimeout(resolve, FAILED_LOGIN_DELAY_MS));
-          return res.status(401).json({ error: "Invalid credentials" });
+          return res.status(401).json({ error: "Invalid credentials", code: "admin_credential_rejected" });
         }
         if (!newPassphrase || String(newPassphrase).length < 14 || newPassphrase !== confirmPassphrase) {
           return res.status(400).json({ error: "Invalid credentials" });
@@ -417,7 +416,7 @@ export function registerAuthRoutes(app: Express): void {
         const current = await verifyAdminPassword(String(currentPassphrase || ""), adminUser);
         if (!current.valid) {
           await new Promise((resolve) => setTimeout(resolve, FAILED_LOGIN_DELAY_MS));
-          return res.status(401).json({ error: "Invalid credentials" });
+          return res.status(401).json({ error: "Invalid credentials", code: "admin_credential_rejected" });
         }
         const newHash = await hashPassword(String(newPassphrase));
         const updated = await db.execute(sql`
@@ -461,7 +460,7 @@ export function registerAuthRoutes(app: Express): void {
         const { currentPin, newPin, confirmPin } = req.body || {};
         if (!(await verifyAdminPinConfirmation(req, currentPin))) {
           await new Promise((resolve) => setTimeout(resolve, FAILED_LOGIN_DELAY_MS));
-          return res.status(401).json({ error: "Invalid credentials" });
+          return res.status(401).json({ error: "Invalid credentials", code: "admin_credential_rejected" });
         }
         if (!newPin || newPin !== confirmPin) return res.status(400).json({ error: "Invalid credentials" });
         const { hashPin, validatePinStrength, WeakPinError, resetFailures } = await import("../pin");
@@ -517,7 +516,7 @@ export function registerAuthRoutes(app: Express): void {
         const { pin } = req.body || {};
         if (!(await verifyAdminPinConfirmation(req, pin))) {
           await new Promise((resolve) => setTimeout(resolve, FAILED_LOGIN_DELAY_MS));
-          return res.status(401).json({ error: "Invalid credentials" });
+          return res.status(401).json({ error: "Invalid credentials", code: "admin_credential_rejected" });
         }
         const updated = await db.execute(sql`
         UPDATE users
@@ -550,14 +549,6 @@ export function registerAuthRoutes(app: Express): void {
   );
 
   // ── Customer magic-link auth ───────────────────────────────────────────────
-  const magicLinkRateLimit = rateLimit({
-    windowMs: 15 * 60 * 1000,
-    max: 5,
-    standardHeaders: true,
-    legacyHeaders: false,
-    message: { error: "Too many login requests. Please wait 15 minutes." },
-  });
-
   // Phase 3 — rate-limit sensitive auth mutations (password/email/account changes
   // + reset/verification email sends) to blunt brute-force of current-password,
   // token guessing, and email-bombing. 10 / 15 min / IP is well clear of any
@@ -571,7 +562,7 @@ export function registerAuthRoutes(app: Express): void {
   });
 
   // POST /api/customer/magic-link — send login link to email
-  app.post("/api/customer/magic-link", magicLinkRateLimit, async (req, res) => {
+  app.post("/api/customer/magic-link", async (req, res) => {
     try {
       const { email } = req.body;
       if (!email || typeof email !== "string") {
@@ -582,23 +573,8 @@ export function registerAuthRoutes(app: Express): void {
         return res.status(400).json({ error: "Please enter a valid email address." });
       }
 
-      const token = await createMagicToken(normalEmail);
-      const baseUrl = APP_BASE_URL;
-      // Wrap through /m/login/:token so the User-Agent sniff can intercept
-      // mobile-webview clicks and show the "open in browser" intermediate
-      // page. Real browsers 302 straight to /api/customer/verify/:token.
-      const loginUrl = `${baseUrl}/m/login/${token}`;
-
-      try {
-        await sendMagicLink({ email: normalEmail, loginUrl });
-      } catch (sendErr: any) {
-        console.error("[magic-link] sendMagicLink failed:", sendErr.message);
-        return res.status(500).json({
-          success: false,
-          error: "Could not send login link. Please try again or contact support@mintvaultuk.com.",
-        });
-      }
-      res.json({ message: "Login link sent. Check your inbox." });
+      await createMagicToken(normalEmail);
+      res.json({ message: "Login link queued. Check your inbox." });
     } catch (err) {
       console.error("[customer] magic-link error:", err);
       res.status(500).json({ error: "Failed to send login link. Please try again." });
@@ -637,6 +613,21 @@ export function registerAuthRoutes(app: Express): void {
       if (!user) {
         user = await storage.createUser({ email });
       }
+      const verifiedUser = await db.execute(sql`
+        UPDATE users
+        SET email_verified = true,
+            email_verified_at = COALESCE(email_verified_at, NOW()),
+            updated_at = NOW()
+        WHERE id = ${(user as any).id}
+          AND deleted_at IS NULL
+        RETURNING id, email, credential_version
+      `);
+      const verifiedRow = verifiedUser.rows[0] as any;
+      if (!verifiedRow) {
+        return req.session.destroy(() => {
+          res.redirect("/dashboard?error=invalid_link");
+        });
+      }
 
       // Regenerate session on privilege grant to cert-owner.
       // Prevents pre-existing admin/account-holder fields from
@@ -645,11 +636,16 @@ export function registerAuthRoutes(app: Express): void {
         req.session.regenerate((err) => (err ? reject(err) : resolve()));
       });
 
-      req.session.userId = undefined as unknown as string;
-      req.session.userEmail = undefined as unknown as string;
+      req.session.userId = String(verifiedRow.id);
+      req.session.userEmail = String(verifiedRow.email);
       req.session.isAdmin = false;
       req.session.adminEmail = undefined as unknown as string;
-      req.session.customerEmail = email;
+      req.session.customerEmail = String(verifiedRow.email);
+      stampAuthSession(req, {
+        userId: String(verifiedRow.id),
+        credentialVersion: credentialVersionOf(verifiedRow),
+        role: "customer",
+      });
 
       // Branch on whether the user has a PIN set. First-time enrollers go
       // to /auth/pin/setup; returning users with a PIN already set carry
@@ -783,11 +779,32 @@ export function registerAuthRoutes(app: Express): void {
       clearPendingSwitchCookie(res);
       return res.redirect("/dashboard?error=switch_failed");
     }
-    req.session.userId = undefined as unknown as string;
-    req.session.userEmail = undefined as unknown as string;
+    let targetUser = await storage.getUserByEmail(toEmail);
+    if (!targetUser) targetUser = await storage.createUser({ email: toEmail });
+    const verifiedTarget = await db.execute(sql`
+      UPDATE users
+      SET email_verified = true,
+          email_verified_at = COALESCE(email_verified_at, NOW()),
+          updated_at = NOW()
+      WHERE id = ${(targetUser as any).id}
+        AND deleted_at IS NULL
+      RETURNING id, email, credential_version
+    `);
+    const targetRow = verifiedTarget.rows[0] as any;
+    if (!targetRow) {
+      clearPendingSwitchCookie(res);
+      return req.session.destroy(() => res.redirect("/dashboard?error=switch_failed"));
+    }
+    req.session.userId = String(targetRow.id);
+    req.session.userEmail = String(targetRow.email);
     req.session.isAdmin = false;
     req.session.adminEmail = undefined as unknown as string;
-    req.session.customerEmail = toEmail;
+    req.session.customerEmail = String(targetRow.email);
+    stampAuthSession(req, {
+      userId: String(targetRow.id),
+      credentialVersion: credentialVersionOf(targetRow),
+      role: "customer",
+    });
     clearPendingSwitchCookie(res);
     try {
       const ip = (req.ip as string) || "unknown";
@@ -906,24 +923,8 @@ export function registerAuthRoutes(app: Express): void {
   });
 
   // ── PIN auth (v1 launch) ────────────────────────────────────────────────────
-  const pinLoginRateLimit = rateLimit({
-    windowMs: 15 * 60 * 1000,
-    max: 5,
-    standardHeaders: true,
-    legacyHeaders: false,
-    message: { error: "Too many login attempts. Please wait 15 minutes." },
-  });
-
-  const pinSetupRateLimit = rateLimit({
-    windowMs: 15 * 60 * 1000,
-    max: 5,
-    standardHeaders: true,
-    legacyHeaders: false,
-    message: { error: "Too many PIN setup attempts. Please wait 15 minutes." },
-  });
-
   // POST /api/auth/pin/setup — set the PIN on the user's row.
-  app.post("/api/auth/pin/setup", pinSetupRateLimit, async (req, res) => {
+  app.post("/api/auth/pin/setup", async (req, res) => {
     try {
       const { hashPin, validatePinStrength, WeakPinError, logPinEvent, hashIp, resetFailures } = await import("../pin");
       const pin = String(req.body?.pin || "").trim();
@@ -938,10 +939,30 @@ export function registerAuthRoutes(app: Express): void {
         targetEmail = resetEmail;
         completionMode = resetIsAdmin ? "reset_admin" : "reset_customer";
       } else if ((req.session as any)?.pendingAdmin) {
-        targetEmail = ADMIN_EMAIL;
+        if (!isPendingAdminValid(req) || (req.session as any).pinSetupRequired !== true) {
+          clearPendingAdmin(req);
+          return res.status(401).json({ error: "PIN setup session expired. Please start again." });
+        }
+        const adminUser = await storage.getUserByEmail(ADMIN_EMAIL);
+        if (!adminUser || (adminUser as any).pinHash) {
+          clearPendingAdmin(req);
+          (req.session as any).pinSetupRequired = undefined;
+          return res.status(409).json({ error: "A PIN is already configured. Use the reset flow to replace it." });
+        }
+        targetEmail = String((adminUser as any).email || ADMIN_EMAIL).toLowerCase();
         completionMode = "admin";
       } else if ((req.session as any)?.customerEmail) {
-        targetEmail = (req.session as any).customerEmail;
+        if ((req.session as any).pinSetupRequired !== true) {
+          return res.status(401).json({ error: "PIN setup is not authorised for this session." });
+        }
+        const authority = await loadCustomerSessionAuthority(req);
+        const cachedEmail = String((req.session as any).customerEmail)
+          .toLowerCase()
+          .trim();
+        if (!authority || !authority.emailVerified || authority.email !== cachedEmail) {
+          return res.status(401).json({ error: "PIN setup session is no longer valid. Please sign in again." });
+        }
+        targetEmail = authority.email;
         completionMode = "customer";
       }
       if (!targetEmail || !completionMode) {
@@ -959,17 +980,26 @@ export function registerAuthRoutes(app: Express): void {
       }
 
       const hash = await hashPin(pin);
+      const requiresUnsetPin = completionMode === "admin" || completionMode === "customer";
       const updatedUser = await db.execute(sql`
         UPDATE users
         SET pin_hash = ${hash},
             pin_set_at = NOW(),
+            email_verified = true,
+            email_verified_at = COALESCE(email_verified_at, NOW()),
             pin_failed_count = 0,
             pin_locked_until = NULL,
             credential_version = credential_version + 1,
             updated_at = NOW()
-        WHERE LOWER(email) = LOWER(${targetEmail}) AND deleted_at IS NULL
+        WHERE LOWER(email) = LOWER(${targetEmail})
+          AND deleted_at IS NULL
+          ${requiresUnsetPin ? sql`AND pin_hash IS NULL` : sql``}
         RETURNING id, credential_version
       `);
+      if (!updatedUser.rows[0]) {
+        (req.session as any).pinSetupRequired = undefined;
+        return res.status(409).json({ error: "PIN setup is no longer available. Use the reset flow if needed." });
+      }
       await resetFailures(targetEmail);
 
       const isReset = completionMode.startsWith("reset_");
@@ -1004,8 +1034,8 @@ export function registerAuthRoutes(app: Express): void {
       await new Promise<void>((resolve, reject) => {
         req.session.regenerate((err) => (err ? reject(err) : resolve()));
       });
-      req.session.userId = undefined as unknown as string;
-      req.session.userEmail = undefined as unknown as string;
+      req.session.userId = String((updatedUser.rows[0] as any)?.id);
+      req.session.userEmail = targetEmail;
       req.session.isAdmin = false;
       req.session.adminEmail = undefined as unknown as string;
       req.session.customerEmail = targetEmail;
@@ -1024,7 +1054,7 @@ export function registerAuthRoutes(app: Express): void {
   });
 
   // POST /api/auth/pin/login — primary cert-owner login. Email + PIN.
-  app.post("/api/auth/pin/login", pinLoginRateLimit, async (req, res) => {
+  app.post("/api/auth/pin/login", async (req, res) => {
     try {
       const { verifyPin, checkLockout, registerFailure, resetFailures, logPinEvent, hashIp, PIN_LOCKOUT_DURATION_MS } =
         await import("../pin");
@@ -1093,6 +1123,11 @@ export function registerAuthRoutes(app: Express): void {
       req.session.isAdmin = false;
       req.session.adminEmail = undefined as unknown as string;
       req.session.customerEmail = rawEmail;
+      stampAuthSession(req, {
+        userId: String((user as any).id),
+        credentialVersion: credentialVersionOf(user),
+        role: "customer",
+      });
       return res.json({ ok: true, redirect: "/dashboard?login=success" });
     } catch (err: any) {
       console.error("[pin/login] error:", err.message);
@@ -1101,7 +1136,7 @@ export function registerAuthRoutes(app: Express): void {
   });
 
   // POST /api/auth/pin/forgot — request a PIN-reset magic link by email.
-  app.post("/api/auth/pin/forgot", magicLinkRateLimit, async (req, res) => {
+  app.post("/api/auth/pin/forgot", async (req, res) => {
     try {
       const { logPinEvent, hashIp } = await import("../pin");
       const rawEmail = String(req.body?.email || "")
@@ -1129,21 +1164,25 @@ export function registerAuthRoutes(app: Express): void {
         return res.json(genericMsg);
       }
 
-      // Mint reset token + send email
+      // Mint reset token and durable notification in the same commit.
       const token = crypto.randomBytes(32).toString("hex");
       const expiresAt = new Date(Date.now() + 15 * 60 * 1000);
-      await db.execute(sql`
-        INSERT INTO pin_reset_tokens (email, token, expires_at)
-        VALUES (${rawEmail}, ${token}, ${expiresAt.toISOString()})
-      `);
-      const baseUrl = APP_BASE_URL;
-      const resetUrl = `${baseUrl}/m/reset/${token}`;
-      try {
-        await sendPinResetLink({ email: rawEmail, resetUrl });
-      } catch (sendErr: any) {
-        console.error("[pin/forgot] sendPinResetLink failed:", sendErr.message);
-      }
-      await logPinEvent(rawEmail, true, "reset_link_sent", ipH);
+      await db.transaction(async (tx) => {
+        await tx.execute(sql`
+          INSERT INTO public.pin_reset_tokens (email, token, expires_at)
+          VALUES (${rawEmail}, ${token}, ${expiresAt.toISOString()})
+        `);
+        await enqueueCustomerNotification(tx, {
+          eventKey: `pin-reset:${crypto.createHash("sha256").update(token).digest("hex")}`,
+          kind: "PIN_RESET",
+          aggregateType: "customer_email",
+          aggregateId: crypto.createHash("sha256").update(rawEmail).digest("hex"),
+          recipient: rawEmail,
+          payload: { token },
+          expiresAt,
+        });
+      });
+      await logPinEvent(rawEmail, true, "reset_link_queued", ipH);
       return res.json(genericMsg);
     } catch (err: any) {
       console.error("[pin/forgot] error:", err.message);
@@ -1158,14 +1197,7 @@ export function registerAuthRoutes(app: Express): void {
   // 256-bit crypto.randomBytes value (unguessable), so this isn't closing a
   // real brute-force — it just caps abuse/DB load and keeps the whole reset
   // surface (request + consume) limited. Generous: a real user hits this once.
-  const pinResetConsumeRateLimit = rateLimit({
-    windowMs: 15 * 60 * 1000,
-    max: 30,
-    standardHeaders: true,
-    legacyHeaders: false,
-    message: { error: "Too many attempts. Please request a new reset link." },
-  });
-  app.get("/auth/pin/reset/:token", pinResetConsumeRateLimit, async (req, res) => {
+  app.get("/auth/pin/reset/:token", async (req, res) => {
     try {
       const token = String(req.params.token);
       // Atomic single-use consume
@@ -1198,23 +1230,28 @@ export function registerAuthRoutes(app: Express): void {
     }
   });
 
-  // POST /api/auth/logout-everywhere — admin-only. Truncates the session table.
+  // POST /api/auth/logout-everywhere — admin-only. Uses runtime-role DML only;
+  // TRUNCATE is both needlessly privileged and incompatible with 0119's
+  // least-privilege session-table grant.
   app.post("/api/auth/logout-everywhere", requireAdmin, async (req, res) => {
     try {
-      const before = await db.execute(sql`SELECT COUNT(*)::int AS n FROM session`);
-      const beforeCount = (before.rows[0] as any).n;
-      await db.execute(sql`TRUNCATE session`);
       const adminEmail = (req.session as any)?.adminEmail || "admin";
-      await db.execute(sql`
-        INSERT INTO audit_log (entity_type, entity_id, action, admin_user, details, created_at)
-        VALUES ('session', 'all', 'logout_everywhere', ${adminEmail},
-                ${JSON.stringify({ destroyed: beforeCount, reason: "PIN auth deploy: forced re-auth" })}::jsonb,
-                NOW())
-      `);
+      const beforeCount = await db.transaction(async (tx) => {
+        const removed = await tx.execute(sql`DELETE FROM public.session RETURNING sid`);
+        const destroyed = removed.rows.length;
+        await tx.execute(sql`
+          INSERT INTO public.audit_log (entity_type, entity_id, action, admin_user, details, created_at)
+          VALUES ('session', 'all', 'logout_everywhere', ${adminEmail},
+                  ${JSON.stringify({ reason: "PIN auth deploy: forced re-auth" })}::jsonb
+                    || jsonb_build_object('destroyed', ${destroyed}),
+                  NOW())
+        `);
+        return destroyed;
+      });
       return res.json({ ok: true, destroyed: beforeCount });
     } catch (err: any) {
       console.error("[logout-everywhere] error:", err.message);
-      return res.status(500).json({ error: "Failed to truncate sessions" });
+      return res.status(500).json({ error: "Failed to revoke sessions" });
     }
   });
 
@@ -1226,13 +1263,7 @@ export function registerAuthRoutes(app: Express): void {
   // ── Account auth (/api/auth/*) ────────────────────────────────────────────
 
   function getClientIpForAuth(req: any): string {
-    const fwd = req.headers["x-forwarded-for"];
-    if (fwd) return (Array.isArray(fwd) ? fwd[0] : fwd.split(",")[0]).trim();
     return req.ip || req.socket?.remoteAddress || "unknown";
-  }
-
-  function getAppBaseUrl(req: any): string {
-    return process.env.APP_URL || `${req.protocol}://${req.get("host")}`;
   }
 
   // POST /api/auth/signup
@@ -1249,19 +1280,28 @@ export function registerAuthRoutes(app: Express): void {
         return res.status(409).json({ error: "An account with that email already exists" });
 
       const hash = await hashPassword(password);
-      const result = await db.execute(sql`
-        INSERT INTO users (email, password_hash, display_name, email_verified, role, created_at, updated_at)
-        VALUES (${email.toLowerCase().trim()}, ${hash}, ${display_name?.trim() || null}, false, 'customer', NOW(), NOW())
-        RETURNING id, email, display_name, email_verified
-      `);
-      const user = result.rows[0] as any;
-      const verifyToken = await createEmailVerificationToken(user.id);
-      const verifyUrl = `${getAppBaseUrl(req)}/api/auth/verify-email?token=${verifyToken}`;
-      await sendWelcomeVerificationEmail(user.email, user.display_name, verifyUrl);
+      const user = await db.transaction(async (tx) => {
+        const result = await tx.execute(sql`
+          INSERT INTO public.users (email, password_hash, display_name, email_verified, role, created_at, updated_at)
+          VALUES (${email.toLowerCase().trim()}, ${hash}, ${display_name?.trim() || null}, false, 'customer', NOW(), NOW())
+          RETURNING id, email, display_name, email_verified, credential_version
+        `);
+        const created = result.rows[0] as any;
+        await createEmailVerificationToken(created.id, tx);
+        return created;
+      });
       await writeAuthAudit("auth.signup", user.id, getClientIpForAuth(req), { email: user.email });
 
       (req.session as any).userId = user.id;
       (req.session as any).userEmail = user.email;
+      // Keep the legacy downstream identity cache aligned, but requireCustomer
+      // will not authorize email-keyed records until email_verified is true.
+      (req.session as any).customerEmail = user.email;
+      stampAuthSession(req, {
+        userId: String(user.id),
+        credentialVersion: credentialVersionOf(user),
+        role: "customer",
+      });
       return res
         .status(201)
         .json({ id: user.id, email: user.email, display_name: user.display_name, email_verified: false });
@@ -1320,6 +1360,11 @@ export function registerAuthRoutes(app: Express): void {
       // clear them explicitly so an account login can never carry a grader role.
       (req.session as any).isGrader = false;
       (req.session as any).graderId = undefined;
+      stampAuthSession(req, {
+        userId: String(user.id),
+        credentialVersion: credentialVersionOf(user),
+        role: "customer",
+      });
 
       await db.execute(sql`
         UPDATE users SET last_login_at = NOW(), last_login_ip = ${ip}, failed_login_count = 0 WHERE id = ${user.id as string}
@@ -1354,9 +1399,7 @@ export function registerAuthRoutes(app: Express): void {
       if (!email) return res.status(400).json({ error: "Email is required" });
       const user = await findUserByEmail(email);
       if (user && !user.deleted_at) {
-        const token = await createAccountMagicLinkToken(user.id as string);
-        const loginUrl = `${getAppBaseUrl(req)}/api/auth/magic-link/verify?token=${token}`;
-        await sendAccountMagicLinkEmail(user.email as string, loginUrl);
+        await createAccountMagicLinkToken(user.id as string);
         await writeAuthAudit("auth.magic_link.requested", user.id as string, getClientIpForAuth(req), { email });
       }
       return res.json({ ok: true, message: "If an account exists, a login link has been sent." });
@@ -1388,11 +1431,29 @@ export function registerAuthRoutes(app: Express): void {
       await new Promise<void>((resolve, reject) => {
         req.session.regenerate((err) => (err ? reject(err) : resolve()));
       });
-      (req.session as any).userId = user.id;
-      (req.session as any).userEmail = user.email;
-      await db.execute(
-        sql`UPDATE users SET last_login_at = NOW(), last_login_ip = ${getClientIpForAuth(req)} WHERE id = ${user.id as string}`
-      );
+      const verifiedUser = await db.execute(sql`
+        UPDATE users
+        SET email_verified = true,
+            email_verified_at = COALESCE(email_verified_at, NOW()),
+            last_login_at = NOW(),
+            last_login_ip = ${getClientIpForAuth(req)},
+            updated_at = NOW()
+        WHERE id = ${user.id as string}
+          AND deleted_at IS NULL
+        RETURNING id, email, credential_version
+      `);
+      const verifiedRow = verifiedUser.rows[0] as any;
+      if (!verifiedRow) return res.redirect("/login?error=expired_link");
+      (req.session as any).userId = verifiedRow.id;
+      (req.session as any).userEmail = verifiedRow.email;
+      // Keep legacy downstream handlers aligned with the live account identity.
+      // requireCustomer re-resolves this value from users on every request.
+      (req.session as any).customerEmail = verifiedRow.email;
+      stampAuthSession(req, {
+        userId: String(verifiedRow.id),
+        credentialVersion: credentialVersionOf(verifiedRow),
+        role: "customer",
+      });
       await writeAuthAudit("auth.magic_link.used", user.id as string, getClientIpForAuth(req), {});
       return res.redirect("/dashboard");
     } catch (err: any) {
@@ -1402,15 +1463,13 @@ export function registerAuthRoutes(app: Express): void {
   });
 
   // POST /api/auth/forgot-password
-  app.post("/api/auth/forgot-password", sensitiveAuthRateLimit, async (req, res) => {
+  app.post("/api/auth/forgot-password", async (req, res) => {
     try {
       const { email } = req.body;
       if (email) {
         const user = await findUserByEmail(email);
         if (user && !user.deleted_at && user.password_hash) {
-          const token = await createPasswordResetToken(user.id as string);
-          const resetUrl = `${getAppBaseUrl(req)}/reset-password?token=${token}`;
-          await sendPasswordResetEmail(user.email as string, resetUrl);
+          await createPasswordResetToken(user.id as string);
           await writeAuthAudit("auth.password_reset.requested", user.id as string, getClientIpForAuth(req), { email });
         }
       }
@@ -1422,7 +1481,7 @@ export function registerAuthRoutes(app: Express): void {
   });
 
   // POST /api/auth/reset-password
-  app.post("/api/auth/reset-password", sensitiveAuthRateLimit, async (req, res) => {
+  app.post("/api/auth/reset-password", async (req, res) => {
     try {
       const { token, new_password } = req.body;
       if (!token || !new_password) return res.status(400).json({ error: "Token and new password are required" });
@@ -1437,45 +1496,56 @@ export function registerAuthRoutes(app: Express): void {
       // single-winner gate (flips consumed_at NULL→NOW() exactly once even under
       // concurrent requests with the same token); only the winner gets user_id back
       // and may reset the password. Replaces the prior SELECT→check→UPDATE (TOCTOU).
-      const consumed = await db.execute(
-        sql`UPDATE password_reset_tokens SET consumed_at = NOW()
-            WHERE token = ${token} AND consumed_at IS NULL AND expires_at > NOW()
-            RETURNING user_id`
-      );
-      if (!consumed.rows.length) {
+      const reset = await db.transaction(async (tx) => {
+        const consumed = await tx.execute(
+          sql`UPDATE public.password_reset_tokens SET consumed_at = NOW()
+              WHERE token = ${token} AND consumed_at IS NULL AND expires_at > NOW()
+              RETURNING user_id`
+        );
+        if (!consumed.rows.length) return null;
+        const resetUserId = (consumed.rows[0] as any).user_id as string;
+        const changed = await tx.execute(sql`
+          UPDATE public.users
+             SET password_hash = ${hash},
+                 credential_version = COALESCE(credential_version, 1) + 1,
+                 updated_at = NOW()
+           WHERE id = ${resetUserId} AND deleted_at IS NULL
+           RETURNING email, credential_version
+        `);
+        const changedRow = changed.rows[0] as { email: string; credential_version: number } | undefined;
+        if (!changedRow) throw new Error("password reset owner unavailable");
+        await enqueueCustomerNotification(tx, {
+          eventKey: `password-changed:reset:${crypto.createHash("sha256").update(String(token)).digest("hex")}`,
+          kind: "PASSWORD_CHANGED",
+          aggregateType: "user",
+          aggregateId: resetUserId,
+          recipient: changedRow.email,
+          payload: {},
+        });
+        return { userId: resetUserId };
+      });
+      if (!reset) {
         return res.status(400).json({ error: "Reset link has expired. Please request a new one." });
       }
-      const resetUserId = (consumed.rows[0] as any).user_id as string;
+      const resetUserId = reset.userId;
       // A password reset is the ONLY remediation a customer has after a session theft, so it must
       // actually end the attacker's access. Previously this wrote password_hash and nothing else:
       // credential_version was not bumped and no session row was deleted, while the session cookie
-      // carries a 30-day rolling maxAge (server/index.ts) and requireAuth
-      // (server/middleware/auth.ts) checks only `req.session.userId`. A stolen `mv.sid` therefore
-      // kept full account access for up to 30 days AFTER the victim reset their password.
+      // carries a 30-day rolling maxAge (server/index.ts). A stolen `mv.sid` therefore kept full
+      // account access for up to 30 days AFTER the victim reset their password.
       //
       // credential_version is bumped for parity with every other credential change in this file
       // (:361, :417, :459) and so any version-aware check is correct from here on.
-      await db.execute(
-        sql`UPDATE users
-               SET password_hash = ${hash},
-                   credential_version = COALESCE(credential_version, 1) + 1,
-                   updated_at = NOW()
-             WHERE id = ${resetUserId}`
-      );
-      // Revoke every live session for this user. connect-pg-simple stores the serialised session in
-      // `session.sess`, and customer login sets `req.session.userId` (:1019), so that JSON field is
-      // the user key. Deleting the row is authoritative and immediate: the store finds no sid, a
-      // fresh empty session is created, and requireAuth 401s.
+      // Remove every live session row for prompt cookie cleanup. The credential-version bump above
+      // is authoritative: requireAuth/requireCustomer reject an older stamp even if this best-effort
+      // physical deletion fails.
       //
       // TWO-MACHINE SAFE (invariant I19): the session store is shared PostgreSQL, not per-process
       // memory, so this revocation is visible to BOTH Fly Machines the instant it commits — there is
       // no per-Machine cache to miss.
       let revokedSessions = 0;
       try {
-        const revoked = await db.execute(
-          sql`DELETE FROM session WHERE sess ->> 'userId' = ${resetUserId} RETURNING sid`
-        );
-        revokedSessions = revoked.rows.length;
+        revokedSessions = await revokeCustomerSessions(resetUserId);
       } catch (revokeErr: any) {
         // Never let a revocation failure strand the user with a consumed token and an unchanged
         // password — the password IS already updated at this point. Surface it loudly instead.
@@ -1483,7 +1553,6 @@ export function registerAuthRoutes(app: Express): void {
       }
       const user = await findUserById(resetUserId);
       if (user) {
-        await sendPasswordChangedEmail(user.email as string);
         await writeAuthAudit("auth.password_reset", user.id as string, getClientIpForAuth(req), {
           email: user.email,
           revokedSessions,
@@ -1527,9 +1596,7 @@ export function registerAuthRoutes(app: Express): void {
       const user = await findUserById(userId);
       if (!user) return res.status(404).json({ error: "User not found" });
       if (user.email_verified) return res.status(400).json({ error: "Email already verified" });
-      const token = await createEmailVerificationToken(userId);
-      const verifyUrl = `${getAppBaseUrl(req)}/api/auth/verify-email?token=${token}`;
-      await sendWelcomeVerificationEmail(user.email as string, user.display_name as string | null, verifyUrl);
+      await createEmailVerificationToken(userId);
       return res.json({ ok: true });
     } catch (err: any) {
       console.error("[auth] resend-verification error:", err.message);
@@ -1538,9 +1605,8 @@ export function registerAuthRoutes(app: Express): void {
   });
 
   // GET /api/auth/me
-  app.get("/api/auth/me", async (req, res) => {
-    const userId = (req.session as any).userId as string | undefined;
-    if (!userId) return res.status(401).json({ error: "auth_required" });
+  app.get("/api/auth/me", requireAuth, async (req, res) => {
+    const userId = (req.session as any).userId as string;
     try {
       const user = await findUserById(userId);
       if (!user || user.deleted_at) {
@@ -1578,8 +1644,42 @@ export function registerAuthRoutes(app: Express): void {
       const valid = await verifyPassword(current_password, user.password_hash as string);
       if (!valid) return res.status(401).json({ error: "Current password is incorrect" });
       const hash = await hashPassword(new_password);
-      await db.execute(sql`UPDATE users SET password_hash = ${hash}, updated_at = NOW() WHERE id = ${userId}`);
-      await sendPasswordChangedEmail(user.email as string);
+      const changed = await db.transaction(async (tx) => {
+        const result = await tx.execute(sql`
+          UPDATE public.users
+          SET password_hash = ${hash},
+              credential_version = COALESCE(credential_version, 1) + 1,
+              updated_at = NOW()
+          WHERE id = ${userId} AND deleted_at IS NULL
+          RETURNING credential_version
+        `);
+        const row = result.rows[0] as { credential_version: number } | undefined;
+        if (row) {
+          await enqueueCustomerNotification(tx, {
+            eventKey: `password-changed:direct:${userId}:v${row.credential_version}`,
+            kind: "PASSWORD_CHANGED",
+            aggregateType: "user",
+            aggregateId: userId,
+            recipient: user.email as string,
+            payload: {},
+          });
+        }
+        return result;
+      });
+      const changedRow = changed.rows[0] as any;
+      if (!changedRow) return res.status(401).json({ error: "auth_required" });
+      try {
+        await revokeCustomerSessions(userId, req.sessionID);
+      } catch (revokeErr: any) {
+        // Credential-version validation is authoritative, so peers still fail
+        // closed even when physical session cleanup is temporarily unavailable.
+        console.error("[auth] change-password: session cleanup failed:", revokeErr?.message);
+      }
+      stampAuthSession(req, {
+        userId,
+        credentialVersion: credentialVersionOf(changedRow),
+        role: "customer",
+      });
       await writeAuthAudit("auth.password_changed", userId, getClientIpForAuth(req), { email: user.email });
       return res.json({ ok: true });
     } catch (err: any) {
@@ -1605,15 +1705,52 @@ export function registerAuthRoutes(app: Express): void {
       const existing = await findUserByEmail(new_email);
       if (existing && existing.id !== userId) return res.status(409).json({ error: "That email is already in use" });
       const oldEmail = user.email as string;
-      await db.execute(
-        sql`UPDATE users SET email = ${new_email.toLowerCase().trim()}, email_verified = false, email_verified_at = NULL, updated_at = NOW() WHERE id = ${userId}`
-      );
-      (req.session as any).userEmail = new_email.toLowerCase().trim();
-      const token = await createEmailVerificationToken(userId);
-      const verifyUrl = `${getAppBaseUrl(req)}/api/auth/verify-email?token=${token}`;
-      await sendWelcomeVerificationEmail(new_email, user.display_name as string | null, verifyUrl);
-      await sendEmailChangedNotification(oldEmail, new_email);
-      await writeAuthAudit("auth.email_changed", userId, getClientIpForAuth(req), { old_email: oldEmail, new_email });
+      const normalEmail = new_email.toLowerCase().trim();
+      const changed = await db.transaction(async (tx) => {
+        const result = await tx.execute(
+          sql`UPDATE public.users
+              SET email = ${normalEmail},
+                  email_verified = false,
+                  email_verified_at = NULL,
+                  credential_version = COALESCE(credential_version, 1) + 1,
+                  updated_at = NOW()
+              WHERE id = ${userId} AND deleted_at IS NULL
+              RETURNING email, credential_version`
+        );
+        const row = result.rows[0] as { email: string; credential_version: number } | undefined;
+        if (row) {
+          await createEmailVerificationToken(userId, tx);
+          await enqueueCustomerNotification(tx, {
+            eventKey: `email-changed:${userId}:v${row.credential_version}`,
+            kind: "EMAIL_CHANGED",
+            aggregateType: "user",
+            aggregateId: userId,
+            recipient: oldEmail,
+            payload: { newEmail: normalEmail },
+          });
+        }
+        return result;
+      });
+      const changedRow = changed.rows[0] as any;
+      if (!changedRow) return res.status(401).json({ error: "auth_required" });
+      try {
+        await revokeCustomerSessions(userId, req.sessionID);
+      } catch (revokeErr: any) {
+        console.error("[auth] change-email: session cleanup failed:", revokeErr?.message);
+      }
+      stampAuthSession(req, {
+        userId,
+        credentialVersion: credentialVersionOf(changedRow),
+        role: "customer",
+      });
+      (req.session as any).userEmail = normalEmail;
+      // Move customerEmail with it. Leaving it on the OLD address kept the session
+      // reading the previous email's collection — a stale-identity read.
+      (req.session as any).customerEmail = normalEmail;
+      await writeAuthAudit("auth.email_changed", userId, getClientIpForAuth(req), {
+        old_email: oldEmail,
+        new_email: normalEmail,
+      });
       return res.json({ ok: true });
     } catch (err: any) {
       console.error("[auth] change-email error:", err.message);
@@ -1689,19 +1826,39 @@ export function registerAuthRoutes(app: Express): void {
         if (!valid) return res.status(401).json({ error: "Password is incorrect" });
       }
       // Soft delete — anonymise PII but preserve cert ownership chain
-      await db.execute(sql`
-        UPDATE users SET
-          email = ${`deleted_${userId}@mintvault.invalid`},
-          password_hash = NULL,
-          display_name = 'Deleted User',
-          deleted_at = NOW(),
-          updated_at = NOW()
-        WHERE id = ${userId}
-      `);
+      await db.transaction(async (tx) => {
+        const changed = await tx.execute(sql`
+          UPDATE public.users SET
+            email = ${`deleted_${userId}@mintvault.invalid`},
+            password_hash = NULL,
+            display_name = 'Deleted User',
+            deleted_at = NOW(),
+            credential_version = COALESCE(credential_version, 1) + 1,
+            updated_at = NOW()
+          WHERE id = ${userId} AND deleted_at IS NULL
+          RETURNING credential_version
+        `);
+        const row = changed.rows[0] as { credential_version: number } | undefined;
+        if (!row) throw new Error("account deletion owner unavailable");
+        await enqueueCustomerNotification(tx, {
+          eventKey: `account-deleted:${userId}:v${row.credential_version}`,
+          kind: "ACCOUNT_DELETED",
+          aggregateType: "user",
+          aggregateId: userId,
+          recipient: user.email as string,
+          payload: {},
+        });
+      });
       const emailForNotif = user.email as string;
+      try {
+        await revokeCustomerSessions(userId);
+      } catch (revokeErr: any) {
+        // The deleted users row remains the authoritative fail-closed gate.
+        console.error("[auth] delete-account: session cleanup failed:", revokeErr?.message);
+      }
       await writeAuthAudit("auth.account_deleted", userId, getClientIpForAuth(req), { email: emailForNotif });
-      req.session.destroy(() => {});
-      await sendAccountDeletedEmail(emailForNotif);
+      await new Promise<void>((resolve) => req.session.destroy(() => resolve()));
+      clearSessionCookie(res);
       return res.json({ ok: true });
     } catch (err: any) {
       console.error("[auth] delete-account error:", err.message);

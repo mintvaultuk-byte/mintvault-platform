@@ -20,6 +20,10 @@
    ========================================================================= */
 
 import React, { useEffect, useRef, useState } from "react";
+import { insuranceTiers, insuranceSurchargeBands, bulkDiscountTiers } from "@shared/commerce";
+import { ADDON_PRICES, ADDON_ORDER } from "@shared/addons";
+
+const poundsFromPence = (pence: number) => `£${(pence / 100).toFixed(pence % 100 === 0 ? 0 : 2)}`;
 
 // ── DESIGN TOKENS ──────────────────────────────────────────────────────────
 // Mockup-only — production code uses var(--v2-*) CSS variables. Inlined
@@ -467,9 +471,7 @@ function Header() {
 
 function SectionAHero() {
   const tierSlabs = [
-    { topBadge: "STANDARD", mainLabel: "£25", rightLabel: "15 DAY", footnote: "MOST CHOSEN", key: "standard" },
-    { topBadge: "VAULT QUEUE", mainLabel: "£19", rightLabel: "40 DAY", footnote: "BEST VALUE", key: "vault-queue" },
-    { topBadge: "EXPRESS", mainLabel: "£45", rightLabel: "5 DAY", footnote: "FASTEST", key: "express" },
+    { topBadge: "MINTVAULT", mainLabel: "MVGS", rightLabel: "GRADING", footnote: "ONE STANDARD", key: "grading" },
   ];
 
   return (
@@ -483,7 +485,7 @@ function SectionAHero() {
             Grade it once.<br />Get it right.
           </h1>
           <p style={{ fontFamily: "'Geist', system-ui, sans-serif", fontSize: 17, lineHeight: 1.6, maxWidth: 540, marginBottom: 32, color: V.inkSoft }}>
-            Three tiers, 5 to 40 working day turnaround, same four-point inspection on every card. Pristine 10P upgrade when your card earns it — free, never sold.
+            The same four-point inspection on every card. View current service options, prices and turnaround on our pricing page. Pristine 10P upgrade when your card earns it — free, never sold.
           </p>
           <div style={{ display: "flex", flexWrap: "wrap", alignItems: "center", gap: 12, marginBottom: 20 }}>
             <a href="#" style={{ display: "inline-flex", alignItems: "center", gap: 8, fontFamily: "'Geist', system-ui, sans-serif", fontSize: 14, fontWeight: 600, padding: "12px 24px", borderRadius: 999, backgroundColor: V.ink, color: V.paper, textDecoration: "none" }}>
@@ -494,7 +496,7 @@ function SectionAHero() {
             </a>
           </div>
           <p style={{ fontFamily: "'Geist Mono', 'JetBrains Mono', monospace", fontSize: 10, textTransform: "uppercase", letterSpacing: "0.1em", color: V.inkMute }}>
-            From £19 · 3 tiers · Free Pristine 10P upgrade
+            <a href="/pricing" style={{ color: "inherit" }}>View current grading prices and turnaround →</a>
           </p>
         </div>
         <HeroSlabFan slabs={tierSlabs} />
@@ -505,169 +507,7 @@ function SectionAHero() {
 
 // ── SECTION I: GRADING TIERS (dark) ───────────────────────────────────────
 
-function TierCard({ tierId, displayName, blurb, featured, priceDisplay, days, features }) {
-  const [hovered, setHovered] = useState(false);
-  return (
-    <div
-      onMouseEnter={() => setHovered(true)}
-      onMouseLeave={() => setHovered(false)}
-      style={{
-        position: "relative",
-        borderRadius: 12,
-        display: "flex",
-        flexDirection: "column",
-        padding: "48px 40px",
-        backgroundColor: "transparent",
-        border: featured ? "1px solid rgba(212, 175, 55, 0.6)" : "1px solid rgba(212, 175, 55, 0.25)",
-        transform: hovered ? "translateY(-4px) scale(1.02)" : "translateY(0) scale(1)",
-        boxShadow: hovered
-          ? "0 20px 40px -10px rgba(0,0,0,0.5), 0 0 30px rgba(212, 175, 55, 0.15)"
-          : "0 0 0 transparent",
-        transition: "transform 250ms cubic-bezier(0.2, 0.8, 0.2, 1), box-shadow 250ms ease-out",
-        willChange: "transform",
-      }}
-    >
-      {featured && (
-        <span
-          style={{
-            position: "absolute",
-            top: -14,
-            left: "50%",
-            transform: "translateX(-50%)",
-            fontFamily: "'Geist Mono', 'JetBrains Mono', monospace",
-            fontSize: 9,
-            textTransform: "uppercase",
-            letterSpacing: "0.2em",
-            padding: "6px 16px",
-            borderRadius: 4,
-            backgroundColor: V.gold,
-            color: V.panelDark,
-          }}
-        >
-          Most chosen
-        </span>
-      )}
-      <p style={{ fontFamily: "'Geist', system-ui, sans-serif", fontSize: 12, textTransform: "uppercase", letterSpacing: "0.2em", marginBottom: 20, color: "rgba(255,255,255,0.4)" }}>
-        {displayName}
-      </p>
-      <div style={{ position: "relative", marginBottom: 4, lineHeight: 1 }}>
-        <span
-          style={{
-            fontFamily: "'Geist', system-ui, sans-serif",
-            fontWeight: 600,
-            position: "absolute",
-            color: "rgba(255,255,255,0.4)",
-            fontSize: "clamp(28px, 3vw, 36px)",
-            top: 4,
-            left: -2,
-            transform: "translateX(-100%)",
-          }}
-        >
-          £
-        </span>
-        <span
-          style={{
-            fontFamily: "'Geist', system-ui, sans-serif",
-            fontWeight: 600,
-            color: "#FFFFFF",
-            fontSize: "clamp(72px, 6vw, 96px)",
-            marginLeft: 20,
-          }}
-        >
-          {priceDisplay}
-        </span>
-      </div>
-      <p style={{ fontFamily: "'Geist Mono', 'JetBrains Mono', monospace", fontSize: 10, textTransform: "uppercase", marginBottom: 24, color: "#888888", letterSpacing: "0.15em" }}>
-        {days} day turnaround
-      </p>
-      {blurb && (
-        <p style={{ fontFamily: "'Geist', system-ui, sans-serif", fontSize: 14, lineHeight: 1.6, marginBottom: 32, color: "rgba(255,255,255,0.7)" }}>
-          {blurb}
-        </p>
-      )}
-      <ul style={{ marginBottom: 40, flex: 1, display: "flex", flexDirection: "column", gap: 16, listStyle: "none", padding: 0 }}>
-        {features.slice(0, 5).map((f) => (
-          <li key={f} style={{ display: "flex", alignItems: "flex-start", gap: 12, fontFamily: "'Geist', system-ui, sans-serif", fontSize: 14, color: "#E8E4DC" }}>
-            <span style={{ flexShrink: 0, color: V.gold }}>—</span>
-            {f}
-          </li>
-        ))}
-      </ul>
-      <a
-        href="#"
-        style={{
-          display: "inline-flex",
-          alignItems: "center",
-          justifyContent: "center",
-          gap: 8,
-          fontFamily: "'Geist', system-ui, sans-serif",
-          fontSize: 14,
-          fontWeight: 600,
-          padding: "12px 20px",
-          borderRadius: 999,
-          width: "100%",
-          textDecoration: "none",
-          ...(featured
-            ? { backgroundColor: V.gold, color: V.panelDark }
-            : { border: `1px solid ${V.gold}`, color: V.gold }),
-        }}
-      >
-        Start a submission →
-      </a>
-    </div>
-  );
-}
-
 function SectionI() {
-  // Locked production data — Vault Queue £19 / Standard £25 / Express £45.
-  const tiers = [
-    {
-      tierId: "standard",
-      displayName: "Vault Queue",
-      blurb: "No rush. Full grade, NFC chip, registry listing — at the best price per card.",
-      featured: false,
-      priceDisplay: "19",
-      days: 40,
-      features: [
-        "Professional grade assessment (1–10 scale)",
-        "Subgrade breakdown (centering, corners, edges, surface)",
-        "Tamper-evident NFC-enabled precision slab",
-        "Unique online-verifiable certificate",
-        "Claim code for ownership registration",
-      ],
-    },
-    {
-      tierId: "priority",
-      displayName: "Standard",
-      blurb: "The balanced option: fair turnaround, full report, priority you can feel.",
-      featured: true,
-      priceDisplay: "25",
-      days: 15,
-      features: [
-        "Professional grade assessment (1–10 scale)",
-        "Subgrade breakdown (centering, corners, edges, surface)",
-        "Tamper-evident NFC-enabled precision slab",
-        "Unique online-verifiable certificate",
-        "Claim code for ownership registration",
-      ],
-    },
-    {
-      tierId: "express",
-      displayName: "Express",
-      blurb: "Back in under a week. For grails, auction deadlines, and holiday hand-offs.",
-      featured: false,
-      priceDisplay: "45",
-      days: 5,
-      features: [
-        "Professional grade assessment (1–10 scale)",
-        "Subgrade breakdown (centering, corners, edges, surface)",
-        "Tamper-evident NFC-enabled precision slab",
-        "Unique online-verifiable certificate",
-        "Claim code for ownership registration",
-      ],
-    },
-  ];
-
   return (
     <section style={{ backgroundColor: V.panelDark, position: "relative", overflow: "hidden" }}>
       <DarkSectionGlow />
@@ -677,18 +517,18 @@ function SectionI() {
         </p>
         <div className="grid grid-cols-1 md:grid-cols-2 gap-6 md:gap-16 mb-14">
           <h2 style={{ fontFamily: "'Geist', system-ui, sans-serif", fontStyle: "italic", fontWeight: 500, fontSize: "clamp(1.875rem, 4vw, 3rem)", lineHeight: 1.1, color: "#FFFFFF" }}>
-            Three tiers.<br />
+            Your grading options.<br />
             <span style={{ fontFamily: "'Geist', system-ui, sans-serif", fontStyle: "italic", fontWeight: 400, color: V.goldSoft }}>One standard.</span>
           </h2>
           <p style={{ fontFamily: "'Geist', system-ui, sans-serif", fontSize: 16, lineHeight: 1.6, alignSelf: "end", color: "rgba(255,255,255,0.6)" }}>
-            Every card passes the same four-point inspection: centering, corners, edges, surface. Tier only changes how quickly the work comes back.
+            Every card passes the same four-point inspection: centering, corners, edges, surface. Compare current service features and turnaround on the pricing page.
           </p>
         </div>
 
-        <div style={{ display: "flex", justifyContent: "center" }}>
-          <div className="grid grid-cols-1 md:grid-cols-3 gap-5 md:gap-6" style={{ maxWidth: 1080, width: "100%" }}>
-            {tiers.map((t) => <TierCard key={t.tierId} {...t} />)}
-          </div>
+        <div style={{ textAlign: "center", padding: "32px 24px", border: `1px solid ${V.gold}`, borderRadius: 12 }}>
+          <a href="/pricing" style={{ color: V.goldSoft, fontSize: 20, fontWeight: 600 }}>
+            View current grading prices and turnaround →
+          </a>
         </div>
 
         <div style={{ marginTop: 64, maxWidth: 768, marginInline: "auto", textAlign: "center" }}>
@@ -710,12 +550,13 @@ function SectionI() {
 // ── SECTION II: VALUE PROTECTION ──────────────────────────────────────────
 
 function SectionII() {
-  const bands = [
-    { tier: "Standard", value: "Up to £500", fee: "Included", note: "Built into every submission", isFree: true },
-    { tier: "Enhanced", value: "Up to £1,500", fee: "+£2", note: "Mid-value cards", isFree: false },
-    { tier: "Premium", value: "Up to £3,000", fee: "+£5", note: "High-value grails", isFree: false },
-    { tier: "Max", value: "Up to £7,500", fee: "+£10", note: "Cap — contact us above £7.5k", isFree: false },
-  ];
+  const bands = insuranceSurchargeBands.map((band, index) => ({
+    tier: ["Standard", "Enhanced", "Premium", "Max"][index] ?? `Band ${index + 1}`,
+    value: `Up to £${band.maxValue.toLocaleString("en-GB")}`,
+    fee: band.surchargePence === 0 ? "Included" : `+${poundsFromPence(band.surchargePence)}`,
+    note: band.surchargePence === 0 ? "Built into every submission" : "Based on declared value",
+    isFree: band.surchargePence === 0,
+  }));
 
   return (
     <section style={{ backgroundColor: V.paper }}>
@@ -762,7 +603,7 @@ function SectionII() {
 
 // ── SECTION III: ADD-ONS ──────────────────────────────────────────────────
 
-function AddonItem({ name, display, description }) {
+function AddonItem({ id, name, description }) {
   const [hovered, setHovered] = useState(false);
   return (
     <div
@@ -777,9 +618,9 @@ function AddonItem({ name, display, description }) {
         <h3 style={{ fontFamily: "'Geist', system-ui, sans-serif", fontStyle: "italic", fontWeight: 500, fontSize: "clamp(1.25rem, 1.8vw, 1.5rem)", color: V.ink }}>
           {name}
         </h3>
-        <span style={{ fontFamily: "'Geist Mono', 'JetBrains Mono', monospace", fontSize: 18, fontWeight: 600, color: hovered ? V.gold : V.gold, transition: "color 200ms" }}>
-          {display}
-        </span>
+        <a href={`/submit?type=${id}`} style={{ fontFamily: "'Geist Mono', 'JetBrains Mono', monospace", fontSize: 14, fontWeight: 600, color: V.gold }}>
+          Current prices and availability →
+        </a>
       </div>
       <p style={{ fontFamily: "'Geist', system-ui, sans-serif", fontSize: 14, lineHeight: 1.6, color: V.inkSoft }}>
         {description}
@@ -789,11 +630,7 @@ function AddonItem({ name, display, description }) {
 }
 
 function SectionIII() {
-  const addons = [
-    { id: "reholder", name: "Reholder", display: "£15", description: "Transfer your card into a new MintVault slab with updated NFC and certificate." },
-    { id: "crossover", name: "Crossover", display: "£35", description: "Re-grade a card from PSA, BGS, CGC, or another grading company." },
-    { id: "authentication", name: "Authentication", display: "£15", description: "Verify authenticity and check for alterations — no grade assigned." },
-  ];
+  const addons = ADDON_ORDER.map((id) => ({ id, name: ADDON_PRICES[id].name, description: ADDON_PRICES[id].description }));
 
   return (
     <section style={{ backgroundColor: V.paperRaised }}>
@@ -806,7 +643,7 @@ function SectionIII() {
             Optional extras.
           </h2>
           <p style={{ fontFamily: "'Geist', system-ui, sans-serif", fontSize: 16, lineHeight: 1.6, alignSelf: "end", color: V.inkSoft }}>
-            Three services you can stack onto a submission. Add only what you need — nothing hidden, nothing default-on.
+            Choose a service to check its current prices and availability. Each service is selected separately in the submission flow.
           </p>
         </div>
         <div className="grid grid-cols-1 md:grid-cols-3 gap-8 md:gap-10">
@@ -820,12 +657,10 @@ function SectionIII() {
 // ── SECTION IV: RETURN SHIPPING ───────────────────────────────────────────
 
 function SectionIV() {
-  const tiers = [
-    { value: "Up to £500", shipping: "£4.99" },
-    { value: "Up to £1,500", shipping: "£9.99" },
-    { value: "Up to £3,000", shipping: "£14.99" },
-    { value: "Up to £7,500", shipping: "£24.99" },
-  ];
+  const tiers = insuranceTiers.map((tier) => ({
+    value: `Up to £${tier.maxValue.toLocaleString("en-GB")}`,
+    shipping: poundsFromPence(tier.shippingPence),
+  }));
   return (
     <section style={{ backgroundColor: V.paperSunk }}>
       <div className="mx-auto max-w-5xl px-6 py-24 md:py-32">
@@ -859,7 +694,7 @@ function SectionIV() {
           </table>
         </div>
         <p style={{ fontFamily: "'Geist', system-ui, sans-serif", fontSize: 12, marginTop: 24, color: V.inkMute }}>
-          Fully insured Royal Mail return. UK addresses only. Above £7,500 declared value, please contact us for bespoke carriage.
+          Fully insured Royal Mail return. UK addresses only. Above the highest listed declared value, please contact us for bespoke carriage.
         </p>
       </div>
     </section>
@@ -892,7 +727,7 @@ function SectionV() {
             Silver membership.
           </h2>
           <p style={{ fontFamily: "'Geist', system-ui, sans-serif", fontSize: 16, lineHeight: 1.6, alignSelf: "end", color: V.inkSoft }}>
-            A perks-and-credits membership for collectors who submit regularly. No percentage discount — tangible perks that cover real costs.
+            A perks-and-credits membership for collectors who submit regularly. Compare current membership benefits with your expected use on the Vault Club page.
           </p>
         </div>
         <div
@@ -936,7 +771,7 @@ function SectionV() {
               See Vault Club →
             </a>
             <p style={{ fontFamily: "'Geist Mono', 'JetBrains Mono', monospace", fontSize: 10, textTransform: "uppercase", letterSpacing: "0.1em", color: V.inkMute }}>
-              Subscriptions temporarily paused — relaunching with full perks system.
+              See Vault Club for current subscription availability and benefits.
             </p>
           </div>
         </div>
@@ -961,18 +796,13 @@ function SectionVI() {
           Bulk discounts apply automatically at checkout based on your card count. The more cards you submit, the more you save per card.
         </p>
         <div className="grid grid-cols-1 md:grid-cols-3 gap-4 mt-10">
-          {/* bulk figures: keep in sync with bulkDiscountTiers (shared/schema.ts) — max 10% (DMCC) */}
-          {[
-            { label: "10–24 cards", body: <><strong style={{ color: V.ink }}>5% off</strong> the per-card grading fee.</> },
-            { label: "25–49 cards", body: <><strong style={{ color: V.ink }}>7.5% off</strong> the per-card grading fee.</> },
-            { label: "50+ cards",   body: <><strong style={{ color: V.ink }}>10% off</strong> the per-card grading fee.</> },
-          ].map((ex) => (
+          {bulkDiscountTiers.filter((band) => band.percent > 0).map((ex) => (
             <div key={ex.label} style={{ borderRadius: 8, padding: 24, backgroundColor: V.paperSunk, border: `1px solid ${V.line}` }}>
               <p style={{ fontFamily: "'Geist Mono', 'JetBrains Mono', monospace", fontSize: 10, textTransform: "uppercase", letterSpacing: "0.15em", marginBottom: 12, color: V.gold }}>
                 {ex.label}
               </p>
               <p style={{ fontFamily: "'Geist', system-ui, sans-serif", fontSize: 14, lineHeight: 1.6, color: V.inkSoft }}>
-                {ex.body}
+                <strong style={{ color: V.ink }}>{ex.percent}% off</strong> the per-card grading fee.
               </p>
             </div>
           ))}
@@ -1017,7 +847,7 @@ function FAQItem({ q, a, index }) {
 
 function SectionVII() {
   const items = [
-    { q: "Why only three tiers? What happened to Gold?", a: "We launched with Vault Queue, Standard, and Express because those cover the three real jobs: cheap-and-patient, balanced, and fast. Demand for a higher-price tier will be re-evaluated post-launch based on submission data rather than guesswork." },
+    { q: "Where can I compare current grading options?", a: <>See the <a href="/pricing">current grading prices and turnaround</a> for available services and features. Every service uses the same four-point inspection.</> },
     { q: "Is Pristine 10P a paid upgrade?", a: "No. Pristine 10P is automatic when every subgrade (centering, corners, edges, surface) hits a 10. There's no extra charge, no form to tick. If your card earns it, you get it." },
     { q: "Are cards insured in transit?", a: "Yes. All return shipping is Royal Mail Special Delivery with cover matched to your declared-value tier. Incoming shipping is your responsibility, but we recommend Royal Mail Special Delivery for anything above £100." },
     { q: "Do you grade cards other than Pokémon?", a: "Yes. We grade Pokémon, Magic: The Gathering, Yu-Gi-Oh!, One Piece TCG, sports cards, and most other trading card formats. If you're unsure, submit anyway — we'll flag it before grading if we can't authenticate." },
@@ -1053,7 +883,7 @@ function SectionVIII() {
           Ready when you are.
         </h2>
         <p style={{ fontFamily: "'Geist', system-ui, sans-serif", fontSize: 16, marginBottom: 40, color: "rgba(255,255,255,0.5)" }}>
-          From £19. UK-based. Insured in transit.
+          <a href="/pricing" style={{ color: "inherit" }}>View current grading prices and turnaround →</a>
         </p>
         <div style={{ display: "flex", flexWrap: "wrap", alignItems: "center", justifyContent: "center", gap: 12, marginBottom: 24 }}>
           <a href="#" style={{ display: "inline-flex", alignItems: "center", gap: 8, fontFamily: "'Geist', system-ui, sans-serif", fontSize: 14, fontWeight: 600, padding: "12px 28px", borderRadius: 999, backgroundColor: V.gold, color: V.panelDark, textDecoration: "none" }}>

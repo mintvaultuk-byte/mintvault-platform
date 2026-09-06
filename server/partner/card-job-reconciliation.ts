@@ -41,6 +41,7 @@ import type { PoolClient } from "pg";
 import { withPartnerAdminTransaction } from "./db";
 import { writePartnerAudit } from "./audit";
 import { CARD_JOB_STATUS, transitionCardJob } from "./card-job-lifecycle";
+import { advanceCardJobAfterCapture } from "./card-job-lifecycle";
 
 /** One work item whose certificate is approved but whose Card Job never advanced. */
 export interface QaCardJobDrift {
@@ -74,6 +75,161 @@ async function certificatesPresent(client: PoolClient): Promise<boolean> {
     `SELECT to_regclass('public.certificates') IS NOT NULL AS present`
   );
   return rows[0]?.present === true;
+}
+
+async function captureEvidenceTablesPresent(client: PoolClient): Promise<boolean> {
+  const { rows } = await client.query<{ present: boolean }>(
+    `SELECT to_regclass('public.certificate_image_evidence') IS NOT NULL
+            AND to_regclass('public.scanner_capture_sessions') IS NOT NULL
+            AND to_regclass('public.partner_stations') IS NOT NULL AS present`
+  );
+  return rows[0]?.present === true;
+}
+
+/** A Card Job whose accepted scanner truth is ahead of its lifecycle state. */
+export interface CaptureCardJobDrift {
+  cardJobId: string;
+  tenantId: string;
+  locationId: string | null;
+  certificateId: number;
+  status: string;
+  acceptedSides: number;
+  lastEvidenceAt: string;
+}
+
+/**
+ * Find only mechanically-repairable capture drift.
+ *
+ * NEEDS_SCAN/FIX_REQUIRED is drifted once one accepted side exists. CAPTURING is
+ * drifted only when both sides satisfy the same session/station/evidence
+ * predicate as the lifecycle authority. A legitimate one-sided CAPTURING job is
+ * therefore never churned by the scheduler.
+ */
+export async function detectCaptureCardJobDrift(limit = 500): Promise<DriftScan<CaptureCardJobDrift>> {
+  return withPartnerAdminTransaction(async (client) => {
+    if (!(await certificatesPresent(client)) || !(await captureEvidenceTablesPresent(client))) {
+      return { ran: false, items: [], skippedReason: "scanner evidence tables absent on this database" };
+    }
+    const { rows } = await client.query<{
+      card_job_id: string;
+      tenant_id: string;
+      location_id: string | null;
+      certificate_id: number;
+      status: string;
+      accepted_sides: number;
+      last_evidence_at: string;
+    }>(
+      `WITH accepted AS (
+         SELECT job.id AS card_job_id,
+                count(DISTINCT evidence.side)::int AS accepted_sides,
+                max(evidence.created_at) AS last_evidence_at
+           FROM partner_card_jobs job
+           JOIN certificates cert
+             ON cert.id=job.certificate_id AND cert.deleted_at IS NULL
+           JOIN certificate_image_evidence evidence
+             ON evidence.certificate_id=job.certificate_id
+            AND evidence.is_current=true
+            AND evidence.evidence_class='NEW_IMMUTABLE_MASTER'
+            AND evidence.format='tiff'
+           JOIN scanner_capture_sessions session
+             ON session.id=evidence.capture_metadata ->> 'captureSessionId'
+            AND session.certificate_id=evidence.certificate_id
+            AND session.side=evidence.side
+            AND session.state='captured'
+           JOIN partner_stations station
+             ON station.id=session.station_id
+            AND station.status='ACTIVE'
+            AND station.tenant_id=job.tenant_id
+            AND station.location_id IS NOT DISTINCT FROM job.location_id
+          WHERE job.cancelled_at IS NULL
+            AND job.status IN ('NEEDS_SCAN','CAPTURING','FIX_REQUIRED')
+          GROUP BY job.id
+       )
+       SELECT job.id AS card_job_id,job.tenant_id,job.location_id,job.certificate_id,job.status,
+              accepted.accepted_sides,accepted.last_evidence_at
+         FROM accepted
+         JOIN partner_card_jobs job ON job.id=accepted.card_job_id
+        WHERE (job.status IN ('NEEDS_SCAN','FIX_REQUIRED') AND accepted.accepted_sides >= 1)
+           OR (job.status='CAPTURING' AND accepted.accepted_sides >= 2)
+        ORDER BY accepted.last_evidence_at ASC
+        LIMIT $1`,
+      [limit]
+    );
+    return {
+      ran: true,
+      items: rows.map((row) => ({
+        cardJobId: row.card_job_id,
+        tenantId: row.tenant_id,
+        locationId: row.location_id,
+        certificateId: Number(row.certificate_id),
+        status: row.status,
+        acceptedSides: Number(row.accepted_sides),
+        lastEvidenceAt: new Date(row.last_evidence_at).toISOString(),
+      })),
+    };
+  });
+}
+
+export interface CaptureRedriveResult {
+  cardJobId: string;
+  outcome: RedriveOutcome;
+  status?: string;
+  reason?: string;
+}
+
+export interface CaptureRedriveSummary {
+  ran: boolean;
+  repaired: number;
+  alreadyAdvanced: number;
+  refused: number;
+  results: CaptureRedriveResult[];
+  skippedReason?: string;
+}
+
+/** Re-drive the canonical capture authority from durable accepted evidence. */
+export async function redriveCaptureCardJobDrift(
+  options: { limit?: number; actor?: string } = {}
+): Promise<CaptureRedriveSummary> {
+  const { limit = 500, actor = "system:card-job-reconciliation" } = options;
+  const scan = await detectCaptureCardJobDrift(limit);
+  if (!scan.ran) {
+    return {
+      ran: false,
+      repaired: 0,
+      alreadyAdvanced: 0,
+      refused: 0,
+      results: [],
+      skippedReason: scan.skippedReason,
+    };
+  }
+  const results: CaptureRedriveResult[] = [];
+  for (const item of scan.items) {
+    try {
+      const result = await advanceCardJobAfterCapture(item.certificateId, { reconciliationActor: actor });
+      if (!result) {
+        results.push({ cardJobId: item.cardJobId, outcome: "refused", reason: "Card Job no longer exists" });
+      } else {
+        results.push({
+          cardJobId: item.cardJobId,
+          outcome: result.changed ? "repaired" : "already_advanced",
+          status: result.status,
+        });
+      }
+    } catch (error) {
+      results.push({
+        cardJobId: item.cardJobId,
+        outcome: "refused",
+        reason: error instanceof Error ? error.message : String(error),
+      });
+    }
+  }
+  return {
+    ran: true,
+    repaired: results.filter((result) => result.outcome === "repaired").length,
+    alreadyAdvanced: results.filter((result) => result.outcome === "already_advanced").length,
+    refused: results.filter((result) => result.outcome === "refused").length,
+    results,
+  };
 }
 
 /**

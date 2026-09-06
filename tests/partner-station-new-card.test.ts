@@ -700,21 +700,22 @@ describe("P6 Scanner NEW CARD (real PostgreSQL)", () => {
 describe("P6 integration surfaces", () => {
   const stationRoutes = readFileSync("server/partner/station-routes.ts", "utf8");
   const captureService = readFileSync("server/scanner-capture-service.ts", "utf8");
+  const operationalAuthority = readFileSync("server/partner/operational-authority.ts", "utf8");
   const scannerMain = readFileSync("scripts/scanner-app/main.js", "utf8");
   const scannerClient = readFileSync("scripts/scanner-app/lib/server-client.js", "utf8");
   const scannerHtml = readFileSync("scripts/scanner-app/renderer/index.html", "utf8");
   const scannerApp = readFileSync("scripts/scanner-app/renderer/app.js", "utf8");
 
   it("the NEW route demands BOTH an approved station and an authorised operator", () => {
-    const route = stationRoutes.slice(stationRoutes.indexOf('r.post("/card-jobs"'));
-    const body = route.slice(0, route.indexOf('r.post("/stations/calibrations"'));
+    const routeStart = stationRoutes.indexOf('r.post("/card-jobs"');
+    const body = stationRoutes.slice(routeStart, stationRoutes.indexOf("r.get(", routeStart));
     expect(body).toContain("requireSignedStation");
     expect(body).toContain("requireSignedStationOperator");
   });
 
   it("the NEW route takes tenant, location and station from the authenticated principals only", () => {
-    const route = stationRoutes.slice(stationRoutes.indexOf('r.post("/card-jobs"'));
-    const body = route.slice(0, route.indexOf('r.post("/stations/calibrations"'));
+    const routeStart = stationRoutes.indexOf('r.post("/card-jobs"');
+    const body = stationRoutes.slice(routeStart, stationRoutes.indexOf("r.get(", routeStart));
     expect(body).toContain("tenantId: station.tenantId");
     expect(body).toContain("locationId: station.locationId");
     expect(body).toContain("stationId: station.id");
@@ -725,8 +726,8 @@ describe("P6 integration surfaces", () => {
   });
 
   it("insufficient credits is answered as 402, not a generic failure", () => {
-    const route = stationRoutes.slice(stationRoutes.indexOf('r.post("/card-jobs"'));
-    const body = route.slice(0, route.indexOf('r.post("/stations/calibrations"'));
+    const routeStart = stationRoutes.indexOf('r.post("/card-jobs"');
+    const body = stationRoutes.slice(routeStart, stationRoutes.indexOf("r.get(", routeStart));
     expect(body).toMatch(/INSUFFICIENT_CREDITS"?\s*\?\s*402/);
     /*
      * 409 is the "conflicts with state that already exists" group. It now covers a second condition
@@ -739,15 +740,18 @@ describe("P6 integration surfaces", () => {
   });
 
   it("the walk-in binding is an ADDITIONAL tenant check, not a relaxation of the existing one", () => {
-    // The connector-import join must survive: it is what binds portal-originated certificates.
-    expect(captureService).toContain("partner_connector_imports");
-    // The new path demands the same tenant AND location facts through the Card Job instead.
-    expect(captureService).toContain("partner_card_jobs job");
-    expect(captureService).toMatch(/job\.tenant_id=station\.tenant_id/);
-    expect(captureService).toMatch(/job\.location_id=station\.location_id/);
-    expect(captureService).toContain("station.status='ACTIVE'");
+    // The main runtime retains zero direct Partner-table reads.
+    expect(captureService).not.toMatch(/\b(?:FROM|JOIN)\s+(?:public\.)?partner_/i);
+    // The separate operational authority preserves connector and Card Job bindings,
+    // locks them through the main arm transaction, and reasserts tenant/location.
+    expect(operationalAuthority).toContain("public.partner_connector_imports");
+    expect(operationalAuthority).toContain("FROM public.partner_card_jobs");
+    expect(operationalAuthority).toContain("tenant_id=$2::uuid");
+    expect(operationalAuthority).toContain("location_id=$3::uuid");
+    expect(operationalAuthority).toContain("station.status='ACTIVE'");
+    expect(operationalAuthority).toContain("FOR SHARE");
     // And the refusal is still reached when neither path binds.
-    expect(captureService).toContain("Certificate is not bound to this station's tenant and location");
+    expect(operationalAuthority).toContain("Certificate is not bound to this station's tenant and location");
   });
 
   it("the Scanner holds ONE retry token across retries of a single press", () => {
@@ -783,8 +787,15 @@ describe("P6 integration surfaces", () => {
     expect(stationClient).toContain('operatorJson("GET", "/api/partner/credits")');
     expect(scannerMain).toContain("availableCreditsOrNull");
     expect(scannerMain).toContain("availableCredits:");
-    // The summary the renderer reads is built WITH the credits value.
-    expect(scannerMain).toContain("stationSummary(session.body, await refreshAvailableCredits())");
+    /*
+     * The summary the renderer reads is built WITH the operator-scoped credits value, but only
+     * after the existing station has passed its tenant/status check. Fetching credits inline while
+     * building the summary would let a wrong-shop login read and commit its wallet before the
+     * persisted station identity had been proved to belong to that session.
+     */
+    expect(scannerMain).toMatch(
+      /const status = await operatorScope\.enrolmentStatus\(code\);[\s\S]*?const availableCredits = await availableCreditsOrNull\(operatorScope\);[\s\S]*?operatorScope\.assertCurrent\(\);[\s\S]*?operatorScope\.validateStationScope\(code, station\.status\);[\s\S]*?const summary = stationSummary\(session\.body, commitAvailableCredits\(availableCredits\)\);/
+    );
     // A failed read degrades to null, never to 0, and never blocks setup.
     expect(scannerMain).toMatch(/catch \{\s*return null;/);
     /*

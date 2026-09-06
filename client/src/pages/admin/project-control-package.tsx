@@ -164,7 +164,6 @@ export default function ProjectControlPackagePage() {
     <AdminShell
       activeTab="dashboard"
       onTabChange={() => navigate("/admin")}
-      onLogout={() => navigate("/admin")}
       title={pkg.title}
       crumb={nodePath.join(" › ")}
     >

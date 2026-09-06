@@ -56,6 +56,15 @@ export const WORKSTATION_HEADER_REGION_CLASS = "shrink-0 space-y-1";
  *  <div> use exactly this — enforced by the architecture test. */
 export const WORKSTATION_BODY_SCROLL_CLASS = "min-h-0 flex-1 space-y-2 overflow-y-auto md:pr-1";
 
+/**
+ * The two-pane floor is derived from the smallest usable control/card split:
+ * 540 CSS px leaves roughly 243px for a complete 45% card rail and 297px for
+ * the independently scrolling controls. It also keeps the owner's measured
+ * 845px laptop in two-pane mode through 150% browser zoom (about 563 CSS px),
+ * avoiding the old `md` breakpoint cliff. True narrow screens stack below it.
+ */
+export const WORKSTATION_TWO_PANE_CLASS = "min-[540px]:flex-row";
+
 export interface CanonicalGradingWorkstationShellProps {
   /** Persistent left card + live-certificate preview rail. */
   previewAside?: ReactNode;
@@ -78,9 +87,17 @@ export function CanonicalGradingWorkstationShell({
 }: CanonicalGradingWorkstationShellProps) {
   return (
     <div ref={rootRef} className={WORKSTATION_FILL_CLASS} data-testid="grading-workspace" data-canonical-shell="true">
-      <div className="flex min-h-0 flex-1 flex-col gap-2 md:flex-row">
+      {/* Below 540px both panes need a definite, reachable height. Super Admin's
+          mobile shell is auto-height, while Staff / Grader / Admin Review /
+          Partner shells are fixed-height. Giving the row a narrow-only scroll
+          owner serves both: the auto-height route can page-scroll and bounded
+          role shells can scroll between two full-height stacked panes. */}
+      <div className={`flex min-h-0 flex-1 flex-col gap-2 max-[539px]:overflow-y-auto ${WORKSTATION_TWO_PANE_CLASS}`}>
         {previewAside}
-        <div className="flex min-h-0 min-w-0 flex-1 flex-col" data-testid="grading-control-panel">
+        <div
+          className="flex min-h-0 min-w-0 flex-1 flex-col max-[539px]:h-[100dvh] max-[539px]:flex-none"
+          data-testid="grading-control-panel"
+        >
           {children}
         </div>
       </div>

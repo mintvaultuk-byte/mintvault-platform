@@ -1,6 +1,6 @@
 import { useState, useEffect, useRef } from "react";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
-import { apiRequest } from "@/lib/queryClient";
+import { adminFetch, apiRequest } from "@/lib/queryClient";
 import { useToast } from "@/hooks/use-toast";
 import { Badge } from "@/components/ui/badge";
 import { AdminButton } from "@/components/admin";
@@ -217,7 +217,7 @@ function QueuedPostPanel({ row }: { row: IgQueueRow }) {
       const form = new FormData();
       form.append("image", file);
       // Don't use apiRequest helper — it JSON-encodes the body. Hit fetch directly.
-      const res = await fetch(`/api/admin/ig/queue/${row.id}/replace-image`, {
+      const res = await adminFetch(`/api/admin/ig/queue/${row.id}/replace-image`, {
         method: "POST",
         body: form,
         credentials: "include",

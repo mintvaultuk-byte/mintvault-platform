@@ -24,7 +24,7 @@ describe("canonical card inspection state", () => {
       },
     });
     expect(state.views.front).toEqual({ zoom: 1, focusX: 0.5, focusY: 0.5 });
-    expect(state.views.back).toEqual({ zoom: 6, focusX: 0, focusY: 1 });
+    expect(state.views.back).toEqual({ zoom: 5, focusX: 0, focusY: 1 });
   });
 
   it("contains no grading, crop, defect or MVGS state", () => {

@@ -28,12 +28,34 @@
  * CONSUMED BY: scripts/ci/run-partner-suite.mjs
  */
 
-/** Disposable loopback clusters. Ports are fixed by the CI container provisioning step. */
+/**
+ * Disposable loopback clusters. CI keeps the conventional ports; local release
+ * verification may opt into distinct loopback ports so concurrent candidates
+ * never share or interrupt a disposable database.
+ */
+function localTestPort(variable, fallback) {
+  const value = String(process.env[variable] || fallback);
+  if (!/^\d{2,5}$/.test(value) || Number(value) < 1024 || Number(value) > 65535) {
+    throw new Error(`${variable} must be an unprivileged local TCP port, got '${value}'.`);
+  }
+  return Number(value);
+}
+
 export const CLUSTERS = {
   /** PostgreSQL 16 + pgvector — the MintVault-compatible shared cluster. */
-  pg16: { host: "127.0.0.1", port: 55432, user: "postgres", password: "postgres" },
+  pg16: {
+    host: "127.0.0.1",
+    port: localTestPort("MINTVAULT_TEST_PG16_PORT", "55432"),
+    user: "postgres",
+    password: "postgres",
+  },
   /** PostgreSQL 17.10 — Partner accounting, RBAC, connector and migration suites. */
-  pg17: { host: "127.0.0.1", port: 55433, user: "postgres", password: "postgres" },
+  pg17: {
+    host: "127.0.0.1",
+    port: localTestPort("MINTVAULT_TEST_PG17_PORT", "55433"),
+    user: "postgres",
+    password: "postgres",
+  },
 };
 
 /** Build a connection URL for a database on a named cluster. */
@@ -930,13 +952,14 @@ export const SUITES = [
   // scanner-production-migration additionally required port 5432 exactly, which no disposable
   // cluster in this repository uses, so it could not have run even if the variable were set.
   //
-  // Both keep their own disposability guards (loopback host + a mintvault_dgn_* database name), so
+  // Both keep their own disposability guards (loopback host + a mintvault_scanner_*_test database
+  // name), so
   // neither can be aimed at staging or production regardless of what is passed here.
   {
     file: "tests/scanner-production-migration.test.ts",
     topology: TOPOLOGY.ADMIN,
     cluster: "pg17",
-    database: "mintvault_dgn_release_scanner",
+    database: "mintvault_scanner_release_test",
     adminVars: ["SCANNER_MIGRATION_TEST_DATABASE_URL"],
     critical: true,
     isolate: true,
@@ -946,7 +969,7 @@ export const SUITES = [
     file: "tests/scanner-evidence-staging-service.integration.test.ts",
     topology: TOPOLOGY.ADMIN,
     cluster: "pg16",
-    database: "mintvault_dgn_evidence",
+    database: "mintvault_scanner_evidence_test",
     adminVars: ["SCANNER_STAGING_TEST_DATABASE_URL"],
     critical: true,
     isolate: true,
@@ -993,3 +1016,25 @@ export function findSuite(file) {
 }
 
 export const CRITICAL_SUITES = SUITES.filter((s) => s.critical);
+
+/** Database variables the isolated runner must scrub before applying one suite's contract. */
+export const MANAGED_DATABASE_ENVIRONMENT_KEYS = Object.freeze(
+  [
+    ...new Set([
+      "TEST_DATABASE_URL",
+      "MINTVAULT_DATABASE_URL",
+      "PARTNER_ADMIN_DATABASE_URL",
+      "PARTNER_CONNECTOR_DATABASE_URL",
+      "PARTNER_DATABASE_URL",
+      ...SUITES.flatMap((suite) => [...(suite.adminVars ?? []), ...(suite.runtimeVars ?? [])]),
+    ]),
+  ].sort()
+);
+
+/** Build one child-process environment with no database state inherited from another topology. */
+export function isolatedSuiteEnvironment(baseEnvironment, suite) {
+  const environment = { ...baseEnvironment, LC_ALL: "C", LANG: "C" };
+  for (const key of MANAGED_DATABASE_ENVIRONMENT_KEYS) delete environment[key];
+  Object.assign(environment, envForSuite(suite));
+  return environment;
+}

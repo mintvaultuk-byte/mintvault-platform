@@ -91,9 +91,16 @@ function sqlLiteral(value: unknown): string | null {
   return null;
 }
 
-/** The generated `CREATE TABLE certificates (...)` statement. Exported so a suite can inspect it. */
-export function certificatesStubDdl(): string {
-  const columns = Object.values(getTableColumns(certificates));
+/**
+ * The generated `CREATE TABLE <name> (...)` statement for ANY Drizzle table.
+ *
+ * Same derivation as `certificatesStubDdl()` — which now delegates here — so a suite that needs a
+ * companion table (`users`, `claim_verifications`, `ownership_history`) gets the same drift-proof
+ * treatment instead of hand-listing columns that rot. Same caveat applies: NAMES and broad TYPES
+ * only, no indexes, foreign keys or triggers.
+ */
+export function stubDdlForTable(table: Parameters<typeof getTableColumns>[0], tableName: string): string {
+  const columns = Object.values(getTableColumns(table));
   const defs = columns.map((column) => {
     const c = column as unknown as {
       name: string;
@@ -121,7 +128,12 @@ export function certificatesStubDdl(): string {
     if (c.notNull && (literal !== null || c.primary)) parts.push("not null");
     return parts.join(" ");
   });
-  return `CREATE TABLE certificates (\n  ${defs.join(",\n  ")}\n)`;
+  return `CREATE TABLE ${tableName} (\n  ${defs.join(",\n  ")}\n)`;
+}
+
+/** The generated `CREATE TABLE certificates (...)` statement. Exported so a suite can inspect it. */
+export function certificatesStubDdl(): string {
+  return stubDdlForTable(certificates, "certificates");
 }
 
 /**

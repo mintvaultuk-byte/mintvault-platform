@@ -10,6 +10,7 @@ import { getSignedUrl } from "@aws-sdk/s3-request-presigner";
 import { createReadStream } from "node:fs";
 import { promises as fs } from "node:fs";
 import path from "node:path";
+import { createHash } from "node:crypto";
 
 let s3Client: S3Client | null = null;
 
@@ -157,6 +158,41 @@ export async function uploadToR2(key: string, body: Buffer, contentType: string)
   return key;
 }
 
+/** Provider-side conditional creation for durable object-write operations. */
+export async function uploadCreateOnlyToR2(
+  key: string,
+  body: Buffer,
+  contentType: string,
+  sha256: string,
+  abortSignal?: AbortSignal
+): Promise<string> {
+  const localRoot = localEvidenceDirectory();
+  if (localRoot) {
+    const target = localEvidencePath(localRoot, key);
+    await fs.mkdir(path.dirname(target), { recursive: true, mode: 0o700 });
+    const handle = await fs.open(target, "wx", 0o600);
+    try {
+      await handle.writeFile(body);
+    } finally {
+      await handle.close();
+    }
+    return key;
+  }
+  await getClient().send(
+    new PutObjectCommand({
+      Bucket: getBucket(),
+      Key: key,
+      Body: body,
+      ContentType: contentType,
+      CacheControl: DEFAULT_CACHE_CONTROL,
+      Metadata: { sha256, byte_length: String(body.length) },
+      IfNoneMatch: "*",
+    }),
+    abortSignal ? { abortSignal } : undefined
+  );
+  return key;
+}
+
 /**
  * Create an evidence object once. The caller supplies a content-addressed key;
  * an existing object is accepted only when its recorded SHA-256 and byte count
@@ -291,6 +327,7 @@ export async function createScannerEvidenceStagingUpload(
       Key: key,
       ContentType: "image/tiff",
       CacheControl: "private, no-store",
+      IfNoneMatch: "*",
     }),
     { expiresIn: expiresInSeconds }
   );
@@ -299,7 +336,7 @@ export async function createScannerEvidenceStagingUpload(
     uploadUrl,
     // The signed command binds this exact representation.  Electron supplies
     // only these server-returned headers plus Content-Length for its file stream.
-    headers: { "content-type": "image/tiff", "cache-control": "private, no-store" },
+    headers: { "content-type": "image/tiff", "cache-control": "private, no-store", "if-none-match": "*" },
     expiresInSeconds,
   };
 }
@@ -321,6 +358,61 @@ export async function deleteFromR2(key: string): Promise<void> {
       Key: key,
     })
   );
+}
+
+export type R2ObjectIntegrity =
+  { exists: false } | { exists: true; byteLength: number; sha256: string; contentType: string | undefined };
+
+function isR2NotFoundError(error: unknown): boolean {
+  const shaped = error as {
+    $metadata?: { httpStatusCode?: number };
+    statusCode?: number;
+    name?: string;
+    Code?: string;
+  };
+  const status = shaped?.$metadata?.httpStatusCode ?? shaped?.statusCode;
+  const name = shaped?.name ?? shaped?.Code;
+  return status === 404 || name === "NotFound" || name === "NoSuchKey";
+}
+
+/** Hash the bytes actually returned by R2; only a real not-found is missing. */
+export async function inspectR2ObjectIntegrity(key: string, abortSignal?: AbortSignal): Promise<R2ObjectIntegrity> {
+  const localRoot = localEvidenceDirectory();
+  if (localRoot) {
+    try {
+      const bytes = await fs.readFile(localEvidencePath(localRoot, key));
+      return {
+        exists: true,
+        byteLength: bytes.length,
+        sha256: createHash("sha256").update(bytes).digest("hex"),
+        contentType: undefined,
+      };
+    } catch (error: unknown) {
+      if ((error as { code?: string })?.code === "ENOENT") return { exists: false };
+      throw error;
+    }
+  }
+  try {
+    const object = await getClient().send(
+      new GetObjectCommand({ Bucket: getBucket(), Key: key }),
+      abortSignal ? { abortSignal } : undefined
+    );
+    if (!object.Body) throw new Error(`R2 object ${key} returned no body`);
+    const hash = createHash("sha256");
+    let byteLength = 0;
+    for await (const chunk of object.Body as AsyncIterable<Uint8Array>) {
+      const bytes = Buffer.from(chunk);
+      byteLength += bytes.length;
+      hash.update(bytes);
+    }
+    if (object.ContentLength !== undefined && Number(object.ContentLength) !== byteLength) {
+      throw new Error(`R2 object ${key} changed or was truncated while reading`);
+    }
+    return { exists: true, byteLength, sha256: hash.digest("hex"), contentType: object.ContentType };
+  } catch (error: unknown) {
+    if (isR2NotFoundError(error)) return { exists: false };
+    throw error;
+  }
 }
 
 /** Download an R2 object into a Buffer (null on missing / any error). Used by the

@@ -1,6 +1,7 @@
 import { Switch, Route, useLocation } from "wouter";
 import { useEffect, lazy, Suspense } from "react";
 import { queryClient } from "./lib/queryClient";
+import { AdminSessionProvider } from "./lib/admin-session";
 import { QueryClientProvider } from "@tanstack/react-query";
 import { Toaster } from "@/components/ui/toaster";
 import { AdminStepUpHost } from "@/components/admin/admin-step-up";
@@ -60,6 +61,7 @@ const StaffLoginPage = lazy(() => import("@/pages/staff-login"));
 const StaffPage = lazy(() => import("@/pages/staff"));
 const AdminStaffPage = lazy(() => import("@/pages/admin-staff"));
 const AdminSecurityPage = lazy(() => import("@/pages/admin-security"));
+const AdminClaimRegisterPage = lazy(() => import("@/pages/admin-claim-register"));
 const AdminSetsPage = lazy(() => import("@/pages/admin-sets"));
 const AdminLegacyReviewPage = lazy(() => import("@/pages/admin-legacy-review"));
 const AdminPokemonKnowledgePage = lazy(() => import("@/pages/admin-pokemon-knowledge"));
@@ -182,6 +184,7 @@ const PartnerSecurityPage = lazy(() => import("@/pages/partner/security"));
 const PartnerCertificatesPage = lazy(() => import("@/pages/partner/certificates"));
 const PartnerSuppliesPage = lazy(() => import("@/pages/partner/supplies"));
 const PartnerSuppliesOrdersPage = lazy(() => import("@/pages/partner/supplies-orders"));
+const PartnerSuppliesRequestsPage = lazy(() => import("@/pages/partner/supplies-orders").then((module) => ({ default: module.PartnerSuppliesRequestsPage })));
 const PartnerWorkflowPlaceholderPage = lazy(() => import("@/pages/partner/workflow-placeholder"));
 const FindAPartnerPage = lazy(() => import("@/pages/find-a-partner"));
 const PublicPartnerProfilePage = lazy(() => import("@/pages/public-partner-profile"));
@@ -405,13 +408,18 @@ function PartnerPortalRoutes() {
             </PartnerRouteGuard>
           </Route>
           <Route path="/partner/supplies">
-            <PartnerRouteGuard requiredPermission="partner.supplies.view">
+            <PartnerRouteGuard requiredPermission="partner.orders.view">
               <PartnerSuppliesPage />
             </PartnerRouteGuard>
           </Route>
           <Route path="/partner/orders">
-            <PartnerRouteGuard requiredPermission="partner.supplies.view">
+            <PartnerRouteGuard requiredPermission="partner.orders.view">
               <PartnerSuppliesOrdersPage />
+            </PartnerRouteGuard>
+          </Route>
+          <Route path="/partner/supplies/requests">
+            <PartnerRouteGuard requiredPermission="partner.supplies.view">
+              <PartnerSuppliesRequestsPage />
             </PartnerRouteGuard>
           </Route>
           <Route path="/partner/public-profile">
@@ -474,6 +482,7 @@ function Router() {
           <Route path="/admin/graders" component={AdminStaffPage} />
           <Route path="/admin/staff" component={AdminStaffPage} />
           <Route path="/admin/security" component={AdminSecurityPage} />
+          <Route path="/admin/claim-register" component={AdminClaimRegisterPage} />
           <Route path="/admin/sets" component={AdminSetsPage} />
           <Route path="/admin/legacy-review" component={AdminLegacyReviewPage} />
           <Route path="/admin/pokemon-knowledge" component={AdminPokemonKnowledgePage} />
@@ -812,22 +821,24 @@ function App() {
   return (
     <ErrorBoundary>
       <QueryClientProvider client={queryClient}>
-        <FeatureFlagsProvider>
-          <TooltipProvider>
-            <GoldBurstEffect />
-            <Toaster />
-            {/*
-              Super Admin step-up prompt. Mounted ONCE, at the root, because the high-risk admin
-              mutations are declared inside the page components themselves — a context provider would
-              have to sit above each page and force those pages to be restructured. It renders
-              nothing until the server issues a challenge.
-            */}
-            <AdminStepUpHost />
-            <SubmitAttributionContinuity />
-            <Router />
-            <CookieBanner />
-          </TooltipProvider>
-        </FeatureFlagsProvider>
+        <AdminSessionProvider>
+          <FeatureFlagsProvider>
+            <TooltipProvider>
+              <GoldBurstEffect />
+              <Toaster />
+              {/*
+                Super Admin step-up prompt. Mounted ONCE, at the root, because the high-risk admin
+                mutations are declared inside the page components themselves — a context provider would
+                have to sit above each page and force those pages to be restructured. It renders
+                nothing until the server issues a challenge.
+              */}
+              <AdminStepUpHost />
+              <SubmitAttributionContinuity />
+              <Router />
+              <CookieBanner />
+            </TooltipProvider>
+          </FeatureFlagsProvider>
+        </AdminSessionProvider>
       </QueryClientProvider>
     </ErrorBoundary>
   );

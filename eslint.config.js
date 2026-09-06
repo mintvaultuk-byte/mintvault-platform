@@ -30,6 +30,14 @@ export default tseslint.config(
     },
   },
   {
-    ignores: ["dist/", "node_modules/", "migrations/", "*.cjs"],
+    ignores: [
+      "dist/",
+      "node_modules/",
+      "migrations/",
+      "**/server/scripts/**",
+      "**/scripts/cricut-app/**",
+      "**/.claude/worktrees/**",
+      "*.cjs",
+    ],
   },
 );

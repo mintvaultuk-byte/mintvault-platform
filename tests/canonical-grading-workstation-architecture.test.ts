@@ -55,8 +55,8 @@ const ROUTE_MOUNTS = { STAFF, GRADER, ADMIN_STAFF, PARTNER, ADMIN_DASH, CERT_FOR
 // a `fixed inset-0 flex flex-col` container. This is what removed the "black bar
 // below the shell" regression (a fixed-calc shell shorter than a taller parent).
 const SHELL_FILL = "flex min-h-0 flex-col h-full";
-const GEOMETRY_ROW = "flex min-h-0 flex-1 flex-col gap-2 md:flex-row";
-const GEOMETRY_COL = 'className="flex min-h-0 min-w-0 flex-1 flex-col" data-testid="grading-control-panel"';
+const GEOMETRY_ROW = "${WORKSTATION_TWO_PANE_CLASS}";
+const GEOMETRY_COL = 'className="flex min-h-0 min-w-0 flex-1 flex-col max-[539px]:h-[100dvh] max-[539px]:flex-none"';
 
 describe("Canonical grading workstation — one shell, capability-only role differences", () => {
   it("1. Super Admin grading mounts GradingWorkstation without a full-form stage injection", () => {
@@ -93,6 +93,7 @@ describe("Canonical grading workstation — one shell, capability-only role diff
     // The shell is the single source of truth for the row + column, and it FILLS
     // its parent rather than setting a viewport-relative height.
     expect(SHELL).toContain(SHELL_FILL);
+    expect(SHELL).toContain('WORKSTATION_TWO_PANE_CLASS = "min-[540px]:flex-row"');
     expect(SHELL).toContain(GEOMETRY_ROW);
     expect(SHELL).toContain(GEOMETRY_COL);
     // The shell must NEVER own a viewport-height calc (that was the black-bar bug).
@@ -147,9 +148,7 @@ describe("Canonical grading workstation — one shell, capability-only role diff
     expect(FOCUS_SURFACE).toContain(
       'ADMIN_FOCUS_SURFACE_CLASS = "flex min-h-[100dvh] flex-col p-2.5 md:h-[100dvh] md:min-h-0"'
     );
-    expect(FOCUS_SURFACE).toContain(
-      'ADMIN_FOCUS_WORKSTATION_CLASS = "flex min-h-0 flex-col md:min-h-0 md:flex-1"'
-    );
+    expect(FOCUS_SURFACE).toContain('ADMIN_FOCUS_WORKSTATION_CLASS = "flex min-h-0 flex-col md:min-h-0 md:flex-1"');
     expect(STAFF).toMatch(/fixed inset-0 z-40 flex flex-col/);
     expect(GRADER).toMatch(/fixed inset-0 z-40 flex flex-col/);
     expect(ADMIN_STAFF).toMatch(/fixed inset-0 z-50 flex flex-col/);
@@ -363,7 +362,8 @@ describe("Canonical persistent preview rail", () => {
     expect(WORKSTATION).toContain("onPreviewChange={handleDraftPreviewChange}");
     expect(WORKSTATION).toContain("authoritativePreview ?? panelPreviewFields");
     expect(WORKSTATION).toContain("fields={previewFields}");
-    expect(PREVIEW_PANEL).toContain("fetch(endpoint");
+    expect(PREVIEW_PANEL).toContain('import { adminFetch } from "@/lib/queryClient"');
+    expect(PREVIEW_PANEL).toContain("adminFetch(endpoint");
     expect(PREVIEW_PANEL).toContain("const body = expectedRevision == null ? fields : { ...fields, expectedRevision }");
     expect(PREVIEW_PANEL).toContain('res.headers.get("X-MintVault-Review-Revision")');
     expect(PREVIEW_PANEL).toContain('credentials: "include"');

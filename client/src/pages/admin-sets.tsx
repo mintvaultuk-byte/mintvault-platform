@@ -155,7 +155,6 @@ function activeIssues(row: SetRow): Suggestion[] {
 
 export default function AdminSetsPage() {
   const [, navigate] = useLocation();
-  const [authed, setAuthed] = useState<boolean | null>(null);
   const [tab, setTab] = useState<TabKey>("all");
   const [q, setQ] = useState("");
   const [sort, setSort] = useState("name_az");
@@ -168,22 +167,6 @@ export default function AdminSetsPage() {
   const [editing, setEditing] = useState<{ row: SetRow; draft: EditDraft } | null>(null);
   const [saving, setSaving] = useState(false);
   const savingRef = useRef(false);
-
-  useEffect(() => {
-    (async () => {
-      try {
-        const res = await fetch("/api/admin/session", { credentials: "include" });
-        const d = await res.json().catch(() => ({}));
-        setAuthed(res.ok && d.authenticated === true);
-      } catch {
-        setAuthed(false);
-      }
-    })();
-  }, []);
-
-  useEffect(() => {
-    if (authed === false) navigate("/admin/login?next=/admin/sets", { replace: true });
-  }, [authed, navigate]);
 
   const filterString = useMemo(() => Array.from(filters).sort().join(","), [filters]);
 
@@ -204,8 +187,8 @@ export default function AdminSetsPage() {
   }, [filterString, page, q, sort, tab]);
 
   useEffect(() => {
-    if (authed) load();
-  }, [authed, load]);
+    void load();
+  }, [load]);
 
   function toggleFilter(key: string) {
     setPage(1);
@@ -286,11 +269,6 @@ export default function AdminSetsPage() {
     setEditing({ row, draft: draftFrom(row, patch) });
   }
 
-  async function logout() {
-    await fetch("/api/admin/logout", { method: "POST", credentials: "include" }).catch(() => undefined);
-    navigate("/cert");
-  }
-
   const editingHasChanges = editing ? hasDraftChanges(editing.row, editing.draft) : false;
   const editingHasUnsavedChanges = editing ? hasUnsavedDraftChanges(editing.row, editing.draft) : false;
   const editingSuggestion =
@@ -330,21 +308,12 @@ export default function AdminSetsPage() {
     };
   }, [editing, editingHasUnsavedChanges, saving]);
 
-  if (authed !== true) {
-    return (
-      <div className="admin-root flex min-h-screen items-center justify-center">
-        <div className="h-8 w-8 animate-spin rounded-full border-2 border-[var(--admin-gold)] border-t-transparent" />
-      </div>
-    );
-  }
-
   const rows = data?.sets || [];
 
   return (
     <AdminShell
       activeTab="sets"
       onTabChange={() => navigate("/admin")}
-      onLogout={logout}
       title="Sets"
       crumb="MINTVAULT · RECORDS"
     >

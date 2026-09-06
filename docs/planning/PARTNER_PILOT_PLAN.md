@@ -8,12 +8,12 @@ The two owner-operated gates are: (1) correct the existing restricted Partner ru
 
 ### Reconciliation boundary
 
-| Authority                    | Observed state                                                                                                     | Consequence                                                                                       |
-| ---------------------------- | ------------------------------------------------------------------------------------------------------------------ | ------------------------------------------------------------------------------------------------- |
-| Working checkout             | `70307beda542c71b1d067230096ac7bd3878bb53`, branch `psp/partner-rbac-hybrid`, with unrelated in-progress LiDE work | Do not deploy or merge from this checkout. Preserve its dirty files.                              |
-| Deployment lineage           | `origin/main` at `864faded`; production currently serves `b0de0880` (Fly v1076)                                    | All release work must begin from the current mainline/production ancestry, not this checkout.     |
-| Live read-only probe         | `/health` = 200; `/api/partner/me` = 503; `/api/partner/stations/enrolment-locations` = 503                        | The Partner surface is safely unavailable, so no tenant or station workflow can currently run.    |
-| Runtime configuration record | `DGN-14` records the literal host `NEON_HOST_HERE` in `PARTNER_DATABASE_URL`; the mount fails closed               | An owner must reset the secret with the real restricted-login URL. No code fallback is permitted. |
+| Authority                    | Observed state                                                                                                                   | Consequence                                                                                       |
+| ---------------------------- | -------------------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------- |
+| Working checkout             | `70307beda542c71b1d067230096ac7bd3878bb53`, branch `psp/partner-rbac-hybrid`, with unrelated in-progress LiDE work               | Do not deploy or merge from this checkout. Preserve its dirty files.                              |
+| Deployment lineage           | `origin/main` at `864faded`; production currently serves `b0de0880` (Fly v1076)                                                  | All release work must begin from the current mainline/production ancestry, not this checkout.     |
+| Live read-only probe         | `/health` = 200; `/api/partner/me` = 503; `/api/partner/stations/enrolment-locations` = 503                                      | The Partner surface is safely unavailable, so no tenant or station workflow can currently run.    |
+| Runtime configuration record | The 2026-08-12 configuration record captured the literal host `NEON_HOST_HERE` in `PARTNER_DATABASE_URL`; the mount fails closed | An owner must reset the secret with the real restricted-login URL. No code fallback is permitted. |
 
 ## System map
 
@@ -109,13 +109,13 @@ flowchart LR
 
 ## Evidence ledger and proof expiry
 
-| Claim                                         | Current proof                                                                                    | Status                          | Invalidated by                          |
-| --------------------------------------------- | ------------------------------------------------------------------------------------------------ | ------------------------------- | --------------------------------------- |
-| Live Partner unsafe configuration is closed   | 2026-08-12 public probes: both Partner endpoints return 503; `DGN-14` records placeholder host   | Proven safe refusal             | Any Partner secret/flag/deploy change   |
-| Allocator preserves committed global identity | `tests/certificate-allocator-concurrency.test.ts`; allocator code is ancestor of live `b0de0880` | Built-needs-current-route-proof | Allocator, raw INSERT or schema changes |
-| Browser must not own MVGS                     | Direct browser imports in current live lineage                                                   | Reproduced blocker              | Client/engine/build changes             |
-| Partner payment purchase exists               | `tests/partner-dashboard-ui-render.test.ts` pins its absence                                     | Reproduced missing capability   | Billing/Stripe/webhook changes          |
-| Pilot QA gate exists                          | No Partner QA schema/service/route/test found                                                    | Reproduced missing capability   | QA/lifecycle/print changes              |
+| Claim                                         | Current proof                                                                                                       | Status                          | Invalidated by                          |
+| --------------------------------------------- | ------------------------------------------------------------------------------------------------------------------- | ------------------------------- | --------------------------------------- |
+| Live Partner unsafe configuration is closed   | 2026-08-12 public probes: both Partner endpoints return 503; the configuration record captures the placeholder host | Proven safe refusal             | Any Partner secret/flag/deploy change   |
+| Allocator preserves committed global identity | `tests/certificate-allocator-concurrency.test.ts`; allocator code is ancestor of live `b0de0880`                    | Built-needs-current-route-proof | Allocator, raw INSERT or schema changes |
+| Browser must not own MVGS                     | Direct browser imports in current live lineage                                                                      | Reproduced blocker              | Client/engine/build changes             |
+| Partner payment purchase exists               | `tests/partner-dashboard-ui-render.test.ts` pins its absence                                                        | Reproduced missing capability   | Billing/Stripe/webhook changes          |
+| Pilot QA gate exists                          | No Partner QA schema/service/route/test found                                                                       | Reproduced missing capability   | QA/lifecycle/print changes              |
 
 ## Executive verdict
 

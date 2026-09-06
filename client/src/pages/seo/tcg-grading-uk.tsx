@@ -62,7 +62,7 @@ export default function TcgGradingUk() {
     <div className="max-w-5xl mx-auto px-4 py-10 no-text-shadow">
       <SeoHead
         title="TCG Grading UK | Professional Trading Card Game Grading | MintVault"
-        description="Professional TCG grading in the UK for Pokemon, Yu-Gi-Oh!, Magic: The Gathering and all major trading card games. For collectors, investors, and resellers. From £19/card."
+        description="Professional TCG grading in the UK for Pokemon, Yu-Gi-Oh!, Magic: The Gathering and all major trading card games. For collectors, investors, and resellers. View current service options and pricing."
         canonical="https://mintvaultuk.com/tcg-grading-uk"
         ogImage="https://mintvaultuk.com/images/collector-lifestyle.webp"
         schema={schema}
@@ -140,7 +140,7 @@ export default function TcgGradingUk() {
               <strong className="text-white">Professional Presentation</strong> — a slabbed card with a printed label looks more professional than a raw card in a penny sleeve. This presentation helps build trust with buyers and can lead to repeat customers.
             </p>
             <p>
-              MintVault offers bulk discounts for larger submissions, making professional grading cost-effective for resellers with volume. See our <Link href="/" className="text-[#D4AF37] hover:underline" data-testid="link-pricing">pricing page</Link> for details on bulk discount tiers.
+              MintVault offers bulk discounts for larger submissions, making professional grading cost-effective for resellers with volume. See our <Link href="/pricing" className="text-[#D4AF37] hover:underline" data-testid="link-pricing">pricing page</Link> for details on bulk discount tiers.
             </p>
           </div>
         </section>
@@ -150,10 +150,10 @@ export default function TcgGradingUk() {
           <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 mb-4">
             {[
               { icon: <Shield size={20} />, title: "Domestic Service", desc: "Your cards stay within the UK. No international shipping risks, no customs paperwork, no import duties." },
-              { icon: <Clock size={20} />, title: "Fast Turnaround", desc: "Service tiers from 5 to 40 working days. Domestic shipping means shorter total elapsed time." },
+              { icon: <Clock size={20} />, title: "Fast Turnaround", desc: "See current service turnaround on the pricing page. Domestic shipping means shorter total elapsed time." },
               { icon: <Award size={20} />, title: "Professional Grading", desc: "Trained UK-based graders assess centering, corners, edges, and surface quality on a 1-10 scale." },
               // bulk figure: keep in sync with bulkDiscountTiers (shared/schema.ts) — max 10%
-              { icon: <TrendingUp size={20} />, title: "Competitive Pricing", desc: "Grading from £19 per card with bulk discounts up to 10%. No hidden international shipping or customs costs." },
+              { icon: <TrendingUp size={20} />, title: "Competitive Pricing", desc: "Compare current grading prices and bulk discount bands online. No hidden international shipping or customs costs." },
               { icon: <Users size={20} />, title: "UK Customer Support", desc: "Contact our team directly in your time zone for questions about your submission." },
               { icon: <Shield size={20} />, title: "Insured Returns", desc: "All graded cards are returned via fully insured tracked delivery based on your declared card value." },
             ].map((item, i) => (

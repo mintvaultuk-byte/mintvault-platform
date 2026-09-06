@@ -1,0 +1,19 @@
+{
+  "capturedAt": "2026-08-25T04:36:10Z",
+  "repository": "/Users/cornelius/mintvault-platform",
+  "baselineCommit": "01d5e4daab30d58ad53943585ebecc972befaa8a",
+  "governanceVersion": "1.2",
+  "files": {
+    "AGENTS.md": "41f66799828be9ef5c6258e10fcccc82fcf1e3954c47dcacd536a0bfcbe11a0c",
+    "CLAUDE.md": "f8bd87de5733b1810ecb543bfa394447f2f7f01c3740f43a3eba42f565097937",
+    "docs/NO_BULLSHIT_COMPLETION_CONTROLLER.md": "91f5de760d89e84a7c0d95e4dc77c77549933e8d219a74a86a9fc89955a43ebc",
+    "docs/GRAPH_OF_LOOPS_BUILD_CONTROLLER.md": "b1633f642bf46f03331cfbb4fe04ddff0e9f54ec232e5c5c786fe510de07ab63",
+    ".claude/skills/controlled-code-lead/SKILL.md": "8df2dd4059c9f975d99e62bed70f1cff7fa0d11d5cf5cb698462b7afe801fced",
+    ".claude/skills/mvgs-grading-protected/SKILL.md": "de39fccf5f20935855c7ad973b379e04014ca659a486418042fe277e6daf9363",
+    ".claude/skills/mintvault-concurrent-session-discipline/SKILL.md": "909e8adcddf9d6968ddeb1724c3f1c9dd671cb1bdb73fd72d07ca16abdf77a0d",
+    ".claude/skills/mintvault-silent-failure-prevention/SKILL.md": "deb85a4e5a01a2b047a2880d68848977746c2b48465684914a780f1a096a7c70",
+    ".claude/controlled-code-lead/protected-systems.md": "d582f96598ba278d39b467b84a4d89a66fdc1bcbea07e7c74ab2974636ffdaf3",
+    ".claude/controlled-code-lead/scope-and-concurrency.md": "c59e6dbd78ac2c11bd443c265c60fb379930d81718f9cdfeba8d5e4939907b08",
+    ".engineering/project.yaml": "9764fa015984d4f602457d0b1df49f8b411890e7b26aa5b7a45b46131b0084b2"
+  }
+}

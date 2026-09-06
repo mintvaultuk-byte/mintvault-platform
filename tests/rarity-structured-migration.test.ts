@@ -19,7 +19,7 @@ function assertLocalTestDb(url: string): void {
   const parsed = new URL(url);
   const ok =
     (parsed.hostname === "127.0.0.1" || parsed.hostname === "localhost") &&
-    parsed.port === "55432" &&
+    parsed.port === (process.env.MINTVAULT_TEST_PG16_PORT || "55432") &&
     parsed.pathname.includes("mintvault_vq_phase10_local");
   if (!ok) {
     throw new Error(`REFUSED: TEST_DATABASE_URL must be the local throwaway DB, got ${parsed.hostname}:${parsed.port}${parsed.pathname}`);

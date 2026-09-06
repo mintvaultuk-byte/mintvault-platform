@@ -194,6 +194,7 @@ describe("AG-2 SCANNER_OPERATOR (real seeded catalogue)", () => {
 
 describe("AG-2 integration surfaces", () => {
   const stationRoutes = readFileSync("server/partner/station-routes.ts", "utf8");
+  const stationService = readFileSync("server/partner/station-service.ts", "utf8");
   const migration = readFileSync("migrations/0085_partner_scanner_operator_role.sql", "utf8");
   const creditViewMigration = readFileSync("migrations/0098_scanner_operator_credit_view.sql", "utf8");
   const seed0034 = readFileSync("migrations/0034_partner_rbac_seed.sql", "utf8");
@@ -237,29 +238,63 @@ describe("AG-2 integration surfaces", () => {
     expect(stationRoutes).toContain("operator.permissions.has(required.capability)");
   });
 
-  it("SOP4d: MOVING the capture area is maintenance, and a Scanner Operator cannot do it", () => {
+  it("SOP4d: the automatic Scanner profile has no public manual-geometry write path", () => {
     /*
      * Recalibration used to sit behind `partner.cards.scan`, so the least-privileged role in the
      * system could silently repoint a station's physical acquisition rectangle. Every card captured
      * afterwards would be framed differently from every card before, and a certificate straddling
      * the change would have two sides from two rectangles.
      */
-    expect(stationRoutes).toMatch(
-      /async function requireSignedStationMaintainer[\s\S]{0,400}?capability: "partner\.stations\.calibrate"/
-    );
-    // And the calibration route actually uses it.
-    expect(stationRoutes).toMatch(/stations\/calibrations"[\s\S]{0,300}?requireSignedStationMaintainer/);
+    expect(stationRoutes).not.toContain('"/stations/calibrations"');
+    expect(stationRoutes).not.toContain("requireSignedStationMaintainer");
 
     const calibrateMigration = readFileSync(
       join(process.cwd(), "migrations", "0092_partner_station_calibrate_permission.sql"),
       "utf8"
     );
-    // Granted to the station-MANAGEMENT roles — the ones that could already enrol a whole new Mac.
+    // Historical grant is retained as an immutable migration record; current Scanner routes do not
+    // expose a manual geometry writer to any Partner role.
     expect(calibrateMigration).toContain("'PARTNER_OWNER', 'PARTNER_MANAGER', 'MVGS_ASSESSMENT_TECHNICIAN'");
     // And the migration proves its own outcome rather than trusting the INSERT.
     expect(calibrateMigration).toContain("SCANNER_OPERATOR must not hold partner.stations.calibrate");
     expect(creditViewMigration).toContain("partner.credits.view");
     expect(calibrateMigration).toContain("RAISE EXCEPTION");
+  });
+
+  it("SOP4e: the one-shot recovery authority is server-derived, MFA/session bounded and STAGING-only", () => {
+    const heartbeatStart = stationRoutes.indexOf('"/stations/heartbeat"');
+    const nextRoute = stationRoutes.indexOf('"/card-jobs"', heartbeatStart);
+    expect(heartbeatStart).toBeGreaterThan(-1);
+    expect(nextRoute).toBeGreaterThan(heartbeatStart);
+    const heartbeat = stationRoutes.slice(heartbeatStart, nextRoute);
+
+    // Signed station + MFA-passed cards.scan remain the outer heartbeat authority. Recovery then
+    // requires the separately seeded maintenance permission and a mutable, non-frozen session.
+    expect(heartbeat).toContain("requireSignedStation");
+    expect(heartbeat).toContain("requireSignedStationOperator");
+    expect(heartbeat).toContain('permissions.has("partner.stations.calibrate")');
+    expect(heartbeat).toContain("!req.partner!.viewOnly");
+    expect(heartbeat).toContain("!req.partner!.sensitiveDisabled");
+    expect(heartbeat).toContain("strictStagingCalibrationRecoveryRuntime()");
+    expect(heartbeat).toContain("approvedStagingCanonCalibrationRecoveryId(req.station!.code)");
+    expect(heartbeat).not.toContain("req.body?.approvedExistingCalibrationId");
+    expect(heartbeat).not.toContain("req.body?.allowExistingCalibrationRecovery");
+
+    // Both the exact Fly app and the classified environment are required. Production, test and
+    // every other station resolve no approved calibration id even if a future route mis-wires it.
+    expect(stationService).toContain('env.FLY_APP_NAME === "mintvault-v2"');
+    expect(stationService).toContain('classifyMintVaultRuntimeEnvironment(env) === "staging"');
+    expect(stationService).toContain('stationCode: "MV-STN-6DIISWMIEU2IKRG4"');
+    expect(stationService).toContain('calibrationId: "f7b7fe4f-aefb-423c-a4a5-dc9cec8fabcf"');
+    expect(stationService).toContain(
+      "approvedExistingCalibrationId === STAGING_CANON_CALIBRATION_RECOVERY.calibrationId"
+    );
+    expect(stationService).toContain("station.code === STAGING_CANON_CALIBRATION_RECOVERY.stationCode");
+
+    // Recovery rides the existing heartbeat; it does not re-expose the removed generic geometry
+    // writer or add a caller-selected calibration endpoint.
+    expect(stationRoutes).not.toContain('"/stations/calibrations"');
+    expect(stationRoutes).not.toContain('"/stations/calibrations/restore-existing"');
   });
 
   it("0034 is not edited — the new role and later credit-view grant arrive additively", () => {

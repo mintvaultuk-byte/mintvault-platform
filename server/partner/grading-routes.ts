@@ -47,6 +47,7 @@ import { auditInOwnTxn } from "./audit";
 import { withPartnerAdminTransaction, withTenant } from "./db";
 import { resolveFlag } from "./flags";
 import { getPartnerPrintEligibilityBlocks } from "./print-eligibility";
+import { withPartnerGradingWriteAuthority } from "./operational-authority";
 import {
   requireNotSensitiveFrozen,
   requireNotViewOnly,
@@ -182,6 +183,7 @@ function expectedReviewRevision(raw: unknown): number | null {
 }
 
 const EDITABLE_STATUSES = new Set(["assigned", "pending_review"]);
+const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
 
 const partnerGradingEditRateLimit = rateLimit({
   windowMs: 60_000,
@@ -561,6 +563,7 @@ export async function authorizePartnerScannerCertificate(
  * lineage's rules. The connector arm below is byte-for-byte the guard that shipped.
  */
 export function partnerDraftWriteGuard(principal: PartnerPrincipal, auth: PartnerCertAuth) {
+  if (!auth.locationId) throw new Error("Partner grading write requires an immutable location origin");
   if (auth.lineage === "card_job") {
     /*
      * CARD JOB ARM.
@@ -580,54 +583,62 @@ export function partnerDraftWriteGuard(principal: PartnerPrincipal, auth: Partne
      */
     return sql`
       AND deleted_at IS NULL
-      AND EXISTS (
-        SELECT 1
-          FROM partner_card_jobs job
-         WHERE job.certificate_id = certificates.id
-           AND job.id = ${auth.cardJobId}::uuid
-           AND job.tenant_id = ${principal.tenantId}::uuid
-           AND job.cancelled_at IS NULL
-           AND job.status = 'GRADING'
-           AND (${principal.orgWide} OR job.location_id = ${principal.locationId}::uuid)
-           AND certificates.origin_type = 'PARTNER'
-           AND certificates.origin_partner_id = job.tenant_id
-           AND certificates.origin_location_id = job.location_id
-      )
+      AND origin_type = 'PARTNER'
+      AND origin_partner_id = ${principal.tenantId}::uuid
+      AND origin_location_id = ${auth.locationId}::uuid
     `;
   }
+  if (
+    !auth.provenanceValid ||
+    auth.tenantId !== principal.tenantId ||
+    (!principal.orgWide && principal.locationId !== auth.locationId) ||
+    !UUID_RE.test(auth.locationId) ||
+    !UUID_RE.test(auth.partnerSubmissionId) ||
+    auth.destinationSubmissionId == null ||
+    !Number.isSafeInteger(auth.destinationSubmissionId) ||
+    auth.destinationSubmissionId < 1 ||
+    !EDITABLE_STATUSES.has(auth.gradingStatus)
+  ) {
+    return sql`AND FALSE`;
+  }
+  const submitterGuard =
+    auth.gradingStatus === "pending_review" ? sql`AND certificates.graded_by = ${principal.userId}` : sql``;
   return sql`
-    AND assigned_grader_id = ${principal.userId}
-    AND deleted_at IS NULL
-    AND EXISTS (
-      SELECT 1
-        FROM certificates cert_check
-        LEFT JOIN cards c ON c.id = cert_check.card_id
-        LEFT JOIN submission_items si ON si.id = cert_check.submission_item_id
-        JOIN submissions s ON s.id = COALESCE(c.submission_id, si.submission_id)
-        JOIN partner_connector_imports pci ON pci.destination_submission_id = s.id
-        JOIN partner_connector_records pcr
-          ON pcr.id = pci.connector_record_id
-         AND pcr.tenant_id = pci.partner_organisation_id
-         AND pcr.partner_submission_id = pci.partner_submission_id
-         AND pcr.handoff_id = pci.partner_handoff_id
-         AND pcr.state = 'imported'
-        JOIN partner_submissions ps
-          ON ps.id = pci.partner_submission_id
-         AND ps.tenant_id = pci.partner_organisation_id
-         AND ps.location_id = pci.partner_location_id
-        JOIN partner_submission_handoffs psh
-          ON psh.id = pci.partner_handoff_id
-         AND psh.tenant_id = pci.partner_organisation_id
-         AND psh.submission_id = pci.partner_submission_id
-       WHERE cert_check.id = certificates.id
-         AND cert_check.origin_type = 'PARTNER'
-         AND cert_check.origin_partner_id = pci.partner_organisation_id
-         AND cert_check.origin_location_id = pci.partner_location_id
-         AND pci.partner_organisation_id = ${principal.tenantId}
-         AND (${principal.orgWide} OR pci.partner_location_id = ${principal.locationId})
-         AND pci.state IN ('completed','imported')
-    )
+    AND certificates.assigned_grader_id = ${principal.userId}
+    AND certificates.grader_status = ${auth.gradingStatus}
+    AND certificates.deleted_at IS NULL
+    AND certificates.origin_type = 'PARTNER'
+    AND certificates.origin_partner_id = ${principal.tenantId}::uuid
+    AND certificates.origin_location_id = ${auth.locationId}::uuid
+    AND COALESCE(
+      (SELECT c.submission_id FROM cards c WHERE c.id = certificates.card_id),
+      (SELECT si.submission_id FROM submission_items si WHERE si.id = certificates.submission_item_id)
+    ) = ${auth.destinationSubmissionId}
+    ${submitterGuard}
   `;
+}
+
+export async function withLivePartnerWriteAuthority<T>(
+  principal: PartnerPrincipal,
+  auth: PartnerCertAuth,
+  operation: () => Promise<T>
+): Promise<T> {
+  if (!auth.locationId) throw new Error("Partner grading write requires an immutable location origin");
+  if (!principal.orgWide && principal.locationId !== auth.locationId) {
+    throw new Error("Partner grading write location authority changed");
+  }
+  return withPartnerGradingWriteAuthority(
+    {
+      lineage: auth.lineage,
+      certificateId: auth.certId,
+      tenantId: principal.tenantId,
+      locationId: auth.locationId,
+      cardJobId: auth.cardJobId,
+      partnerSubmissionId: auth.partnerSubmissionId,
+      destinationSubmissionId: auth.destinationSubmissionId,
+    },
+    operation
+  );
 }
 
 /**
@@ -1349,10 +1360,8 @@ export function partnerGradingRouter(): Router {
         } catch (leaseFailure) {
           return leaseError(res, leaseFailure);
         }
-        const saved = await applyCertGradeDraft(
-          certId,
-          req.body || {},
-          partnerDraftWriteGuard(req.partner!, auth.auth)
+        const saved = await withLivePartnerWriteAuthority(req.partner!, auth.auth, () =>
+          applyCertGradeDraft(certId, req.body || {}, partnerDraftWriteGuard(req.partner!, auth.auth))
         );
         if (!saved) return res.status(409).json({ error: "Card status changed; refresh and try again" });
         await auditInOwnTxn({
@@ -1465,8 +1474,10 @@ export function partnerGradingRouter(): Router {
         } catch (leaseFailure) {
           return leaseError(res, leaseFailure);
         }
-        if (req.body && Object.keys(req.body).length) {
-          const saved = await applyCertGradeDraft(certId, req.body, partnerDraftWriteGuard(req.partner!, auth.auth));
+        if (auth.auth.lineage === "card_job" && req.body && Object.keys(req.body).length) {
+          const saved = await withLivePartnerWriteAuthority(req.partner!, auth.auth, () =>
+            applyCertGradeDraft(certId, req.body, partnerDraftWriteGuard(req.partner!, auth.auth))
+          );
           if (!saved) return res.status(409).json({ error: "Card status changed; refresh and try again" });
         }
 
@@ -1497,55 +1508,44 @@ export function partnerGradingRouter(): Router {
           });
         }
 
-        const submitted = await db.execute(sql`
-          UPDATE certificates SET
-            grader_status = 'pending_review',
-            review_required = true,
-            graded_at = NOW(),
-            graded_by = ${req.partner!.userId},
-            operator_grade = grade,
-            operator_subgrades = jsonb_build_object(
-              'centering', centering_score,
-              'corners', corners_score,
-              'edges', edges_score,
-              'surface', surface_score
-            ),
-            updated_at = NOW()
-          WHERE id = ${certId}
-            AND assigned_grader_id = ${req.partner!.userId}
-            AND grader_status = 'assigned'
-            AND deleted_at IS NULL
-            AND EXISTS (
-              SELECT 1
-                FROM certificates cert_check
-                LEFT JOIN cards c ON c.id = cert_check.card_id
-                LEFT JOIN submission_items si ON si.id = cert_check.submission_item_id
-                JOIN submissions s ON s.id = COALESCE(c.submission_id, si.submission_id)
-                JOIN partner_connector_imports pci ON pci.destination_submission_id = s.id
-                JOIN partner_connector_records pcr
-                  ON pcr.id = pci.connector_record_id
-                 AND pcr.tenant_id = pci.partner_organisation_id
-                 AND pcr.partner_submission_id = pci.partner_submission_id
-                 AND pcr.handoff_id = pci.partner_handoff_id
-                 AND pcr.state = 'imported'
-                JOIN partner_submissions ps
-                  ON ps.id = pci.partner_submission_id
-                 AND ps.tenant_id = pci.partner_organisation_id
-                 AND ps.location_id = pci.partner_location_id
-                JOIN partner_submission_handoffs psh
-                  ON psh.id = pci.partner_handoff_id
-                 AND psh.tenant_id = pci.partner_organisation_id
-                 AND psh.submission_id = pci.partner_submission_id
-               WHERE cert_check.id = certificates.id
-                 AND cert_check.origin_type = 'PARTNER'
-                 AND cert_check.origin_partner_id = pci.partner_organisation_id
-                 AND cert_check.origin_location_id = pci.partner_location_id
-                 AND pci.partner_organisation_id = ${req.partner!.tenantId}
-                 AND (${req.partner!.orgWide} OR pci.partner_location_id = ${req.partner!.locationId})
-                 AND pci.state IN ('completed','imported')
-            )
-          RETURNING id
-        `);
+        const connectorWrite = await withLivePartnerWriteAuthority(req.partner!, auth.auth, async () => {
+          if (req.body && Object.keys(req.body).length) {
+            const saved = await applyCertGradeDraft(certId, req.body, partnerDraftWriteGuard(req.partner!, auth.auth));
+            if (!saved) return { draftConflict: true as const, submitted: null };
+          }
+          const submitted = await db.execute(sql`
+            UPDATE certificates SET
+              grader_status = 'pending_review',
+              review_required = true,
+              graded_at = NOW(),
+              graded_by = ${req.partner!.userId},
+              operator_grade = grade,
+              operator_subgrades = jsonb_build_object(
+                'centering', centering_score,
+                'corners', corners_score,
+                'edges', edges_score,
+                'surface', surface_score
+              ),
+              updated_at = NOW()
+            WHERE id = ${certId}
+              AND assigned_grader_id = ${req.partner!.userId}
+              AND grader_status = 'assigned'
+              AND deleted_at IS NULL
+              AND origin_type = 'PARTNER'
+              AND origin_partner_id = ${req.partner!.tenantId}::uuid
+              AND origin_location_id = ${auth.auth.locationId}::uuid
+              AND COALESCE(
+                (SELECT c.submission_id FROM cards c WHERE c.id = certificates.card_id),
+                (SELECT si.submission_id FROM submission_items si WHERE si.id = certificates.submission_item_id)
+              ) = ${auth.auth.destinationSubmissionId}
+            RETURNING id
+          `);
+          return { draftConflict: false as const, submitted };
+        });
+        if (connectorWrite.draftConflict) {
+          return res.status(409).json({ error: "Card status changed; refresh and try again" });
+        }
+        const submitted = connectorWrite.submitted!;
         if (submitted.rows.length !== 1) {
           return res.status(409).json({ error: "Card status changed; refresh and try again" });
         }
@@ -1621,61 +1621,45 @@ export function partnerGradingRouter(): Router {
         } catch (leaseFailure) {
           return leaseError(res, leaseFailure);
         }
-        const saved = await applyCertGradeDraft(
-          certId,
-          req.body || {},
-          partnerDraftWriteGuard(req.partner!, auth.auth)
-        );
-        if (!saved) return res.status(409).json({ error: "Card status changed; refresh and try again" });
-        const edited = await db.execute(sql`
-          UPDATE certificates SET
-            grader_status = 'pending_review',
-            review_required = true,
-            graded_at = NOW(),
-            graded_by = ${req.partner!.userId},
-            operator_grade = grade,
-            operator_subgrades = jsonb_build_object(
-              'centering', centering_score,
-              'corners', corners_score,
-              'edges', edges_score,
-              'surface', surface_score
-            ),
-            updated_at = NOW()
-          WHERE id = ${certId}
-            AND assigned_grader_id = ${req.partner!.userId}
-            AND grader_status = 'pending_review'
-            AND deleted_at IS NULL
-            AND EXISTS (
-              SELECT 1
-                FROM certificates cert_check
-                LEFT JOIN cards c ON c.id = cert_check.card_id
-                LEFT JOIN submission_items si ON si.id = cert_check.submission_item_id
-                JOIN submissions s ON s.id = COALESCE(c.submission_id, si.submission_id)
-                JOIN partner_connector_imports pci ON pci.destination_submission_id = s.id
-                JOIN partner_connector_records pcr
-                  ON pcr.id = pci.connector_record_id
-                 AND pcr.tenant_id = pci.partner_organisation_id
-                 AND pcr.partner_submission_id = pci.partner_submission_id
-                 AND pcr.handoff_id = pci.partner_handoff_id
-                 AND pcr.state = 'imported'
-                JOIN partner_submissions ps
-                  ON ps.id = pci.partner_submission_id
-                 AND ps.tenant_id = pci.partner_organisation_id
-                 AND ps.location_id = pci.partner_location_id
-                JOIN partner_submission_handoffs psh
-                  ON psh.id = pci.partner_handoff_id
-                 AND psh.tenant_id = pci.partner_organisation_id
-                 AND psh.submission_id = pci.partner_submission_id
-               WHERE cert_check.id = certificates.id
-                 AND cert_check.origin_type = 'PARTNER'
-                 AND cert_check.origin_partner_id = pci.partner_organisation_id
-                 AND cert_check.origin_location_id = pci.partner_location_id
-                 AND pci.partner_organisation_id = ${req.partner!.tenantId}
-                 AND (${req.partner!.orgWide} OR pci.partner_location_id = ${req.partner!.locationId})
-                 AND pci.state IN ('completed','imported')
-            )
-          RETURNING id
-        `);
+        const write = await withLivePartnerWriteAuthority(req.partner!, auth.auth, async () => {
+          const saved = await applyCertGradeDraft(
+            certId,
+            req.body || {},
+            partnerDraftWriteGuard(req.partner!, auth.auth)
+          );
+          if (!saved) return { saved: null, edited: null };
+          const edited = await db.execute(sql`
+            UPDATE certificates SET
+              grader_status = 'pending_review',
+              review_required = true,
+              graded_at = NOW(),
+              graded_by = ${req.partner!.userId},
+              operator_grade = grade,
+              operator_subgrades = jsonb_build_object(
+                'centering', centering_score,
+                'corners', corners_score,
+                'edges', edges_score,
+                'surface', surface_score
+              ),
+              updated_at = NOW()
+            WHERE id = ${certId}
+              AND assigned_grader_id = ${req.partner!.userId}
+              AND grader_status = 'pending_review'
+              AND deleted_at IS NULL
+              AND origin_type = 'PARTNER'
+              AND origin_partner_id = ${req.partner!.tenantId}::uuid
+              AND origin_location_id = ${auth.auth.locationId}::uuid
+              AND graded_by = ${req.partner!.userId}
+              AND COALESCE(
+                (SELECT c.submission_id FROM cards c WHERE c.id = certificates.card_id),
+                (SELECT si.submission_id FROM submission_items si WHERE si.id = certificates.submission_item_id)
+              ) = ${auth.auth.destinationSubmissionId}
+            RETURNING id
+          `);
+          return { saved, edited };
+        });
+        if (!write.saved) return res.status(409).json({ error: "Card status changed; refresh and try again" });
+        const edited = write.edited!;
         if (edited.rows.length !== 1) {
           return res.status(409).json({ error: "Card status changed; refresh and try again" });
         }

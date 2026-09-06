@@ -19,18 +19,27 @@ import { tmpdir } from "node:os";
 import {
   CRITICAL_SUITES,
   SUITES,
-  envForSuite,
   findSuite,
   urlFor,
   assertDisposable,
+  isolatedSuiteEnvironment,
 } from "./partner-suite-env-matrix.mjs";
-import { classifyReport, GREEN_VERDICTS } from "./partner-suite-verdict.mjs";
+import { classifyReport, GREEN_VERDICTS, validatePartnerSuiteFloors } from "./partner-suite-verdict.mjs";
 
 const args = process.argv.slice(2);
 const all = args.includes("--all");
 const jsonIdx = args.indexOf("--json");
 const jsonDir = jsonIdx >= 0 ? args[jsonIdx + 1] : null;
 const explicit = args.filter((a) => a.endsWith(".test.ts"));
+// Individual integration hooks may legitimately consume 180s. The process cap must
+// leave room for setup, the full assertion body, and teardown rather than racing the
+// suite's own supported timeout.
+const PARTNER_SUITE_TIMEOUT_MS = 600_000;
+const floorDocument = JSON.parse(readFileSync("scripts/ci/partner-suite-floors.json", "utf8"));
+if (floorDocument.schemaVersion !== 1 || !floorDocument.suites) {
+  console.error("invalid Partner suite floor baseline");
+  process.exit(1);
+}
 
 const targets = all ? CRITICAL_SUITES : explicit.map(findSuite).filter(Boolean);
 if (targets.length === 0) {
@@ -133,15 +142,10 @@ function seedCoreStubs(suite) {
 
 const results = [];
 for (const suite of targets) {
-  const env = { ...process.env, LC_ALL: "C", LANG: "C", ...envForSuite(suite) };
-  // A globally-inherited MINTVAULT pin is exactly the collision this runner exists to prevent.
-  // Suites that do not pin accounting themselves must not inherit one from the parent shell.
-  if (!Object.prototype.hasOwnProperty.call(envForSuite(suite), "MINTVAULT_DATABASE_URL")) {
-    delete env.MINTVAULT_DATABASE_URL;
-    delete env.PARTNER_ADMIN_DATABASE_URL;
-    delete env.PARTNER_DATABASE_URL;
-    delete env.PARTNER_CONNECTOR_DATABASE_URL;
-  }
+  // Hosted CI necessarily exports the flattened runner's full database matrix.
+  // None of it may leak into an isolated suite: scrub every matrix-managed key,
+  // then add back only this suite's declared contract.
+  const env = isolatedSuiteEnvironment(process.env, suite);
   const reportPath = join(reportDir, suite.file.replace(/\//g, "_") + ".json");
   // Always emit the machine-readable report: it is the ONLY thing this runner is allowed to
   // conclude "green" from. `--reporter=default` is kept so a human still sees the failure output.
@@ -164,10 +168,20 @@ for (const suite of targets) {
     continue;
   }
   const started = process.hrtime.bigint();
-  const proc = spawnSync("npx", vitestArgs, { env, stdio: "inherit" });
+  const proc = spawnSync("npx", vitestArgs, {
+    env,
+    stdio: "inherit",
+    timeout: PARTNER_SUITE_TIMEOUT_MS,
+  });
   const ms = Number((process.hrtime.bigint() - started) / 1_000_000n);
   const counts = classify(reportPath, suite.file, proc.status);
-  results.push({ file: suite.file, critical: !!suite.critical, ms, ...counts });
+  results.push({
+    file: suite.file,
+    critical: !!suite.critical,
+    ms,
+    timedOut: proc.error?.code === "ETIMEDOUT",
+    ...counts,
+  });
 }
 
 console.log("\n================ PARTNER SUITE MATRIX ================");
@@ -213,4 +227,13 @@ if (observed === 0) {
   console.error("\nzero tests observed across every suite — refusing to report green");
   process.exit(1);
 }
-console.log(`\nAll ${results.length} suite(s) green — ${observed} assertions observed.`);
+const selectedFloors = Object.fromEntries(targets.map((suite) => [suite.file, floorDocument.suites[suite.file]]));
+const floorVerdict = validatePartnerSuiteFloors(results, selectedFloors);
+if (!floorVerdict.ok) {
+  console.error(`\n${floorVerdict.errors.join("\n")}`);
+  process.exit(1);
+}
+console.log(
+  `\nAll ${results.length} suite(s) green — ${observed} assertions observed ` +
+    `(per-suite baseline ${floorVerdict.minimum}).`
+);

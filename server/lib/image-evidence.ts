@@ -7,7 +7,7 @@
  * the evidence object; never derive it from a filename or a client header.
  */
 import { createHash } from "node:crypto";
-import sharp from "sharp";
+import sharp, { type Metadata } from "sharp";
 
 // 128 MiB accepts the supplied 96.7 MiB 1200-DPI V850 TIFF while still placing
 // a finite bound on multipart buffering. The independent 30MP decoder bound
@@ -77,7 +77,7 @@ export async function inspectScannerEvidence(buffer: Buffer): Promise<ScannerEvi
   const isJpeg = jpegSignature(buffer);
   if (!isTiff && !isJpeg) throw new Error("Scanner evidence must be TIFF or a legacy JPEG");
 
-  let meta: sharp.Metadata;
+  let meta: Metadata;
   try {
     meta = await sharp(buffer, { limitInputPixels: MAX_SCANNER_EVIDENCE_PIXELS, failOn: "error" }).metadata();
   } catch {

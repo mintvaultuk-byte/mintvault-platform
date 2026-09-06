@@ -6,10 +6,18 @@ on:
   pull_request:
     branches: [main]
 
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+
 jobs:
   check:
     name: Lint, Type Check, Test & Build
     runs-on: ubuntu-latest
+    timeout-minutes: 90
     env:
       TEST_DATABASE_URL: postgres://postgres:postgres@127.0.0.1:55432/mintvault_vq_phase10_local
       MINTVAULT_DATABASE_URL: postgres://postgres:postgres@127.0.0.1:55432/mintvault_vq_phase10_local
@@ -89,8 +97,8 @@ jobs:
       PARTNER_PUBLIC_RT_RUNTIME: postgres://partner_app_test_public:synthetic@127.0.0.1:55433/mintvault_partner_public
       # RC-F14: both scanner suites were gated on variables set NOWHERE, so they ran in no
       # environment at all while their presence in tests/ implied coverage.
-      SCANNER_MIGRATION_TEST_DATABASE_URL: postgres://postgres:postgres@127.0.0.1:55433/mintvault_dgn_release_scanner
-      SCANNER_STAGING_TEST_DATABASE_URL: postgres://postgres:postgres@127.0.0.1:55432/mintvault_dgn_evidence
+      SCANNER_MIGRATION_TEST_DATABASE_URL: postgres://postgres:postgres@127.0.0.1:55433/mintvault_scanner_release_test
+      SCANNER_STAGING_TEST_DATABASE_URL: postgres://postgres:postgres@127.0.0.1:55432/mintvault_scanner_evidence_test
       PARTNER_RT_ADMIN: postgres://postgres:postgres@127.0.0.1:55433/mintvault_partner_runtime
       PARTNER_RT_RUNTIME: postgres://partner_app_test_rt:synthetic@127.0.0.1:55433/mintvault_partner_runtime
 
@@ -334,7 +342,7 @@ jobs:
         # declares a `vector(1536)` embedding column (RAG pipeline), so the plain
         # postgres:16 image failed `drizzle-kit push` at DB setup with
         # `type "vector" does not exist`. The extension is still CREATEd below.
-        image: pgvector/pgvector:pg16
+        image: pgvector/pgvector:pg16@sha256:ccc6e83d6e35e931dc7c5def2022729d5a6c370318d099181995567ff1fb4d6b
         env:
           POSTGRES_DB: mintvault_vq_phase10_local
           POSTGRES_USER: postgres
@@ -351,7 +359,7 @@ jobs:
       # port from the pg16 service, so the suites' CREATE/DROP DATABASE cycle is isolated from
       # the shared test database and from both Partner databases.
       postgres17:
-        image: postgres:17
+        image: postgres:17.10@sha256:7958605b474b3d264a969cb3a123d6aa00ad1e1fe9da8a69984dabb704d93317
         env:
           POSTGRES_DB: postgres
           POSTGRES_USER: postgres
@@ -365,16 +373,18 @@ jobs:
           --health-retries 20
 
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1 (Node 24)
         with:
           # Full history so the grading-release-scope guard (tests/helpers/grading-release-scope.ts)
           # can reach its pinned base commits (d69ad147/fc57b53b); it fail-closes on a shallow clone.
           # Mirrors the gitleaks job, which already uses fetch-depth: 0.
           fetch-depth: 0
+          persist-credentials: false
 
-      - uses: actions/setup-node@v4
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0 (Node 24)
         with:
-          node-version: 20
+          # Match the exact runtime exercised and shipped by the production image.
+          node-version: 20.20.2
           cache: npm
 
       - run: npm ci
@@ -414,12 +424,6 @@ jobs:
           # pgvector/pgvector image ships the extension files.
           psql "$TEST_DATABASE_URL" -v ON_ERROR_STOP=1 -c "CREATE EXTENSION IF NOT EXISTS vector;"
           npx drizzle-kit push --force
-          for migration in migrations-vq/*.sql; do
-            echo "[ci-db] applying ${migration}"
-            psql "$TEST_DATABASE_URL" -v ON_ERROR_STOP=1 -f "$migration" >/dev/null
-          done
-          psql "$TEST_DATABASE_URL" -v ON_ERROR_STOP=1 -tAc "SELECT pg_get_constraintdef(oid) FROM pg_constraint WHERE conname = 'vq_feature_flags_feature_check'" | grep -q "gen_action_pose"
-          psql "$TEST_DATABASE_URL" -v ON_ERROR_STOP=1 -tAc "SELECT pg_get_constraintdef(oid) FROM pg_constraint WHERE conname = 'vq_feature_flags_feature_check'" | grep -q "auto_paid_retry"
           # Project Control server must be reachable AND be PostgreSQL 17, and the admin role
           # must be able to CREATE DATABASE — otherwise the suites would fail deep inside
           # beforeAll with a less obvious message.
@@ -451,7 +455,7 @@ jobs:
                             mintvault_partner_ux_rt mintvault_partner_rls mintvault_partner_cert_origin \
                             mintvault_partner_definer mintvault_partner_mgmt_mig \
                             mintvault_partner_admin_shell \
-                            mintvault_dgn_release_scanner \
+                            mintvault_scanner_release_test \
                             mintvault_correction_test; do
             present="$(psql "$PROJECT_CONTROL_TEST_ADMIN_URL" -v ON_ERROR_STOP=1 -tAc \
               "SELECT 1 FROM pg_database WHERE datname = '$partner_db'")"
@@ -464,11 +468,11 @@ jobs:
           # database must live on the pg16 cluster rather than with the partner databases above.
           # Without it the suite skips — which is precisely how it came to run in no environment.
           evidence_present="$(psql "$TEST_DATABASE_URL" -v ON_ERROR_STOP=1 -tAc \
-            "SELECT 1 FROM pg_database WHERE datname = 'mintvault_dgn_evidence'")"
+            "SELECT 1 FROM pg_database WHERE datname = 'mintvault_scanner_evidence_test'")"
           if [ "$evidence_present" != "1" ]; then
-            psql "$TEST_DATABASE_URL" -v ON_ERROR_STOP=1 -c "CREATE DATABASE mintvault_dgn_evidence"
+            psql "$TEST_DATABASE_URL" -v ON_ERROR_STOP=1 -c "CREATE DATABASE mintvault_scanner_evidence_test"
           fi
-          echo "[ci-db] scanner evidence database ready: mintvault_dgn_evidence"
+          echo "[ci-db] scanner evidence database ready: mintvault_scanner_evidence_test"
           # The capability suite creates and ALTERs roles (BYPASSRLS / NOBYPASSRLS), so the admin
           # role must carry CREATEROLE — otherwise its two route-gating tests would fail deep
           # inside beforeAll instead of reporting a clear precondition failure here.
@@ -583,6 +587,17 @@ jobs:
             psql "$full_set_admin" -v ON_ERROR_STOP=1 -c "ALTER TABLE certificates OWNER TO pn_migrator"
           done
 
+      - name: Main runtime authority for disposable Vault Quest
+        run: node --import tsx scripts/ci/prepare-vq-test-db.mjs
+
+      - name: Journalled disposable Vault Quest migrations
+        run: MINTVAULT_MIGRATION_DATABASE_URL="$TEST_DATABASE_URL" node node_modules/tsx/dist/cli.mjs scripts/db/migrate.ts --estate vault-quest --apply
+
+      - name: Verify disposable Vault Quest feature vocabulary
+        run: |
+          psql "$TEST_DATABASE_URL" -v ON_ERROR_STOP=1 -tAc "SELECT pg_get_constraintdef(oid) FROM pg_constraint WHERE conname = 'vq_feature_flags_feature_check'" | grep -q "gen_action_pose"
+          psql "$TEST_DATABASE_URL" -v ON_ERROR_STOP=1 -tAc "SELECT pg_get_constraintdef(oid) FROM pg_constraint WHERE conname = 'vq_feature_flags_feature_check'" | grep -q "auto_paid_retry"
+
       # ── MVGS v1.4 immutability gate ────────────────────────────────────────
       # Runs BEFORE lint/typecheck/test so a freeze violation is the first thing
       # a contributor sees, with the "create a new rules version" message, rather
@@ -594,6 +609,32 @@ jobs:
       # the expected hashes.
       - name: MVGS v1.4 freeze verification
         run: npx tsx scripts/mvgs/verify-freeze.ts
+
+      - name: Architecture authority drift gate
+        run: npm run architecture:check
+
+      - name: Migration reference authority
+        run: npm run migration:references:check
+
+      - name: Test TypeScript diagnostic ratchet
+        run: npm run check:tests
+
+      - name: Script TypeScript diagnostic ratchet
+        run: npm run check:scripts
+
+      - name: Unreachable production-code ratchet
+        run: npm run check:unreachable
+
+      - name: JavaScript script syntax
+        run: npm run check:script-syntax
+
+      - name: CI topology self-check
+        run: npm run ci:topology
+
+      # The hosted runner's explicit default context is disposable. The parent
+      # generates credentials and verifies ownership; no global R2 env is exported.
+      - name: Owned real object-store proof
+        run: node scripts/ci/run-disposable-integration.mjs --docker-context default --r2-proof
 
       - name: Lint
         run: npm run lint
@@ -642,17 +683,42 @@ jobs:
         if: always()
         run: node scripts/ci/assert-partner-auth-suites-executed.mjs vitest-report.json
 
+      # Each critical Partner file runs in its own Vitest process with its own
+      # disposable database topology. The flattened run above cannot provide
+      # this isolation because several suites intentionally mutate process env,
+      # roles, schema ownership, and database identity.
+      - name: Isolated Partner critical matrix
+        run: npm run test:partner:critical
+
       - name: Build
         run: npm run build
 
+      - name: Owned Super Admin browser proof
+        run: node scripts/ci/run-disposable-integration.mjs --docker-context default --admin-browser-proof
+
+      - name: Owned Partner browser proof
+        run: node scripts/ci/run-disposable-integration.mjs --docker-context default --partner-browser-proof
+
       - name: Audit (high severity)
         run: npm audit --audit-level=high
-        continue-on-error: true
+
+      # Run Scanner only after every server/client proof is complete. It has a
+      # separate nested lockfile and requires Node >=22.12, whereas the shipped
+      # server remains tested and built on exact Node 20.20.2 above.
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0 (Node 24)
+        with:
+          node-version: 22.12.0
+          cache: npm
+          cache-dependency-path: scripts/scanner-app/package-lock.json
+      - name: Install Scanner test dependencies from its nested lockfile
+        run: npm ci --prefix scripts/scanner-app --ignore-scripts
+      - name: Run every Scanner suite independently with TAP non-vacuity floors
+        run: npm run test:scanner:critical
 
   # ── Security scanning (forward-ported from security/remediation-release) ──
   # Additive to the check job above; these run independently and surface SAST /
-  # secret / dependency findings on every push + PR to main. They do NOT gate the
-  # Fly deploy (deploys are manual) — they are a signal, not a blocker.
+  # secret / dependency findings on every push + PR to main. The repository
+  # ruleset makes these required PR checks; deployment remains owner-controlled.
   dependency-review:
     name: PR dependency review
     if: github.event_name == 'pull_request'
@@ -662,9 +728,11 @@ jobs:
       contents: read
       pull-requests: read
     steps:
-      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1 (Node 24)
+        with:
+          persist-credentials: false
       - name: Dependency review (block HIGH on the PR diff)
-        uses: actions/dependency-review-action@v4
+        uses: actions/dependency-review-action@a1d282b36b6f3519aa1f3fc636f609c47dddb294 # v5.0.0 (Node 24)
         with:
           fail-on-severity: high
 
@@ -675,11 +743,12 @@ jobs:
     permissions:
       contents: read
     steps:
-      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1 (Node 24)
         with:
           fetch-depth: 0 # full history so gitleaks can scan all commits on the ref
+          persist-credentials: false
       - name: Gitleaks
-        uses: gitleaks/gitleaks-action@ff98106e4c7b2bc287b24eaf42907196329070c7 # v2
+        uses: gitleaks/gitleaks-action@e0c47f4f8be36e29cdc102c57e68cb5cbf0e8d1e # v3.0.0 (Node 24)
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
@@ -690,24 +759,21 @@ jobs:
     permissions:
       contents: read
       security-events: write # CodeQL uploads its SARIF results
-    strategy:
-      fail-fast: false
-      matrix:
-        language: [javascript-typescript]
     steps:
-      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
-      - name: Initialize CodeQL
-        uses: github/codeql-action/init@v3
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1 (Node 24)
         with:
-          languages: ${{ matrix.language }}
+          persist-credentials: false
+      - name: Initialize CodeQL
+        uses: github/codeql-action/init@cdf488f595d80d6e07e03d4674febd5ab45fa938 # v4.37.9 (Node 24)
+        with:
+          languages: javascript-typescript
           config: |
             paths-ignore:
               - tests/**
               - scripts/cricut-app/**
-              - server/scripts/**
               - dist/**
       - name: Analyze
-        uses: github/codeql-action/analyze@v3
+        uses: github/codeql-action/analyze@cdf488f595d80d6e07e03d4674febd5ab45fa938 # v4.37.9 (Node 24)
 
   # ── linux/amd64 production-image release proof ────────────────────────────────
   # WHY THIS JOB EXISTS. The Dockerfile pins both stages to node:20.20.2-slim
@@ -725,12 +791,12 @@ jobs:
   amd64-release-proof:
     name: linux/amd64 image build & boot
     runs-on: ubuntu-latest
-    timeout-minutes: 30
+    timeout-minutes: 60
     permissions:
       contents: read
     services:
       postgres:
-        image: postgres:17.10
+        image: pgvector/pgvector:pg17@sha256:cf134a767f474095eeba57e0117be8e568e011a63f33fbf252f14c9b760f8e6f
         env:
           POSTGRES_PASSWORD: postgres
           POSTGRES_DB: amd64probe
@@ -738,12 +804,36 @@ jobs:
         options: >-
           --health-cmd pg_isready --health-interval 5s --health-timeout 5s --health-retries 20
     steps:
-      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1 (Node 24)
+        with:
+          persist-credentials: false
+
+      - name: Plant forbidden build-context sentinels
+        run: |
+          set -euo pipefail
+          mkdir -p \
+            .local/canon-lide-physical-proof \
+            .agents \
+            .codex \
+            mintvault-scans \
+            .mintvault-scanner-tools \
+            evidence/masters \
+            server/.local
+          touch \
+            .local/canon-lide-physical-proof/DO_NOT_SHIP.tiff \
+            .agents/DO_NOT_SHIP.txt \
+            .codex/DO_NOT_SHIP.txt \
+            mintvault-scans/DO_NOT_SHIP.tiff \
+            .mintvault-scanner-tools/DO_NOT_SHIP.pem \
+            evidence/masters/DO_NOT_SHIP.tiff \
+            server/.local/DO_NOT_SHIP.tiff \
+            server/DO_NOT_SHIP.tiff \
+            .env.context-sentinel
 
       - name: Build the production image (native amd64, no emulation)
         run: |
           set -euo pipefail
-          docker build --build-arg GIT_SHA="$(git rev-parse --short HEAD)" -t mv-amd64-proof:ci .
+          docker build --build-arg GIT_SHA="$(git rev-parse HEAD)" -t mv-amd64-proof:ci .
 
       - name: Image really is linux/amd64 and carries the pinned Node
         run: |
@@ -786,14 +876,90 @@ jobs:
             })().catch((e) => { console.error(e); process.exit(1); });
           '
 
+      - name: Production image excludes development toolchain
+        run: |
+          set -euo pipefail
+          docker run --rm --entrypoint npm mv-amd64-proof:ci ls --omit=dev --depth=0
+          docker run --rm --entrypoint node mv-amd64-proof:ci -e '
+            for (const devOnly of ["vitest", "typescript", "tsx", "prettier", "eslint"]) {
+              try {
+                require.resolve(devOnly);
+                throw new Error("development dependency shipped: " + devOnly);
+              } catch (error) {
+                if (error && error.message === "development dependency shipped: " + devOnly) throw error;
+              }
+            }
+            console.log("OK: development toolchain absent");
+          '
+
+      - name: Production image runs unprivileged with a read-only application directory
+        run: |
+          set -euo pipefail
+          uid="$(docker run --rm --entrypoint id mv-amd64-proof:ci -u)"
+          echo "runtime uid=$uid"
+          [ "$uid" != "0" ] || { echo "production container runs as root"; exit 1; }
+          docker run --rm --entrypoint sh mv-amd64-proof:ci -c \
+            'test ! -w /app && test -w /tmp'
+
+      - name: Generate the exact-image CycloneDX SBOM
+        uses: aquasecurity/trivy-action@ed142fd0673e97e23eac54620cfb913e5ce36c25 # v0.36.0 (Trivy 0.70.0)
+        with:
+          scan-type: image
+          image-ref: mv-amd64-proof:ci
+          format: cyclonedx
+          output: mintvault-${{ github.sha }}.cdx.json
+          list-all-pkgs: true
+          timeout: 10m
+
+      - name: Retain the exact-SHA SBOM as release evidence
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1 (Node 24)
+        with:
+          name: mintvault-${{ github.sha }}-sbom
+          path: mintvault-${{ github.sha }}.cdx.json
+          if-no-files-found: error
+          retention-days: 30
+
+      - name: Block fixable HIGH or CRITICAL production-image vulnerabilities
+        uses: aquasecurity/trivy-action@ed142fd0673e97e23eac54620cfb913e5ce36c25 # v0.36.0 (Trivy 0.70.0)
+        with:
+          scan-type: image
+          image-ref: mv-amd64-proof:ci
+          scanners: vuln
+          vuln-type: os,library
+          severity: HIGH,CRITICAL
+          ignore-unfixed: true
+          exit-code: 1
+          format: table
+          timeout: 10m
+
       - name: Readiness fails CLOSED before the schema exists
         run: |
           set -euo pipefail
           docker run -d --name mv-amd64-boot --network host \
             -e NODE_ENV=production -e PORT=5055 \
             -e MINTVAULT_DATABASE_URL="postgres://postgres:postgres@127.0.0.1:55440/amd64probe" \
+            -e PARTNER_DATABASE_URL="postgres://partner_ci_runtime:synthetic@127.0.0.1:55440/amd64probe" \
+            -e PARTNER_ADMIN_DATABASE_URL="postgres://postgres:postgres@127.0.0.1:55440/amd64probe" \
+            -e PARTNER_MFA_ENC_KEY=0000000000000000000000000000000000000000000000000000000000000000 \
+            -e STRIPE_ENV=test \
+            -e STRIPE_SECRET_KEY=sk_test_ci-not-a-real-key \
+            -e STRIPE_PUBLISHABLE_KEY=pk_test_ci-not-a-real-key \
+            -e STRIPE_WEBHOOK_SECRET=whsec_ci-not-a-real-secret \
             -e SESSION_SECRET=amd64-proof-not-a-real-secret \
             -e SIGNED_URL_SECRET=amd64-proof-not-a-real-secret \
+            -e APP_URL=https://mintvault-ci.invalid \
+            -e R2_ENDPOINT=https://r2-ci.invalid \
+            -e R2_ACCESS_KEY_ID=ci-not-a-real-access-key \
+            -e R2_SECRET_ACCESS_KEY=ci-not-a-real-secret-key \
+            -e R2_BUCKET_NAME=mintvault-ci \
+            -e B2_ENDPOINT=https://b2-ci.invalid \
+            -e B2_KEY_ID=ci-not-a-real-key-id \
+            -e B2_APPLICATION_KEY=ci-not-a-real-application-key \
+            -e B2_BUCKET=mintvault-ci-archive \
+            -e RESEND_API_KEY=re_ci-not-a-real-key \
+            -e RESEND_DOMAIN_VERIFIED=true \
+            -e CUSTOMER_NOTIFICATION_ENC_KEY_VERSION=1 \
+            -e CUSTOMER_NOTIFICATION_ENC_KEY_V1=0000000000000000000000000000000000000000000000000000000000000000 \
             -e ADMIN_PASSWORD=amd64-proof -e ADMIN_PIN=000000 \
             mv-amd64-proof:ci
           for i in $(seq 1 40); do
@@ -806,15 +972,161 @@ jobs:
           code="$(curl -s -o /dev/null -w '%{http_code}' http://127.0.0.1:5055/ready)"
           echo "ready=$code"
           [ "$code" = "503" ] || { echo "readiness did not fail closed"; docker logs mv-amd64-boot | tail -40; exit 1; }
+          # Release order is migrate, then boot. Stop this deliberately
+          # pre-schema process so the positive proof cannot inherit boot state.
+          docker stop --time 30 mv-amd64-boot >/dev/null
+          docker rm mv-amd64-boot >/dev/null
 
-      - name: Readiness succeeds once the schema is present; version reports this SHA
+      - name: Converge the disposable database through real schema and migration authority
         run: |
           set -euo pipefail
-          docker exec -e PGPASSWORD=postgres mv-amd64-boot true 2>/dev/null || true
-          # Create the one relation /ready probes for, in the disposable database.
-          docker run --rm --network host -e PGPASSWORD=postgres postgres:17.10 \
+          database_url="postgres://postgres:postgres@127.0.0.1:55440/amd64probe"
+          # pgvector is a declared shared-schema prerequisite, not an application table fixture.
+          docker run --rm --network host -e PGPASSWORD=postgres \
+            pgvector/pgvector:pg17@sha256:cf134a767f474095eeba57e0117be8e568e011a63f33fbf252f14c9b760f8e6f \
             psql -h 127.0.0.1 -p 55440 -U postgres -d amd64probe \
-            -c "CREATE TABLE IF NOT EXISTS certificates (id serial primary key)"
+            -v ON_ERROR_STOP=1 -c "CREATE EXTENSION IF NOT EXISTS vector"
+          docker build --target schema-tool --build-arg GIT_SHA="$(git rev-parse HEAD)" \
+            -t mv-amd64-schema-proof:ci .
+          docker run --rm --network host \
+            -e NODE_ENV=test -e MINTVAULT_DATABASE_URL="$database_url" \
+            --entrypoint npm mv-amd64-schema-proof:ci run db:push -- --force
+          # Apply the exact numbered-migration inventory and runner copied into
+          # the already-built production image. No CI-only schema is handwritten.
+          docker run --rm --network host \
+            -e NODE_ENV=production -e MINTVAULT_MIGRATION_DATABASE_URL="$database_url" \
+            --entrypoint node mv-amd64-proof:ci \
+            /app/dist/migrate.cjs --apply --allow-destructive
+          # Credentials are infrastructure, not application schema. Provision a
+          # LOGIN identities inherit only their migration-owned runtime groups.
+          # The web image boots with mintvault_ci_runtime, never this migration
+          # owner; Partner admin remains an explicit separate URL.
+          docker run --rm --network host -e PGPASSWORD=postgres \
+            pgvector/pgvector:pg17@sha256:cf134a767f474095eeba57e0117be8e568e011a63f33fbf252f14c9b760f8e6f \
+            psql -h 127.0.0.1 -p 55440 -U postgres -d amd64probe -v ON_ERROR_STOP=1 \
+            -c "CREATE ROLE partner_ci_runtime LOGIN PASSWORD 'synthetic' INHERIT NOSUPERUSER NOBYPASSRLS NOCREATEDB NOCREATEROLE; GRANT partner_runtime TO partner_ci_runtime; CREATE ROLE mintvault_ci_runtime LOGIN PASSWORD 'synthetic' INHERIT NOSUPERUSER NOBYPASSRLS NOCREATEDB NOCREATEROLE; GRANT mintvault_app TO mintvault_ci_runtime"
+
+      - name: Prove production-image Vault Quest migrations and replay
+        run: |
+          set -euo pipefail
+          docker run --rm --network host \
+            -e NODE_ENV=production \
+            -e MINTVAULT_MIGRATION_DATABASE_URL="postgres://postgres:postgres@127.0.0.1:55440/amd64probe" \
+            --entrypoint node mv-amd64-proof:ci -e '
+              const assert = require("node:assert/strict");
+              const fs = require("node:fs");
+              const crypto = require("node:crypto");
+              const { spawnSync } = require("node:child_process");
+              const { Client } = require("pg");
+              const apply = () => {
+                const result = spawnSync(process.execPath, ["/app/dist/migrate.cjs", "--estate", "vault-quest", "--apply"], { stdio: "inherit", env: process.env });
+                assert.equal(result.status, 0, "bundled VQ runner failed");
+              };
+              (async () => {
+                const files = fs.readdirSync("/app/migrations-vq").filter(name => /^\d{4,}_.+\.sql$/.test(name)).sort();
+                assert.ok(files.length > 0, "VQ image inventory is empty");
+                const expected = files.map(filename => ({ filename, checksum: crypto.createHash("sha256").update(fs.readFileSync("/app/migrations-vq/" + filename)).digest("hex") }));
+                apply();
+                const db = new Client({ connectionString: process.env.MINTVAULT_MIGRATION_DATABASE_URL });
+                await db.connect();
+                try {
+                  const readJournal = async () => (await db.query("SELECT * FROM drizzle.vq_schema_migrations ORDER BY filename")).rows;
+                  const before = await readJournal();
+                  assert.deepEqual(before.map(({ filename, checksum }) => ({ filename, checksum })), expected);
+                  assert.ok(before.every(row => row.status === "applied" && row.completed_at !== null));
+                  assert.equal((await db.query("SELECT * FROM drizzle.vq_schema_baselines")).rowCount, 0, "fresh execution must not attest history");
+                  apply();
+                  assert.deepEqual(await readJournal(), before, "VQ replay changed execution history");
+                  assert.equal((await db.query("SELECT * FROM drizzle.vq_schema_baselines")).rowCount, 0);
+                  console.log("PASS image-owned VQ inventory, completed checksums, fresh history and replay: " + files.length);
+                } finally { await db.end(); }
+              })().catch(error => { console.error(error.message); process.exitCode = 1; });
+            '
+
+      - name: Observe disposable database readiness as the runtime identity
+        run: |
+          set -euo pipefail
+          # Read-only diagnostics use the same source and low-privilege identity
+          # as the image. Keep the public /ready response generic and fail closed.
+          docker run --rm --network host \
+            -e NODE_ENV=test \
+            -e MINTVAULT_DATABASE_URL="postgres://mintvault_ci_runtime:synthetic@127.0.0.1:55440/amd64probe" \
+            --entrypoint node mv-amd64-schema-proof:ci --import tsx -e '
+              const { Client } = require("pg");
+              const r = require("./server/readiness.ts");
+              const v = require("./server/lib/vq-schema-contract.ts");
+              const db = new Client({ connectionString: process.env.MINTVAULT_DATABASE_URL });
+              (async () => {
+                await db.connect();
+                try {
+                  const main = await db.query(r.RELEASE_READINESS_SQL, [
+                    [...r.REQUIRED_RELEASE_RELATIONS], [...r.REQUIRED_RELEASE_MIGRATIONS],
+                    [...r.REQUIRED_RELEASE_TRIGGERS], [...r.REQUIRED_RELEASE_TRIGGER_RELATIONS], true,
+                  ]);
+                  console.log("Main readiness evidence: " + JSON.stringify(main.rows));
+                  const clauses = r.PRINT_WORKFLOW_READINESS_SQL
+                    .slice("SELECT (".length, -") AS ready".length).split(/\n  AND /);
+                  for (const [index, clause] of clauses.entries()) {
+                    const check = await db.query("SELECT (" + clause + ") AS ready");
+                    if (check.rows[0].ready !== true) {
+                      console.log("Print readiness failing clause: " + index);
+                      // Expose only schema metadata for the canonical column/default
+                      // predicates, never row contents or configuration values.
+                      if (index === 7 || index === 8) {
+                        const body = clause.trim().slice("NOT EXISTS (".length, -1);
+                        const fields = index === 7
+                          ? "required.relation_name,required.column_name,required.expected_type,format_type(attribute.atttypid,attribute.atttypmod) AS actual_type,attribute.attnotnull AS actual_not_null"
+                          : "required.relation_name,required.column_name,pg_get_expr(default_row.adbin,default_row.adrelid) AS actual_default";
+                        const mismatch = await db.query(body.replace("SELECT 1 FROM (VALUES", "SELECT " + fields + " FROM (VALUES"));
+                        console.log("Print readiness mismatch: " + JSON.stringify(mismatch.rows));
+                      }
+                    }
+                  }
+                  const result = await db.query(v.VQ_RUNTIME_EVIDENCE_SQL, [true]);
+                  const { catalog, ...evidence } = result.rows[0];
+                  const catalogFingerprint = v.vqSchemaFingerprint(catalog);
+                  console.log("VQ readiness evidence: " + JSON.stringify({
+                    catalogFingerprint, runtimeAuthorityReady: evidence.runtimeAuthorityReady,
+                    ...v.evaluateVqRuntimeEvidence({ ...evidence, catalogFingerprint }),
+                  }));
+                } finally { await db.end(); }
+              })().catch(error => { console.error("Readiness diagnostic SQLSTATE: " + (error.code || "unknown")); process.exitCode = 1; });
+            '
+
+      - name: Readiness succeeds on the authoritative schema; version reports this SHA
+        run: |
+          set -euo pipefail
+          docker run -d --name mv-amd64-boot --network host \
+            -e NODE_ENV=production -e PORT=5055 \
+            -e MINTVAULT_DATABASE_URL="postgres://mintvault_ci_runtime:synthetic@127.0.0.1:55440/amd64probe" \
+            -e PARTNER_DATABASE_URL="postgres://partner_ci_runtime:synthetic@127.0.0.1:55440/amd64probe" \
+            -e PARTNER_ADMIN_DATABASE_URL="postgres://postgres:postgres@127.0.0.1:55440/amd64probe" \
+            -e PARTNER_MFA_ENC_KEY=0000000000000000000000000000000000000000000000000000000000000000 \
+            -e STRIPE_ENV=test \
+            -e STRIPE_SECRET_KEY=sk_test_ci-not-a-real-key \
+            -e STRIPE_PUBLISHABLE_KEY=pk_test_ci-not-a-real-key \
+            -e STRIPE_WEBHOOK_SECRET=whsec_ci-not-a-real-secret \
+            -e SESSION_SECRET=amd64-proof-not-a-real-secret \
+            -e SIGNED_URL_SECRET=amd64-proof-not-a-real-secret \
+            -e APP_URL=https://mintvault-ci.invalid \
+            -e R2_ENDPOINT=https://r2-ci.invalid \
+            -e R2_ACCESS_KEY_ID=ci-not-a-real-access-key \
+            -e R2_SECRET_ACCESS_KEY=ci-not-a-real-secret-key \
+            -e R2_BUCKET_NAME=mintvault-ci \
+            -e B2_ENDPOINT=https://b2-ci.invalid \
+            -e B2_KEY_ID=ci-not-a-real-key-id \
+            -e B2_APPLICATION_KEY=ci-not-a-real-application-key \
+            -e B2_BUCKET=mintvault-ci-archive \
+            -e RESEND_API_KEY=re_ci-not-a-real-key \
+            -e RESEND_DOMAIN_VERIFIED=true \
+            -e CUSTOMER_NOTIFICATION_ENC_KEY_VERSION=1 \
+            -e CUSTOMER_NOTIFICATION_ENC_KEY_V1=0000000000000000000000000000000000000000000000000000000000000000 \
+            -e ADMIN_PASSWORD=amd64-proof -e ADMIN_PIN=000000 \
+            mv-amd64-proof:ci
+          for i in $(seq 1 40); do
+            curl -fsS http://127.0.0.1:5055/health >/dev/null 2>&1 && break
+            sleep 2
+          done
           for i in $(seq 1 20); do
             code="$(curl -s -o /dev/null -w '%{http_code}' http://127.0.0.1:5055/ready)"
             [ "$code" = "200" ] && break
@@ -822,7 +1134,7 @@ jobs:
           done
           echo "ready=$code"; [ "$code" = "200" ] || { docker logs mv-amd64-boot | tail -40; exit 1; }
           echo "--- /api/version must report the built SHA ---"
-          expected="$(git rev-parse --short HEAD)"
+          expected="$(git rev-parse HEAD)"
           body="$(curl -fsS http://127.0.0.1:5055/api/version)"; echo "$body"
           echo "$body" | grep -q "$expected" || { echo "expected commit $expected"; exit 1; }
           echo "--- Partner router mounted (401/403/503, never 404) ---"

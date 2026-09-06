@@ -110,7 +110,7 @@ const ROW_PITCH_MM = ROW_H_MM + GAP_MM;
 // (20mm, shared with the PDF + slab rendering, which must NOT change). 4-up now.
 const CRICUT_LABEL_W_MM = 70;
 const CRICUT_LABEL_H_MM = 21;
-const CRICUT_PNG_ROW_COUNT = 5;
+export const CRICUT_ARTIFACT_CAPACITY = 5;
 const CRICUT_PNG_SLAB_PAIR_H_MM = CRICUT_LABEL_H_MM + 2 + CRICUT_LABEL_H_MM; // 44 (2mm gap)
 const CRICUT_PNG_INTER_ROW_GAP_MM = 2.5; // more spacing with only 4 rows
 const CRICUT_PNG_ROW_PITCH_MM = CRICUT_PNG_SLAB_PAIR_H_MM + CRICUT_PNG_INTER_ROW_GAP_MM; // 54
@@ -120,11 +120,11 @@ const CRICUT_PNG_ROW_PITCH_MM = CRICUT_PNG_SLAB_PAIR_H_MM + CRICUT_PNG_INTER_ROW
 {
   const vSum =
     MARGIN_MM +
-    CRICUT_PNG_ROW_COUNT * CRICUT_PNG_SLAB_PAIR_H_MM +
-    (CRICUT_PNG_ROW_COUNT - 1) * CRICUT_PNG_INTER_ROW_GAP_MM;
+    CRICUT_ARTIFACT_CAPACITY * CRICUT_PNG_SLAB_PAIR_H_MM +
+    (CRICUT_ARTIFACT_CAPACITY - 1) * CRICUT_PNG_INTER_ROW_GAP_MM;
   if (vSum > PNG_PAGE_H_MM) {
     throw new Error(
-      `print-batch.ts: Cricut PNG ${CRICUT_PNG_ROW_COUNT}-up layout sums to ${vSum}mm, exceeds ${PNG_PAGE_H_MM}mm`
+      `print-batch.ts: Cricut PNG ${CRICUT_ARTIFACT_CAPACITY}-up layout sums to ${vSum}mm, exceeds ${PNG_PAGE_H_MM}mm`
     );
   }
 }
@@ -232,7 +232,20 @@ export const MAX_CERTS_PER_BATCH = 8;
 // guillotine-only multi-page PDF (no Cricut PNG/SVG — those stay single-sheet).
 export const MAX_CERTS_PER_MULTI_BATCH = 48;
 const MAX_CERTS_PER_CRICUT_SHEET = 4;
-export const SHEET_LAYOUT_VERSION = "v32"; // v32: restored variant line to front label (buildVariantLine wiring) — busts cached print-batch sheets
+export const SHEET_LAYOUT_VERSION = "v33"; // v33: deterministic PDF metadata + durable PRINT_ARTIFACT manifests
+
+export function printArtifactPlan(itemCount: number): {
+  pdfOnly: boolean;
+  isPdfMultiPage: boolean;
+  pageCount: number;
+} {
+  const count = Math.max(0, Math.floor(itemCount));
+  return {
+    pdfOnly: count > CRICUT_ARTIFACT_CAPACITY,
+    isPdfMultiPage: count > CERTS_PER_PAGE,
+    pageCount: count === 0 ? 0 : Math.ceil(count / CERTS_PER_PAGE),
+  };
+}
 
 // Per-side cut bleed inset — slices through the printed border, not the
 // paper outside.
@@ -305,7 +318,7 @@ function buildLayout(itemCount: number): CellSpec[] {
 // canvas height. Left-column label + back structure is identical to buildLayout;
 // only the insert column and the row cap/pitch differ.
 function buildCricutPNGLayout(itemCount: number): CellSpec[] {
-  const n = Math.max(1, Math.min(CRICUT_PNG_ROW_COUNT, itemCount | 0));
+  const n = Math.max(1, Math.min(CRICUT_ARTIFACT_CAPACITY, itemCount | 0));
   const cells: CellSpec[] = [];
   for (let i = 0; i < n; i++) {
     const rowTopY = MARGIN_MM + i * CRICUT_PNG_ROW_PITCH_MM;
@@ -492,7 +505,7 @@ function buildPortraitLayout(itemCount: number): CellSpec[] {
 // so even if more buffers exist it indexes the same 0–4.
 async function renderItemBuffers(
   items: PrintBatchItem[],
-  cap: number = MAX_CERTS_PER_BATCH
+  cap: number = CRICUT_ARTIFACT_CAPACITY
 ): Promise<{
   fronts: Buffer[];
   backs: Buffer[];
@@ -674,6 +687,10 @@ export async function generatePrintBatchPDF(items: PrintBatchItem[]): Promise<Bu
       info: {
         Title: `MintVault Print Batch (${SHEET_LAYOUT_VERSION})`,
         Author: "MintVault Trading Card Grading",
+        // Reconciliation must be able to reproduce the exact manifest bytes
+        // after a crash. PDFKit otherwise injects wall-clock metadata.
+        CreationDate: new Date(0),
+        ModDate: new Date(0),
       },
     });
 

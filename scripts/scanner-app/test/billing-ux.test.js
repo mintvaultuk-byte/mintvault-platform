@@ -63,6 +63,7 @@ async function mountScanner({ availableCredits, canPurchaseCredits = true, activ
     getStationSetup: async () => ({
       ok: true,
       stage: "active",
+      calibrationStatus: "VALID",
       stationCode: "STAGING-ZERO",
       summary: {
         organisationName: "Fixture Partner",

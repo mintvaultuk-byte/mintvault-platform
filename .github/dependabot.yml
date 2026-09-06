@@ -1,6 +1,6 @@
 version: 2
-# Forward-port from security/remediation-release, extended to cover all five npm
-# manifests in the repo (root web service + the four local desktop-tooling apps).
+# Forward-port from security/remediation-release, covering all four npm
+# manifests in the repo (root web service + the three local scanner-tooling apps).
 # Weekly cadence; minor+patch bumps grouped into one PR per manifest to silence
 # the dev-only / local-tooling noise that drives most of the Dependabot alerts.
 updates:
@@ -41,17 +41,6 @@ updates:
 
   - package-ecosystem: npm
     directory: "/scripts/scanner-watcher/guide-window"
-    schedule:
-      interval: weekly
-    open-pull-requests-limit: 5
-    groups:
-      all-deps:
-        update-types:
-          - minor
-          - patch
-
-  - package-ecosystem: npm
-    directory: "/scripts/cricut-app"
     schedule:
       interval: weekly
     open-pull-requests-limit: 5

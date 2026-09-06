@@ -41,6 +41,7 @@ import { startPostgres17, type DisposablePostgres17 } from "./helpers/postgres17
 import { createCertificatesStub } from "./helpers/certificates-stub";
 import { checkNfcBindable } from "../shared/nfc-binding";
 import type { PartnerPrincipal } from "../server/partner/session";
+import { applyMigrations, listMigrationFiles } from "../scripts/db/migrate";
 
 let cluster: DisposablePostgres17;
 let admin: Client;
@@ -371,6 +372,14 @@ describe("P11 Card Job output: certificate, label, print, NFC (real PostgreSQL)"
       // database authority instead of a racy read-then-write.
       "0088_nfc_binding_integrity",
     ]);
+    await applyMigrations(
+      admin,
+      listMigrationFiles().filter((file) =>
+        ["0121_main_runtime_role_authority.sql", "0122_object_write_intent_reconciliation.sql"].includes(
+          file.filename
+        )
+      )
+    );
     // 0035's origin-immutability trigger is what AT-P7 proves. It is applied here rather than through
     // the partner list because this suite owns a `certificates` table for it to attach to.
     await admin.query(`ALTER TABLE certificates OWNER TO pn_migrator`);
@@ -608,6 +617,7 @@ describe("P11 Card Job output: certificate, label, print, NFC (real PostgreSQL)"
       reason: "Label damaged during slab assembly",
       reasonCategory: "damaged_print",
       identity: QA,
+      idempotencyKey: `partner-reprint-${card.mvNumber}`,
     });
     expect(reprint.applied).toEqual([card.mvNumber]);
 

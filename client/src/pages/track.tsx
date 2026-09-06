@@ -61,10 +61,10 @@ export default function TrackPage() {
       setResult(data);
     } catch (err: any) {
       const msg = err.message || "";
-      if (msg.includes("404")) {
-        setError("Submission not found. Please check your submission ID.");
-      } else if (msg.includes("403")) {
-        setError("Email address does not match this submission.");
+      if (msg.includes("404") || msg.includes("403")) {
+        // Keep missing ids and mismatched email addresses indistinguishable;
+        // the server deliberately uses the same response for both.
+        setError("Submission not found or details do not match. Check both entries and try again.");
       } else {
         setError("Something went wrong. Please try again.");
       }

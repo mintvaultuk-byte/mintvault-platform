@@ -983,6 +983,7 @@ describe("rendering + protected-system guarantees (items 20-22)", () => {
         // no longer swallow the rest of the diff (N1). See tests/helpers/strip-non-code.ts.
         const addedCode = addedCodeOf(diff, "+");
         const addedJs = addedJsOf(diff, "+");
+        const removedJs = addedJsOf(diff, "-");
         // An escape the analyser cannot decode could hide an identifier, so it is refused
         // outright rather than guessed at (N4).
         expect(hasMalformedEscape(diff), "server/grader.ts contains a malformed escape sequence").toBe(false);
@@ -1088,8 +1089,27 @@ describe("rendering + protected-system guarantees (items 20-22)", () => {
         const signatureH =
           /mvgs_rules_version\s*=\s*\$\{authority\.rulesVersion\}/.test(addedCode) &&
           /\bauthority\.rulesVersion\b/.test(addedJs);
+        // I) Runtime-DDL retirement. This is deletion-only and names all three
+        // exact schema helpers moved to migration 0115; it grants no latitude
+        // to alter or remove grading authority/calculation entry points.
+        const retiredSchemaFunctions = removedJs.match(/\bexport\s+async\s+function\s+\w+\s*\(/g) ?? [];
+        const signatureI =
+          addedJs.trim() === "" &&
+          retiredSchemaFunctions.length === 3 &&
+          ["migrateGraderSchema", "migrateGraderCertSchema", "migratePerOperatorSchema"].every((name) =>
+            new RegExp(`\\bexport\\s+async\\s+function\\s+${name}\\s*\\(`).test(removedJs)
+          ) &&
+          !/\b(calculate|scoreMvgs|resolveDraftGradeAuthority|approveGraderCert|applyCertGradeDraft)\b/.test(removedJs);
         expect(
-          signatureA || signatureB || signatureC || signatureD || signatureE || signatureF || signatureG || signatureH,
+          signatureA ||
+            signatureB ||
+            signatureC ||
+            signatureD ||
+            signatureE ||
+            signatureF ||
+            signatureG ||
+            signatureH ||
+            signatureI,
           "server/grader.ts changed but matches no founder-authorised signature"
         ).toBe(true);
         const revisionBoundAddedCode = (

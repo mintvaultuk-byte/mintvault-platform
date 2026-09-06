@@ -8,6 +8,7 @@ export type PartnerCapabilityFailureCode =
   | "PARTNER_ADMIN_DB_UNAVAILABLE"
   | "PART_ROLE_LOOKUP_EMPTY"
   | "PARTNER_ADMIN_BYPASSRLS_REQUIRED"
+  | "PARTNER_RUNTIME_SUPERUSER_FORBIDDEN"
   | "PARTNER_RUNTIME_BYPASSRLS_FORBIDDEN"
   | "PARTNER_CAPABILITY_TIMEOUT";
 
@@ -31,6 +32,7 @@ type QueryFn = <T extends pg.QueryResultRow = pg.QueryResultRow>(
 
 interface RoleCapabilityRow extends pg.QueryResultRow {
   has_role: boolean;
+  rolsuper: boolean;
   rolbypassrls: boolean;
 }
 
@@ -40,7 +42,10 @@ const ROLE_CAPABILITY_SQL = `
          ) AS has_role,
          COALESCE((
            SELECT rolbypassrls FROM pg_catalog.pg_roles WHERE rolname = current_user
-         ), false) AS rolbypassrls
+         ), false) AS rolbypassrls,
+         COALESCE((
+           SELECT rolsuper FROM pg_catalog.pg_roles WHERE rolname = current_user
+         ), false) AS rolsuper
 `;
 
 const DEFAULT_TIMEOUT_MS = 2_000;
@@ -80,6 +85,14 @@ async function checkRoleCapability(
       const row = rows[0];
       if (!row?.has_role) {
         return { ok: false, checkedAt: nowIso(), capability, code: "PART_ROLE_LOOKUP_EMPTY" };
+      }
+      if (capability === PARTNER_RUNTIME_CAPABILITY && Boolean(row.rolsuper)) {
+        return {
+          ok: false,
+          checkedAt: nowIso(),
+          capability,
+          code: "PARTNER_RUNTIME_SUPERUSER_FORBIDDEN",
+        };
       }
       if (Boolean(row.rolbypassrls) !== expectedBypassRls) {
         return {

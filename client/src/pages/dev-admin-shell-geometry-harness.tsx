@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useState } from "react";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import AdminShell from "@/components/admin/admin-shell";
+import { AdminSessionProvider } from "@/lib/admin-session";
 import { GradingWorkstation } from "@/components/grading-workflow/GradingWorkstation";
 import { createCanonicalHarnessFetchFixture } from "./dev-canonical-workstation-harness";
 import { AdminHeaderRow } from "@/components/admin/AdminHeaderRow";
@@ -93,7 +94,8 @@ export default function DevAdminShellGeometryHarness() {
   if (!ready) return null;
   return (
     <QueryClientProvider client={queryClient}>
-      <AdminShell activeTab="certs" onTabChange={() => {}} onLogout={() => {}} focus>
+      <AdminSessionProvider>
+        <AdminShell activeTab="certs" onTabChange={() => {}} focus>
         {/* Byte-identical composition to admin-dashboard.tsx's focus branch:
             surface → shrink-0 header → flex-1 workstation. */}
         <div className={surfaceClass} data-testid="admin-focus-surface" data-legacy={legacy ? "1" : "0"}>
@@ -132,9 +134,9 @@ export default function DevAdminShellGeometryHarness() {
                  viewport tall while its child actively tries to push it open,
                  which is the condition that inflated the page to 2568px before. */
               <div className="flex min-h-0 h-full flex-col" data-testid="grading-workspace">
-                <div className="flex min-h-0 flex-1 flex-col gap-2 md:flex-row">
+                <div className="flex min-h-0 flex-1 flex-col gap-2 min-[540px]:flex-row">
                   <aside
-                    className="min-h-0 max-md:max-h-[55vh] md:w-[45%] md:shrink-0 rounded border border-[var(--admin-line)] bg-[var(--admin-panel)]"
+                    className="min-h-0 max-[539px]:basis-1/2 max-[539px]:flex-1 min-[540px]:w-[45%] min-[540px]:shrink-0 rounded border border-[var(--admin-line)] bg-[var(--admin-panel)]"
                     data-testid="grading-preview-panel"
                   >
                     <div className="p-2 text-xs text-[var(--admin-ink-dim)]">card rail (stub)</div>
@@ -184,7 +186,8 @@ export default function DevAdminShellGeometryHarness() {
             )}
           </div>
         </div>
-      </AdminShell>
+        </AdminShell>
+      </AdminSessionProvider>
     </QueryClientProvider>
   );
 }

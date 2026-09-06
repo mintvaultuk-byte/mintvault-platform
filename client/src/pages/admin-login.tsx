@@ -1,6 +1,6 @@
 import { useEffect, useState } from "react";
 import { useLocation } from "wouter";
-import { apiRequest } from "@/lib/queryClient";
+import { adminFetch, apiRequest } from "@/lib/queryClient";
 import { LogIn, KeyRound, Eye, EyeOff, RotateCcw } from "lucide-react";
 import GoldShader from "@/components/admin/gold-shader";
 
@@ -64,7 +64,7 @@ export default function AdminLoginPage({ onLogin }: Props) {
     setLoading(true);
     setError("");
     try {
-      await fetch("/api/admin/clear-session", { method: "POST", credentials: "include" });
+      await adminFetch("/api/admin/clear-session", { method: "POST", credentials: "include" });
     } catch {
       // A network failure should not stop local cleanup.
     } finally {
@@ -80,7 +80,9 @@ export default function AdminLoginPage({ onLogin }: Props) {
     setLoading(true);
 
     try {
-      const res = await apiRequest("POST", "/api/admin/session", { password });
+      const res = await apiRequest("POST", "/api/admin/session", { password }, {
+        adminUnauthorizedPolicy: "credential-rejection-aware",
+      });
       const data = await res.json();
       if (data.step === "PIN_REQUIRED") {
         setStep("pin");
@@ -99,7 +101,9 @@ export default function AdminLoginPage({ onLogin }: Props) {
     setLoading(true);
 
     try {
-      const res = await apiRequest("POST", "/api/admin/pin", { pin });
+      const res = await apiRequest("POST", "/api/admin/pin", { pin }, {
+        adminUnauthorizedPolicy: "credential-rejection-aware",
+      });
       const data = await res.json();
       if (data.step === "PIN_SETUP_REQUIRED") {
         // First admin login post-PIN-deploy: pin_hash not yet set. Server keeps

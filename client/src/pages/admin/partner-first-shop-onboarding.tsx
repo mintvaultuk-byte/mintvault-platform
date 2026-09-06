@@ -47,7 +47,13 @@ type StaffUser = {
   role_codes?: string[];
   location_eligible?: boolean;
 };
-type FleetStation = { stationCode?: string; station_code?: string; status: string; tenantId?: string; tenant_id?: string };
+type FleetStation = {
+  stationCode?: string;
+  station_code?: string;
+  status: string;
+  tenantId?: string;
+  tenant_id?: string;
+};
 
 const ORG_WIDE_ROLE_CODES = ["PARTNER_OWNER", "PARTNER_MANAGER", "PARTNER_FINANCE_VIEWER"];
 
@@ -55,10 +61,25 @@ function requestKey(): string {
   return `first-shop-${crypto.randomUUID()}`;
 }
 
-function Input({ label, value, onChange, type = "text", required = true }: { label: string; value: string; onChange: (value: string) => void; type?: string; required?: boolean }) {
+function Input({
+  label,
+  value,
+  onChange,
+  type = "text",
+  required = true,
+}: {
+  label: string;
+  value: string;
+  onChange: (value: string) => void;
+  type?: string;
+  required?: boolean;
+}) {
   return (
     <label style={{ display: "grid", gap: 4, minWidth: 190, flex: 1 }}>
-      <span style={{ fontSize: 12, opacity: 0.8 }}>{label}{required ? " *" : ""}</span>
+      <span style={{ fontSize: 12, opacity: 0.8 }}>
+        {label}
+        {required ? " *" : ""}
+      </span>
       <input
         required={required}
         type={type}
@@ -70,7 +91,17 @@ function Input({ label, value, onChange, type = "text", required = true }: { lab
   );
 }
 
-function Step({ number, title, complete, children }: { number: number; title: string; complete: boolean; children: React.ReactNode }) {
+function Step({
+  number,
+  title,
+  complete,
+  children,
+}: {
+  number: number;
+  title: string;
+  complete: boolean;
+  children: React.ReactNode;
+}) {
   return (
     <Panel title={`${number}. ${title}`} sub={complete ? "Complete" : "Action required"}>
       <div data-testid={`first-shop-step-${number}`} data-complete={complete ? "true" : "false"}>
@@ -82,6 +113,29 @@ function Step({ number, title, complete, children }: { number: number; title: st
 
 function errorMessage(error: unknown, fallback: string): string {
   return (error as { body?: { error?: { message?: string } } })?.body?.error?.message ?? fallback;
+}
+
+/** The onboarding projection is read-only, so a load failure must name its authority rather than look like missing shop data. */
+function onboardingLoadFailure(error: unknown): string {
+  const failure = error as {
+    status?: number;
+    body?: { error?: { code?: string; message?: string } | string };
+    message?: string;
+  };
+  const message =
+    typeof failure.body?.error === "string"
+      ? failure.body.error
+      : failure.body?.error?.message ||
+        failure.message ||
+        "The onboarding projection did not return a usable response.";
+  if (failure.status === 401)
+    return "Your Super Admin session has expired or is unavailable. Sign in again, then reopen this exact Partner onboarding page.";
+  if (failure.status === 403)
+    return "This signed-in account is not allowed to view Super Admin Partner onboarding. Use an authorised Super Admin account.";
+  if (failure.status === 404) return `MintVault could not find this Partner onboarding record. ${message}`;
+  if (failure.status)
+    return `MintVault could not load this Partner onboarding record (HTTP ${failure.status}). ${message}`;
+  return `MintVault could not load this Partner onboarding record. ${message}`;
 }
 
 export default function PartnerFirstShopOnboardingPage() {
@@ -130,19 +184,26 @@ export default function PartnerFirstShopOnboardingPage() {
         owner: { firstName: ownerFirstName, lastName: ownerLastName, email: ownerEmail },
         idempotencyKey: createIdempotencyKey.current,
         reason: "first-shop guided onboarding",
-      }).then((response) => response.json() as Promise<{ result?: { partnerId?: string; invitationDeliveryStatus?: string } }>),
+      }).then(
+        (response) => response.json() as Promise<{ result?: { partnerId?: string; invitationDeliveryStatus?: string } }>
+      ),
     onSuccess: (data) => {
       const id = data.result?.partnerId;
       if (!id) {
-        setBanner("The onboarding request completed, but its Partner identifier was not returned. Refresh the Partner directory before retrying.");
+        setBanner(
+          "The onboarding request completed, but its Partner identifier was not returned. Refresh the Partner directory before retrying."
+        );
         return;
       }
-      setBanner(`First shop created. Owner invitation delivery: ${data.result?.invitationDeliveryStatus ?? "recorded"}.`);
+      setBanner(
+        `First shop created. Owner invitation delivery: ${data.result?.invitationDeliveryStatus ?? "recorded"}.`
+      );
       createIdempotencyKey.current = requestKey();
       void queryClient.invalidateQueries({ queryKey: [BASE, "partners"] });
       navigate(`/admin/partners/${id}/onboarding`);
     },
-    onError: (error) => setBanner(errorMessage(error, "First-shop onboarding could not be created. Nothing was partially saved.")),
+    onError: (error) =>
+      setBanner(errorMessage(error, "First-shop onboarding could not be created. Nothing was partially saved.")),
   });
   const saveAddress = useMutation({
     mutationFn: () =>
@@ -204,11 +265,15 @@ export default function PartnerFirstShopOnboardingPage() {
     [mainLocation]
   );
   const addressValue = partnerId && address.line1 === "" ? existingAddress : address;
-  const contactNameValue = partnerId && contactName === "" ? contact?.full_name ?? "" : contactName;
-  const contactEmailValue = partnerId && contactEmail === "" ? contact?.email ?? "" : contactEmail;
+  const contactNameValue = partnerId && contactName === "" ? (contact?.full_name ?? "") : contactName;
+  const contactEmailValue = partnerId && contactEmail === "" ? (contact?.email ?? "") : contactEmail;
   const setAddressField = (key: keyof typeof emptyAddress, value: string) => {
     addressIdempotencyKey.current = requestKey();
-    setAddress((current) => ({ ...current, ...(partnerId && current.line1 === "" ? existingAddress : {}), [key]: value }));
+    setAddress((current) => ({
+      ...current,
+      ...(partnerId && current.line1 === "" ? existingAddress : {}),
+      [key]: value,
+    }));
   };
   const setContactNameForCurrentShop = (value: string) => {
     contactIdempotencyKey.current = requestKey();
@@ -307,16 +372,33 @@ export default function PartnerFirstShopOnboardingPage() {
   });
 
   return (
-    <AdminShell activeTab="dashboard" onTabChange={() => navigate("/admin")} onLogout={() => navigate("/admin")} title="First-shop onboarding" crumb="Partner Network">
+    <AdminShell
+      activeTab="dashboard"
+      onTabChange={() => navigate("/admin")}
+      title="First-shop onboarding"
+      crumb="Partner Network"
+    >
       <div data-testid="first-shop-onboarding-root" style={{ maxWidth: 980 }}>
         <div style={{ display: "flex", justifyContent: "space-between", gap: 12, flexWrap: "wrap", marginBottom: 16 }}>
           <div>
             <h1 style={{ margin: 0 }}>First-shop onboarding</h1>
-            <p style={{ margin: "6px 0", opacity: 0.8 }}>One guided flow over the canonical Partner, location, contact, Owner, station and wallet records.</p>
+            <p style={{ margin: "6px 0", opacity: 0.8 }}>
+              One guided flow over the canonical Partner, location, contact, Owner, station and wallet records.
+            </p>
           </div>
-          <Link href="/admin/partners/directory" style={{ alignSelf: "center" }}>← Partner directory</Link>
+          <Link href="/admin/partners/directory" style={{ alignSelf: "center" }}>
+            ← Partner directory
+          </Link>
         </div>
-        {banner && <div role="status" data-testid="first-shop-banner" style={{ padding: 10, borderRadius: 8, background: "#24200e", marginBottom: 12 }}>{banner}</div>}
+        {banner && (
+          <div
+            role="status"
+            data-testid="first-shop-banner"
+            style={{ padding: 10, borderRadius: 8, background: "#24200e", marginBottom: 12 }}
+          >
+            {banner}
+          </div>
+        )}
 
         {!partnerId ? (
           <form
@@ -338,58 +420,159 @@ export default function PartnerFirstShopOnboardingPage() {
             <Step number={3} title="Primary operations contact" complete={false}>
               <div style={{ display: "flex", gap: 10, flexWrap: "wrap" }}>
                 <Input label="Contact name" value={contactName} onChange={resetCreateIntent(setContactName)} />
-                <Input label="Operational email" value={contactEmail} onChange={resetCreateIntent(setContactEmail)} type="email" />
+                <Input
+                  label="Operational email"
+                  value={contactEmail}
+                  onChange={resetCreateIntent(setContactEmail)}
+                  type="email"
+                />
               </div>
             </Step>
             <Step number={4} title="Partner Owner" complete={false}>
-              <p style={{ marginTop: 0 }}>Submitting sends this Owner the existing invitation flow. They set their own password and MFA; neither secret is shown to MintVault staff.</p>
+              <p style={{ marginTop: 0 }}>
+                Submitting sends this Owner the existing invitation flow. They set their own password and MFA; neither
+                secret is shown to MintVault staff.
+              </p>
               <div style={{ display: "flex", gap: 10, flexWrap: "wrap" }}>
-                <Input label="Owner first name" value={ownerFirstName} onChange={resetCreateIntent(setOwnerFirstName)} />
+                <Input
+                  label="Owner first name"
+                  value={ownerFirstName}
+                  onChange={resetCreateIntent(setOwnerFirstName)}
+                />
                 <Input label="Owner last name" value={ownerLastName} onChange={resetCreateIntent(setOwnerLastName)} />
-                <Input label="Owner email" value={ownerEmail} onChange={resetCreateIntent(setOwnerEmail)} type="email" />
+                <Input
+                  label="Owner email"
+                  value={ownerEmail}
+                  onChange={resetCreateIntent(setOwnerEmail)}
+                  type="email"
+                />
               </div>
             </Step>
-            <Panel title="Create first shop" sub="Creates canonical records atomically before the Owner invitation is delivered.">
-              <AdminButton type="submit" variant="gold" disabled={create.isPending} data-testid="first-shop-create-submit">
+            <Panel
+              title="Create first shop"
+              sub="Creates canonical records atomically before the Owner invitation is delivered."
+            >
+              <AdminButton
+                type="submit"
+                variant="gold"
+                disabled={create.isPending}
+                data-testid="first-shop-create-submit"
+              >
                 {create.isPending ? "Creating…" : "Create shop and send Owner invitation"}
               </AdminButton>
             </Panel>
           </form>
         ) : onboarding.isLoading ? (
           <div role="status">Loading the canonical first-shop records…</div>
-        ) : !shop ? (
-          <div role="alert">This Partner could not be loaded.</div>
+        ) : onboarding.isError || !shop ? (
+          <div role="alert" data-testid="first-shop-load-failure">
+            {onboardingLoadFailure(onboarding.error)}
+          </div>
         ) : (
           <>
             <Panel title="Current scope" sub="Every action below is scoped to this exact Partner and Main location.">
-              <div data-testid="first-shop-current-partner"><b>Current Partner:</b> {shop.organisation.legalName} <Badge variant={shop.organisation.status === "ACTIVE" ? "act" : "wait"}>{shop.organisation.status}</Badge></div>
-              <div data-testid="first-shop-current-location" style={{ marginTop: 6 }}><b>Current location:</b> {mainLocation ? `${mainLocation.name} (${mainLocation.status})` : "No active Main location"}</div>
+              <div data-testid="first-shop-current-partner">
+                <b>Current Partner:</b> {shop.organisation.legalName}{" "}
+                <Badge variant={shop.organisation.status === "ACTIVE" ? "act" : "wait"}>
+                  {shop.organisation.status}
+                </Badge>
+              </div>
+              <div data-testid="first-shop-current-location" style={{ marginTop: 6 }}>
+                <b>Current location:</b>{" "}
+                {mainLocation ? `${mainLocation.name} (${mainLocation.status})` : "No active Main location"}
+              </div>
             </Panel>
             <Step number={1} title="Shop" complete={shop.organisation.status === "ACTIVE"}>
-              <p>Partner status: <b>{shop.organisation.status}</b>. The record remains pending until the operator deliberately activates it.</p>
-              {shop.organisation.status === "PENDING" && <AdminButton size="sm" variant="gold" disabled={activate.isPending} onClick={() => activate.mutate()} data-testid="first-shop-activate">Activate Partner</AdminButton>}
+              <p>
+                Partner status: <b>{shop.organisation.status}</b>. The record remains pending until the operator
+                deliberately activates it.
+              </p>
+              {shop.organisation.status === "PENDING" && (
+                <AdminButton
+                  size="sm"
+                  variant="gold"
+                  disabled={activate.isPending}
+                  onClick={() => activate.mutate()}
+                  data-testid="first-shop-activate"
+                >
+                  Activate Partner
+                </AdminButton>
+              )}
             </Step>
-            <Step number={2} title="Main location delivery address" complete={shop.operational.dimensions.delivery.status === "PASS"}>
-              <form onSubmit={(event) => { event.preventDefault(); saveAddress.mutate(); }}>
+            <Step
+              number={2}
+              title="Main location delivery address"
+              complete={shop.operational.dimensions.delivery.status === "PASS"}
+            >
+              <form
+                onSubmit={(event) => {
+                  event.preventDefault();
+                  saveAddress.mutate();
+                }}
+              >
                 <AddressFields value={addressValue} onChange={setAddressField} />
-                <AdminButton type="submit" size="sm" variant="gold" disabled={!mainLocation || saveAddress.isPending} data-testid="first-shop-save-address" style={{ marginTop: 12 }}>Save Main location address</AdminButton>
+                <AdminButton
+                  type="submit"
+                  size="sm"
+                  variant="gold"
+                  disabled={!mainLocation || saveAddress.isPending}
+                  data-testid="first-shop-save-address"
+                  style={{ marginTop: 12 }}
+                >
+                  Save Main location address
+                </AdminButton>
               </form>
             </Step>
-            <Step number={3} title="Primary operations contact" complete={shop.operational.dimensions.operationsContact.status === "PASS"}>
-              <form onSubmit={(event) => { event.preventDefault(); saveContact.mutate(); }}>
+            <Step
+              number={3}
+              title="Primary operations contact"
+              complete={shop.operational.dimensions.operationsContact.status === "PASS"}
+            >
+              <form
+                onSubmit={(event) => {
+                  event.preventDefault();
+                  saveContact.mutate();
+                }}
+              >
                 <div style={{ display: "flex", gap: 10, flexWrap: "wrap" }}>
                   <Input label="Contact name" value={contactNameValue} onChange={setContactNameForCurrentShop} />
-                  <Input label="Operational email" value={contactEmailValue} onChange={setContactEmailForCurrentShop} type="email" />
+                  <Input
+                    label="Operational email"
+                    value={contactEmailValue}
+                    onChange={setContactEmailForCurrentShop}
+                    type="email"
+                  />
                 </div>
-                <AdminButton type="submit" size="sm" variant="gold" disabled={saveContact.isPending} data-testid="first-shop-save-contact" style={{ marginTop: 12 }}>Save primary operations contact</AdminButton>
+                <AdminButton
+                  type="submit"
+                  size="sm"
+                  variant="gold"
+                  disabled={saveContact.isPending}
+                  data-testid="first-shop-save-contact"
+                  style={{ marginTop: 12 }}
+                >
+                  Save primary operations contact
+                </AdminButton>
               </form>
             </Step>
             <Step number={4} title="Partner Owner" complete={shop.operational.dimensions.owner.status === "PASS"}>
-              <p>{shop.owner ? `Owner: ${shop.owner.email} — ${shop.owner.readiness?.onboardingState ?? shop.owner.userStatus}` : "No Partner Owner has been invited."}</p>
-              <Link href={`/admin/partners/${shop.organisation.id}/staff`} data-testid="first-shop-owner-action">Open Owner setup</Link>
+              <p>
+                {shop.owner
+                  ? `Owner: ${shop.owner.email} — ${shop.owner.readiness?.onboardingState ?? shop.owner.userStatus}`
+                  : "No Partner Owner has been invited."}
+              </p>
+              <Link href={`/admin/partners/${shop.organisation.id}/staff`} data-testid="first-shop-owner-action">
+                Open Owner setup
+              </Link>
             </Step>
-            <Step number={5} title="Staff and operator access" complete={shop.operational.dimensions.staff?.status === "PASS"}>
-              <p data-testid="first-shop-staff-message">{shop.operational.dimensions.staff?.message ?? "Operator access could not be confirmed."}</p>
+            <Step
+              number={5}
+              title="Staff and operator access"
+              complete={shop.operational.dimensions.staff?.status === "PASS"}
+            >
+              <p data-testid="first-shop-staff-message">
+                {shop.operational.dimensions.staff?.message ?? "Operator access could not be confirmed."}
+              </p>
               {unassignedOperators.length > 0 && (
                 <div data-testid="first-shop-staff-unassigned" style={{ marginTop: 10 }}>
                   <p style={{ fontSize: 12, opacity: 0.85 }}>
@@ -408,16 +591,30 @@ export default function PartnerFirstShopOnboardingPage() {
                           data-testid="first-shop-staff-location-select"
                           value={assignLocationId || activeLocations[0].id}
                           onChange={(event) => setAssignLocationId(event.target.value)}
-                          style={{ background: "#0d0d0d", color: "#fff", border: "1px solid #555", borderRadius: 7, padding: "8px 10px" }}
+                          style={{
+                            background: "#0d0d0d",
+                            color: "#fff",
+                            border: "1px solid #555",
+                            borderRadius: 7,
+                            padding: "8px 10px",
+                          }}
                         >
                           {activeLocations.map((l) => (
-                            <option key={l.id} value={l.id}>{l.name}</option>
+                            <option key={l.id} value={l.id}>
+                              {l.name}
+                            </option>
                           ))}
                         </select>
                       </label>
                       {unassignedOperators.map((u) => (
-                        <div key={u.id} style={{ display: "flex", alignItems: "center", gap: 10, marginTop: 6, flexWrap: "wrap" }}>
-                          <span data-testid={`first-shop-staff-user-${u.id}`}>{u.email}{u.role ? ` — ${u.role}` : ""}</span>
+                        <div
+                          key={u.id}
+                          style={{ display: "flex", alignItems: "center", gap: 10, marginTop: 6, flexWrap: "wrap" }}
+                        >
+                          <span data-testid={`first-shop-staff-user-${u.id}`}>
+                            {u.email}
+                            {u.role ? ` — ${u.role}` : ""}
+                          </span>
                           <AdminButton
                             size="sm"
                             variant="gold"
@@ -434,7 +631,9 @@ export default function PartnerFirstShopOnboardingPage() {
                 </div>
               )}
               <div style={{ marginTop: 10 }}>
-                <Link href={`/admin/partners/${shop.organisation.id}/staff`} data-testid="first-shop-staff-action">Open Staff</Link>
+                <Link href={`/admin/partners/${shop.organisation.id}/staff`} data-testid="first-shop-staff-action">
+                  Open Staff
+                </Link>
               </div>
             </Step>
             <Step number={6} title="Scanner station" complete={shop.operational.dimensions.station.status === "PASS"}>
@@ -446,7 +645,10 @@ export default function PartnerFirstShopOnboardingPage() {
                       station transition behind its existing admin step-up. */}
                   <p style={{ fontWeight: 700, letterSpacing: "0.04em" }}>SCANNER WAITING FOR APPROVAL</p>
                   {pendingStations.map((st) => (
-                    <div key={stationCodeOf(st)} style={{ display: "flex", alignItems: "center", gap: 10, marginTop: 6, flexWrap: "wrap" }}>
+                    <div
+                      key={stationCodeOf(st)}
+                      style={{ display: "flex", alignItems: "center", gap: 10, marginTop: 6, flexWrap: "wrap" }}
+                    >
                       <code>{stationCodeOf(st)}</code>
                       <AdminButton
                         size="sm"
@@ -462,35 +664,43 @@ export default function PartnerFirstShopOnboardingPage() {
                 </div>
               ) : (
                 <p style={{ marginTop: 8, fontSize: 12, opacity: 0.85 }}>
-                  Station enrolment must come from the real shop Scanner: the operator signs in on the Mac and
-                  registers it. This step updates by itself when a request arrives.
+                  Station enrolment must come from the real shop Scanner: the operator signs in on the Mac and registers
+                  it. This step updates by itself when a request arrives.
                 </p>
               )}
               <div style={{ marginTop: 10 }}>
-                <Link href={`/admin/partners/${shop.organisation.id}/stations`} data-testid="first-shop-station-action">Open station setup</Link>
+                <Link href={`/admin/partners/${shop.organisation.id}/stations`} data-testid="first-shop-station-action">
+                  Open station setup
+                </Link>
               </div>
             </Step>
-            <Step number={7} title="Calibration and Scanner health" complete={shop.operational.dimensions.scanner.status === "PASS"}>
+            <Step
+              number={7}
+              title="Scanner connection and automatic profile"
+              complete={shop.operational.dimensions.scanner.status === "PASS"}
+            >
               <p data-testid="first-shop-scanner-message">{shop.operational.dimensions.scanner.message}</p>
               <p style={{ marginTop: 8, fontSize: 12, opacity: 0.85 }}>
-                Calibration happens physically in the Scanner app on the shop Mac. This step turns green once the
-                station reports a VALID calibration.
+                MintVault Scanner applies the fixed Canon profile automatically. This diagnostic turns green once the
+                enrolled station reports a healthy current profile.
               </p>
             </Step>
             <Step number={8} title="Credits" complete={shop.operational.dimensions.credits.status === "PASS"}>
               <p data-testid="first-shop-credits-message">{shop.operational.dimensions.credits.message}</p>
               <div style={{ marginTop: 10 }}>
-                <Link href={`/admin/partners/${shop.organisation.id}/credits`} data-testid="first-shop-credits-action">Open credits / billing readiness</Link>
+                <Link href={`/admin/partners/${shop.organisation.id}/credits`} data-testid="first-shop-credits-action">
+                  Open credits / billing readiness
+                </Link>
               </div>
             </Step>
             <Step number={9} title="Test card" complete={shop.operational.testCard.state === "COMPLETE"}>
               {/*
-                * EVERY WORD HERE COMES FROM THE SERVER. The state, the sentence and the actions are
-                * all produced by derivePartnerOperationalReadiness from the explicit
-                * `purpose = 'ONBOARDING_TEST'` marker and the Card Job lifecycle. Nothing on this
-                * page inspects a status, counts a card or infers which job the test one is — that
-                * inference is the exact defect the marker was added to remove.
-                */}
+               * EVERY WORD HERE COMES FROM THE SERVER. The state, the sentence and the actions are
+               * all produced by derivePartnerOperationalReadiness from the explicit
+               * `purpose = 'ONBOARDING_TEST'` marker and the Card Job lifecycle. Nothing on this
+               * page inspects a status, counts a card or infers which job the test one is — that
+               * inference is the exact defect the marker was added to remove.
+               */}
               <p data-testid="first-shop-test-card-message" data-state={shop.operational.testCard.state}>
                 {shop.operational.testCard.message}
               </p>
@@ -513,14 +723,14 @@ export default function PartnerFirstShopOnboardingPage() {
                   </p>
                 ) : shop.testCardArmedAt ? (
                   <p data-testid="first-shop-test-card-armed" style={{ fontSize: 12, opacity: 0.85 }}>
-                    Armed. The next card scanned in MintVault Scanner at this shop is recorded as the
-                    onboarding test card. It costs one Grading Credit, exactly like any other card.
+                    Armed. The next card scanned in MintVault Scanner at this shop is recorded as the onboarding test
+                    card. It costs one Grading Credit, exactly like any other card.
                   </p>
                 ) : (
                   <div data-testid="first-shop-test-card-arm-panel" style={{ marginTop: 10 }}>
                     <p style={{ fontSize: 12, opacity: 0.85 }}>
-                      The shop scans its test card on its own Mac. Arm it here first so MintVault records
-                      that card as the test rather than guessing which one it was.
+                      The shop scans its test card on its own Mac. Arm it here first so MintVault records that card as
+                      the test rather than guessing which one it was.
                     </p>
                     <AdminButton
                       size="sm"
@@ -536,11 +746,11 @@ export default function PartnerFirstShopOnboardingPage() {
             </Step>
             <Step number={10} title="Ready" complete={shop.operational.onboarding.complete}>
               {/*
-                * `onboarding.complete`, NOT `overall.ready`. The two are different questions and the
-                * server keeps them apart: `ready` is "can this shop grade a card now", which is true
-                * before any test card exists, while `onboarding.complete` additionally requires the
-                * shop to have put one card all the way through. This step is the second question.
-                */}
+               * `onboarding.complete`, NOT `overall.ready`. The two are different questions and the
+               * server keeps them apart: `ready` is "can this shop grade a card now", which is true
+               * before any test card exists, while `onboarding.complete` additionally requires the
+               * shop to have put one card all the way through. This step is the second question.
+               */}
               <p data-testid="first-shop-ready-message">{shop.operational.onboarding.message}</p>
               <ReadinessPanel readiness={shop.operational} audience="SUPER_ADMIN" />
             </Step>
@@ -551,7 +761,13 @@ export default function PartnerFirstShopOnboardingPage() {
   );
 }
 
-function AddressFields({ value, onChange }: { value: typeof emptyAddress; onChange: (key: keyof typeof emptyAddress, value: string) => void }) {
+function AddressFields({
+  value,
+  onChange,
+}: {
+  value: typeof emptyAddress;
+  onChange: (key: keyof typeof emptyAddress, value: string) => void;
+}) {
   return (
     <div style={{ display: "flex", gap: 10, flexWrap: "wrap" }}>
       <Input label="Address line 1" value={value.line1} onChange={(next) => onChange("line1", next)} />

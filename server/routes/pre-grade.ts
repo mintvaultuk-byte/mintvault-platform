@@ -6,32 +6,32 @@
  */
 
 import type { Express } from "express";
-import rateLimit from "express-rate-limit";
 import multer from "multer";
 import { rejectInvalidUploads } from "../routes";
+import { pool } from "../db";
+import { createSharedPublicRateLimit } from "../lib/shared-public-rate-limit";
+import { publicImageProcessingAdmission } from "../lib/public-image-processing-admission";
 
 export function registerPreGradeRoutes(app: Express): void {
   // Public AI pre-grade — 3/hour per IP. Each call invokes Claude Haiku
   // (paid). Tight cap is deliberate; expect VPN abuse to bypass over
   // time and add captcha / signed-token gating if it materialises.
-  const preGradeRateLimit = rateLimit({
+  const preGradeRateLimit = createSharedPublicRateLimit(pool, {
+    namespace: "pre_grade_ai",
     windowMs: 60 * 60 * 1000,
     max: 3,
-    standardHeaders: true,
-    legacyHeaders: false,
-    message: { error: "AI pre-grade is limited to 3 requests per hour per IP. Try again later." },
+    message: "AI pre-grade is limited to 3 requests per hour per IP. Try again later.",
   });
 
   // TIFF preview transcoding (/api/pre-grade/preview) — sharp resize +
   // JPEG encode only, no AI cost. Higher cap so users uploading scanner
   // TIFFs for front + back can preview both sides without spending
   // grading quota. Still capped to deter abuse of the public endpoint.
-  const preGradePreviewRateLimit = rateLimit({
+  const preGradePreviewRateLimit = createSharedPublicRateLimit(pool, {
+    namespace: "pre_grade_preview",
     windowMs: 60 * 60 * 1000,
     max: 20,
-    standardHeaders: true,
-    legacyHeaders: false,
-    message: { error: "Too many preview requests. Try again later." },
+    message: "Too many preview requests. Try again later.",
   });
 
   // Multer config for /api/pre-grade. In-memory storage (per spec — no
@@ -57,6 +57,7 @@ export function registerPreGradeRoutes(app: Express): void {
   app.post(
     "/api/pre-grade",
     preGradeRateLimit,
+    publicImageProcessingAdmission.middleware,
     preGradeUpload.fields([
       { name: "front", maxCount: 1 },
       { name: "back", maxCount: 1 },
@@ -121,24 +122,30 @@ export function registerPreGradeRoutes(app: Express): void {
   // previewing doesn't eat the user's 3/hour grading quota — sharp
   // resize + JPEG encode is cheap and ~10× preview headroom matches
   // realistic use (front + back × a few replacements).
-  app.post("/api/pre-grade/preview", preGradePreviewRateLimit, preGradeUpload.single("image"), async (req, res) => {
-    try {
-      const file = req.file;
-      if (!file) {
-        return res.status(400).json({ error: "Image required (multipart field: 'image')." });
+  app.post(
+    "/api/pre-grade/preview",
+    preGradePreviewRateLimit,
+    publicImageProcessingAdmission.middleware,
+    preGradeUpload.single("image"),
+    async (req, res) => {
+      try {
+        const file = req.file;
+        if (!file) {
+          return res.status(400).json({ error: "Image required (multipart field: 'image')." });
+        }
+        const sharp = (await import("sharp")).default;
+        const jpeg = await sharp(file.buffer)
+          .rotate()
+          .resize(800, undefined, { fit: "inside", withoutEnlargement: true })
+          .jpeg({ quality: 70, progressive: true })
+          .toBuffer();
+        res.set("Content-Type", "image/jpeg");
+        res.set("Cache-Control", "no-store");
+        res.send(jpeg);
+      } catch (err: any) {
+        console.error("[pre-grade/preview] failed:", err.message);
+        res.status(500).json({ error: "Preview generation failed." }); // H-d — no raw err.message to client (logged above)
       }
-      const sharp = (await import("sharp")).default;
-      const jpeg = await sharp(file.buffer)
-        .rotate()
-        .resize(800, undefined, { fit: "inside", withoutEnlargement: true })
-        .jpeg({ quality: 70, progressive: true })
-        .toBuffer();
-      res.set("Content-Type", "image/jpeg");
-      res.set("Cache-Control", "no-store");
-      res.send(jpeg);
-    } catch (err: any) {
-      console.error("[pre-grade/preview] failed:", err.message);
-      res.status(500).json({ error: "Preview generation failed." }); // H-d — no raw err.message to client (logged above)
     }
-  });
+  );
 }

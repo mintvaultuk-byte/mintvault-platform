@@ -1,9 +1,9 @@
 /**
  * Partner Portal — rate-limit abstraction (Phase 1).
  *
- * A pluggable store interface so the final architecture can be backed by a SHARED store (Postgres/
- * Redis) — the in-memory store here is per-machine and is a LOCAL-ONLY default. INFRASTRUCTURE
- * PREREQUISITE for production: a shared store (documented in the master rollback/infra notes).
+ * Production installs the shared PostgreSQL store. Until that installation has
+ * completed, the default store is deliberately unavailable: sensitive limiters
+ * fail closed instead of silently falling back to per-machine counters.
  *
  * Fail behaviour is per-endpoint sensitivity: a `failClosed` limiter DENIES when its backing store
  * errors/is unavailable (login, MFA, reset, session, location-switch, super-admin partner controls);
@@ -31,9 +31,40 @@ export class MemoryRateLimitStore implements RateLimitStore {
   }
 }
 
-let store: RateLimitStore = new MemoryRateLimitStore();
+/** Secure boot/failure default. Tests may explicitly inject MemoryRateLimitStore. */
+export class UnavailableRateLimitStore implements RateLimitStore {
+  async hit(): Promise<number> {
+    throw new Error("shared partner rate-limit store is not ready");
+  }
+}
+
+let store: RateLimitStore = new UnavailableRateLimitStore();
+let sharedPostgresStoreInstalled = false;
+
+/**
+ * General/test injection never satisfies production readiness. In particular,
+ * MemoryRateLimitStore must not turn /ready green on a multi-Machine process.
+ */
 export function setPartnerRateLimitStore(s: RateLimitStore): void {
   store = s;
+  sharedPostgresStoreInstalled = false;
+}
+
+/** Called only after rate-limit-store-pg has proved the shared relation exists. */
+export function installSharedPostgresPartnerRateLimitStore(s: RateLimitStore): void {
+  store = s;
+  sharedPostgresStoreInstalled = true;
+}
+
+/** Fail closed before every installation attempt, including retries after a prior success. */
+export function markSharedPostgresPartnerRateLimitStoreUnavailable(): void {
+  store = new UnavailableRateLimitStore();
+  sharedPostgresStoreInstalled = false;
+}
+
+/** Pure, name-safe process-readiness signal; performs no database operation. */
+export function partnerSharedRateLimitStoreInstalled(): boolean {
+  return sharedPostgresStoreInstalled;
 }
 
 export interface LimiterOpts {
@@ -198,13 +229,10 @@ const acctOnly = (req: Request): string => (req.body?.email ?? "").toString().to
  * fumbling their password is still bounded by the per-account bucket first, and a small partner
  * shop behind one egress IP (a few staff, a few typos each) is not locked out.
  *
- * WHAT THIS IS AND IS NOT WORTH, stated precisely: the budget is 30 per quarter hour per source
- * PER MACHINE, because the backing store is the in-process MemoryRateLimitStore (see the file
- * header). Across N machines a sprayer's real ceiling is 30 × N per window, and a deploy or
- * restart clears every bucket. That is still a hard bound where there was none, but it is not a
- * global one, and it does not become one until the shared store this module was designed for is
- * actually provided. Two further known limits, logged rather than fixed: a shared-NAT partner shop
- * shares one bucket, and successful logins consume budget alongside failed ones.
+ * The production budget is fleet-wide because the shared PostgreSQL store is
+ * required. Before it is ready, this sensitive limiter returns 503; it never
+ * grants a per-Machine fallback budget. A shared-NAT shop still shares one
+ * bucket, and successful logins consume budget alongside failed ones.
  */
 export const partnerLoginIpLimiter = partnerRateLimit({
   name: "partner_login_ip",

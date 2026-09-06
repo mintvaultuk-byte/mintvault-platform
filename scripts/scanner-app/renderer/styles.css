@@ -327,87 +327,6 @@ body {
   margin: 6px 0 0;
   white-space: pre-wrap;
 }
-/*
- * PHASE C — the draggable capture window, drawn to the platen's real 216 x 297 mm proportions so a
- * drag maps linearly to millimetres. Every position shown here is one the station can actually
- * scan: the main process clamps and then REFUSES anything outside the platen bounds rather than
- * silently relocating it.
- */
-.capture-window-setup {
-  display: flex;
-  flex-direction: column;
-  gap: 8px;
-}
-.platen-viewport {
-  aspect-ratio: 216 / 297;
-  background: repeating-linear-gradient(45deg, #1a1a1a, #1a1a1a 6px, #161616 6px, #161616 12px);
-  border: 1px solid var(--border);
-  border-radius: 5px;
-  margin: 0 auto;
-  max-width: 190px;
-  position: relative;
-  touch-action: none;
-  width: 100%;
-}
-/*
- * The station's FIXED capture area. Default cursor, because for a Scanner Operator this is a
- * read-out and nothing here is draggable — a grab cursor on an immovable box is an invitation to
- * try. The grab affordance is added back only under maintenance authority.
- */
-.platen-window {
-  align-items: flex-start;
-  background: rgb(96 165 250 / 14%);
-  border: 1px solid var(--blue);
-  border-radius: 3px;
-  display: flex;
-  justify-content: center;
-  position: absolute;
-}
-.platen-window--movable {
-  cursor: grab;
-}
-.platen-window--movable:active {
-  cursor: grabbing;
-}
-.platen-window > span {
-  color: var(--blue);
-  font-size: 7px;
-  font-weight: 800;
-  letter-spacing: 0.4px;
-  padding-top: 2px;
-  pointer-events: none;
-}
-/*
- * `.platen-safe` — the inner 80 x 110 box — is gone with the 10 mm gate it drew. It refused cards
- * that produced valid evidence, and drawing it here made setup and capture agree on a rule that
- * should never have been enforced.
- */
-.positioning-panel {
-  align-items: center;
-  background: var(--bg-2);
-  border: 1px solid var(--blue);
-  border-radius: 8px;
-  display: flex;
-  flex-direction: column;
-  gap: 7px;
-  padding: 8px;
-}
-.positioning-card-preview-viewport {
-  background: #000;
-  border-radius: 5px;
-  height: 270px;
-  max-width: 218px;
-  overflow: hidden;
-  position: relative;
-  width: 100%;
-}
-.positioning-card-preview {
-  display: block;
-  left: 0;
-  max-width: none;
-  position: absolute;
-  top: 0;
-}
 .positioning-preview-viewport {
   background: #000;
   border-radius: 5px;
@@ -1075,17 +994,48 @@ body {
   color: #1a1400;
 }
 
-/* Capture-window save outcome. A refusal used to render in the same grey as
-   "Saving…" and as success, which is how an operator came to believe a refused
-   save had worked. Three outcomes, three appearances. */
-#captureWindowStatus[data-state="refused"] {
-  color: #b3261e;
-  font-weight: 800;
+/*
+ * THE ALWAYS-AVAILABLE RECOVERY ROW on the station setup modal.
+ *
+ * Deliberately quiet — these are not the primary action on any screen, and on the happy path nobody
+ * should need them. But they are always rendered and never disabled, because the modal above them
+ * blocks everything else and the app it sits in has no window close button.
+ */
+.station-setup-recovery {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  flex-wrap: wrap;
+  margin-top: 14px;
+  padding-top: 12px;
+  border-top: 1px solid rgba(255, 255, 255, 0.12);
 }
-#captureWindowStatus[data-state="saved"] {
-  color: #1f7a34;
-  font-weight: 700;
+
+.station-setup-environment {
+  font-size: 11px;
+  letter-spacing: 1.2px;
+  text-transform: uppercase;
+  opacity: 0.7;
 }
-#captureWindowStatus[data-state="pending"] {
-  color: #7a7a7a;
+
+.station-setup-recovery-actions {
+  display: flex;
+  align-items: center;
+  gap: 14px;
+  flex-wrap: wrap;
+}
+
+.station-setup-recovery-actions .linklike {
+  font-size: 11px;
+  letter-spacing: 1.1px;
+}
+
+/*
+ * The waiting screen states Shop / Location / Mac on their own lines. Written as newlines in
+ * textContent rather than markup, so the copy stays one readable string in the renderer and cannot
+ * drift out of step with the element structure around it.
+ */
+#stationSetupText {
+  white-space: pre-line;
 }

@@ -159,7 +159,7 @@ const LB = "20000000-0000-0000-0000-0000000000d1";
     // enable the portal flag (global)
     await admin.query("DELETE FROM partner_feature_flags");
     await admin.query(
-      "INSERT INTO partner_feature_flags (tenant_id, flag, enabled) VALUES (NULL,'partner_portal_enabled',true)"
+      "INSERT INTO partner_feature_flags (tenant_id, flag, enabled) VALUES (NULL,'partner_portal_enabled',true),(NULL,'partner_login_enabled',true),(NULL,'partner_onboarding_enabled',true)"
     );
 
     const { createPartnerApp } = await import("../server/partner/app");

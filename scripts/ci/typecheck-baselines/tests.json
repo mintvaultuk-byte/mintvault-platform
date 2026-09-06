@@ -1,0 +1,540 @@
+{
+  "schemaVersion": 2,
+  "config": "tsconfig.tests.json",
+  "contract": {
+    "compilerVersion": "5.6.3",
+    "configSha256": "5648eaa52b860f9cbdd1bc3015a64d8d36952e94da1a2dffc47cd12509eca382",
+    "trackedFileCount": 508,
+    "trackedFilesSha256": "31bc38e4c930c0dca68c34dea5dfb9dd0acaff408cae29c185078b8d4b4ee1b4",
+    "noCheckFileCount": 0,
+    "noCheckFiles": [],
+    "noCheckFilesSha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+  },
+  "diagnosticCount": 345,
+  "fingerprints": [
+    {
+      "fingerprint": "scripts/db/schema-registry.ts|TS2345|Argument of type '1 | readonly [\"new\", \"received\", \"in_grading\", \"ready_to_return\", \"shipped\", \"completed\"] | Record<string, string> | { id: string; name: string; description: string; }[] | BulkDiscountTier[] | ... 128 more ... | ((pricePerCard: number, quantity: number, totalDeclaredValue?: number) => { ...; })' is not assignable to parameter of type 'Table<TableConfig<Column<any, object, object>>>'.",
+      "count": 1
+    },
+    {
+      "fingerprint": "scripts/db/schema-registry.ts|TS2677|A type predicate's type must be assignable to its parameter's type.",
+      "count": 1
+    },
+    {
+      "fingerprint": "server/lib/scanner-auth.ts|TS2339|Property 'rawBody' does not exist on type 'Request<ParamsDictionary, any, any, ParsedQs, Record<string, any>>'.",
+      "count": 1
+    },
+    {
+      "fingerprint": "server/partner/station-routes.ts|TS2339|Property 'rawBody' does not exist on type 'Request<ParamsDictionary, any, any, ParsedQs, Record<string, any>>'.",
+      "count": 1
+    },
+    {
+      "fingerprint": "tests/admin-auth-reliability.test.ts|TS18048|'server' is possibly 'undefined'.",
+      "count": 2
+    },
+    {
+      "fingerprint": "tests/admin-auth-reliability.test.ts|TS2322|Type '{ id: string; credential_version: number; }' is not assignable to type 'never'.",
+      "count": 4
+    },
+    {
+      "fingerprint": "tests/admin-grade-review-images.test.ts|TS2322|Type 'false' is not assignable to type 'true'.",
+      "count": 1
+    },
+    {
+      "fingerprint": "tests/admin-set-editor-actions.test.ts|TS2345|Argument of type '{ readonly uid: \"custom:mv1\"; readonly source: \"custom\"; readonly setId: \"mv1\"; readonly setName: \"Original Set\"; readonly tcg: \"pokemon\"; readonly series: \"Promo\"; readonly releaseYear: 2024; ... 8 more ...; readonly suggestions: readonly []; }' is not assignable to parameter of type 'SetRow'.",
+      "count": 4
+    },
+    {
+      "fingerprint": "tests/admin-station-approval-step-up-ui.test.ts|TS2493|Tuple type '[]' of length '0' has no element at index '0'.",
+      "count": 1
+    },
+    {
+      "fingerprint": "tests/admin-station-approval-step-up-ui.test.ts|TS2556|A spread argument must either have a tuple type or be passed to a rest parameter.",
+      "count": 1
+    },
+    {
+      "fingerprint": "tests/card-inspection-mounted.test.ts|TS2339|Property 'click' does not exist on type 'Element'.",
+      "count": 2
+    },
+    {
+      "fingerprint": "tests/card-inspection-mounted.test.ts|TS2339|Property 'name' does not exist on type 'Blob | MediaSource'.",
+      "count": 1
+    },
+    {
+      "fingerprint": "tests/card-inspection-mounted.test.ts|TS2347|Untyped function calls may not accept type arguments.",
+      "count": 13
+    },
+    {
+      "fingerprint": "tests/card-inspection-mounted.test.ts|TS2531|Object is possibly 'null'.",
+      "count": 2
+    },
+    {
+      "fingerprint": "tests/card-inspection-mounted.test.ts|TS7005|Variable 'added' implicitly has an 'any[]' type.",
+      "count": 3
+    },
+    {
+      "fingerprint": "tests/card-inspection-mounted.test.ts|TS7005|Variable 'host' implicitly has an 'any' type.",
+      "count": 87
+    },
+    {
+      "fingerprint": "tests/card-inspection-mounted.test.ts|TS7005|Variable 'root' implicitly has an 'any' type.",
+      "count": 24
+    },
+    {
+      "fingerprint": "tests/card-inspection-mounted.test.ts|TS7006|Parameter 'text' implicitly has an 'any' type.",
+      "count": 2
+    },
+    {
+      "fingerprint": "tests/card-inspection-mounted.test.ts|TS7017|Element implicitly has an 'any' type because type 'typeof globalThis' has no index signature.",
+      "count": 1
+    },
+    {
+      "fingerprint": "tests/card-inspection-mounted.test.ts|TS7034|Variable 'added' implicitly has type 'any[]' in some locations where its type cannot be determined.",
+      "count": 1
+    },
+    {
+      "fingerprint": "tests/card-inspection-mounted.test.ts|TS7034|Variable 'host' implicitly has type 'any' in some locations where its type cannot be determined.",
+      "count": 1
+    },
+    {
+      "fingerprint": "tests/card-inspection-mounted.test.ts|TS7034|Variable 'root' implicitly has type 'any' in some locations where its type cannot be determined.",
+      "count": 1
+    },
+    {
+      "fingerprint": "tests/card-tool-geometry.test.ts|TS2339|Property 'subgrade' does not exist on type '{ outer: Rect; inner: Rect; lr: string; tb: string; }'.",
+      "count": 2
+    },
+    {
+      "fingerprint": "tests/card-tool-geometry.test.ts|TS2339|Property 'subgrade' does not exist on type 'CenteringFromRects'.",
+      "count": 2
+    },
+    {
+      "fingerprint": "tests/certificate-preview-compact-layout.test.ts|TS2769|No overload matches this call.",
+      "count": 1
+    },
+    {
+      "fingerprint": "tests/certificate-preview-revision-runtime.test.ts|TS2339|Property 'body' does not exist on type 'never'.",
+      "count": 1
+    },
+    {
+      "fingerprint": "tests/certificate-preview-revision-runtime.test.ts|TS2493|Tuple type '[]' of length '0' has no element at index '1'.",
+      "count": 1
+    },
+    {
+      "fingerprint": "tests/claim-ownership-authority.test.ts|TS2345|Argument of type 'null' is not assignable to parameter of type 'string | undefined'.",
+      "count": 7
+    },
+    {
+      "fingerprint": "tests/command-centre-ui-runtime.test.ts|TS2769|No overload matches this call.",
+      "count": 1
+    },
+    {
+      "fingerprint": "tests/estimate-credit-consumption-owner-binding.test.ts|TS2322|Type 'NodePgDatabase<Record<string, unknown>> & { $client: Client; }' is not assignable to type 'NodePgDatabase<Record<string, unknown>> & { $client: Pool; }'.",
+      "count": 1
+    },
+    {
+      "fingerprint": "tests/grader-certificate-read-rate-limit.test.ts|TS18048|'server' is possibly 'undefined'.",
+      "count": 2
+    },
+    {
+      "fingerprint": "tests/grader-certificate-read-rate-limit.test.ts|TS2322|Type '{ isStaff: true; staffId: string; graderId: string; capGrade: true; }' is not assignable to type 'Session & Partial<SessionData> & Record<string, unknown>'.",
+      "count": 1
+    },
+    {
+      "fingerprint": "tests/grader-edit-submission-rate-limit.test.ts|TS18048|'server' is possibly 'undefined'.",
+      "count": 2
+    },
+    {
+      "fingerprint": "tests/grader-edit-submission-rate-limit.test.ts|TS2322|Type '{ isStaff: true; staffId: string; graderId: string; capGrade: true; }' is not assignable to type 'Session & Partial<SessionData> & Record<string, unknown>'.",
+      "count": 1
+    },
+    {
+      "fingerprint": "tests/grading-credit-owner-binding.test.ts|TS2322|Type 'NodePgDatabase<Record<string, unknown>> & { $client: Pool; }' is not assignable to type 'PaymentExecutor | undefined'.",
+      "count": 13
+    },
+    {
+      "fingerprint": "tests/grading-identity-verification.test.ts|TS2322|Type '{ certId: number; certIdStr: string; mode: \"edit\" | \"review\"; locked: boolean; game: string | null; name: string; set: string; setCode: string; number: string; year: string; language?: string | undefined; ... 18 more ...; resetKey: string | number; }' is not assignable to type 'GradingIdentityVerificationProps'.",
+      "count": 1
+    },
+    {
+      "fingerprint": "tests/grading-review-transition-barrier.test.ts|TS2322|Type 'Promise<unknown>' is not assignable to type 'Promise<PersistedReviewRevision<unknown>>'.",
+      "count": 1
+    },
+    {
+      "fingerprint": "tests/grading-stale-grade-race.test.ts|TS7006|Parameter 'f' implicitly has an 'any' type.",
+      "count": 1
+    },
+    {
+      "fingerprint": "tests/grading-workflow-runtime.test.ts|TS2307|Cannot find module '../client/src/components/grading-workflow/LabelPreview' or its corresponding type declarations.",
+      "count": 1
+    },
+    {
+      "fingerprint": "tests/growth-command-gb03.test.ts|TS2769|No overload matches this call.",
+      "count": 2
+    },
+    {
+      "fingerprint": "tests/growth-command-gb04-rbac.test.ts|TS2769|No overload matches this call.",
+      "count": 1
+    },
+    {
+      "fingerprint": "tests/growth-command-pass-b1.test.ts|TS2353|Object literal may only specify known properties, and 'customerEmail' does not exist in type 'SubmissionConfirmationCandidate'.",
+      "count": 1
+    },
+    {
+      "fingerprint": "tests/lide400-capture-authority.test.ts|TS2352|Conversion of type 'Lide400CaptureProfile' to type 'Record<string, unknown>' may be a mistake because neither type sufficiently overlaps with the other. If this was intentional, convert the expression to 'unknown' first.",
+      "count": 1
+    },
+    {
+      "fingerprint": "tests/lide400-capture-corpus.test.ts|TS2305|Module '\"@shared/lide400-card-geometry.cjs\"' has no exported member '_stages'.",
+      "count": 1
+    },
+    {
+      "fingerprint": "tests/lide400-capture-profile.test.ts|TS2352|Conversion of type 'Lide400CaptureProfile' to type 'Record<string, unknown>' may be a mistake because neither type sufficiently overlaps with the other. If this was intentional, convert the expression to 'unknown' first.",
+      "count": 2
+    },
+    {
+      "fingerprint": "tests/main-runtime-role-authority-migration.test.ts|TS2345|Argument of type 'PgTableWithColumns<{ name: \"vq_set_settings\"; schema: undefined; columns: { id: PgColumn<{ name: \"id\"; tableName: \"vq_set_settings\"; dataType: \"number\"; columnType: \"PgSerial\"; data: number; driverParam: number; notNull: true; ... 7 more ...; generated: undefined; }, {}, {}>; ... 15 more ...; updatedAt: PgColumn<......' is not assignable to parameter of type 'Table<TableConfig<Column<any, object, object>>>'.",
+      "count": 1
+    },
+    {
+      "fingerprint": "tests/main-runtime-role-authority-migration.test.ts|TS2677|A type predicate's type must be assignable to its parameter's type.",
+      "count": 1
+    },
+    {
+      "fingerprint": "tests/partner-admin-capability.test.ts|TS2322|Type 'Promise<{ rows: { has_role: boolean; rolsuper: boolean; rolbypassrls: boolean; }[]; rowCount: number; command: string; oid: number; fields: never[]; }>' is not assignable to type 'Promise<QueryResult<T>>'.",
+      "count": 5
+    },
+    {
+      "fingerprint": "tests/partner-at21-grant-boundary.test.ts|TS2345|Argument of type 'Pool' is not assignable to parameter of type 'Client'.",
+      "count": 3
+    },
+    {
+      "fingerprint": "tests/partner-at21-grant-boundary.test.ts|TS2353|Object literal may only specify known properties, and 'actorType' does not exist in type 'WalletActor'.",
+      "count": 1
+    },
+    {
+      "fingerprint": "tests/partner-card-job-grading-bridge.test.ts|TS2345|Argument of type 'Promise<AcquireResult> | Promise<LeaseView>' is not assignable to parameter of type 'Promise<AcquireResult>'.",
+      "count": 1
+    },
+    {
+      "fingerprint": "tests/partner-catalogue-router-scope.test.ts|TS2769|No overload matches this call.",
+      "count": 1
+    },
+    {
+      "fingerprint": "tests/partner-connector-fault-injection.test.ts|TS2345|Argument of type 'string | undefined' is not assignable to parameter of type 'string'.",
+      "count": 1
+    },
+    {
+      "fingerprint": "tests/partner-connector-g3f-blockers.test.ts|TS2345|Argument of type 'string | undefined' is not assignable to parameter of type 'string'.",
+      "count": 1
+    },
+    {
+      "fingerprint": "tests/partner-connector-import-service.test.ts|TS2345|Argument of type 'string | undefined' is not assignable to parameter of type 'string'.",
+      "count": 1
+    },
+    {
+      "fingerprint": "tests/partner-connector-reconciliation-concurrency.test.ts|TS2345|Argument of type 'string | undefined' is not assignable to parameter of type 'string'.",
+      "count": 1
+    },
+    {
+      "fingerprint": "tests/partner-connector-reconciliation-service.test.ts|TS2345|Argument of type 'string | undefined' is not assignable to parameter of type 'string'.",
+      "count": 1
+    },
+    {
+      "fingerprint": "tests/partner-connector-runtime.test.ts|TS2345|Argument of type 'string | undefined' is not assignable to parameter of type 'string'.",
+      "count": 1
+    },
+    {
+      "fingerprint": "tests/partner-connector-scale.test.ts|TS2345|Argument of type 'string | undefined' is not assignable to parameter of type 'string'.",
+      "count": 1
+    },
+    {
+      "fingerprint": "tests/partner-connector-service.test.ts|TS2345|Argument of type 'string | undefined' is not assignable to parameter of type 'string'.",
+      "count": 1
+    },
+    {
+      "fingerprint": "tests/partner-connector-validation-service.test.ts|TS2322|Type 'null' is not assignable to type 'number | undefined'.",
+      "count": 1
+    },
+    {
+      "fingerprint": "tests/partner-connector-validation-service.test.ts|TS2345|Argument of type 'string | undefined' is not assignable to parameter of type 'string'.",
+      "count": 1
+    },
+    {
+      "fingerprint": "tests/partner-dashboard-integration.test.ts|TS2339|Property 'code' does not exist on type 'never'.",
+      "count": 5
+    },
+    {
+      "fingerprint": "tests/partner-dashboard-integration.test.ts|TS2339|Property 'credits' does not exist on type 'never'.",
+      "count": 2
+    },
+    {
+      "fingerprint": "tests/partner-dashboard-integration.test.ts|TS2339|Property 'partnerId' does not exist on type 'never'.",
+      "count": 2
+    },
+    {
+      "fingerprint": "tests/partner-dashboard-integration.test.ts|TS2339|Property 'shops' does not exist on type 'never'.",
+      "count": 4
+    },
+    {
+      "fingerprint": "tests/partner-dashboard-integration.test.ts|TS2488|Type 'never' must have a '[Symbol.iterator]()' method that returns an iterator.",
+      "count": 2
+    },
+    {
+      "fingerprint": "tests/partner-dashboard-integration.test.ts|TS2571|Object is of type 'unknown'.",
+      "count": 1
+    },
+    {
+      "fingerprint": "tests/partner-final-owner-invariant.test.ts|TS2345|Argument of type 'string | undefined' is not assignable to parameter of type 'string'.",
+      "count": 1
+    },
+    {
+      "fingerprint": "tests/partner-first-shop-onboarding.test.ts|TS2352|Conversion of type '{ method: string; headers: { \"x-request-id\": string; }; body: { idempotencyKey: string; }; partner: { tenantId: string; locationId: null; userId: string; sessionId: string; }; }' to type 'Request<ParamsDictionary, any, any, ParsedQs, Record<string, any>>' may be a mistake because neither type sufficiently overlaps with the other. If this was intentional, convert the expression to 'unknown' first.",
+      "count": 1
+    },
+    {
+      "fingerprint": "tests/partner-grading-lease.test.ts|TS2345|Argument of type 'Promise<AcquireResult> | Promise<LeaseView>' is not assignable to parameter of type 'Promise<AcquireResult>'.",
+      "count": 1
+    },
+    {
+      "fingerprint": "tests/partner-management-integration.test.ts|TS2339|Property 'delivery' does not exist on type '{ invitationId: string; deliveryStatus: string; invitationLink?: string | undefined; userId: string; }'.",
+      "count": 1
+    },
+    {
+      "fingerprint": "tests/partner-management-integration.test.ts|TS2721|Cannot invoke an object which is possibly 'null'.",
+      "count": 1
+    },
+    {
+      "fingerprint": "tests/partner-network-consolidation.test.ts|TS2345|Argument of type '{ id: string; partnerId: string; partnerName: string; severity: \"high\"; kind: string; reason: string; recommendedAction: string; detectedAt: null; }[]' is not assignable to parameter of type 'DashboardAlert[]'.",
+      "count": 1
+    },
+    {
+      "fingerprint": "tests/partner-network-lifecycle.test.ts|TS2322|Type '{ staff?: ReadinessDimension | undefined; owner: ReadinessDimension; location: ReadinessDimension; scanner: ReadinessDimension; ... 4 more ...; credits: ReadinessDimension; }' is not assignable to type 'Record<ReadinessDimensionKey, ReadinessDimension>'.",
+      "count": 1
+    },
+    {
+      "fingerprint": "tests/partner-network-lifecycle.test.ts|TS2345|Argument of type '{ overall: { ready: true; code: \"READY\"; message: string; }; dimensions: Record<ReadinessDimensionKey, ReadinessDimension>; actions: never[]; }' is not assignable to parameter of type 'PartnerOperationalReadiness'.",
+      "count": 1
+    },
+    {
+      "fingerprint": "tests/partner-onboarding-matrix.test.ts|TS2339|Property 'raw' does not exist on type '{ status: number; body: Json; userId: string; invitationId: string; token: string; }'.",
+      "count": 1
+    },
+    {
+      "fingerprint": "tests/partner-onboarding-matrix.test.ts|TS2345|Argument of type 'string | null' is not assignable to parameter of type 'string'.",
+      "count": 2
+    },
+    {
+      "fingerprint": "tests/partner-operational-readiness.test.ts|TS2322|Type '{ orgStatus: string; portalEnabled: boolean | null; loginFlagEnabled: boolean | null; emergencyStop: boolean | null; owner: { userStatus: string; passwordConfigured: boolean; invitationValid: boolean; mfaRequired: boolean; mfaConfigured: boolean; } | null; ... 7 more ...; nowMs: number; }' is not assignable to type 'PartnerReadinessFacts'.",
+      "count": 1
+    },
+    {
+      "fingerprint": "tests/partner-pilot-concurrency.test.ts|TS2345|Argument of type 'Pool' is not assignable to parameter of type 'Client'.",
+      "count": 3
+    },
+    {
+      "fingerprint": "tests/partner-pilot-flag-controls-ui.test.ts|TS7006|Parameter 'r' implicitly has an 'any' type.",
+      "count": 2
+    },
+    {
+      "fingerprint": "tests/partner-rbac-migration.test.ts|TS2367|This comparison appears to be unintentional because the types '\"0001_partner_foundation\" | \"0002_partner_auth_support\" | \"0003_partner_auth_hardening\" | \"0004_partner_mfa_enrol\" | \"0005_partner_mfa_replay_and_grants\" | \"0044_partner_mfa_pending_lifecycle\" | ... 19 more ... | \"0096_partner_card_job_void_management_audit\"' and '\"0073_lineage_convergence\"' have no overlap.",
+      "count": 1
+    },
+    {
+      "fingerprint": "tests/partner-readiness-panel-render.test.ts|TS2741|Property 'testCard' is missing in type '{ orgStatus: string; portalEnabled: true; loginFlagEnabled: true; emergencyStop: false; owner: { userStatus: string; passwordConfigured: true; invitationValid: false; mfaRequired: false; mfaConfigured: false; }; ... 6 more ...; nowMs: number; }' but required in type 'PartnerReadinessFacts'.",
+      "count": 1
+    },
+    {
+      "fingerprint": "tests/partner-route-and-rate-limit-authority.test.ts|TS2554|Expected 0 arguments, but got 2.",
+      "count": 1
+    },
+    {
+      "fingerprint": "tests/partner-runtime-integration.test.ts|TS2345|Argument of type 'string | undefined' is not assignable to parameter of type 'string'.",
+      "count": 1
+    },
+    {
+      "fingerprint": "tests/partner-scanner-fix.test.ts|TS2345|Argument of type 'Promise<InvalidateSideResult> | Promise<FixAuthorisation>' is not assignable to parameter of type 'Promise<InvalidateSideResult>'.",
+      "count": 1
+    },
+    {
+      "fingerprint": "tests/partner-schema-parity.test.ts|TS2345|Argument of type 'PgTableWithColumns<{ name: \"partner_roles\"; schema: undefined; columns: { id: PgColumn<{ name: \"id\"; tableName: \"partner_roles\"; dataType: \"string\"; columnType: \"PgUUID\"; data: string; driverParam: string; notNull: true; ... 7 more ...; generated: undefined; }, {}, {}>; code: PgColumn<...>; label: PgColumn<...>; cre...' is not assignable to parameter of type 'Table<TableConfig<Column<any, object, object>>>'.",
+      "count": 3
+    },
+    {
+      "fingerprint": "tests/partner-schema-parity.test.ts|TS2677|A type predicate's type must be assignable to its parameter's type.",
+      "count": 2
+    },
+    {
+      "fingerprint": "tests/partner-submission-credit-lifecycle.test.ts|TS2339|Property 'reservation_id' does not exist on type '{ error: string; message: string; reservationLinkConflict?: undefined; } | { error: string; message: string; reservationLinkConflict: boolean; } | { destinationCreditHold: { id: string; destination_submission_id: number; reason_code: string; created_at: string; released_at: string | null; }; ... 7 more ...; message?...'.",
+      "count": 1
+    },
+    {
+      "fingerprint": "tests/partner-submission-credit-lifecycle.test.ts|TS2365|Operator '<' cannot be applied to types 'string' and 'number'.",
+      "count": 1
+    },
+    {
+      "fingerprint": "tests/partner-submission-workflow.test.ts|TS2345|Argument of type 'string | undefined' is not assignable to parameter of type 'string'.",
+      "count": 1
+    },
+    {
+      "fingerprint": "tests/partner-supplies-ordering.test.ts|TS2698|Spread types may only be created from object types.",
+      "count": 1
+    },
+    {
+      "fingerprint": "tests/partner-supply-orders.integration.test.ts|TS2493|Tuple type '[]' of length '0' has no element at index '0'.",
+      "count": 1
+    },
+    {
+      "fingerprint": "tests/partner-supply-orders.integration.test.ts|TS2493|Tuple type '[]' of length '0' has no element at index '1'.",
+      "count": 1
+    },
+    {
+      "fingerprint": "tests/partner-supply-orders.integration.test.ts|TS2532|Object is possibly 'undefined'.",
+      "count": 1
+    },
+    {
+      "fingerprint": "tests/partner-user-management-ui-render.test.ts|TS7006|Parameter 'r' implicitly has an 'any' type.",
+      "count": 1
+    },
+    {
+      "fingerprint": "tests/partner-workflow-apis.test.ts|TS2345|Argument of type 'string | undefined' is not assignable to parameter of type 'string'.",
+      "count": 1
+    },
+    {
+      "fingerprint": "tests/postgres-operational-script-transport.test.ts|TS2339|Property 'connectionParameters' does not exist on type 'Client'.",
+      "count": 5
+    },
+    {
+      "fingerprint": "tests/postgres-transport-security.test.ts|TS2339|Property 'connectionParameters' does not exist on type 'Client'.",
+      "count": 8
+    },
+    {
+      "fingerprint": "tests/project-control-surface.test.ts|TS2741|Property 'suppressed' is missing in type '{ packageKey: string; packageTitle: string; nodeKey: string; kind: \"deploy\"; headline: string; priority: number; riskScore: number; businessValue: number; requiresOwnerApproval: true; blockedBy: never[]; reasons: never[]; }' but required in type 'NextAction'.",
+      "count": 1
+    },
+    {
+      "fingerprint": "tests/public-partner-profile-view.test.ts|TS2769|No overload matches this call.",
+      "count": 1
+    },
+    {
+      "fingerprint": "tests/r2-to-b2-archival.test.ts|TS2322|Type 'string' is not assignable to type 'null'.",
+      "count": 2
+    },
+    {
+      "fingerprint": "tests/r2-to-b2-archival.test.ts|TS2345|Argument of type 'null' is not assignable to parameter of type 'string'.",
+      "count": 1
+    },
+    {
+      "fingerprint": "tests/release-readiness.test.ts|TS2493|Tuple type '[]' of length '0' has no element at index '0'.",
+      "count": 1
+    },
+    {
+      "fingerprint": "tests/set-library-postgres.integration.test.ts|TS2339|Property 'text' does not exist on type '{}'.",
+      "count": 1
+    },
+    {
+      "fingerprint": "tests/set-library.test.ts|TS2345|Argument of type '{ source: \"card_sets\"; release_year: number; release_date_raw: string; updated_at: null; set_id: string; set_name: string; card_game: string; series: string; total_cards: number; subset: null; archived: boolean; linked_cards: number; linked_certificates: number; }' is not assignable to parameter of type '{ source: string; set_id: string; set_name: string; card_game: string; series: string; release_year: number; total_cards: number; subset: null; archived: boolean; updated_at: string; release_date_raw: string; linked_cards: number; linked_certificates: number; }'.",
+      "count": 1
+    },
+    {
+      "fingerprint": "tests/set-library.test.ts|TS2353|Object literal may only specify known properties, and 'updatedAt' does not exist in type 'SetLibraryEditInput'.",
+      "count": 1
+    },
+    {
+      "fingerprint": "tests/structured-variant-persistence.test.ts|TS2345|Argument of type '{ rarity: string; }' is not assignable to parameter of type '{ rarity: string | null; language: string | null; era: string | null; id: number; deletedAt: Date | null; createdAt: Date; updatedAt: Date | null; status: string; notes: string | null; ... 153 more ...; originSnapshotVersion: number | null; }'.",
+      "count": 1
+    },
+    {
+      "fingerprint": "tests/structured-variant-persistence.test.ts|TS2345|Argument of type '{ rarityCode: string; }' is not assignable to parameter of type '{ rarity: string | null; language: string | null; era: string | null; id: number; deletedAt: Date | null; createdAt: Date; updatedAt: Date | null; status: string; notes: string | null; ... 153 more ...; originSnapshotVersion: number | null; }'.",
+      "count": 1
+    },
+    {
+      "fingerprint": "tests/structured-variant-persistence.test.ts|TS2345|Argument of type '{ structuredVariantVersion: number; rarityCode: string; }' is not assignable to parameter of type '{ rarity: string | null; language: string | null; era: string | null; id: number; deletedAt: Date | null; createdAt: Date; updatedAt: Date | null; status: string; notes: string | null; ... 153 more ...; originSnapshotVersion: number | null; }'.",
+      "count": 1
+    },
+    {
+      "fingerprint": "tests/structured-variant-persistence.test.ts|TS2345|Argument of type '{ variant: string; }' is not assignable to parameter of type '{ rarity: string | null; language: string | null; era: string | null; id: number; deletedAt: Date | null; createdAt: Date; updatedAt: Date | null; status: string; notes: string | null; ... 153 more ...; originSnapshotVersion: number | null; }'.",
+      "count": 1
+    },
+    {
+      "fingerprint": "tests/vq-action-reference-background-gate.integration.test.ts|TS2352|Conversion of type 'undefined' to type '{ prompt: string; }' may be a mistake because neither type sufficiently overlaps with the other. If this was intentional, convert the expression to 'unknown' first.",
+      "count": 2
+    },
+    {
+      "fingerprint": "tests/vq-action-reference-background-gate.integration.test.ts|TS2493|Tuple type '[]' of length '0' has no element at index '0'.",
+      "count": 7
+    },
+    {
+      "fingerprint": "tests/vq-action-replacement-gate.integration.test.ts|TS2352|Conversion of type 'undefined' to type '{ imageReferences?: Buffer[] | undefined; }' may be a mistake because neither type sufficiently overlaps with the other. If this was intentional, convert the expression to 'unknown' first.",
+      "count": 1
+    },
+    {
+      "fingerprint": "tests/vq-action-replacement-gate.integration.test.ts|TS2352|Conversion of type 'undefined' to type '{ prompt: string; }' may be a mistake because neither type sufficiently overlaps with the other. If this was intentional, convert the expression to 'unknown' first.",
+      "count": 3
+    },
+    {
+      "fingerprint": "tests/vq-action-replacement-gate.integration.test.ts|TS2493|Tuple type '[]' of length '0' has no element at index '0'.",
+      "count": 4
+    },
+    {
+      "fingerprint": "tests/vq-action-replacement-gate.integration.test.ts|TS2571|Object is of type 'unknown'.",
+      "count": 2
+    },
+    {
+      "fingerprint": "tests/vq-card-factory.test.ts|TS2345|Argument of type '{ spec: VqCardFactorySpec; card: null; character: null; validation: { code: string; field: string; message: string; severity: \"blocker\"; }[]; completionStatus: \"missing\"; blockingReason: string; ... 8 more ...; previousStagePortraitStatus: \"not_required\"; }[]' is not assignable to parameter of type 'VqFactoryCardRow[]'.",
+      "count": 3
+    },
+    {
+      "fingerprint": "tests/vq-card-factory.test.ts|TS2345|Argument of type 'string | null | undefined' is not assignable to parameter of type 'string'.",
+      "count": 1
+    },
+    {
+      "fingerprint": "tests/vq-card-factory.test.ts|TS2352|Conversion of type '{ cardId: string; cardType: string; displayName: string; lifeStage: string; keywords: never[]; effects: null; renderR2Key: null; variantTier: string; baseCardId: null; setCode: string; language: string; ... 27 more ...; status?: string | ... 1 more ... | undefined; }[]' to type '{ rarity: string | null; language: string; shift: number | null; id: number; name: string; createdAt: Date; updatedAt: Date; displayName: string | null; status: string; notes: string | null; ... 27 more ...; baseCardId: string | null; }[]' may be a mistake because neither type sufficiently overlaps with the other. If this was intentional, convert the expression to 'unknown' first.",
+      "count": 1
+    },
+    {
+      "fingerprint": "tests/vq-card-factory.test.ts|TS2352|Conversion of type '{ cardId: string; cardType: string; displayName: string; lifeStage: string; keywords: never[]; effects: null; renderR2Key: null; variantTier: string; baseCardId: null; setCode: string; language: string; ... 27 more ...; status?: string | null; }' to type '{ rarity: string | null; language: string; shift: number | null; id: number; name: string; createdAt: Date; updatedAt: Date; displayName: string | null; status: string; notes: string | null; ... 27 more ...; baseCardId: string | null; }' may be a mistake because neither type sufficiently overlaps with the other. If this was intentional, convert the expression to 'unknown' first.",
+      "count": 1
+    },
+    {
+      "fingerprint": "tests/vq-card-factory.test.ts|TS2352|Conversion of type '{ cardId: string; collectorNumber: string; name: string; displayName: string; cardType: string; element: string; rarity: string; familyId: string; stageNumber: number; lifeStage: string; health: number; ... 18 more ...; status: string; }' to type '{ rarity: string | null; language: string; shift: number | null; id: number; name: string; createdAt: Date; updatedAt: Date; displayName: string | null; status: string; notes: string | null; ... 27 more ...; baseCardId: string | null; }' may be a mistake because neither type sufficiently overlaps with the other. If this was intentional, convert the expression to 'unknown' first.",
+      "count": 1
+    },
+    {
+      "fingerprint": "tests/vq-card-factory.test.ts|TS2352|Conversion of type '{ id: number; characterId: string; setCode: string; familyId: string; familyName: string; cardId: string; stageNumber: number; characterName: string; element: string; referencePack: { master_portrait: { ...; }; }; ... 8 more ...; updatedAt: Date; }[]' to type '{ id: number; role: string | null; createdAt: Date; updatedAt: Date; cardId: string; setCode: string; locked: boolean; approvalStatus: string; characterId: string; familyId: string; ... 23 more ...; descriptionStatus: string; }[]' may be a mistake because neither type sufficiently overlaps with the other. If this was intentional, convert the expression to 'unknown' first.",
+      "count": 1
+    },
+    {
+      "fingerprint": "tests/vq-evolution-gate.integration.test.ts|TS2571|Object is of type 'unknown'.",
+      "count": 2
+    },
+    {
+      "fingerprint": "tests/vq-identity-drift-gate.integration.test.ts|TS2352|Conversion of type 'undefined' to type '{ imageReferences?: Buffer[] | undefined; }' may be a mistake because neither type sufficiently overlaps with the other. If this was intentional, convert the expression to 'unknown' first.",
+      "count": 1
+    },
+    {
+      "fingerprint": "tests/vq-identity-drift-gate.integration.test.ts|TS2352|Conversion of type 'undefined' to type '{ prompt: string; }' may be a mistake because neither type sufficiently overlaps with the other. If this was intentional, convert the expression to 'unknown' first.",
+      "count": 2
+    },
+    {
+      "fingerprint": "tests/vq-identity-drift-gate.integration.test.ts|TS2493|Tuple type '[]' of length '0' has no element at index '0'.",
+      "count": 3
+    },
+    {
+      "fingerprint": "tests/vq-identity-drift-gate.integration.test.ts|TS2571|Object is of type 'unknown'.",
+      "count": 2
+    },
+    {
+      "fingerprint": "tests/vq-legacy-first-generation-route-proof.integration.test.ts|TS2352|Conversion of type 'undefined' to type 'string' may be a mistake because neither type sufficiently overlaps with the other. If this was intentional, convert the expression to 'unknown' first.",
+      "count": 1
+    },
+    {
+      "fingerprint": "tests/vq-legacy-first-generation-route-proof.integration.test.ts|TS2493|Tuple type '[]' of length '0' has no element at index '0'.",
+      "count": 1
+    },
+    {
+      "fingerprint": "tests/vq-pose-diversity-gate.integration.test.ts|TS2571|Object is of type 'unknown'.",
+      "count": 3
+    }
+  ]
+}

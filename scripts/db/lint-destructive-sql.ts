@@ -122,6 +122,16 @@ export function lintSql(sql: string): DestructiveFinding[] {
     const re = new RegExp(rule.re.source, rule.re.flags.includes("g") ? rule.re.flags : rule.re.flags + "g");
     let m: RegExpExecArray | null;
     while ((m = re.exec(cleaned)) !== null) {
+      // TRUNCATE is also a legitimate trigger event (`BEFORE TRUNCATE` /
+      // `AFTER TRUNCATE`). Treating the event declaration as a destructive
+      // statement makes it impossible to install a guard that refuses actual
+      // TRUNCATE statements without requesting a bogus destructive approval.
+      if (
+        rule.kind === "truncate" &&
+        /\b(?:BEFORE|AFTER)\s+$/i.test(cleaned.slice(Math.max(0, m.index - 24), m.index))
+      ) {
+        continue;
+      }
       const line = cleaned.slice(0, m.index).split("\n").length;
       findings.push({
         kind: rule.kind,
@@ -259,7 +269,10 @@ export function isApprovedDestructiveFinding(filePath: string, sql: string, find
     ];
     return pairs.every(([table, action]) => {
       const name = `${table}_tenant_id_fkey`;
-      const drop = new RegExp(`ALTER\\s+TABLE\\s+${table}\\s+DROP\\s+CONSTRAINT\\s+IF\\s+EXISTS\\s+${name}\\s*;`, "i").exec(cleaned);
+      const drop = new RegExp(
+        `ALTER\\s+TABLE\\s+${table}\\s+DROP\\s+CONSTRAINT\\s+IF\\s+EXISTS\\s+${name}\\s*;`,
+        "i"
+      ).exec(cleaned);
       const addFk = new RegExp(
         `ALTER\\s+TABLE\\s+${table}\\s+ADD\\s+CONSTRAINT\\s+${name}\\s+FOREIGN\\s+KEY\\s*\\(\\s*tenant_id\\s*\\)\\s+REFERENCES\\s+partner_organisations\\s*\\(\\s*id\\s*\\)\\s+ON\\s+DELETE\\s+${action}\\s*;`,
         "i"
@@ -322,7 +335,9 @@ export function isApprovedDestructiveFinding(filePath: string, sql: string, find
     if (!rawAdd) return false;
     const blockEnd = sql.indexOf("));", rawAdd.index);
     if (blockEnd < 0) return false;
-    const actionValues = new Set([...sql.slice(rawAdd.index, blockEnd).matchAll(/'([^']+)'/g)].map((match) => match[1]));
+    const actionValues = new Set(
+      [...sql.slice(rawAdd.index, blockEnd).matchAll(/'([^']+)'/g)].map((match) => match[1])
+    );
     const expected = [
       ...PARTNER_MANAGEMENT_AUDIT_ACTIONS_0105,
       // The only two values 0110 is approved to add. Any third one, or any missing prior value,
@@ -356,7 +371,9 @@ export function isApprovedDestructiveFinding(filePath: string, sql: string, find
     if (!rawAdd) return false;
     const blockEnd = sql.indexOf("));", rawAdd.index);
     if (blockEnd < 0) return false;
-    const actionValues = new Set([...sql.slice(rawAdd.index, blockEnd).matchAll(/'([^']+)'/g)].map((match) => match[1]));
+    const actionValues = new Set(
+      [...sql.slice(rawAdd.index, blockEnd).matchAll(/'([^']+)'/g)].map((match) => match[1])
+    );
     const expected = PARTNER_MANAGEMENT_AUDIT_ACTIONS_0105;
     return actionValues.size === expected.length && expected.every((action) => actionValues.has(action));
   }

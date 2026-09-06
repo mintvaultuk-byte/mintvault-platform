@@ -86,11 +86,11 @@ describe("Ownership + NFC moved out of the grading scroll (spec 8-13, 15-17)", (
 describe("two-column shell + density (spec 1, 3, 19)", () => {
   it("Card Details renders the preview beside the controls (~40% left column)", () => {
     expect(WORKSTATION).toContain("<CanonicalGradingWorkstationShell");
-    expect(CANON_SHELL).toContain("flex min-h-0 flex-1 flex-col gap-2 md:flex-row");
+    expect(CANON_SHELL).toContain('WORKSTATION_TWO_PANE_CLASS = "min-[540px]:flex-row"');
     // unified-shell pass: the column-ratio class now lives in ONE shared
     // constant inside WorkstationPreviewAside, not inline in certificate-form.
     const asideSrc = read("client/src/components/grading-workflow/WorkstationPreviewAside.tsx");
-    expect(asideSrc).toContain("md:w-[45%] md:shrink-0");
+    expect(asideSrc).toContain("min-[540px]:w-[45%] min-[540px]:shrink-0");
     expect(asideSrc).toContain('data-testid="grading-preview-panel"');
     expect(WORKSTATION).toContain("<WorkstationPreviewAside");
   });

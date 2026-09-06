@@ -1,3 +1,4 @@
+import { adminFetch } from "@/lib/queryClient";
 /**
  * Admin → Pokémon Knowledge — the founder/staff Knowledge Hub.
  *
@@ -47,12 +48,12 @@ const SECTIONS = [
 type Section = (typeof SECTIONS)[number];
 
 async function getJson<T>(url: string): Promise<T> {
-  const res = await fetch(url, { credentials: "include" });
+  const res = await adminFetch(url, { credentials: "include" });
   if (!res.ok) throw new Error(`${res.status}`);
   return res.json();
 }
 async function postJson(url: string, body: unknown): Promise<Response> {
-  return fetch(url, {
+  return adminFetch(url, {
     method: "POST",
     credentials: "include",
     headers: { "Content-Type": "application/json" },

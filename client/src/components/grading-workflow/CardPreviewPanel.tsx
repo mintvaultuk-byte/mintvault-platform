@@ -16,6 +16,8 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import { useQuery } from "@tanstack/react-query";
 import { ZoomIn, ZoomOut, Maximize2, Minimize2, RotateCcw } from "lucide-react";
 import {
+  CARD_INSPECTION_MAX_ZOOM,
+  CARD_INSPECTION_MIN_ZOOM,
   normaliseCardInspectionState,
   updateCardInspectionView,
   type CardInspectionState,
@@ -31,11 +33,11 @@ interface ImagesResponse {
   >;
 }
 
-// Button-only zoom levels: 100% → 175% → … → 550% → 600% (75 percentage
-// points per click, clamped on the final step), max 600%, min 100%. Zoom is ONLY driven by the +/− and
-// Reset buttons — never the mouse wheel (the wheel scrolls the page/panel).
-const MIN_ZOOM = 1;
-const MAX_ZOOM = 6;
+// The read-only preview consumes the same 50–500% presentation-state range as
+// the authoritative inspection viewport. Buttons move by 75 percentage points;
+// ordinary wheel input remains page/panel scroll on this secondary surface.
+const MIN_ZOOM = CARD_INSPECTION_MIN_ZOOM;
+const MAX_ZOOM = CARD_INSPECTION_MAX_ZOOM;
 const ZOOM_STEP = 0.75;
 const clampZoom = (z: number) => Math.min(MAX_ZOOM, Math.max(MIN_ZOOM, z));
 
@@ -230,7 +232,7 @@ export function CardPreviewPanel({
           alt={`Card ${side}`}
           style={{
             transform:
-              zoom > 1
+              zoom !== 1
                 ? `scale(${zoom}) translate(${((0.5 - view.focusX) * 100) / zoom}%, ${((0.5 - view.focusY) * 100) / zoom}%)`
                 : "none",
             transition: dragging ? "none" : "transform 0.1s ease-out",

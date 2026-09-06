@@ -98,8 +98,7 @@ const PROFANITY = new Set([
 // ── Username validation ───────────────────────────────────────────────────────
 
 export type UsernameCheckResult =
-  | { available: true; reason: null }
-  | { available: false; reason: "invalid" | "reserved" | "taken" };
+  { available: true; reason: null } | { available: false; reason: "invalid" | "reserved" | "taken" };
 
 export function validateUsernameFormat(username: string): {
   ok: boolean;
@@ -193,11 +192,7 @@ export function registerShowroomRoutes(app: Express): void {
     standardHeaders: true,
     legacyHeaders: false,
     validate: false,
-    keyGenerator: (req) => {
-      const fwd = req.headers["x-forwarded-for"];
-      if (fwd) return (Array.isArray(fwd) ? fwd[0] : fwd.split(",")[0]).trim();
-      return req.ip || "unknown";
-    },
+    keyGenerator: (req) => req.ip || req.socket.remoteAddress || "unknown",
   });
 
   // Rate limit for unauthenticated showroom lookups — protects against
@@ -261,11 +256,7 @@ export function registerShowroomRoutes(app: Express): void {
 
       showroomsListCache.invalidate("list");
 
-      const ip = (() => {
-        const fwd = req.headers["x-forwarded-for"];
-        if (fwd) return (Array.isArray(fwd) ? fwd[0] : fwd.split(",")[0]).trim();
-        return req.ip || "unknown";
-      })();
+      const ip = req.ip || req.socket.remoteAddress || "unknown";
       await writeAuthAudit("showroom.claimed", userId, ip, { username });
 
       return res.json({ success: true, username });
@@ -299,11 +290,7 @@ export function registerShowroomRoutes(app: Express): void {
       const username = (user.rows[0] as any)?.username;
       if (username) showroomCache.invalidate(username.toLowerCase());
 
-      const ip = (() => {
-        const fwd = req.headers["x-forwarded-for"];
-        if (fwd) return (Array.isArray(fwd) ? fwd[0] : fwd.split(",")[0]).trim();
-        return req.ip || "unknown";
-      })();
+      const ip = req.ip || req.socket.remoteAddress || "unknown";
       await writeAuthAudit("showroom.bio_updated", userId, ip, {});
 
       return res.json({ success: true });

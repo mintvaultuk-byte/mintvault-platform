@@ -3,11 +3,12 @@ import type { Express } from "express";
 import rateLimit from "express-rate-limit";
 import { z } from "zod";
 import { BUILD_STAMP, serviceTierToPricingTier } from "@shared/schema";
+import { submissionTypes } from "@shared/commerce";
 import { getActivePromotion } from "../services/promotionService";
 import { storage } from "../storage";
 import { getStripePublishableKey } from "../stripeClient";
 import { getR2SignedUrl } from "../r2";
-import { db } from "../db";
+import { db, pool } from "../db";
 import { sql } from "drizzle-orm";
 import { assertSetLibrarySchemaReady } from "../services/set-library";
 import { APP_BASE_URL } from "../app-url";
@@ -16,9 +17,14 @@ import fs from "fs";
 import path from "path";
 import { normalizeCertId } from "../lib/cert-id";
 import { requireAdmin } from "../auth";
-import { partnerApplicationSchema, persistPartnerApplication, sanitizePartnerAttribution } from "../partner-applications";
+import {
+  partnerApplicationSchema,
+  persistPartnerApplication,
+  sanitizePartnerAttribution,
+} from "../partner-applications";
 import { isLegalDocumentPublic } from "../config/publication-gates";
 import { isPublicPartnerDirectoryEnabled } from "../partner/public-presence-service";
+import { createSharedPublicRateLimit } from "../lib/shared-public-rate-limit";
 
 export function registerPublicRoutes(app: Express): void {
   // ── Health check — no auth, no DB, no shared state ──────────────────────
@@ -60,12 +66,16 @@ export function registerPublicRoutes(app: Express): void {
       }
       const statsResult = await db.execute(sql`
         SELECT
-          COUNT(*) FILTER (WHERE deleted_at IS NULL AND grade IS NOT NULL AND grade_approved_at IS NOT NULL) AS total_graded,
-          COUNT(DISTINCT card_name) FILTER (WHERE deleted_at IS NULL AND grade IS NOT NULL AND grade_approved_at IS NOT NULL) AS unique_cards,
-          COUNT(DISTINCT set_name) FILTER (WHERE deleted_at IS NULL AND grade IS NOT NULL AND grade_approved_at IS NOT NULL) AS unique_sets,
-          ROUND(AVG(grade::numeric) FILTER (WHERE deleted_at IS NULL AND grade IS NOT NULL AND grade_approved_at IS NOT NULL), 1) AS avg_grade,
+          COUNT(*) AS total_graded,
+          COUNT(DISTINCT card_name) AS unique_cards,
+          COUNT(DISTINCT set_name) AS unique_sets,
+          ROUND(AVG(grade::numeric), 1) AS avg_grade,
           COUNT(*) FILTER (WHERE ownership_status = 'claimed') AS claimed_count
         FROM certificates
+        WHERE status = 'active'
+          AND deleted_at IS NULL
+          AND grade IS NOT NULL
+          AND grade_approved_at IS NOT NULL
       `);
       // recent_certs removed (2026-06-13): it derived cert_number from the DB
       // row id, surfacing fabricated numbers (MV584/593/595). The homepage now
@@ -87,12 +97,11 @@ export function registerPublicRoutes(app: Express): void {
   });
 
   // ── v2 Founding-members waitlist (homepage CTA, replaces stats trio) ───────
-  const waitlistRateLimit = rateLimit({
+  const waitlistRateLimit = createSharedPublicRateLimit(pool, {
+    namespace: "waitlist",
     windowMs: 60 * 60 * 1000,
     max: 10,
-    standardHeaders: true,
-    legacyHeaders: false,
-    message: { error: "Too many attempts from this device. Please try again later." },
+    message: "Too many attempts from this device. Please try again later.",
   });
 
   app.post("/api/v2/waitlist", waitlistRateLimit, async (req, res) => {
@@ -107,10 +116,7 @@ export function registerPublicRoutes(app: Express): void {
         return res.status(400).json({ error: "Please enter a valid email address." });
       }
 
-      const ip =
-        (req.headers["x-forwarded-for"] as string | undefined)?.split(",")[0]?.trim() ||
-        req.socket.remoteAddress ||
-        null;
+      const ip = req.ip || req.socket.remoteAddress || null;
       const userAgent = (req.headers["user-agent"] as string | undefined) || null;
 
       // Atomic insert. The partial unique index on LOWER(email) WHERE
@@ -153,12 +159,11 @@ export function registerPublicRoutes(app: Express): void {
   });
 
   // ── Contact-form endpoint ─────────────────────────────────────────────────
-  const contactRateLimit = rateLimit({
+  const contactRateLimit = createSharedPublicRateLimit(pool, {
+    namespace: "contact_mail",
     windowMs: 15 * 60 * 1000,
     max: 5,
-    standardHeaders: true,
-    legacyHeaders: false,
-    message: { error: "Too many contact-form submissions from this device. Please wait 15 minutes." },
+    message: "Too many contact-form submissions from this device. Please wait 15 minutes.",
   });
 
   const contactSchema = z.object({
@@ -184,7 +189,7 @@ export function registerPublicRoutes(app: Express): void {
       }
       const { name, email, topic, message } = parsed.data;
 
-      const ipAddress = (req.headers["x-forwarded-for"] as string)?.split(",")[0]?.trim() || req.ip || "unknown";
+      const ipAddress = req.ip || req.socket.remoteAddress || "unknown";
       const userAgent = (req.headers["user-agent"] as string)?.slice(0, 500) || null;
 
       // Write BEFORE send so the message survives any Resend failure.
@@ -210,7 +215,7 @@ export function registerPublicRoutes(app: Express): void {
         await db.execute(sql`
           UPDATE contact_inquiries SET email_sent_at = NOW() WHERE id = ${inquiryId}
         `);
-        console.log(`[contact] inquiry ${inquiryId} sent to inbox (topic=${topic}, from=${email})`);
+        console.log(`[contact] inquiry ${inquiryId} sent to inbox (topic=${topic})`);
       } catch (sendErr: any) {
         const errMsg = (sendErr?.message || String(sendErr)).slice(0, 1000);
         console.error(`[contact] inquiry ${inquiryId} Resend send failed: ${errMsg}`);
@@ -229,12 +234,11 @@ export function registerPublicRoutes(app: Express): void {
   // ── Founding Partner application (public acquisition only) ────────────────
   // This endpoint must never create a Partner tenant, login, invite, wallet or
   // station. It records a prospective business lead before any email attempt.
-  const partnerApplicationRateLimit = rateLimit({
+  const partnerApplicationRateLimit = createSharedPublicRateLimit(pool, {
+    namespace: "partner_application_mail",
     windowMs: 60 * 60 * 1000,
     max: 3,
-    standardHeaders: true,
-    legacyHeaders: false,
-    message: { error: "Too many Partner applications from this device. Please try again later." },
+    message: "Too many Partner applications from this device. Please try again later.",
   });
 
   app.post("/api/partner-applications", partnerApplicationRateLimit, async (req, res) => {
@@ -324,12 +328,11 @@ export function registerPublicRoutes(app: Express): void {
   });
 
   // ── MVGS compliance interest (public, rate-limited) ──────────────────────
-  const mvgsInterestRateLimit = rateLimit({
+  const mvgsInterestRateLimit = createSharedPublicRateLimit(pool, {
+    namespace: "mvgs_interest",
     windowMs: 60 * 60 * 1000,
     max: 3,
-    standardHeaders: true,
-    legacyHeaders: false,
-    message: { error: "Too many submissions from this device. Please wait an hour." },
+    message: "Too many submissions from this device. Please wait an hour.",
   });
 
   const mvgsInterestSchema = z.object({
@@ -346,10 +349,7 @@ export function registerPublicRoutes(app: Express): void {
         return res.status(400).json({ error: firstIssue?.message || "Invalid submission" });
       }
       const { company, email, message } = parsed.data;
-      const ip =
-        (req.headers["x-forwarded-for"] as string | undefined)?.split(",")[0]?.trim() ||
-        req.socket.remoteAddress ||
-        null;
+      const ip = req.ip || req.socket.remoteAddress || null;
       const { mvgsInterest } = await import("@shared/schema");
       await db.insert(mvgsInterest).values({
         company,
@@ -383,7 +383,13 @@ export function registerPublicRoutes(app: Express): void {
       const lastUpdatedMatch = content.match(/^lastUpdated:\s*"?([^"\n]+)"?\s*$/m);
       const body = content.replace(/^---[\s\S]*?---\s*/m, "");
 
-      res.json({ slug, title: titleMatch?.[1] || slug, version: versionMatch?.[1] || "unknown", lastUpdated: lastUpdatedMatch?.[1] || null, content: body });
+      res.json({
+        slug,
+        title: titleMatch?.[1] || slug,
+        version: versionMatch?.[1] || "unknown",
+        lastUpdated: lastUpdatedMatch?.[1] || null,
+        content: body,
+      });
     } catch {
       res.status(404).json({ error: "Document not found" });
     }
@@ -474,10 +480,14 @@ export function registerPublicRoutes(app: Express): void {
 
   // ── Service tiers ──────────────────────────────────────────────────────────
   app.get("/api/service-tiers", async (req, res) => {
+    res.set("Cache-Control", "no-store");
     try {
-      const serviceType = req.query.serviceType as string | undefined;
+      const serviceType = req.query.serviceType ?? "grading";
+      if (typeof serviceType !== "string" || !submissionTypes.some((service) => service.id === serviceType)) {
+        return res.status(400).json({ error: "Invalid service type" });
+      }
       const tiers = await storage.getServiceTiers(serviceType);
-      const pricingData = tiers.map(serviceTierToPricingTier);
+      const pricingData = tiers.filter((tier) => tier.isActive === true).map(serviceTierToPricingTier);
 
       // Enrich with capacity status
       const capacityRows = await db.execute(
@@ -485,8 +495,8 @@ export function registerPublicRoutes(app: Express): void {
       );
       const capacityMap = new Map((capacityRows.rows as any[]).map((r) => [r.tier_id, r]));
 
-      const enriched = pricingData.map((tier: any) => {
-        const cap = capacityMap.get(tier.tierId) || capacityMap.get(tier.id);
+      const enriched = pricingData.map((tier) => {
+        const cap = capacityMap.get(tier.id);
         return {
           ...tier,
           capacityStatus: cap?.status || "open",
@@ -511,6 +521,7 @@ export function registerPublicRoutes(app: Express): void {
   // still authoritative if rounding ever diverges. A missing/broken promo simply
   // returns { promo: null } — it never errors the page.
   app.get("/api/promotions/active", async (_req, res) => {
+    res.set("Cache-Control", "no-store");
     try {
       const promo = await getActivePromotion();
       if (!promo || promo.active !== true) {

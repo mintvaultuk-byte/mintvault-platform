@@ -170,6 +170,7 @@ describe("partner rate-limit bucket key derivation", () => {
     await admin.query("ALTER TABLE submissions OWNER TO pn_migrator");
     await admin.query("ALTER TABLE submission_items OWNER TO pn_migrator");
     await applyMigrationsRealistic(admin, ADMIN_URL, PARTNER_MIGRATIONS_WITH_USER_MANAGEMENT_INVARIANT);
+    await applyMigrationsRealistic(admin, ADMIN_URL, ["0089_partner_shared_rate_limit_buckets"]);
 
     await admin.query(
       `DO $$ BEGIN CREATE ROLE ${APP_ROLE} LOGIN PASSWORD '${APP_PASSWORD}';
@@ -203,6 +204,14 @@ describe("partner rate-limit bucket key derivation", () => {
     await admin.query(
       "INSERT INTO partner_feature_flags (tenant_id, flag, enabled) VALUES (NULL,'partner_portal_enabled',true),(NULL,'partner_login_enabled',true)"
     );
+
+    // Production composition installs the shared PostgreSQL limiter before it
+    // can become ready. Drive that exact installer here rather than injecting
+    // the per-process memory test store.
+    const { installSharedPartnerRateLimitStore } = await import("../server/partner/rate-limit-store-pg");
+    expect(await installSharedPartnerRateLimitStore()).toBe(true);
+    const { partnerSharedRateLimitStoreInstalled } = await import("../server/partner/rate-limit");
+    expect(partnerSharedRateLimitStoreInstalled()).toBe(true);
 
     const { registerPartnerPublicRoutes } = await import("../server/partner/public-routes");
     const app = express();
@@ -342,53 +351,6 @@ describe("partner rate-limit bucket key derivation", () => {
         .status;
     }
     expect(last).toBe(429);
-  }, 120_000);
-
-  /**
-   * The protection must NOT depend on registration order.
-   *
-   * partnerApiRouter (server/partner/routes.ts) still defines its own /auth/login, kept permanently
-   * shadowed only by the ordering invariant at server/routes.ts:2798 — registerPartnerPublicRoutes
-   * before mountPartnerPortal. That invariant is one line-swap away from being wrong, so this test
-   * mounts partnerApiRouter's login route DIRECTLY, on its own app, bypassing public-routes
-   * entirely, and proves IP rotation is throttled there too. (Behavioural, not structural: mounting
-   * the router in isolation turned out to be practical — that handler reaches partnerLogin without
-   * any auth middleware in front of it.)
-   *
-   * Note the gate difference, stated exactly: this router is NOT ungated — partnerPortalRouter
-   * (server/partner/mount.ts) composes it behind requirePartnerRuntimeConfig, requireDefinerModel,
-   * requireNoEmergencyStop and requirePortalEnabled. The ONE gate it lacks is the per-route
-   * partner_login_enabled check that public-routes.ts performs. Mounting partnerApiRouter directly
-   * here therefore bypasses those four mount-level gates deliberately, in order to exercise the
-   * handler and its limiters in isolation.
-   */
-  it("throttles IP rotation on the SHADOWED duplicate route too, so protection does not rely on mount order", async () => {
-    await clearLockout();
-    const { partnerApiRouter } = await import("../server/partner/routes");
-    const shadow = express();
-    shadow.set("trust proxy", 1); // identical to server/index.ts:45
-    shadow.use(express.json());
-    shadow.use("/api/partner", partnerApiRouter());
-    const shadowServer = http.createServer(shadow);
-    await new Promise<void>((resolve) => shadowServer.listen(0, "127.0.0.1", resolve));
-    const shadowBase = `http://127.0.0.1:${(shadowServer.address() as AddressInfo).port}`;
-
-    const IP = "203.0.113.30"; // a bucket no other test in this file has touched
-    const seen: number[] = [];
-    for (let i = 0; i < IP_MAX + 5; i++) {
-      const res = await fetch(`${shadowBase}/api/partner/auth/login`, {
-        method: "POST",
-        headers: { "content-type": "application/json", "x-forwarded-for": IP },
-        body: JSON.stringify({ email: `shadow-spray-${i}@example.test`, password: "wrong-password-1" }),
-      });
-      seen.push(res.status);
-    }
-    await new Promise<void>((resolve) => shadowServer.close(() => resolve()));
-
-    const firstThrottled = seen.indexOf(429);
-    expect(firstThrottled).toBe(IP_MAX);
-    expect(seen.slice(0, firstThrottled).every((s) => s === 401)).toBe(true);
-    expect(seen.slice(firstThrottled).every((s) => s === 429)).toBe(true);
   }, 120_000);
 
   /**

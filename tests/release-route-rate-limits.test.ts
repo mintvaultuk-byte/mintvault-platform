@@ -38,9 +38,7 @@ describe("release route rate-limit hardening", () => {
     expect(stations).toMatch(
       /capture-sessions",\s*requirePartnerAuth,\s*requirePartnerCapability\("partner\.cards\.scan"\),\s*partnerStationCaptureRateLimit/
     );
-    expect(stations).toMatch(
-      /stations\/calibrations",\s*partnerStationCalibrationIngressRateLimit,\s*requireSignedStation,\s*requireSignedStationMaintainer,\s*partnerStationCalibrationRateLimit/
-    );
+    expect(stations).not.toContain('"/stations/calibrations"');
     expect(stations).toMatch(
       /capture-sessions\/:sessionId",\s*requirePartnerAuth,\s*requirePartnerCapability\("partner\.cards\.scan"\),\s*partnerStationReadRateLimit/
     );
@@ -66,7 +64,7 @@ describe("release route rate-limit hardening", () => {
     expect(staff).toMatch(/scanner-capture-sessions",\s*requireCapability\("scan"\),\s*staffScanCaptureLimit/);
     expect(staff).toMatch(/scanner-capture-sessions\/:sessionId",\s*requireCapability\("scan"\),\s*staffScanReadLimit/);
     expect(staff).toMatch(
-      /scan\/certificates\/:id\/upload",\s*requireCapability\("scan"\),\s*staffScanUploadLimit,\s*scanUpload\.fields/
+      /scan\/certificates\/:id\/upload",\s*requireCapability\("scan"\),\s*staffScanUploadLimit,\s*uploadMemoryAdmission\("staff_scan", 128\),\s*scanUpload\.fields/
     );
     expect(grader).toMatch(/certificates\/:id\/grade",\s*requireCapability\("grade"\),\s*graderGradeMutationRateLimit/);
     expect(grader).toMatch(

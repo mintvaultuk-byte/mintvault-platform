@@ -27,11 +27,11 @@ const breadcrumbs = [
 const faqs = [
   {
     question: "How much does Pokemon card grading cost in the UK?",
-    answer: "MintVault UK offers grading from £19 per card on the Vault Queue tier (40 working days). Standard is £25 (15 working days) and Express is £45 (5 working days). Bulk discounts are available for 10+ card submissions. All prices include fully insured return shipping based on your declared card value.",
+    answer: "See the current pricing page for available grading services, prices and turnaround. Your submission quote confirms applicable discounts, insurance, return shipping and the total before payment.",
   },
   {
     question: "How long does Pokemon card grading take with MintVault?",
-    answer: "Turnaround times depend on your chosen service tier. Vault Queue is 40 working days, Standard is 15 working days, and Express is 5 working days. You can track your submission status online at any time via our <a href='/track' class='text-[#E3350D] hover:underline'>tracking page</a>.",
+    answer: "See the current pricing page for available grading services, prices and turnaround. Your submission quote confirms applicable discounts, insurance, return shipping and the total before payment.",
   },
   {
     question: "What Pokemon cards are worth grading?",
@@ -76,7 +76,7 @@ export default function PokemonCardGradingUk() {
     <div className="max-w-5xl mx-auto px-4 py-10 no-text-shadow">
       <SeoHead
         title="Pokemon Card Grading UK | Professional Grading Service | MintVault"
-        description="Professional Pokemon card grading in the UK. Fast turnaround, tamper-evident slabs, insured shipping. Grade your Pokemon cards with MintVault from £19 per card."
+        description="Professional Pokemon card grading in the UK. Fast turnaround, tamper-evident slabs, insured shipping. Grade your Pokemon cards with MintVault. View current service options and pricing."
         canonical="https://mintvaultuk.com/pokemon-card-grading-uk"
         ogImage="https://mintvaultuk.com/images/collector-lifestyle.webp"
         schema={schema}
@@ -168,23 +168,15 @@ export default function PokemonCardGradingUk() {
         <section className="mb-10" data-testid="section-tiers">
           <h2 className="text-2xl font-bold text-[#E3350D] tracking-wide mb-4">Service Tiers and Turnaround</h2>
           <p className="text-[#d4d4d4] text-sm leading-relaxed mb-4">
-            MintVault offers five grading tiers to accommodate different timelines and budgets. All tiers include the same rigorous grading process, tamper-evident slab, unique certificate, and insured return shipping.
+            Compare currently available grading services for your timeline and budget. Every service uses the same grading inspection; your quote confirms shipping and insurance.
           </p>
           <div className="border border-[#E3350D]/20 rounded-lg overflow-hidden mb-4">
-            {[
-              { tier: "Vault Queue", price: "£19", turnaround: "40 working days" },
-              { tier: "Standard", price: "£25", turnaround: "15 working days" },
-              { tier: "Express", price: "£45", turnaround: "5 working days" },
-            ].map((t, i) => (
-              <div key={i} className={`flex items-center justify-between px-5 py-3 ${i > 0 ? "border-t border-[#E3350D]/10" : ""}`} data-testid={`row-tier-${i}`}>
-                <span className="text-white text-sm font-medium">{t.tier}</span>
-                <span className="text-[#d4d4d4] text-sm">{t.turnaround}</span>
-                <span className="text-[#E3350D] text-sm font-semibold">{t.price}/card</span>
-              </div>
-            ))}
+            <Link href="/pricing" className="block px-4 py-3 text-[#E3350D] hover:underline">
+              View current grading prices and turnaround →
+            </Link>
           </div>
           <p className="text-[#d4d4d4] text-sm">
-            View full pricing details and bulk discounts on our <Link href="/" className="text-[#E3350D] hover:underline" data-testid="link-pricing">pricing page</Link>.
+            View full pricing details and bulk discounts on our <Link href="/pricing" className="text-[#E3350D] hover:underline" data-testid="link-pricing">pricing page</Link>.
           </p>
         </section>
 

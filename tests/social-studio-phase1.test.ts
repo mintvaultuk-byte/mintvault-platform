@@ -162,7 +162,8 @@ describe("Social Studio Phase 1 wiring", () => {
 
   it("keeps downloads predictable and strips editor controls from the exported image path", () => {
     expect(pageSource).toContain("buildSocialStudioDownloadFilename(card, format)");
-    expect(pageSource).toContain('fetch("/api/admin/social-studio/render"');
+    expect(pageSource).toContain('import { adminFetch } from "@/lib/queryClient"');
+    expect(pageSource).toContain('adminFetch("/api/admin/social-studio/render"');
     expect(pageSource).toContain('method: "POST"');
     expect(pageSource).not.toContain("/api/admin/social-studio/render/${");
     expect(pageSource).toContain("Download {SOCIAL_STUDIO_FORMAT_LABELS[format]}");

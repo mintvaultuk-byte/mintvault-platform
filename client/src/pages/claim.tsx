@@ -104,6 +104,15 @@ export default function ClaimPage() {
               >
                 {result.message}
               </p>
+              {result.type === "success" && (
+                <a
+                  href="/customer-login"
+                  className="mt-3 inline-flex items-center gap-1.5 text-sm font-semibold text-[#D4AF37] hover:underline"
+                  data-testid="link-claim-view-collection"
+                >
+                  View it in your collection <ArrowRight className="w-3.5 h-3.5" />
+                </a>
+              )}
               {result.showBuyerInit && (
                 <a
                   href={`/transfer/claim-by-code${certId ? `?certId=${encodeURIComponent(certId)}` : ""}`}

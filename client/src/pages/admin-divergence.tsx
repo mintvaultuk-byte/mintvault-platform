@@ -1,3 +1,4 @@
+import { adminFetch } from "@/lib/queryClient";
 import { useQuery } from "@tanstack/react-query";
 import { useMemo, useState } from "react";
 import { TrendingUp, RefreshCw, AlertTriangle, ExternalLink } from "lucide-react";
@@ -115,7 +116,7 @@ export default function AdminDivergencePage() {
       const params = new URLSearchParams();
       if (sinceDays != null) params.set("sinceDays", String(sinceDays));
       if (callType) params.set("callType", callType);
-      const res = await fetch(`/api/admin/ai-divergence?${params}`, { credentials: "include" });
+      const res = await adminFetch(`/api/admin/ai-divergence?${params}`, { credentials: "include" });
       if (!res.ok) throw new Error(`HTTP ${res.status}`);
       return res.json();
     },

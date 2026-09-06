@@ -91,6 +91,18 @@ async function waitFor(id: string) {
   }
   throw new Error("Timed out for " + id);
 }
+async function renderPage(client: QueryClient, Page: React.ComponentType) {
+  const { AdminSessionProvider } = await import("../client/src/lib/admin-session");
+  await act(async () =>
+    root.render(
+      createElement(
+        QueryClientProvider,
+        { client },
+        createElement(AdminSessionProvider, null, createElement(Page))
+      )
+    )
+  );
+}
 
 beforeEach(() => {
   window.history.replaceState({}, "", "/admin/command");
@@ -102,16 +114,18 @@ beforeEach(() => {
   apiRequest.mockImplementation((method: string, url: string) =>
     method === "GET" && url.startsWith("/api/admin/command/dashboard") ? ok(dashboard()) : ok({})
   );
-  globalThis.fetch = vi.fn(() =>
-    ok({
-      env: "development",
-      neon_host: "",
-      db_name: "",
-      card_master_active_count: 0,
-      card_sets_active_count: 0,
-      certificates_count: 0,
-      command_centre_available: true,
-    })
+  globalThis.fetch = vi.fn((input: RequestInfo | URL) =>
+    String(input) === "/api/admin/session"
+      ? ok({ authenticated: true, email: "admin@example.test", isSuperAdmin: true })
+      : ok({
+          env: "development",
+          neon_host: "",
+          db_name: "",
+          card_master_active_count: 0,
+          card_sets_active_count: 0,
+          certificates_count: 0,
+          command_centre_available: true,
+        })
   );
 });
 afterEach(async () => {
@@ -126,7 +140,7 @@ describe("Command Centre rendered controls", () => {
     const { default: Page } = await import("../client/src/pages/admin-command-centre");
     const client = new QueryClient({ defaultOptions: { queries: { retry: false }, mutations: { retry: false } } });
     apiRequest.mockRejectedValue(Object.assign(new Error("Forbidden"), { status: 403 }));
-    await act(async () => root.render(createElement(QueryClientProvider, { client }, createElement(Page))));
+    await renderPage(client, Page);
     const forbidden = await waitFor("command-centre-forbidden");
     expect(forbidden.textContent).toContain("Super Admin access required");
     expect(q("command-centre-kpi-station-lifecycle-state")).toBeNull();
@@ -134,7 +148,7 @@ describe("Command Centre rendered controls", () => {
     await act(async () => root.unmount());
     root = createRoot(container);
     apiRequest.mockRejectedValue(Object.assign(new Error("Unauthorized"), { status: 401 }));
-    await act(async () => root.render(createElement(QueryClientProvider, { client }, createElement(Page))));
+    await renderPage(client, Page);
     for (let attempt = 0; attempt < 30 && navigate.mock.calls.length === 0; attempt += 1) {
       await act(async () => {
         await new Promise((resolve) => setTimeout(resolve, 5));
@@ -152,7 +166,7 @@ describe("Command Centre rendered controls", () => {
         mutations: { retry: false },
       },
     });
-    await act(async () => root.render(createElement(QueryClientProvider, { client }, createElement(Page))));
+    await renderPage(client, Page);
     await waitFor("command-centre-kpi-station-lifecycle-state");
     expect(apiRequest.mock.calls.filter((call) => call[0] === "GET")).toHaveLength(1);
 
@@ -162,7 +176,7 @@ describe("Command Centre rendered controls", () => {
     apiRequest.mockImplementation((method: string) =>
       method === "GET" ? Promise.reject(Object.assign(new Error("Not found"), { status: 404 })) : ok({})
     );
-    await act(async () => root.render(createElement(QueryClientProvider, { client }, createElement(Page))));
+    await renderPage(client, Page);
     await waitFor("command-centre-unavailable");
     expect(q("command-centre-kpi-station-lifecycle-state")).toBeNull();
     expect(q("nav-command-centre-group")).toBeNull();
@@ -181,7 +195,7 @@ describe("Command Centre rendered controls", () => {
       },
     });
     client.setQueryData(["protected", "command-centre", "dashboard", "month"], dashboard());
-    await act(async () => root.render(createElement(QueryClientProvider, { client }, createElement(Page))));
+    await renderPage(client, Page);
     await waitFor("command-centre-kpi-station-lifecycle-state");
 
     apiRequest.mockRejectedValue(Object.assign(new Error("Denied"), { status }));
@@ -214,7 +228,7 @@ describe("Command Centre rendered controls", () => {
         mutations: { retry: false },
       },
     });
-    await act(async () => root.render(createElement(QueryClientProvider, { client }, createElement(Page))));
+    await renderPage(client, Page);
     const stationKpi = await waitFor("command-centre-kpi-station-lifecycle-state");
     expect(apiRequest).toHaveBeenCalledWith("GET", "/api/admin/command/dashboard?period=today");
     expect(stationKpi.classList.contains("command-centre-surface")).toBe(true);
@@ -350,7 +364,7 @@ describe("Command Centre rendered controls", () => {
         mutations: { retry: false },
       },
     });
-    await act(async () => root.render(createElement(QueryClientProvider, { client }, createElement(Page))));
+    await renderPage(client, Page);
     const scanKpi = await waitFor("command-centre-kpi-scan-queue-backlog");
 
     expect(scanKpi.textContent).toContain("STALE");

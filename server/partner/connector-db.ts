@@ -11,6 +11,7 @@
  */
 import pg from "pg";
 import { assertMintVaultDatabaseEnvironmentSafety } from "../lib/database-environment-guard";
+import { securePostgresPoolConnection } from "../lib/postgres-transport-security";
 
 let pool: pg.Pool | null = null;
 
@@ -35,7 +36,7 @@ function getPool(): pg.Pool {
     // fault test. `max` unchanged (default 4).
     const acquireMs = Number(process.env.PARTNER_CONNECTOR_ACQUIRE_TIMEOUT_MS ?? 0);
     pool = new pg.Pool({
-      connectionString: process.env.PARTNER_CONNECTOR_DATABASE_URL,
+      ...securePostgresPoolConnection(process.env.PARTNER_CONNECTOR_DATABASE_URL, "PARTNER_CONNECTOR_DATABASE_URL"),
       max: Number(process.env.PARTNER_CONNECTOR_DB_POOL_MAX ?? 4),
       ...(acquireMs > 0 ? { connectionTimeoutMillis: acquireMs } : {}),
     });

@@ -12,6 +12,7 @@ import { recordSubmissionAttribution } from "../commercial-attribution";
 import { recordGrowthConversionEvent } from "../growth-conversion-service";
 import { db } from "../db";
 import { sql } from "drizzle-orm";
+import { randomUUID } from "node:crypto";
 
 /**
  * Minimal DB executor surface used by the credit primitives. Defaults to the
@@ -23,32 +24,36 @@ import { sql } from "drizzle-orm";
 type SqlExecutor = Pick<typeof db, "execute">;
 
 /**
- * Atomically RESERVE one available credit for a checkout that's about to create
- * a discounted PaymentIntent. Returns the reserved credit id, or null if none
- * is available (already used / expired / reserved by a concurrent checkout).
+ * Atomically RESERVE one available credit for the exact submission whose
+ * checkout is about to create a discounted PaymentIntent. Returns the reserved
+ * credit id, or null if none is available (already used / expired / bound to
+ * another checkout).
  * Two simultaneous callers can't reserve the same row (FOR UPDATE SKIP LOCKED +
- * the availability re-check at commit), so only one gets the discount — this is
- * the fix for the credit double-spend race. Reservation is TTL'd (30 min): an
- * abandoned checkout auto-frees the credit, so there is no sweeper to run.
+ * the availability re-check at commit), so only one gets the discount. A
+ * reservation is deliberately NOT reusable on a timer: Stripe PaymentIntents
+ * remain payable beyond a local TTL, so timed reuse would let one credit back
+ * multiple chargeable orders. Release requires an explicit future cancellation
+ * authority which proves the original PaymentIntent can no longer succeed.
  */
 export async function reserveCredit(
   userId: string,
   creditType: string,
+  trackingNumber: string,
   runner: SqlExecutor = db
 ): Promise<number | null> {
   const result = await runner.execute(sql`
     UPDATE member_credits
-    SET reserved_at = NOW(), reserved_until = NOW() + INTERVAL '30 minutes'
+    SET reserved_at = NOW(), reserved_until = NULL, reserved_for_tracking_number = ${trackingNumber}
     WHERE id = (
       SELECT id FROM member_credits
       WHERE user_id = ${userId} AND credit_type = ${creditType}
         AND used_at IS NULL AND expires_at > NOW()
-        AND (reserved_at IS NULL OR reserved_until < NOW())
+        AND reserved_at IS NULL AND reserved_for_tracking_number IS NULL
       ORDER BY expires_at ASC LIMIT 1
       FOR UPDATE SKIP LOCKED
     )
       AND used_at IS NULL
-      AND (reserved_at IS NULL OR reserved_until < NOW())
+      AND reserved_at IS NULL AND reserved_for_tracking_number IS NULL
     RETURNING id
   `);
   return result.rows.length > 0 ? Number((result.rows[0] as any).id) : null;
@@ -67,6 +72,7 @@ export async function reserveCredit(
 async function consumeReservedCredit(
   reservedCreditId: number,
   submissionId: number,
+  trackingNumber: string,
   ownerUserId: string | null,
   runner: SqlExecutor = db
 ): Promise<boolean> {
@@ -75,6 +81,7 @@ async function consumeReservedCredit(
     SET used_at = NOW(), used_for_submission_id = ${submissionId}
     WHERE id = ${reservedCreditId}
       AND used_at IS NULL
+      AND reserved_for_tracking_number = ${trackingNumber}
       ${ownerUserId ? sql`AND user_id = ${ownerUserId}` : sql``}
     RETURNING id
   `);
@@ -101,6 +108,7 @@ async function consumeCredit(
       SELECT id FROM member_credits
       WHERE user_id = ${userId} AND credit_type = ${creditType}
         AND used_at IS NULL AND expires_at > NOW()
+        AND reserved_at IS NULL AND reserved_for_tracking_number IS NULL
       ORDER BY expires_at ASC LIMIT 1
       FOR UPDATE SKIP LOCKED
     ) AND used_at IS NULL
@@ -146,8 +154,9 @@ async function getTierCapacity(tierSlug: string): Promise<CapacityEntry> {
 }
 
 /**
- * Idempotent fulfilment of a paid grading submission. Called by BOTH
- * /api/confirm-payment AND the Stripe grading webhook (payment_intent.succeeded).
+ * Legacy/injected idempotent fulfilment implementation. Production Stripe and
+ * browser-confirm paths now enter through the durable wrapper below; this body
+ * remains for non-payment maintenance callers and focused credit primitives.
  *
  * The atomic markSubmissionAsPaid() gate is the single source of truth for
  * "who fulfils": only the FIRST caller to flip the submission to paid runs the
@@ -162,7 +171,7 @@ async function getTierCapacity(tierSlug: string): Promise<CapacityEntry> {
  * failed email or credit lookup must not bubble up and 500 the caller. Every
  * branch logs with the human submissionId for traceability.
  */
-export async function fulfilPaidSubmission(
+async function fulfilPaidSubmissionLegacy(
   submission: any,
   piMeta: Record<string, string | undefined>,
   piAmount: number,
@@ -224,7 +233,7 @@ export async function fulfilPaidSubmission(
       if (reservedCreditId) {
         // Primary path (all PIs since reserve-at-checkout shipped). Consume the
         // exact reserved row, pinned to the bound owner when present. Fail closed.
-        consumed = await consumeReservedCredit(reservedCreditId, numId, ownerUserId, exec);
+        consumed = await consumeReservedCredit(reservedCreditId, numId, sid, ownerUserId, exec);
         failReason = "reserved_credit_unavailable";
       } else if (ownerUserId) {
         // Owner bound but no reserved id (defensive; not produced by current
@@ -354,6 +363,628 @@ export async function fulfilPaidSubmission(
 
   console.log(`[fulfil] submission ${sid} fulfilled (paymentStatus=paid)`);
   return { fulfilled: true };
+}
+
+type PaymentExecutor = Pick<typeof db, "execute" | "transaction">;
+
+interface PaidSubmissionPayment {
+  currency: string;
+  paidAt: Date;
+  /** Present on both production authorities: Stripe webhook and browser confirm. */
+  paymentIntentId?: string;
+}
+
+interface ConfirmationPayload {
+  useV2: boolean;
+  emailData: {
+    email: string;
+    firstName: string;
+    submissionId: string;
+    cardCount: number;
+    tier: string;
+    total: number;
+    serviceType?: string;
+    crossoverCompany?: string;
+    crossoverOriginalGrade?: string;
+    crossoverCertNumber?: string;
+    labelToken: string;
+    termsVersion?: string;
+    termsAcceptedAt?: string;
+  };
+}
+
+interface GradingPaymentFulfilmentRow {
+  submission_id: number;
+  tracking_number: string;
+  payment_intent_id: string;
+  payment_metadata: Record<string, string>;
+  amount_pence: number;
+  currency: string;
+  paid_at: Date | string;
+  confirmation_payload: ConfirmationPayload;
+  provider_idempotency_key: string;
+  status: "PENDING" | "PROCESSING" | "FAILED" | "COMPLETE" | "RECONCILIATION_REQUIRED";
+  attempt_count: number;
+  claim_token: string;
+  estimate_completed_at: Date | string | null;
+  credit_completed_at: Date | string | null;
+  promo_completed_at: Date | string | null;
+  user_link_completed_at: Date | string | null;
+  email_completed_at: Date | string | null;
+}
+
+class PermanentPaymentFulfilmentError extends Error {}
+
+const PAYMENT_FULFILMENT_MAX_ATTEMPTS = 8;
+
+async function buildConfirmationPayload(submission: any, piAmount: number): Promise<ConfirmationPayload> {
+  const { FEATURE_FLAGS: currentFlags } = await import("../config/feature-flags");
+  const { TERMS_VERSION: currentTermsVersion } = await import("../config/legal");
+  return {
+    useV2: currentFlags.LEGAL_PAGES_LIVE,
+    emailData: {
+      email: submission.email || "",
+      firstName: submission.firstName || submission.first_name || "Customer",
+      submissionId: submission.submissionId,
+      cardCount: submission.cardCount || submission.card_count || 0,
+      tier: submission.serviceTier || submission.service_tier || "standard",
+      total: piAmount || 0,
+      serviceType: submission.serviceType || submission.service_type || undefined,
+      crossoverCompany: submission.crossover_company || submission.crossoverCompany || undefined,
+      crossoverOriginalGrade: submission.crossover_original_grade || submission.crossoverOriginalGrade || undefined,
+      crossoverCertNumber: submission.crossover_cert_number || submission.crossoverCertNumber || undefined,
+      // Snapshot the token once. Resend retries use the same idempotency key and
+      // therefore must also use byte-equivalent message content.
+      labelToken: generatePdfToken(submission.submissionId),
+      termsVersion: currentFlags.LEGAL_PAGES_LIVE ? currentTermsVersion : undefined,
+      termsAcceptedAt: currentFlags.LEGAL_PAGES_LIVE ? new Date().toISOString() : undefined,
+    },
+  };
+}
+
+async function ensureGradingPaymentFulfilment(
+  submission: any,
+  piMeta: Record<string, string | undefined>,
+  piAmount: number,
+  payment: PaidSubmissionPayment & { paymentIntentId: string },
+  runner: PaymentExecutor
+): Promise<void> {
+  const submissionId = Number(submission.id);
+  const currency = payment.currency.trim().toUpperCase().slice(0, 3);
+  if (!Number.isInteger(submissionId) || submissionId <= 0 || !/^[A-Z]{3}$/.test(currency)) {
+    throw new Error("Cannot enqueue grading-payment fulfilment: invalid submission or currency");
+  }
+  const confirmationPayload = await buildConfirmationPayload(submission, piAmount);
+  const metadataJson = JSON.stringify(piMeta);
+  const payloadJson = JSON.stringify(confirmationPayload);
+  const providerIdempotencyKey = `grading-payment-confirmation:${submission.submissionId}`;
+  const inserted = await runner.execute(sql`
+    INSERT INTO grading_payment_fulfilments (
+      submission_id, tracking_number, payment_intent_id, payment_metadata,
+      amount_pence, currency, paid_at, confirmation_payload, provider_idempotency_key
+    ) VALUES (
+      ${submissionId}, ${submission.submissionId}, ${payment.paymentIntentId}, ${metadataJson}::jsonb,
+      ${Math.max(0, Math.trunc(piAmount))}, ${currency}, ${payment.paidAt},
+      ${payloadJson}::jsonb, ${providerIdempotencyKey}
+    )
+    ON CONFLICT DO NOTHING
+    RETURNING submission_id
+  `);
+  if (inserted.rows.length === 1) return;
+  const existing = await runner.execute(sql`
+    SELECT 1 FROM grading_payment_fulfilments
+     WHERE submission_id = ${submissionId}
+       AND payment_intent_id = ${payment.paymentIntentId}
+       AND amount_pence = ${Math.max(0, Math.trunc(piAmount))}
+       AND currency = ${currency}
+  `);
+  if (existing.rows.length !== 1) {
+    throw new Error("Grading-payment fulfilment already exists with different authoritative payment data");
+  }
+}
+
+async function claimGradingPaymentFulfilment(
+  submissionId: number,
+  runner: PaymentExecutor
+): Promise<GradingPaymentFulfilmentRow | null> {
+  const claimToken = randomUUID();
+  const claimed = await runner.execute(sql`
+    UPDATE grading_payment_fulfilments f
+       SET status = 'PROCESSING',
+           attempt_count = attempt_count + 1,
+           claim_token = ${claimToken},
+           claim_expires_at = NOW() + INTERVAL '5 minutes',
+           next_attempt_at = NOW() + INTERVAL '5 minutes',
+           last_error = NULL,
+           updated_at = NOW()
+     WHERE f.submission_id = ${submissionId}
+       AND f.attempt_count < ${PAYMENT_FULFILMENT_MAX_ATTEMPTS}
+       AND EXISTS (
+         SELECT 1 FROM submissions s
+          WHERE s.id = f.submission_id AND s.payment_status = 'paid'
+       )
+       AND (
+         (f.status IN ('PENDING', 'FAILED') AND f.next_attempt_at <= NOW())
+         OR (f.status = 'PROCESSING' AND f.claim_expires_at <= NOW())
+       )
+    RETURNING *
+  `);
+  return (claimed.rows[0] as unknown as GradingPaymentFulfilmentRow | undefined) ?? null;
+}
+
+async function completeEstimateEffect(
+  row: GradingPaymentFulfilmentRow,
+  submission: any,
+  runner: PaymentExecutor
+): Promise<void> {
+  if (row.estimate_completed_at) return;
+  const tier = String(submission.serviceTier || submission.service_tier || "standard").toLowerCase();
+  const purchasedDays = submission.turnaroundDays ?? submission.turnaround_days;
+  if (purchasedDays != null && (!Number.isInteger(purchasedDays) || purchasedDays <= 0)) {
+    throw new PermanentPaymentFulfilmentError("invalid purchased turnaround snapshot");
+  }
+  // New purchases retain the configured numeric promise even after tier edits.
+  // Pre-snapshot orders keep their historical fallback; never consult live prices here.
+  const workingDays =
+    purchasedDays ?? ({ standard: 20, priority: 10, express: 5 } as Record<string, number>)[tier] ?? 20;
+  const target = new Date(row.paid_at);
+  let added = 0;
+  while (added < workingDays) {
+    target.setUTCDate(target.getUTCDate() + 1);
+    const day = target.getUTCDay();
+    if (day !== 0 && day !== 6) added += 1;
+  }
+  await runner.transaction(async (tx) => {
+    const locked = await tx.execute(sql`
+      SELECT estimate_completed_at FROM grading_payment_fulfilments
+       WHERE submission_id = ${row.submission_id} AND claim_token = ${row.claim_token}
+         AND status = 'PROCESSING'
+       FOR UPDATE
+    `);
+    if (locked.rows.length !== 1) throw new Error("grading payment estimate claim lost");
+    if ((locked.rows[0] as { estimate_completed_at: Date | null }).estimate_completed_at) return;
+    // Derive from authoritative paid_at, never retry-time NOW(), and keep any
+    // earlier canonical promise. The submission write and effect marker commit
+    // together, so a crash cannot move the date on replay.
+    await tx.execute(sql`
+      UPDATE submissions
+         SET estimated_completion_date = COALESCE(estimated_completion_date, ${target.toISOString()}),
+             updated_at = NOW()
+       WHERE id = ${row.submission_id}
+    `);
+    await tx.execute(sql`
+      UPDATE grading_payment_fulfilments
+         SET estimate_completed_at = NOW(), updated_at = NOW()
+       WHERE submission_id = ${row.submission_id} AND claim_token = ${row.claim_token}
+    `);
+  });
+}
+
+async function completeCreditEffect(
+  row: GradingPaymentFulfilmentRow,
+  submission: any,
+  runner: PaymentExecutor
+): Promise<void> {
+  if (row.credit_completed_at) return;
+  const meta = row.payment_metadata || {};
+  const outcome = await runner.transaction(async (tx) => {
+    const locked = await tx.execute(sql`
+      SELECT credit_completed_at FROM grading_payment_fulfilments
+       WHERE submission_id = ${row.submission_id} AND claim_token = ${row.claim_token}
+         AND status = 'PROCESSING'
+       FOR UPDATE
+    `);
+    if (locked.rows.length !== 1) return { ok: false, reason: "claim_lost", permanent: false };
+    if ((locked.rows[0] as { credit_completed_at: Date | null }).credit_completed_at) {
+      return { ok: true, reason: "already_complete", permanent: false };
+    }
+
+    if (meta.creditApplied !== "true" || !meta.creditType) {
+      await tx.execute(sql`
+        UPDATE grading_payment_fulfilments SET credit_completed_at = NOW(), updated_at = NOW()
+         WHERE submission_id = ${row.submission_id} AND claim_token = ${row.claim_token}
+      `);
+      return { ok: true, reason: "not_applied", permanent: false };
+    }
+
+    const reservedId = Number(meta.reservedCreditId);
+    const reservedCreditId = Number.isInteger(reservedId) && reservedId > 0 ? reservedId : null;
+    const ownerUserId = (meta.creditOwnerUserId || "").trim() || null;
+    let consumed = false;
+    let reason = "no_owner_identity";
+
+    if (reservedCreditId) {
+      const used = await tx.execute(sql`
+        UPDATE member_credits
+           SET used_at = NOW(), used_for_submission_id = ${row.submission_id}
+         WHERE id = ${reservedCreditId}
+           AND used_at IS NULL
+           AND reserved_for_tracking_number = ${row.tracking_number}
+           ${ownerUserId ? sql`AND user_id = ${ownerUserId}` : sql``}
+        RETURNING id
+      `);
+      consumed = used.rows.length === 1;
+      if (!consumed) {
+        const replay = await tx.execute(sql`
+          SELECT 1 FROM member_credits
+           WHERE id = ${reservedCreditId} AND used_for_submission_id = ${row.submission_id}
+        `);
+        consumed = replay.rows.length === 1;
+      }
+      reason = "reserved_credit_unavailable";
+    } else {
+      let effectiveOwner = ownerUserId;
+      if (!effectiveOwner && submission.email) {
+        const user = await tx.execute(sql`
+          SELECT id FROM users WHERE LOWER(email) = LOWER(${submission.email}) LIMIT 1
+        `);
+        effectiveOwner = (user.rows[0] as { id?: string } | undefined)?.id ?? null;
+        reason = effectiveOwner ? "no_credit_available" : "no_user_for_email";
+      }
+      if (effectiveOwner) {
+        const used = await tx.execute(sql`
+          UPDATE member_credits
+             SET used_at = NOW(), used_for_submission_id = ${row.submission_id}
+           WHERE id = (
+             SELECT id FROM member_credits
+              WHERE user_id = ${effectiveOwner} AND credit_type = ${meta.creditType}
+                AND used_at IS NULL AND expires_at > NOW()
+                AND reserved_at IS NULL AND reserved_for_tracking_number IS NULL
+              ORDER BY expires_at ASC LIMIT 1 FOR UPDATE SKIP LOCKED
+           )
+          RETURNING id
+        `);
+        consumed = used.rows.length === 1;
+        if (!consumed) {
+          const replay = await tx.execute(sql`
+            SELECT 1 FROM member_credits
+             WHERE user_id = ${effectiveOwner} AND credit_type = ${meta.creditType}
+               AND used_for_submission_id = ${row.submission_id}
+             LIMIT 1
+          `);
+          consumed = replay.rows.length === 1;
+        }
+        reason = "no_credit_available";
+      }
+    }
+
+    if (!consumed) {
+      const details = JSON.stringify({
+        reason,
+        creditType: meta.creditType,
+        creditAmountPence: meta.creditAmountPence ?? null,
+        reservedCreditId,
+        userId: ownerUserId,
+      });
+      await tx.execute(sql`
+        INSERT INTO audit_log (entity_type, entity_id, action, admin_user, details)
+        VALUES ('submission', ${String(row.submission_id)}, 'CREDIT_CONSUME_FAILED', NULL, ${details}::jsonb)
+      `);
+      return { ok: false, reason, permanent: true };
+    }
+
+    await tx.execute(sql`
+      UPDATE grading_payment_fulfilments SET credit_completed_at = NOW(), updated_at = NOW()
+       WHERE submission_id = ${row.submission_id} AND claim_token = ${row.claim_token}
+    `);
+    return { ok: true, reason: "consumed", permanent: false };
+  });
+
+  if (!outcome.ok) {
+    if (outcome.permanent) throw new PermanentPaymentFulfilmentError(`credit:${outcome.reason}`);
+    throw new Error(`grading payment credit effect failed: ${outcome.reason}`);
+  }
+}
+
+async function completePromoEffect(row: GradingPaymentFulfilmentRow, runner: PaymentExecutor): Promise<void> {
+  if (row.promo_completed_at) return;
+  const meta = row.payment_metadata || {};
+  await runner.transaction(async (tx) => {
+    const locked = await tx.execute(sql`
+      SELECT promo_completed_at FROM grading_payment_fulfilments
+       WHERE submission_id = ${row.submission_id} AND claim_token = ${row.claim_token}
+         AND status = 'PROCESSING'
+       FOR UPDATE
+    `);
+    if (locked.rows.length !== 1) throw new Error("grading payment promo claim lost");
+    if ((locked.rows[0] as { promo_completed_at: Date | null }).promo_completed_at) return;
+
+    const promoId = Number(meta.promoCodeId);
+    if (Number.isInteger(promoId) && promoId > 0) {
+      let overCap = false;
+      if (meta.promoReservedAtCheckout !== "true") {
+        const redeemed = await tx.execute(sql`
+          UPDATE promo_codes SET uses_count = uses_count + 1, updated_at = NOW()
+           WHERE id = ${promoId} AND deleted_at IS NULL
+             AND (max_uses IS NULL OR uses_count < max_uses)
+          RETURNING id
+        `);
+        overCap = redeemed.rows.length === 0;
+      }
+      const details = JSON.stringify({
+        code: meta.promoCode || null,
+        percent: meta.promoCodePercent ? Number(meta.promoCodePercent) : null,
+        submission_id: row.submission_id,
+        over_cap: overCap,
+        reserved_at_checkout: meta.promoReservedAtCheckout === "true",
+      });
+      await tx.execute(sql`
+        INSERT INTO audit_log (entity_type, entity_id, action, admin_user, details)
+        VALUES ('promo_code', ${String(promoId)}, 'PROMO_CODE_REDEEMED', NULL, ${details}::jsonb)
+      `);
+    }
+    await tx.execute(sql`
+      UPDATE grading_payment_fulfilments SET promo_completed_at = NOW(), updated_at = NOW()
+       WHERE submission_id = ${row.submission_id} AND claim_token = ${row.claim_token}
+    `);
+  });
+}
+
+async function completeUserLinkEffect(
+  row: GradingPaymentFulfilmentRow,
+  submission: any,
+  runner: PaymentExecutor
+): Promise<void> {
+  if (row.user_link_completed_at) return;
+  await runner.transaction(async (tx) => {
+    const locked = await tx.execute(sql`
+      SELECT user_link_completed_at FROM grading_payment_fulfilments
+       WHERE submission_id = ${row.submission_id} AND claim_token = ${row.claim_token}
+         AND status = 'PROCESSING'
+       FOR UPDATE
+    `);
+    if (locked.rows.length !== 1) throw new Error("grading payment user-link claim lost");
+    if ((locked.rows[0] as { user_link_completed_at: Date | null }).user_link_completed_at) return;
+
+    if (submission.email) {
+      const email = String(submission.email).trim().toLowerCase();
+      let user = await tx.execute(sql`SELECT id FROM users WHERE LOWER(email) = ${email} LIMIT 1`);
+      if (user.rows.length === 0) {
+        user = await tx.execute(sql`
+          INSERT INTO users (email, first_name, last_name)
+          VALUES (
+            ${email},
+            ${submission.firstName || submission.first_name || null},
+            ${submission.lastName || submission.last_name || null}
+          )
+          ON CONFLICT DO NOTHING
+          RETURNING id
+        `);
+        if (user.rows.length === 0) {
+          // Another account transaction may have won the case-insensitive email
+          // key. Resolve its canonical id before linking the paid submission.
+          user = await tx.execute(sql`SELECT id FROM users WHERE LOWER(email) = ${email} LIMIT 1`);
+        }
+      }
+      const userId = (user.rows[0] as { id?: string } | undefined)?.id;
+      if (!userId) throw new Error("grading payment user creation failed");
+      await tx.execute(sql`
+        UPDATE submissions SET user_id = ${userId}, updated_at = NOW() WHERE id = ${row.submission_id}
+      `);
+    }
+    await tx.execute(sql`
+      UPDATE grading_payment_fulfilments
+         SET user_link_completed_at = NOW(), updated_at = NOW()
+       WHERE submission_id = ${row.submission_id} AND claim_token = ${row.claim_token}
+    `);
+  });
+}
+
+async function completeEmailEffect(row: GradingPaymentFulfilmentRow, runner: PaymentExecutor): Promise<void> {
+  if (row.email_completed_at) return;
+  const payload = row.confirmation_payload;
+  const emailData = { ...payload.emailData, idempotencyKey: row.provider_idempotency_key };
+  const receipt = payload.useV2
+    ? await sendSubmissionConfirmationV2(emailData)
+    : await sendSubmissionConfirmation(emailData);
+  if (!receipt?.id) throw new Error("grading payment confirmation email provider unavailable");
+  await runner.execute(sql`
+    UPDATE grading_payment_fulfilments
+       SET email_completed_at = COALESCE(email_completed_at, NOW()),
+           provider_message_id = COALESCE(provider_message_id, ${receipt.id}),
+           updated_at = NOW()
+     WHERE submission_id = ${row.submission_id} AND claim_token = ${row.claim_token} AND status = 'PROCESSING'
+  `);
+}
+
+async function markGradingPaymentFulfilmentFailure(
+  row: GradingPaymentFulfilmentRow,
+  error: unknown,
+  runner: PaymentExecutor
+): Promise<"FAILED" | "RECONCILIATION_REQUIRED"> {
+  const terminal =
+    error instanceof PermanentPaymentFulfilmentError || row.attempt_count >= PAYMENT_FULFILMENT_MAX_ATTEMPTS;
+  const status = terminal ? "RECONCILIATION_REQUIRED" : "FAILED";
+  const rawMessage = error instanceof Error ? error.message : "unknown fulfilment error";
+  const message = rawMessage.replace(/[\r\n\t]+/g, " ").slice(0, 300);
+  await runner.execute(sql`
+    UPDATE grading_payment_fulfilments
+       SET status = ${status}, claim_token = NULL, claim_expires_at = NULL,
+           next_attempt_at = NOW() + INTERVAL '5 minutes', last_error = ${message}, updated_at = NOW()
+     WHERE submission_id = ${row.submission_id} AND claim_token = ${row.claim_token} AND status = 'PROCESSING'
+  `);
+  return status;
+}
+
+async function processClaimedGradingPaymentFulfilment(
+  row: GradingPaymentFulfilmentRow,
+  deps: { storage?: typeof storage; exec?: PaymentExecutor } = {}
+): Promise<"COMPLETE" | "FAILED" | "RECONCILIATION_REQUIRED"> {
+  const store = deps.storage ?? storage;
+  const runner = deps.exec ?? db;
+  try {
+    const submission = await store.getSubmissionBySubmissionId(row.tracking_number);
+    if (!submission) throw new PermanentPaymentFulfilmentError("canonical submission missing");
+    await completeEstimateEffect(row, submission, runner);
+    await completeCreditEffect(row, submission, runner);
+    await completePromoEffect(row, runner);
+    await completeUserLinkEffect(row, submission, runner);
+    await completeEmailEffect(row, runner);
+    const completed = await runner.execute(sql`
+      UPDATE grading_payment_fulfilments
+         SET status = 'COMPLETE', completed_at = NOW(), claim_token = NULL, claim_expires_at = NULL,
+             next_attempt_at = NOW(), last_error = NULL, updated_at = NOW()
+       WHERE submission_id = ${row.submission_id} AND claim_token = ${row.claim_token}
+         AND status = 'PROCESSING'
+         AND estimate_completed_at IS NOT NULL AND credit_completed_at IS NOT NULL
+         AND promo_completed_at IS NOT NULL AND user_link_completed_at IS NOT NULL
+         AND email_completed_at IS NOT NULL
+      RETURNING submission_id
+    `);
+    if (completed.rows.length !== 1) throw new Error("grading payment fulfilment completion CAS failed");
+    return "COMPLETE";
+  } catch (error) {
+    return markGradingPaymentFulfilmentFailure(row, error, runner);
+  }
+}
+
+async function processGradingPaymentFulfilmentById(
+  submissionId: number,
+  deps: { storage?: typeof storage; exec?: PaymentExecutor } = {}
+): Promise<"NOT_DUE" | "COMPLETE" | "FAILED" | "RECONCILIATION_REQUIRED"> {
+  const runner = deps.exec ?? db;
+  const row = await claimGradingPaymentFulfilment(submissionId, runner);
+  if (!row) return "NOT_DUE";
+  return processClaimedGradingPaymentFulfilment(row, deps);
+}
+
+/**
+ * Durable payment entrypoint shared by Stripe webhook and browser confirmation.
+ * The outbox row is committed before the paid transition, so a process death
+ * after `markSubmissionAsPaid` leaves explicit retryable work rather than a
+ * silently paid-but-unfulfilled submission.
+ */
+export async function fulfilPaidSubmission(
+  submission: any,
+  piMeta: Record<string, string | undefined>,
+  piAmount: number,
+  deps: { storage?: typeof storage; exec?: PaymentExecutor } = {},
+  payment?: PaidSubmissionPayment
+): Promise<{ fulfilled: boolean }> {
+  if (!payment?.paymentIntentId) {
+    return fulfilPaidSubmissionLegacy(submission, piMeta, piAmount, deps, payment);
+  }
+
+  const store = deps.storage ?? storage;
+  const runner = deps.exec ?? db;
+  await ensureGradingPaymentFulfilment(
+    submission,
+    piMeta,
+    piAmount,
+    { ...payment, paymentIntentId: payment.paymentIntentId },
+    runner
+  );
+
+  const won = await store.markSubmissionAsPaid(Number(submission.id), {
+    amountPence: piAmount,
+    currency: payment.currency,
+    paidAt: payment.paidAt,
+  });
+  if (!won) {
+    // `false` means either an idempotent replay of an already-paid row or a
+    // transition that did not happen. Only the first is safe to acknowledge to
+    // Stripe: otherwise the provider event would be recorded while the durable
+    // receipt remained permanently filtered out of fulfilment.
+    const paid = await runner.execute(sql`
+      SELECT 1 FROM submissions
+       WHERE id = ${Number(submission.id)} AND payment_status = 'paid'
+    `);
+    if (paid.rows.length !== 1) {
+      throw new Error("grading payment receipt persisted but submission did not reach paid state");
+    }
+  }
+  const outcome = await processGradingPaymentFulfilmentById(Number(submission.id), deps);
+  if (outcome === "RECONCILIATION_REQUIRED") {
+    console.error(`[fulfil] submission ${submission.submissionId} requires payment-fulfilment reconciliation`);
+  }
+  return { fulfilled: won };
+}
+
+/** Advisory-locked by server/index.ts; row claims remain the multi-machine authority. */
+export async function reconcileGradingPaymentFulfilments(
+  options: { limit?: number; storage?: typeof storage; exec?: PaymentExecutor } = {}
+): Promise<{ examined: number; completed: number; failed: number; reconciliationRequired: number }> {
+  const runner = options.exec ?? db;
+  const limit = Math.min(Math.max(options.limit ?? 20, 1), 100);
+  // The receipt is written before the paid transition. If a process dies in
+  // that narrow window, recover the same guarded draft->paid transition from
+  // authoritative receipt data instead of depending forever on provider
+  // redelivery. Unsafe non-draft mismatches are never overwritten; they become
+  // a standing operator-visible reconciliation item.
+  await runner.transaction(async (tx) => {
+    await tx.execute(sql`SET LOCAL mintvault.admin_bypass = 'true'`);
+    await tx.execute(sql`
+      UPDATE submissions s
+         SET status = 'paid', payment_status = 'paid',
+             payment_amount = f.amount_pence::numeric / 100,
+             payment_currency = f.currency,
+             payment_timestamp = COALESCE(s.payment_timestamp, f.paid_at),
+             updated_at = NOW()
+        FROM grading_payment_fulfilments f
+       WHERE f.submission_id = s.id
+         AND f.status IN ('PENDING', 'FAILED')
+         AND f.next_attempt_at <= NOW()
+         AND LOWER(s.status) = 'draft'
+         AND s.payment_status <> 'paid'
+    `);
+    await tx.execute(sql`
+      UPDATE grading_payment_fulfilments f
+         SET status = 'RECONCILIATION_REQUIRED',
+             claim_token = NULL, claim_expires_at = NULL,
+             last_error = 'paid receipt conflicts with non-draft unpaid submission state',
+             updated_at = NOW()
+        FROM submissions s
+       WHERE s.id = f.submission_id
+         AND f.status IN ('PENDING', 'FAILED')
+         AND f.next_attempt_at <= NOW()
+         AND s.payment_status <> 'paid'
+         AND LOWER(s.status) <> 'draft'
+    `);
+  });
+  // A hard process death bypasses the in-process catch. If it happens during
+  // the final allowed claim, terminalize the expired lease explicitly rather
+  // than leaving a PROCESSING row that the attempt ceiling makes unclaimable.
+  await runner.execute(sql`
+    UPDATE grading_payment_fulfilments
+       SET status = 'RECONCILIATION_REQUIRED', claim_token = NULL, claim_expires_at = NULL,
+           last_error = COALESCE(last_error, 'fulfilment attempt ceiling exhausted after worker interruption'),
+           updated_at = NOW()
+     WHERE attempt_count >= ${PAYMENT_FULFILMENT_MAX_ATTEMPTS}
+       AND (
+         (status IN ('PENDING', 'FAILED') AND next_attempt_at <= NOW())
+         OR (status = 'PROCESSING' AND claim_expires_at <= NOW())
+       )
+  `);
+  const due = await runner.execute(sql`
+    SELECT f.submission_id
+      FROM grading_payment_fulfilments f
+      JOIN submissions s ON s.id = f.submission_id AND s.payment_status = 'paid'
+     WHERE f.attempt_count < ${PAYMENT_FULFILMENT_MAX_ATTEMPTS}
+       AND (
+         (f.status IN ('PENDING', 'FAILED') AND f.next_attempt_at <= NOW())
+         OR (f.status = 'PROCESSING' AND f.claim_expires_at <= NOW())
+       )
+     ORDER BY f.next_attempt_at, f.submission_id
+     LIMIT ${limit}
+  `);
+  let completed = 0;
+  let failed = 0;
+  for (const item of due.rows as Array<{ submission_id: number }>) {
+    const state = await processGradingPaymentFulfilmentById(Number(item.submission_id), {
+      storage: options.storage,
+      exec: runner,
+    });
+    if (state === "COMPLETE") completed += 1;
+    else if (state === "FAILED") failed += 1;
+  }
+  // Return the standing backlog, not only transitions from this invocation.
+  // The periodic worker therefore keeps alerting until an operator resolves it.
+  const reconciliation = await runner.execute(sql`
+    SELECT COUNT(*)::int AS count FROM grading_payment_fulfilments
+     WHERE status = 'RECONCILIATION_REQUIRED'
+  `);
+  const reconciliationRequired = Number((reconciliation.rows[0] as { count?: number } | undefined)?.count ?? 0);
+  return { examined: due.rows.length, completed, failed, reconciliationRequired };
 }
 
 // Payment endpoints — generous for legit users retrying declined cards
@@ -615,6 +1246,7 @@ export function registerSubmissionRoutes(app: Express): void {
         promoCode: typeof promoCode === "string" ? promoCode : undefined,
       };
       let quote = await computeGradingQuote(quoteInput);
+      const submissionId = await storage.getNextSubmissionId();
 
       // ── Reserve-at-checkout (fix for the credit double-spend + promo
       // over-redemption races). Atomically claim the credit/promo BEFORE the
@@ -628,7 +1260,7 @@ export function registerSubmissionRoutes(app: Express): void {
       let reservedCreditId: number | null = null;
       let promoReservedAtCheckout = false;
       if (quote.creditApplied && quote.creditTypeApplied && sessionUserId) {
-        reservedCreditId = await reserveCredit(sessionUserId, quote.creditTypeApplied);
+        reservedCreditId = await reserveCredit(sessionUserId, quote.creditTypeApplied, submissionId);
       }
       if (quote.promoCodeApplied && quote.promoCodeId != null) {
         promoReservedAtCheckout = await reservePromoCodeUse(quote.promoCodeId);
@@ -674,12 +1306,9 @@ export function registerSubmissionRoutes(app: Express): void {
       const highValueFlag = declaredValuePerCard > 3000 || totalDeclaredValue > 7500;
       const requiresManualApproval = totalDeclaredValue > 7500;
 
-      const submissionId = await storage.getNextSubmissionId();
+      const turnaroundDays = dbTier.turnaroundDays;
 
-      const turnaroundDays = tierData.turnaround ? parseInt(tierData.turnaround) : null;
-
-      const clientIp =
-        req.headers["x-forwarded-for"]?.toString()?.split(",")[0]?.trim() || req.socket?.remoteAddress || "unknown";
+      const clientIp = req.ip || req.socket?.remoteAddress || "unknown";
 
       const submission = await storage.createSubmission({
         submissionId,
@@ -970,10 +1599,17 @@ export function registerSubmissionRoutes(app: Express): void {
         // credit, redeem promo, link user, email) run for exactly ONE caller
         // (this handler or the Stripe webhook, whoever wins the atomic paid
         // transition). A duplicate/raced confirm is a safe no-op.
-        await fulfilPaidSubmission(submission, paymentIntent.metadata || {}, paymentIntent.amount || 0, {}, {
-          currency: paymentIntent.currency,
-          paidAt: new Date(),
-        });
+        await fulfilPaidSubmission(
+          submission,
+          paymentIntent.metadata || {},
+          paymentIntent.amount || 0,
+          {},
+          {
+            currency: paymentIntent.currency,
+            paidAt: new Date(),
+            paymentIntentId: paymentIntent.id,
+          }
+        );
 
         const packingSlipToken = generatePdfToken(submission.submissionId); // H-a hardened token
         return res.json({
@@ -1062,22 +1698,25 @@ export function registerSubmissionRoutes(app: Express): void {
     }
   });
 
-  app.post("/api/submissions/:submissionId/track", async (req, res) => {
+  app.post("/api/submissions/:submissionId/track", submissionLookupRateLimit, async (req, res) => {
     try {
       const { email } = req.body;
-      if (!email) {
+      if (typeof email !== "string" || !email.trim()) {
         return res.status(400).json({ error: "Email is required" });
       }
 
-      const submission = await storage.getSubmissionBySubmissionId(req.params.submissionId);
+      const submission = await storage.getSubmissionBySubmissionId(String(req.params.submissionId));
       if (!submission) {
-        return res.status(404).json({ error: "Submission not found" });
+        return res.status(404).json({ error: "Submission not found or details do not match" });
       }
 
       const storedEmail = (submission.customerEmail || "").toLowerCase().trim();
       const providedEmail = email.toLowerCase().trim();
       if (!storedEmail || storedEmail !== providedEmail) {
-        return res.status(403).json({ error: "Email does not match" });
+        // Sequential submission ids make distinct 404/403 responses an
+        // existence oracle. Missing and mismatched records are deliberately
+        // indistinguishable to public callers.
+        return res.status(404).json({ error: "Submission not found or details do not match" });
       }
 
       res.json({

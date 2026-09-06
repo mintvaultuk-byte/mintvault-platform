@@ -26,6 +26,7 @@ export default function SignupPage() {
   const [terms, setTerms] = useState(false);
   const [error, setError] = useState("");
   const [done, setDone] = useState(false);
+  const [resendSent, setResendSent] = useState(false);
 
   const strength = passwordStrength(password);
 
@@ -47,6 +48,12 @@ export default function SignupPage() {
       setDone(true);
     },
     onError: (err: Error) => setError(err.message),
+  });
+
+  const resendMutation = useMutation({
+    mutationFn: () => apiRequest("POST", "/api/auth/resend-verification", {}),
+    onSuccess: () => setResendSent(true),
+    onError: () => setError("Failed to resend the verification email. Please try again."),
   });
 
   const handleSubmit = (e: React.FormEvent) => {
@@ -75,17 +82,43 @@ export default function SignupPage() {
             We've sent a verification link to <strong>{email}</strong>.
           </p>
           <p className="text-sm text-[#888888] mb-8">
-            Click the link in your inbox to verify your email address. You can still use your account in the meantime.
+            Click the link in your inbox before accessing customer records or paid account features. This protects any
+            existing MintVault cards and submissions associated with your address.
           </p>
-          <GradientButton
-            as="button"
+          {resendSent ? (
+            <p className="text-sm text-emerald-700 font-semibold" role="status" aria-live="polite">
+              Verification email sent. Check your inbox.
+            </p>
+          ) : (
+            <GradientButton
+              as="button"
+              type="button"
+              onClick={() => resendMutation.mutate()}
+              disabled={resendMutation.isPending}
+              className="gradient-btn-filled"
+              height="48px"
+            >
+              {resendMutation.isPending ? (
+                <>
+                  <Loader2 size={14} className="animate-spin" /> Sending…
+                </>
+              ) : (
+                "Resend Verification Email"
+              )}
+            </GradientButton>
+          )}
+          {error && (
+            <p className="text-xs text-red-600 mt-4" role="alert" aria-live="assertive">
+              {error}
+            </p>
+          )}
+          <button
             type="button"
-            onClick={() => navigate("/dashboard")}
-            className="gradient-btn-filled"
-            height="48px"
+            onClick={() => navigate("/")}
+            className="block mx-auto mt-5 text-xs text-[#888888] hover:text-[#B8960C] transition-colors"
           >
-            Go to Dashboard
-          </GradientButton>
+            Return to MintVault
+          </button>
         </div>
       </div>
     );

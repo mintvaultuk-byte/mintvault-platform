@@ -254,7 +254,6 @@ export default function PartnerManagementDetailPage() {
   // Canonical workspace URLs reject malformed identifiers locally. The older retained route is
   // deliberately left to its existing server-side not-found behaviour until its retirement date.
   const validPartnerId = pathname.startsWith("/admin/partner-network/partners/") || UUID_RE.test(partnerId);
-  const [authed, setAuthed] = useState<boolean | null>(null);
   const [banner, setBanner] = useState<string | null>(null);
   // generic reason modal state
   const [modal, setModal] = useState<{
@@ -318,25 +317,7 @@ export default function PartnerManagementDetailPage() {
   // turns red before it has been filled in reads as broken rather than helpful.
   const [userTouched, setUserTouched] = useState(false);
 
-  useEffect(() => {
-    let live = true;
-    fetch("/api/admin/session", { credentials: "include" })
-      .then((r) => (r.ok ? r.json() : null))
-      .then((d) => live && setAuthed(!!d?.authenticated))
-      .catch(() => live && setAuthed(false));
-    return () => {
-      live = false;
-    };
-  }, []);
-  useEffect(() => {
-    if (authed === false)
-      navigate(
-        `/admin/login?next=${encodeURIComponent(`${pathname}${window.location.search}${window.location.hash}`)}`,
-        { replace: true }
-      );
-  }, [authed, navigate, pathname]);
-
-  const on = authed === true && validPartnerId;
+  const on = validPartnerId;
   const detail = useQuery({
     queryKey: pmKeys.partner(partnerId),
     queryFn: () => apiRequest("GET", `${BASE}/partners/${partnerId}`).then((r) => r.json()),
@@ -757,7 +738,7 @@ export default function PartnerManagementDetailPage() {
     (publicProfileStatus.data?.locations ?? []).map((location) => [location.id, location] as const)
   );
 
-  if (authed === null || detail.isLoading) {
+  if (detail.isLoading) {
     return (
       <div
         className="admin-root"
@@ -773,7 +754,6 @@ export default function PartnerManagementDetailPage() {
       <AdminShell
         activeTab="dashboard"
         onTabChange={() => navigate("/admin")}
-        onLogout={() => navigate("/admin")}
         title="Partner"
         crumb="Partner Network"
       >
@@ -805,7 +785,6 @@ export default function PartnerManagementDetailPage() {
     <AdminShell
       activeTab="dashboard"
       onTabChange={() => navigate("/admin")}
-      onLogout={() => navigate("/admin")}
       title={org.legal_name}
       crumb="Partner Network"
     >

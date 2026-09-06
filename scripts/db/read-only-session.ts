@@ -39,6 +39,8 @@
  * port; those are passed through as-is.)
  */
 import type { Client as PgClient, QueryResult, QueryResultRow } from "pg";
+import type pg from "pg";
+import { securePostgresPoolConnection } from "../../server/lib/postgres-transport-security";
 
 /** Query function handed to the caller. Confined to the read-only transaction. */
 export type ReadOnlyQuery = <R extends QueryResultRow = QueryResultRow>(
@@ -57,16 +59,12 @@ export interface ReadOnlyCapableClient {
   query: (sql: string, params?: unknown[]) => Promise<QueryResult<never>>;
 }
 
-const isLocalHost = (databaseUrl: string): boolean => {
-  try {
-    const h = new URL(databaseUrl).hostname.toLowerCase();
-    return h === "localhost" || h === "127.0.0.1" || h === "::1" || h === "[::1]";
-  } catch {
-    // Unparseable: fall back to a substring test rather than silently enabling TLS
-    // against something we cannot identify.
-    return databaseUrl.includes("127.0.0.1") || databaseUrl.includes("localhost");
-  }
-};
+export function readOnlyClientConfig(databaseUrl: string): pg.ClientConfig {
+  return {
+    ...securePostgresPoolConnection(databaseUrl, "MINTVAULT_DATABASE_URL"),
+    connectionTimeoutMillis: 15_000,
+  };
+}
 
 /** Statements that would end or re-open the protected transaction. Refused outright. */
 const TRANSACTION_CONTROL =
@@ -208,13 +206,9 @@ export async function withReadOnlySession<T>(
   const { Client } = await import("pg");
 
   const connect = async (url: string): Promise<PgClient> => {
-    const c: PgClient = new Client({
-      connectionString: url,
-      ssl: isLocalHost(url) ? undefined : { rejectUnauthorized: false },
-      // Bound the connection attempt: this runs as a deploy gate, so a blackholed host
-      // must fail fast rather than hang.
-      connectionTimeoutMillis: 15_000,
-    });
+    // Bound the connection attempt: this runs as a deploy gate, so a blackholed host
+    // must fail fast rather than hang. Transport is the same verified authority as runtime.
+    const c: PgClient = new Client(readOnlyClientConfig(url));
     // A pg Client emits a connection-level 'error' event when the socket dies
     // unexpectedly (backend terminated, pooler recycled it, network dropped). With no
     // listener that becomes an UNCAUGHT EXCEPTION and takes the whole preflight process

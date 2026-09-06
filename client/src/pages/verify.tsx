@@ -36,10 +36,20 @@ interface VerifyResult {
   stolenStatus?: string | null;
 }
 
+interface VoidedVerifyResult {
+  verified: false;
+  reason: "voided";
+  certId: string;
+  status: "voided";
+}
+
+type VerifyApiResult = VerifyResult | VoidedVerifyResult;
+
 type VerifyStatus =
   | { kind: "idle" }
   | { kind: "loading" }
   | { kind: "verified"; result: VerifyResult }
+  | { kind: "voided"; result: VoidedVerifyResult }
   | { kind: "not-found"; certId: string }
   | { kind: "rate-limited" }
   | { kind: "error" };
@@ -107,6 +117,29 @@ const FAQS = [
 
 // ── Result card (inline) ───────────────────────────────────────────────────
 
+function VoidedResultCard({ result }: { result: VoidedVerifyResult }) {
+  return (
+    <div
+      className="mt-8 rounded-xl p-6 md:p-8 transition-opacity duration-300"
+      style={{ backgroundColor: "#FEF2F2", border: "2px solid #DC2626" }}
+      role="alert"
+      aria-live="assertive"
+      data-testid="verify-result-voided"
+    >
+      <p className="font-mono-v2 text-[10px] uppercase tracking-widest mb-2" style={{ color: "#DC2626" }}>
+        Certificate voided &middot; Not valid
+      </p>
+      <p className="font-mono-v2 text-2xl md:text-3xl font-semibold" style={{ color: "var(--v2-ink)" }}>
+        {result.certId}
+      </p>
+      <p className="font-body text-xs md:text-sm font-semibold mt-3 max-w-xl" style={{ color: "#991B1B" }}>
+        This certificate has been voided by MintVault and is no longer valid. Do not rely on this slab as verified or
+        purchase it as a valid MintVault certificate. Contact support@mintvaultuk.com if you need help.
+      </p>
+    </div>
+  );
+}
+
 function ResultCard({ result }: { result: VerifyResult }) {
   const identityParts = [result.cardSet, result.cardYear, result.cardNumber ? `#${result.cardNumber}` : null].filter(
     Boolean
@@ -123,6 +156,7 @@ function ResultCard({ result }: { result: VerifyResult }) {
         backgroundColor: "var(--v2-paper-raised)",
         border: isStolen ? "2px solid #DC2626" : "1px solid var(--v2-gold-soft)",
       }}
+      data-testid="verify-result-valid"
     >
       <div
         className="flex items-start justify-between gap-4 flex-wrap mb-6"
@@ -266,7 +300,17 @@ export default function VerifyV2() {
         setStatus({ kind: "error" });
         return;
       }
-      const data = (await res.json()) as VerifyResult;
+      const data = (await res.json()) as VerifyApiResult;
+      // The discriminant is authoritative. Status is checked too as a
+      // compatibility fail-safe for an old cached response during rollout.
+      if ((!data.verified && data.reason === "voided") || data.status.trim().toLowerCase() === "voided") {
+        setStatus({
+          kind: "voided",
+          result: { verified: false, reason: "voided", certId: data.certId, status: "voided" },
+        });
+        setCertNumber("");
+        return;
+      }
       if (!data.verified) {
         setStatus({ kind: "not-found", certId: trimmed });
         return;
@@ -355,6 +399,7 @@ export default function VerifyV2() {
 
             {/* Inline result */}
             {status.kind === "verified" && <ResultCard result={status.result} />}
+            {status.kind === "voided" && <VoidedResultCard result={status.result} />}
             {status.kind === "not-found" && (
               <p className="mt-6 font-body text-sm max-w-md" style={{ color: "var(--v2-ink-soft)" }}>
                 Certificate {status.certId} not recognised. Check the number and try again. If the slab is physical, the

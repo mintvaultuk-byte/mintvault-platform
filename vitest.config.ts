@@ -13,6 +13,13 @@ export default defineConfig({
     globals: true,
     include: ["tests/**/*.test.ts"],
     fileParallelism: !process.env.TEST_DATABASE_URL,
+    // Synthetic test-only keyring. Notification-producing storage/auth tests
+    // must exercise the same fail-closed encryption path as production without
+    // depending on a developer's local environment.
+    env: {
+      CUSTOMER_NOTIFICATION_ENC_KEY_VERSION: "1",
+      CUSTOMER_NOTIFICATION_ENC_KEY_V1: "0000000000000000000000000000000000000000000000000000000000000000",
+    },
   },
   resolve: {
     alias: {

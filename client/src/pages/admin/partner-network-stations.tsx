@@ -70,33 +70,14 @@ function stationBadge(status: string): "act" | "wait" | "prog" | "red" | "neu" {
 }
 
 export default function PartnerNetworkStationsPage() {
-  const [pathname, navigate] = useLocation();
+  const [, navigate] = useLocation();
   const [, params] = useRoute("/admin/partners/:partnerId/stations");
   const partnerId = params?.partnerId ?? null;
   const validPartnerId = !partnerId || UUID_RE.test(partnerId);
-  const [authed, setAuthed] = useState<boolean | null>(null);
   const [status, setStatus] = useState<string>("");
   const [query, setQuery] = useState("");
   const [stationAction, setStationAction] = useState<StationAction | null>(null);
   const [reason, setReason] = useState("");
-  useEffect(() => {
-    let live = true;
-    fetch("/api/admin/session", { credentials: "include" })
-      .then((response) => (response.ok ? response.json() : null))
-      .then((value) => live && setAuthed(value?.authenticated === true))
-      .catch(() => live && setAuthed(false));
-    return () => {
-      live = false;
-    };
-  }, []);
-  useEffect(() => {
-    if (authed === false)
-      navigate(
-        `/admin/login?next=${encodeURIComponent(`${pathname}${window.location.search}${window.location.hash}`)}`,
-        { replace: true }
-      );
-  }, [authed, navigate, pathname]);
-
   const fleet = useQuery<{ stations: Station[]; total: number }>({
     queryKey: [BASE, { status, query, partnerId }],
     queryFn: () => {
@@ -106,7 +87,7 @@ export default function PartnerNetworkStationsPage() {
       if (partnerId) params.set("tenantId", partnerId);
       return apiRequest("GET", `${BASE}?${params}`).then((response) => response.json());
     },
-    enabled: authed === true && validPartnerId,
+    enabled: validPartnerId,
   });
   const stationMutation = useMutation({
     mutationFn: async (action: StationAction) =>
@@ -126,7 +107,6 @@ export default function PartnerNetworkStationsPage() {
     <AdminShell
       activeTab="dashboard"
       onTabChange={() => navigate("/admin")}
-      onLogout={() => navigate("/admin")}
       title="Partner Network"
       crumb={partnerId ? "Partner Stations" : "Stations"}
     >

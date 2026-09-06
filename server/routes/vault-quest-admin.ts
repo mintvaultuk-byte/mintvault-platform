@@ -11,6 +11,7 @@ import type { Express, Request, Response, NextFunction } from "express";
 import { requireAdmin } from "../auth";
 import { uploadToR2, getR2Buffer } from "../r2";
 import { toolsUpload } from "../lib/multer-configs";
+import { uploadMemoryAdmission } from "../lib/upload-memory-admission";
 import { vqStorage, type CharacterBibleContext, type CharacterBiblePatch } from "../vault-quest/storage";
 import { validateArtwork } from "../vault-quest/upload-guard";
 import { intOrNull, isCandidateReferencedInPack } from "../vault-quest/lib/write-sanitize";
@@ -28,7 +29,7 @@ import { normalizePdf } from "../vault-quest/pdf-normalize";
 import { VQ_ELEMENTS, VQ_ELEMENTS_NEEDS_APPROVAL } from "../vault-quest/lib/vq-constants";
 import { canTransition, isVqStatus } from "@shared/vq-workflow";
 import { setIntegrity, cardMetadata } from "../vault-quest/qa-set";
-import { startExport, getExportStatusView, resolveExportDownload } from "../vault-quest/export-jobs";
+import { startExport, getExportStatusView, resolveExportDownload, ExportUnavailableError } from "../vault-quest/export-jobs";
 import { getR2ObjectStream } from "../r2";
 import { checkGenerationSpend } from "../vault-quest/lib/generation-guard";
 import {
@@ -680,7 +681,7 @@ interface GenCandidateResult {
 // outage must never turn a rejection into a 500 — the caller `.catch(() => null)`s it.
 async function quarantineRejectedImage(
   characterId: string,
-  png: Buffer,
+  png: Buffer
 ): Promise<{ key: string; checksum: string } | null> {
   const safe = characterId.replace(/[^A-Za-z0-9_-]/g, "").slice(0, 64);
   if (!safe) return null;
@@ -1425,6 +1426,7 @@ export function registerVaultQuestAdminRoutes(app: Express): void {
   app.post(
     "/api/admin/vault-quest/characters/:characterId/artwork",
     requireAdmin,
+    uploadMemoryAdmission("vq_character_artwork", 128),
     toolsUpload.single("file"),
     async (req: Request, res: Response) => {
       try {
@@ -1534,6 +1536,7 @@ export function registerVaultQuestAdminRoutes(app: Express): void {
   app.post(
     "/api/admin/vault-quest/characters/:characterId/reference/:referenceType/upload",
     requireAdmin,
+    uploadMemoryAdmission("vq_character_reference", 128),
     toolsUpload.single("file"),
     async (req: Request, res: Response) => {
       try {
@@ -1827,7 +1830,9 @@ export function registerVaultQuestAdminRoutes(app: Express): void {
             identityThreshold: identity?.threshold ?? identityThreshold(),
           });
         }
-        const thumb = await (await import("sharp"))
+        const thumb = await (
+          await import("sharp")
+        )
           .default(artwork.png)
           .resize(320, 320, { fit: "inside" })
           .png()
@@ -1869,26 +1874,22 @@ export function registerVaultQuestAdminRoutes(app: Express): void {
   // R2 quarantine keyspace — never a public or long-lived URL, never a candidate. The
   // ref is the URL-encoded quarantine key returned in the 422 above; it is re-validated
   // as a read key inside the `vq/characters/.../quarantine/` space (no traversal).
-  app.get(
-    "/api/admin/vault-quest/quarantine/:ref/image",
-    requireAdmin,
-    async (req: Request, res: Response) => {
-      try {
-        const decoded = decodeURIComponent(String(req.params.ref));
-        if (!decoded.startsWith("vq/characters/") || !decoded.includes("/quarantine/") || decoded.includes("..")) {
-          return res.status(400).json({ error: "invalid quarantine reference" });
-        }
-        const key = assertVqReadKey(decoded);
-        const buf = await getR2Buffer(key);
-        if (!buf) return res.status(404).json({ error: "quarantined source not found" });
-        res.setHeader("Content-Type", "image/png");
-        res.setHeader("Cache-Control", "private, no-store");
-        res.send(buf);
-      } catch (err) {
-        res.status(500).json({ error: err instanceof Error ? err.message : "failed to load quarantined source" });
+  app.get("/api/admin/vault-quest/quarantine/:ref/image", requireAdmin, async (req: Request, res: Response) => {
+    try {
+      const decoded = decodeURIComponent(String(req.params.ref));
+      if (!decoded.startsWith("vq/characters/") || !decoded.includes("/quarantine/") || decoded.includes("..")) {
+        return res.status(400).json({ error: "invalid quarantine reference" });
       }
+      const key = assertVqReadKey(decoded);
+      const buf = await getR2Buffer(key);
+      if (!buf) return res.status(404).json({ error: "quarantined source not found" });
+      res.setHeader("Content-Type", "image/png");
+      res.setHeader("Cache-Control", "private, no-store");
+      res.send(buf);
+    } catch (err) {
+      res.status(500).json({ error: err instanceof Error ? err.message : "failed to load quarantined source" });
     }
-  );
+  });
 
   // Generate N more candidates (default 3, max 3) for THIS character only. Partial-tolerant:
   // if a later image fails (e.g. credits), the ones already created are still returned.
@@ -1934,12 +1935,10 @@ export function registerVaultQuestAdminRoutes(app: Express): void {
           return res.status(400).json({ error: `Invalid job count.`, count: body.count });
         }
         if (requestedCount > VQ_BATCH_MAX_JOBS) {
-          return res
-            .status(400)
-            .json({
-              error: `That asks for more than the ${VQ_BATCH_MAX_JOBS}-job batch limit.`,
-              maxJobs: VQ_BATCH_MAX_JOBS,
-            });
+          return res.status(400).json({
+            error: `That asks for more than the ${VQ_BATCH_MAX_JOBS}-job batch limit.`,
+            maxJobs: VQ_BATCH_MAX_JOBS,
+          });
         }
         const count = Math.max(1, Math.min(VQ_BATCH_MAX_JOBS, requestedCount || VQ_BATCH_MAX_JOBS));
         const referenceType = parseReferenceType(body.referenceType);
@@ -2233,12 +2232,10 @@ export function registerVaultQuestAdminRoutes(app: Express): void {
           const confirmReplaceLocked =
             (req.body as { confirmReplaceLocked?: boolean } | undefined)?.confirmReplaceLocked === true;
           if (character?.locked && !confirmReplaceLocked)
-            return res
-              .status(423)
-              .json({
-                error: "Character is locked — unlock before restoring an older reference, or confirm the restore.",
-                locked: true,
-              });
+            return res.status(423).json({
+              error: "Character is locked — unlock before restoring an older reference, or confirm the restore.",
+              locked: true,
+            });
         }
         const outcome = await restoreArtworkRevision(revisionId, req.session?.adminEmail || "admin");
         if (!outcome.ok) {
@@ -2281,12 +2278,10 @@ export function registerVaultQuestAdminRoutes(app: Express): void {
         // stays locked; promoteCharacterReferenceRevision below still archives the old
         // image and keeps full history either way. Without the flag, still hard-blocked.
         if (character.locked && body.confirmReplaceLocked !== true)
-          return res
-            .status(423)
-            .json({
-              error: "Character is locked — unlock before changing its reference pack, or confirm the Replace action.",
-              locked: true,
-            });
+          return res.status(423).json({
+            error: "Character is locked — unlock before changing its reference pack, or confirm the Replace action.",
+            locked: true,
+          });
         const cand = await vqStorage.getArtworkCandidate(candidateId);
         if (!cand || cand.characterId !== characterId || !cand.r2Key.startsWith("vq/characters/")) {
           return res.status(404).json({ error: "candidate not found for this character" });
@@ -2447,12 +2442,10 @@ export function registerVaultQuestAdminRoutes(app: Express): void {
         // Batch/family hard limit (Phase 3B item 6A) — reject BEFORE any spend/
         // reservation/provider work; never partially run an over-limit family.
         if (fam.length > VQ_FAMILY_MAX_JOBS) {
-          return res
-            .status(400)
-            .json({
-              error: `That family has more than the ${VQ_FAMILY_MAX_JOBS}-stage limit for one press.`,
-              maxJobs: VQ_FAMILY_MAX_JOBS,
-            });
+          return res.status(400).json({
+            error: `That family has more than the ${VQ_FAMILY_MAX_JOBS}-stage limit for one press.`,
+            maxJobs: VQ_FAMILY_MAX_JOBS,
+          });
         }
         if (!(await providerGateOrRespond(res))) return;
         if (!(await vqFeatureGateOrRespond(res, "generation"))) return; // emergency kill switch (Phase 10A-4)
@@ -3595,6 +3588,7 @@ export function registerVaultQuestAdminRoutes(app: Express): void {
   app.post(
     "/api/admin/vault-quest/cards/:cardId/art",
     requireAdmin,
+    uploadMemoryAdmission("vq_card_art", 128),
     toolsUpload.single("file"),
     async (req: Request, res: Response) => {
       try {
@@ -3664,6 +3658,7 @@ export function registerVaultQuestAdminRoutes(app: Express): void {
   app.post(
     "/api/admin/vault-quest/import",
     requireAdmin,
+    uploadMemoryAdmission("vq_import", 64),
     toolsUpload.single("file"),
     async (req: Request, res: Response) => {
       const file = (req as Request & { file?: Express.Multer.File }).file;
@@ -3882,6 +3877,7 @@ export function registerVaultQuestAdminRoutes(app: Express): void {
         const { jobId, count } = await startExport(kind, ownerAdminId, ids);
         res.status(202).json({ jobId, count });
       } catch (err) {
+        if (err instanceof ExportUnavailableError) return res.status(503).json({ error: "export service temporarily unavailable" });
         const status = (err as { status?: number }).status;
         const msg = err instanceof Error ? err.message : `${kind} failed to start`;
         // Concurrency back-pressure ("too many exports") is our own safe text → surface it.
@@ -3899,27 +3895,29 @@ export function registerVaultQuestAdminRoutes(app: Express): void {
   // export pack (.zip): svg/png/pdf + per-card metadata + manifest + checksums — background job
   app.post("/api/admin/vault-quest/export/pack", requireAdmin, startBatch("pack"));
 
-  // job progress (poll) — durable (Postgres) first, legacy in-memory fallback, so a
+  // job progress (poll) — shared durable PostgreSQL state, so a
   // poll that lands on a different Fly machine than the POST still finds the job.
   app.get("/api/admin/vault-quest/export/jobs/:id", requireAdmin, async (req: Request, res: Response) => {
     const view = await getExportStatusView(String(req.params.id));
-    if (!view) return res.status(404).json({ error: "job not found or expired" });
-    res.json(view);
+    if (!view.ok) return res.status(view.status).json({ error: view.reason === "unavailable" ? "export service temporarily unavailable" : "job not found or expired" });
+    res.json(view.value);
   });
 
   // download the finished file. Durable jobs stream from shared R2 (same-origin,
-  // behind admin auth) so any machine can serve it; legacy jobs stream the temp file.
+  // behind admin auth) so any machine can serve it. Temp render files are never served.
   app.get("/api/admin/vault-quest/export/jobs/:id/file", requireAdmin, async (req: Request, res: Response) => {
     const plan = await resolveExportDownload(String(req.params.id));
     switch (plan.kind) {
+      case "unavailable":
+        return res.status(plan.status).json({ error: "export service temporarily unavailable" });
       case "not_found":
-        return res.status(404).json({ error: "job not found or expired" });
+        return res.status(plan.status).json({ error: "job not found or expired" });
       case "running":
-        return res.status(409).json({ error: "export still running" });
+        return res.status(plan.status).json({ error: "export still running" });
       case "failed":
-        return res.status(422).json({ error: plan.message });
+        return res.status(plan.status).json({ error: plan.message });
       case "gone":
-        return res.status(410).json({ error: "export file no longer available" });
+        return res.status(plan.status).json({ error: "export file no longer available" });
       case "r2": {
         const obj = await getR2ObjectStream(plan.outputKey);
         if (!obj) return res.status(410).json({ error: "export file no longer available" });
@@ -3933,20 +3931,6 @@ export function registerVaultQuestAdminRoutes(app: Express): void {
           else res.destroy();
         });
         return obj.body.pipe(res);
-      }
-      case "file": {
-        const fs = await import("fs");
-        if (!fs.existsSync(plan.filePath)) return res.status(410).json({ error: "export file no longer available" });
-        res.setHeader("Content-Type", plan.contentType);
-        res.setHeader("Content-Disposition", `attachment; filename="${plan.fileName}"`);
-        if (plan.bytes) res.setHeader("Content-Length", String(plan.bytes));
-        const stream = fs.createReadStream(plan.filePath);
-        stream.on("error", () => {
-          if (!res.headersSent) res.status(500).json({ error: "failed to read export file" });
-          else res.destroy();
-        });
-        res.on("close", () => stream.destroy());
-        return stream.pipe(res);
       }
     }
   });

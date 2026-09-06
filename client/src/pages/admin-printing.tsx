@@ -1,7 +1,7 @@
-import { useState, useCallback, useMemo, createContext, useContext } from "react";
+import { useState, useCallback, useMemo, useRef, createContext, useContext } from "react";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { useForm } from "react-hook-form";
-import { apiRequest } from "@/lib/queryClient";
+import { adminFetch, apiRequest } from "@/lib/queryClient";
 import type { CertificateRecord } from "@shared/schema";
 import { useToast } from "@/hooks/use-toast";
 import { Badge } from "@/components/ui/badge";
@@ -291,19 +291,15 @@ function EditLabelModal({
   );
 }
 
-// ── Reprint Reason Modal — admin override for claimed certs ─────────────────
-// v525 — when /api/admin/print-batch rejects with 409 because one or more
-// selected certs are claimed, this modal collects the reason and re-submits
-// to /api/admin/print-batch/reprint. Reason 10-500 chars, recorded to
-// audit_log per cert.
+// ── Reprint Reason Modal — required for every already-produced label ────────
 function ReprintReasonModal({
-  claimedCertIds,
+  reasonRequiredCertIds,
   allCertIds,
   onCancel,
   onSubmit,
   submitting,
 }: {
-  claimedCertIds: string[];
+  reasonRequiredCertIds: string[];
   allCertIds: string[];
   onCancel: () => void;
   onSubmit: (reason: string) => void;
@@ -316,7 +312,7 @@ function ReprintReasonModal({
     <Dialog
       open
       onOpenChange={(open) => {
-        if (!open) onCancel();
+        if (!open && !submitting) onCancel();
       }}
     >
       <DialogContent
@@ -325,7 +321,7 @@ function ReprintReasonModal({
       >
         <DialogHeader>
           <DialogTitle className="text-[var(--admin-gold-hi)] flex items-center gap-2">
-            <AlertCircle className="h-4 w-4" /> Reprint claimed cert(s)
+            <AlertCircle className="h-4 w-4" /> Reprint produced cert(s)
           </DialogTitle>
         </DialogHeader>
         <div className="space-y-3">
@@ -333,14 +329,14 @@ function ReprintReasonModal({
             <AlertCircle className="h-3.5 w-3.5 shrink-0 mt-0.5" />
             <div>
               <p className="font-semibold mb-1">
-                {claimedCertIds.length} of {allCertIds.length} selected cert(s) already claimed:
+                {reasonRequiredCertIds.length} of {allCertIds.length} selected cert(s) require a reprint reason:
               </p>
               <p className="text-[10px] break-all" style={{ fontFamily: "var(--admin-mono)" }}>
-                {claimedCertIds.join(", ")}
+                {reasonRequiredCertIds.join(", ")}
               </p>
               <p className="mt-2">
-                Reprinting a claimed cert is recorded to audit_log with the reason below. Use only for damaged-in-post,
-                lost, or bad-cut reprints.
+                The reason is recorded in permanent print lifecycle history. Use this only for a deliberate replacement
+                of a label that was already produced.
               </p>
             </div>
           </div>
@@ -369,6 +365,7 @@ function ReprintReasonModal({
             type="button"
             variant="ghost"
             onClick={onCancel}
+            disabled={submitting}
             className="text-[var(--admin-ink-faint)] hover:text-[var(--admin-ink)]"
           >
             Cancel
@@ -866,9 +863,172 @@ function LatestSheetSection({
   );
 }
 
+type PrintArtifactEnvelope = {
+  batchId: string;
+  certIds: string[];
+  pdfUrl: string;
+  pngUrl?: string;
+  cricutSvgUrl?: string;
+  generatedAt?: string;
+  sheetLayoutVersion?: string;
+  isMultiSheet?: boolean;
+  isPdfMultiPage?: boolean;
+  pageCount?: number;
+};
+
+type DirectReprintIntent = {
+  certIds: string[];
+  reasonRequiredCertIds: string[];
+};
+
+type DirectReprintCommand = {
+  modal: DirectReprintIntent | null;
+  pendingCertIds: ReadonlySet<string>;
+  submittingReason: boolean;
+  openReasonModal: (certIds: string[], reasonRequiredCertIds?: string[]) => void;
+  cancelReason: () => void;
+  submitReason: (reason: string) => Promise<void>;
+  saveBatchFiles: (data: PrintArtifactEnvelope) => void;
+};
+
+function parsePrintArtifactEnvelope(value: unknown): PrintArtifactEnvelope {
+  if (!value || typeof value !== "object") throw new Error("Print server returned an invalid artifact response.");
+  const candidate = value as Partial<PrintArtifactEnvelope>;
+  if (
+    typeof candidate.batchId !== "string" ||
+    !candidate.batchId ||
+    typeof candidate.pdfUrl !== "string" ||
+    !candidate.pdfUrl ||
+    !Array.isArray(candidate.certIds) ||
+    candidate.certIds.some((certId) => typeof certId !== "string")
+  ) {
+    throw new Error("Print server returned an incomplete artifact response.");
+  }
+  return candidate as PrintArtifactEnvelope;
+}
+
+function useDirectReprintCommand(base: string): DirectReprintCommand {
+  const { toast } = useToast();
+  const qc = useQueryClient();
+  const [modal, setModal] = useState<DirectReprintIntent | null>(null);
+  const [submittingReason, setSubmittingReason] = useState(false);
+  const [pendingCertIds, setPendingCertIds] = useState<Set<string>>(new Set());
+  const attempts = useRef(new Map<string, string>());
+
+  const saveBatchFiles = useCallback(
+    (data: PrintArtifactEnvelope) => {
+      const saveServerUrl = (url: string, filename: string) => {
+        const anchor = document.createElement("a");
+        anchor.href = url;
+        anchor.download = filename;
+        document.body.appendChild(anchor);
+        anchor.click();
+        anchor.remove();
+      };
+      if (data.cricutSvgUrl) {
+        saveServerUrl(rebaseUrl(data.cricutSvgUrl, base), `mintvault-batch-${data.batchId}-cut.svg`);
+      }
+      const pdfUrl = rebaseUrl(data.pdfUrl, base);
+      saveServerUrl(`${pdfUrl}${pdfUrl.includes("?") ? "&" : "?"}download=1`, `mintvault-batch-${data.batchId}.pdf`);
+    },
+    [base]
+  );
+
+  const openReasonModal = useCallback((certIds: string[], reasonRequiredCertIds = certIds) => {
+    const uniqueCertIds = [...new Set(certIds)].sort();
+    if (uniqueCertIds.length === 0) return;
+    setModal({ certIds: uniqueCertIds, reasonRequiredCertIds: [...new Set(reasonRequiredCertIds)].sort() });
+  }, []);
+
+  const cancelReason = useCallback(() => setModal(null), []);
+
+  const submitReason = useCallback(
+    async (rawReason: string) => {
+      if (!modal) return;
+      const submittedIntent = modal;
+      const reason = rawReason.trim();
+      if (reason.length < 10 || reason.length > 500) return;
+      if (modal.certIds.length > REPRINT_MAX_CERTS) {
+        toast({
+          title: "Too many to reprint at once",
+          description: `Reprints are limited to ${REPRINT_MAX_CERTS} certificates. Close this and select a smaller batch.`,
+          variant: "destructive",
+        });
+        return;
+      }
+      const fingerprint = `reprint:${[...modal.certIds].sort().join(",")}:${reason}`;
+      let idempotencyKey = attempts.current.get(fingerprint);
+      if (!idempotencyKey) {
+        idempotencyKey = crypto.randomUUID();
+        attempts.current.set(fingerprint, idempotencyKey);
+      }
+      setSubmittingReason(true);
+      setPendingCertIds(new Set(modal.certIds));
+      try {
+        const response = await apiRequest(
+          "POST",
+          `${base}/print-batch/reprint`,
+          { certIds: modal.certIds, reason },
+          { headers: { "Idempotency-Key": idempotencyKey } }
+        );
+        const data = parsePrintArtifactEnvelope(await response.json());
+        saveBatchFiles(data);
+        attempts.current.delete(fingerprint);
+        setModal((current) => (current === submittedIntent ? null : current));
+        await Promise.all([
+          qc.invalidateQueries({ queryKey: [`${base}/printing/queue`] }),
+          qc.invalidateQueries({ queryKey: [`${base}/printing/sheets`] }),
+          qc.invalidateQueries({ queryKey: ["/api/admin/printing/browser"] }),
+        ]);
+        toast({
+          title: "Reprint reason recorded",
+          description: `${data.certIds.length} cert${data.certIds.length === 1 ? "" : "s"} — batch ${data.batchId.slice(0, 8)}`,
+        });
+      } catch (error: any) {
+        if (error?.status === 409 && error?.body?.code === "OBJECT_WRITE_TERMINAL") {
+          attempts.current.delete(fingerprint);
+        }
+        toast({
+          title: "Reprint failed",
+          description: error?.message || "The reprint result is unknown; retrying will reuse the same request key.",
+          variant: "destructive",
+        });
+      } finally {
+        setSubmittingReason(false);
+        setPendingCertIds(new Set());
+      }
+    },
+    [base, modal, qc, saveBatchFiles, toast]
+  );
+
+  return {
+    modal,
+    pendingCertIds,
+    submittingReason,
+    openReasonModal,
+    cancelReason,
+    submitReason,
+    saveBatchFiles,
+  };
+}
+
+function DirectReprintModal({ command }: { command: DirectReprintCommand }) {
+  if (!command.modal) return null;
+  return (
+    <ReprintReasonModal
+      reasonRequiredCertIds={command.modal.reasonRequiredCertIds}
+      allCertIds={command.modal.certIds}
+      onCancel={command.cancelReason}
+      onSubmit={command.submitReason}
+      submitting={command.submittingReason}
+    />
+  );
+}
+
 // ── Main tab wrapper ──────────────────────────────────────────────────────────
 export default function AdminPrinting() {
   const [tab, setTab] = useState<"sheet" | "browser">("sheet");
+  const reprintCommand = useDirectReprintCommand("/api/admin");
 
   return (
     <div className="max-w-4xl mx-auto px-4 py-6 space-y-6" data-testid="admin-printing-root">
@@ -897,7 +1057,15 @@ export default function AdminPrinting() {
         </button>
       </div>
 
-      {tab === "sheet" ? <SheetPrintingPanel /> : <AdminCertBrowser />}
+      {tab === "sheet" ? (
+        <SheetPrintingPanel reprintCommand={reprintCommand} />
+      ) : (
+        <AdminCertBrowser
+          onReprint={(certId) => reprintCommand.openReasonModal([certId])}
+          reprintingCertIds={reprintCommand.pendingCertIds}
+        />
+      )}
+      <DirectReprintModal command={reprintCommand} />
     </div>
   );
 }
@@ -909,13 +1077,24 @@ export default function AdminPrinting() {
 export function PrintingConsole({ apiBase = "/api/admin" }: { apiBase?: string }) {
   return (
     <PrintApiBase.Provider value={apiBase}>
-      <SheetPrintingPanel />
+      <PrintingConsoleBody />
     </PrintApiBase.Provider>
   );
 }
 
+function PrintingConsoleBody() {
+  const base = useContext(PrintApiBase);
+  const reprintCommand = useDirectReprintCommand(base);
+  return (
+    <>
+      <SheetPrintingPanel reprintCommand={reprintCommand} />
+      <DirectReprintModal command={reprintCommand} />
+    </>
+  );
+}
+
 // ── Sheet Printing Panel ──────────────────────────────────────────────────────
-function SheetPrintingPanel() {
+function SheetPrintingPanel({ reprintCommand }: { reprintCommand: DirectReprintCommand }) {
   const { toast } = useToast();
   const qc = useQueryClient();
   const base = useContext(PrintApiBase);
@@ -927,14 +1106,16 @@ function SheetPrintingPanel() {
   const [reprintingId, setReprintingId] = useState<string | null>(null);
   const [editTarget, setEditTarget] = useState<{ certId: string; cert: CertificateRecord } | null>(null);
 
-  // v525 — reprint-with-reason modal state. Populated when /api/admin/print-batch
-  // returns 409 (some selected certs already claimed). Submitting the reason
-  // posts to /api/admin/print-batch/reprint instead.
-  const [reprintModal, setReprintModal] = useState<{
-    claimedCertIds: string[];
-    allCertIds: string[];
-  } | null>(null);
-  const [reprintSubmitting, setReprintSubmitting] = useState(false);
+  const printAttempts = useRef(new Map<string, string>());
+  const attemptKey = useCallback((kind: string, certIds: string[], reason = "") => {
+    const fingerprint = `${kind}:${[...certIds].sort().join(",")}:${reason.trim()}`;
+    let key = printAttempts.current.get(fingerprint);
+    if (!key) {
+      key = crypto.randomUUID();
+      printAttempts.current.set(fingerprint, key);
+    }
+    return { fingerprint, key };
+  }, []);
 
   const {
     data: allCerts = [],
@@ -1005,50 +1186,6 @@ function SheetPrintingPanel() {
     qc.invalidateQueries({ queryKey: [`${base}/printing/sheets`] });
   }, [refetchCerts, qc, base]);
 
-  // v525 — shared helper for saving the 3-file batch output. PDF + PNG are
-  // streamed from R2 via the server endpoints (no expiring blob URLs); SVG
-  // still arrives as base64 in the POST response and uses a blob URL.
-  // All three filenames share the batchId so the operator can pair them.
-  const saveBatchFiles = useCallback(
-    (data: { pdfUrl: string; svg?: string; pngUrl?: string; batchId: string }) => {
-      const decode = (b64: string, mime: string) => {
-        const bin = atob(b64);
-        const buf = new Uint8Array(bin.length);
-        for (let i = 0; i < bin.length; i++) buf[i] = bin.charCodeAt(i);
-        return new Blob([buf], { type: mime });
-      };
-      const saveBlob = (blob: Blob, filename: string) => {
-        const url = URL.createObjectURL(blob);
-        const a = document.createElement("a");
-        a.href = url;
-        a.download = filename;
-        document.body.appendChild(a);
-        a.click();
-        a.remove();
-        URL.revokeObjectURL(url);
-      };
-      const saveServerUrl = (url: string, filename: string) => {
-        const a = document.createElement("a");
-        a.href = url;
-        a.download = filename;
-        document.body.appendChild(a);
-        a.click();
-        a.remove();
-      };
-      // Multi-sheet (multi-page) batches are guillotine-only — no cut SVG. Only
-      // save the SVG when the server returned one (single-sheet batches).
-      if (data.svg) saveBlob(decode(data.svg, "image/svg+xml"), `mintvault-batch-${data.batchId}.svg`);
-      // PNG is intentionally NOT auto-downloaded here — Chrome's multi-download
-      // gate silently blocks the 2nd/3rd file from a single gesture. Reprint
-      // flows (this helper's only callers) skip the PNG; the primary Generate
-      // Batch flow downloads its PNG inline.
-      // ?download=1 flips the PDF endpoint to Content-Disposition: attachment
-      // so this drops it to Downloads rather than opening inline in a tab.
-      saveServerUrl(`${rebaseUrl(data.pdfUrl, base)}?download=1`, `mintvault-batch-${data.batchId}.pdf`);
-    },
-    [base]
-  );
-
   // v525 — single-cert reprint routes through the same /api/admin/print-batch
   // endpoint as multi-cert batches. Produces a 1-row sheet (front + claim
   // insert) with cut SVG + Cricut PNG. Eliminates the third parallel reprint
@@ -1061,17 +1198,21 @@ function SheetPrintingPanel() {
     async (certId: string) => {
       setReprintingId(certId);
       try {
-        const res = await apiRequest("POST", `${base}/print-batch`, { certIds: [certId] });
-        const data = (await res.json()) as { pdfUrl: string; svg: string; pngUrl: string; batchId: string };
-        saveBatchFiles(data);
+        const attempt = attemptKey("batch", [certId]);
+        const res = await apiRequest(
+          "POST",
+          `${base}/print-batch`,
+          { certIds: [certId] },
+          { headers: { "Idempotency-Key": attempt.key } }
+        );
+        const data = parsePrintArtifactEnvelope(await res.json());
+        reprintCommand.saveBatchFiles(data);
+        printAttempts.current.delete(attempt.fingerprint);
         toast({ title: "Single-cert reprint generated", description: `${certId} — batch ${data.batchId.slice(0, 8)}` });
         invalidate();
       } catch (err: any) {
         if (err?.status === 409 && err?.body?.code === "CLAIMED_CERTS_PRESENT") {
-          setReprintModal({
-            claimedCertIds: err.body.claimedCertIds || [certId],
-            allCertIds: [certId],
-          });
+          reprintCommand.openReasonModal([certId], err.body.claimedCertIds || [certId]);
         } else {
           toast({ title: "Reprint failed", description: err.message, variant: "destructive" });
         }
@@ -1079,7 +1220,7 @@ function SheetPrintingPanel() {
         setReprintingId(null);
       }
     },
-    [toast, invalidate, saveBatchFiles]
+    [toast, invalidate, reprintCommand]
   );
 
   // Download claim insert sheet
@@ -1132,9 +1273,9 @@ function SheetPrintingPanel() {
         });
         return;
       }
-      setReprintModal({ claimedCertIds, allCertIds });
+      reprintCommand.openReasonModal(allCertIds, claimedCertIds);
     },
-    [toast]
+    [reprintCommand, toast]
   );
 
   // LatestSheetSection's "reprint sheet" button hits this. If any cert in
@@ -1142,11 +1283,18 @@ function SheetPrintingPanel() {
   const reprintFromHistory = useCallback(
     async (certIds: string[]) => {
       try {
-        const res = await apiRequest("POST", `${base}/print-batch`, { certIds });
+        const attempt = attemptKey("batch", certIds);
+        const res = await apiRequest(
+          "POST",
+          `${base}/print-batch`,
+          { certIds },
+          { headers: { "Idempotency-Key": attempt.key } }
+        );
         // A historical sheet with > CERTS_PER_PAGE certs reprints as a multi-page
         // guillotine PDF (no svg/png) — saveBatchFiles handles the missing files.
-        const data = (await res.json()) as { pdfUrl: string; svg?: string; pngUrl?: string; batchId: string };
-        saveBatchFiles(data);
+        const data = parsePrintArtifactEnvelope(await res.json());
+        reprintCommand.saveBatchFiles(data);
+        printAttempts.current.delete(attempt.fingerprint);
         toast({
           title: "Sheet reprinted",
           description: `${certIds.length} cert${certIds.length !== 1 ? "s" : ""} — batch ${data.batchId.slice(0, 8)}`,
@@ -1160,7 +1308,7 @@ function SheetPrintingPanel() {
         }
       }
     },
-    [toast, invalidate, saveBatchFiles, handleClaimedConflict]
+    [toast, invalidate, reprintCommand, handleClaimedConflict]
   );
 
   // Print-batch cap. Single-page batches (≤ CERTS_PER_PAGE) return a JSON
@@ -1179,7 +1327,7 @@ function SheetPrintingPanel() {
       if (!url) return;
       setDownloadingPng(true);
       try {
-        const res = await fetch(url, { credentials: "same-origin" });
+        const res = await adminFetch(url, { credentials: "same-origin" });
         if (!res.ok) {
           const detail = await res.json().catch(() => ({ error: `HTTP ${res.status}` }));
           throw new Error(detail.error || `HTTP ${res.status}`);
@@ -1232,7 +1380,13 @@ function SheetPrintingPanel() {
         }
       }
       try {
-        const res = await apiRequest("POST", `${base}/print-batch`, { certIds });
+        const attempt = attemptKey("batch", certIds);
+        const res = await apiRequest(
+          "POST",
+          `${base}/print-batch`,
+          { certIds },
+          { headers: { "Idempotency-Key": attempt.key } }
+        );
         const data = (await res.json()) as {
           pdfUrl: string;
           svg?: string;
@@ -1244,6 +1398,7 @@ function SheetPrintingPanel() {
           isMultiSheet?: boolean;
           pageCount?: number;
         };
+        printAttempts.current.delete(attempt.fingerprint);
 
         // Multi-sheet (multi-page) batches are guillotine-only — there is no
         // Cricut PNG to download. Single-sheet batches download the PNG (the
@@ -1316,43 +1471,6 @@ function SheetPrintingPanel() {
       }
     },
     [toast, invalidate, handleClaimedConflict]
-  );
-
-  // v525 — submitted from the ReprintReasonModal. Reposts the original
-  // selection to /api/admin/print-batch/reprint with the operator's reason.
-  const submitReprintWithReason = useCallback(
-    async (reason: string) => {
-      if (!reprintModal) return;
-      const certIds = reprintModal.allCertIds;
-      // Safety net — the reprint route caps at REPRINT_MAX_CERTS. The 409 handler
-      // already steers >8 selections away from this modal, but guard here too so
-      // a large reprint can never dead-end on a raw 400.
-      if (certIds.length > REPRINT_MAX_CERTS) {
-        toast({
-          title: "Too many to reprint at once",
-          description: `Reprints are limited to ${REPRINT_MAX_CERTS} certificates. Close this and deselect some, then try again.`,
-          variant: "destructive",
-        });
-        return;
-      }
-      setReprintSubmitting(true);
-      try {
-        const res = await apiRequest("POST", `${base}/print-batch/reprint`, { certIds, reason });
-        const data = (await res.json()) as { pdfUrl: string; svg: string; pngUrl: string; batchId: string };
-        saveBatchFiles(data);
-        toast({
-          title: "Reprint with reason recorded",
-          description: `${certIds.length} cert${certIds.length !== 1 ? "s" : ""} — batch ${data.batchId.slice(0, 8)}`,
-        });
-        setReprintModal(null);
-        invalidate();
-      } catch (err: any) {
-        toast({ title: "Reprint failed", description: err.message, variant: "destructive" });
-      } finally {
-        setReprintSubmitting(false);
-      }
-    },
-    [reprintModal, toast, invalidate, saveBatchFiles]
   );
 
   // Mark printed
@@ -1597,17 +1715,6 @@ function SheetPrintingPanel() {
         onDownloadPng={handleDownloadPng}
         downloadingPng={downloadingPng}
       />
-
-      {/* Reprint with reason modal */}
-      {reprintModal && (
-        <ReprintReasonModal
-          claimedCertIds={reprintModal.claimedCertIds}
-          allCertIds={reprintModal.allCertIds}
-          onCancel={() => setReprintModal(null)}
-          onSubmit={submitReprintWithReason}
-          submitting={reprintSubmitting}
-        />
-      )}
 
       {/* Edit label modal */}
       {editTarget && (

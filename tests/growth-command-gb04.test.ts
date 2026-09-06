@@ -157,7 +157,11 @@ describe("GB-04 Growth Command commercial authority", () => {
       { rows: [{ active_count: "4" }] },
     ];
     let index = 0;
-    const summary = await getGrowthSummary("30d", { execute: async () => replies[index++] as { rows: unknown[] } });
+    const summary = await getGrowthSummary(
+      "30d",
+      { execute: async () => replies[index++] as { rows: unknown[] } },
+      async () => 4
+    );
     expect(summary.paid).toMatchObject({
       paidSubmissions: { value: 2 },
       paidCards: { value: 7 },
@@ -225,9 +229,9 @@ describe("GB-04 Growth Command commercial authority", () => {
      * exactly one file claims each number, and 0099 is somebody else's.
      */
     expect(numbered.filter((number) => number === "0099")).toHaveLength(1);
-    expect(
-      fs.readdirSync("migrations").filter((file) => /^0099_/.test(file))
-    ).toEqual(["0099_partner_credit_checkout_operation_idempotency.sql"]);
+    expect(fs.readdirSync("migrations").filter((file) => /^0099_/.test(file))).toEqual([
+      "0099_partner_credit_checkout_operation_idempotency.sql",
+    ]);
     expect(numbered.filter((number) => number === "0100")).toHaveLength(1);
     expect(new Set(numbered).size).toBe(numbered.length);
   });

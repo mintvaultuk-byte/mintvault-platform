@@ -10,22 +10,11 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import { Textarea } from "@/components/ui/textarea";
 import { usePartnerSession } from "@/hooks/use-partner-session";
-import {
-  partnerErrorMessage,
-  partnerTeam,
-  type PartnerTeamDisplayRole,
-  type PartnerTeamMember,
-  type PartnerTeamRole,
-} from "@/lib/partner-api";
+import { partnerErrorMessage, partnerTeam, type PartnerTeamMember, type PartnerTeamRole } from "@/lib/partner-api";
 import { usePartnerStepUp } from "@/components/partner/partner-step-up";
 import { PartnerErrorState, PartnerLoadingState } from "@/components/partner/partner-shell";
 
-const ROLES: Array<{ value: PartnerTeamRole; label: string }> = [
-  { value: "OWNER", label: "Owner" },
-  { value: "ADMIN", label: "Admin" },
-  { value: "GRADER", label: "Grader" },
-  { value: "STAFF", label: "Staff" },
-];
+import { PORTAL_TEAM_ROLE_OPTIONS as ROLES, isPortalTeamRole as isEditableRole } from "@shared/partner-team-roles";
 
 type Action =
   | { kind: "resend"; user: PartnerTeamMember }
@@ -49,10 +38,6 @@ function badgeVariant(status: string): "default" | "secondary" | "destructive" |
   if (status === "SUSPENDED" || status === "DELIVERY_FAILED") return "destructive";
   if (status === "REVOKED") return "secondary";
   return "outline";
-}
-
-function isEditableRole(role: PartnerTeamDisplayRole): role is PartnerTeamRole {
-  return role === "OWNER" || role === "ADMIN" || role === "GRADER" || role === "STAFF";
 }
 
 export default function PartnerUsersPage() {
@@ -188,7 +173,11 @@ export default function PartnerUsersPage() {
                           </SelectTrigger>
                           <SelectContent>
                             {(isOwner && !isSelf ? ROLES : permittedRoles).map((role) => (
-                              <SelectItem key={role.value} value={role.value}>
+                              <SelectItem
+                                key={role.value}
+                                value={role.value}
+                                data-testid={`team-edit-role-option-${role.value}`}
+                              >
                                 {role.label}
                               </SelectItem>
                             ))}
@@ -330,7 +319,11 @@ export default function PartnerUsersPage() {
                 </SelectTrigger>
                 <SelectContent>
                   {permittedRoles.map((role) => (
-                    <SelectItem key={role.value} value={role.value}>
+                    <SelectItem
+                      key={role.value}
+                      value={role.value}
+                      data-testid={`team-invite-role-option-${role.value}`}
+                    >
                       {role.label}
                     </SelectItem>
                   ))}

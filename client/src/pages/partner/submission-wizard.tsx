@@ -186,9 +186,14 @@ export default function PartnerSubmissionWizardPage() {
     }
   }
 
-  async function handleUploadCardImage(cardId: string, side: "front" | "back", file: File) {
+  async function handleUploadCardImage(
+    cardId: string,
+    side: "front" | "back",
+    file: File,
+    idempotencyKey: string
+  ) {
     if (!submission) return;
-    const uploaded = await partnerCards.uploadImage(submission.id, cardId, side, file);
+    const uploaded = await partnerCards.uploadImage(submission.id, cardId, side, file, idempotencyKey);
     setCards((items) =>
       items.map((card) =>
         card.id === cardId
@@ -490,7 +495,7 @@ function CardsStep(props: {
   onAddCard: (input: any) => Promise<void>;
   onEditCard: (id: string, input: any) => Promise<void>;
   onRemoveCard: (id: string) => Promise<void>;
-  onUploadCardImage: (id: string, side: "front" | "back", file: File) => Promise<void>;
+  onUploadCardImage: (id: string, side: "front" | "back", file: File, idempotencyKey: string) => Promise<void>;
   catalogue: import("@shared/pokemon-rarity-catalogue").CatalogueSnapshot | null;
 }) {
   const [form, setForm] = useState(emptyCardForm);
@@ -751,10 +756,11 @@ function CardImageUploadButton({
 }: {
   card: SubmissionCard;
   side: "front" | "back";
-  onUpload: (id: string, side: "front" | "back", file: File) => Promise<void>;
+  onUpload: (id: string, side: "front" | "back", file: File, idempotencyKey: string) => Promise<void>;
 }) {
   const [uploading, setUploading] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const retry = useRef<{ fingerprint: string; key: string } | null>(null);
   const url = side === "front" ? card.front_image_url : card.back_image_url;
   return (
     <label className="inline-flex items-center gap-1.5 text-xs rounded-md border px-2 py-1 cursor-pointer hover:bg-accent">
@@ -772,10 +778,15 @@ function CardImageUploadButton({
         onChange={async (e) => {
           const file = e.currentTarget.files?.[0];
           if (!file) return;
+          const fingerprint = `${file.name}:${file.size}:${file.type}:${file.lastModified}`;
+          if (!retry.current || retry.current.fingerprint !== fingerprint) {
+            retry.current = { fingerprint, key: crypto.randomUUID() };
+          }
           setUploading(true);
           setError(null);
           try {
-            await onUpload(card.id, side, file);
+            await onUpload(card.id, side, file, retry.current.key);
+            retry.current = null;
           } catch (err) {
             setError(partnerErrorMessage(err));
           } finally {

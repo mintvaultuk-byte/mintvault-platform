@@ -37,6 +37,7 @@ import {
 import { eq, sql, desc, or, ilike, like, and, isNull, isNotNull, ne, inArray } from "drizzle-orm";
 import { db } from "./db";
 import crypto from "crypto";
+import { enqueueCustomerNotification } from "./customer-notification-outbox";
 
 /**
  * The minimal surface shared by the drizzle database handle and a drizzle
@@ -46,6 +47,40 @@ import crypto from "crypto";
  * certificate INSERT.
  */
 export type SqlExecutor = Pick<typeof db, "execute">;
+
+function maskNotificationEmail(email: string): string {
+  const [local = "", domain = ""] = email.toLowerCase().trim().split("@");
+  return `${local.slice(0, 1)}***@${domain}`;
+}
+
+export const NFC_PHYSICAL_LOCK_METHOD = "web_nfc_make_read_only" as const;
+export const NFC_PHYSICAL_LOCK_RECOVERY_METHOD = "operator_verified_read_only_recovery" as const;
+export const NFC_PHYSICAL_LOCK_CANCEL_METHOD = "operator_verified_writable" as const;
+export type NfcPhysicalLockMethod = typeof NFC_PHYSICAL_LOCK_METHOD | typeof NFC_PHYSICAL_LOCK_RECOVERY_METHOD;
+
+export function isSupportedNfcPhysicalLockMethod(value: unknown): value is NfcPhysicalLockMethod {
+  return value === NFC_PHYSICAL_LOCK_METHOD || value === NFC_PHYSICAL_LOCK_RECOVERY_METHOD;
+}
+
+export type NfcMutationOutcome =
+  | "UPDATED"
+  | "UNCHANGED"
+  | "NOT_FOUND"
+  | "LOCKED"
+  | "UID_MISMATCH"
+  | "STALE_BINDING"
+  | "ALREADY_ASSIGNED"
+  | "INVALID_PROOF"
+  | "UNSUPPORTED_METHOD"
+  | "INCOMPLETE_BINDING"
+  | "LOCK_PENDING"
+  | "INTENT_MISMATCH";
+
+export interface NfcMutationResult {
+  outcome: NfcMutationOutcome;
+  /** Returned only once. The database stores SHA-256(token), never the token. */
+  attemptToken?: string;
+}
 
 /**
  * Thrown by ownership-mutating storage methods when the cert has been reported
@@ -82,6 +117,18 @@ function firstStatusHistoryTime(history: unknown, targetStatus: string): string 
   }
   return null;
 }
+
+function normaliseNfcUid(value: string | null | undefined): string | null {
+  if (typeof value !== "string") return null;
+  const normalised = value.trim().toLowerCase();
+  return normalised || null;
+}
+
+function hashNfcLockToken(token: string): string {
+  return crypto.createHash("sha256").update(token, "utf8").digest("hex");
+}
+
+const INACTIVE_CERTIFICATE_TRANSFER_ERROR = "This certificate is no longer active and cannot be transferred.";
 
 export interface DashboardStats {
   totalCerts: number;
@@ -186,15 +233,37 @@ export interface IStorage {
    * For a read-only display hint use getLastIssuedMvNumber() instead.
    */
   getNextCertId(executor: SqlExecutor): Promise<string>;
-  ensureCertCounterTable(): Promise<void>;
 
   saveNfcData(
     id: number,
-    data: { uid: string; chipType?: string; url: string; writtenBy?: string }
-  ): Promise<CertificateRecord | undefined>;
+    data: {
+      uid: string;
+      chipType?: string;
+      url: string;
+      actor: string;
+      overwrite: boolean;
+      expectedUid: string | null;
+    }
+  ): Promise<NfcMutationResult>;
   getCertificateByNfcUid(uid: string): Promise<CertificateRecord | undefined>;
-  lockNfc(id: number): Promise<CertificateRecord | undefined>;
-  clearNfc(id: number): Promise<CertificateRecord | undefined>;
+  prepareNfcLock(id: number, evidence: { uid: string; lockMethod: string; actor: string }): Promise<NfcMutationResult>;
+  lockNfc(
+    id: number,
+    evidence: {
+      uid: string;
+      physicalLockConfirmed: boolean;
+      operatorReadOnlyVerified?: boolean;
+      lockMethod: string;
+      attemptToken?: string;
+      reason?: string;
+      actor: string;
+    }
+  ): Promise<NfcMutationResult>;
+  cancelNfcLock(
+    id: number,
+    evidence: { uid: string; attemptToken: string; verificationMethod: string; actor: string; reason: string }
+  ): Promise<NfcMutationResult>;
+  clearNfc(id: number, evidence: { actor: string; reason: string | null }): Promise<NfcMutationResult>;
   recordNfcVerified(id: number): Promise<void>;
   recordNfcScan(certId: string, ip?: string): Promise<void>;
 
@@ -1121,61 +1190,325 @@ export class DatabaseStorage implements IStorage {
 
   async saveNfcData(
     id: number,
-    data: { uid: string; chipType?: string; url: string; writtenBy?: string }
-  ): Promise<CertificateRecord | undefined> {
-    const [cert] = await db
-      .update(certificates)
-      .set({
-        nfcUid: data.uid,
-        nfcEnabled: true,
-        nfcChipType: data.chipType || null,
-        nfcUrl: data.url,
-        nfcLocked: false,
-        nfcWrittenAt: new Date(),
-        nfcWrittenBy: data.writtenBy || null,
-        nfcLastVerifiedAt: null,
-        nfcLockedAt: null,
-        updatedAt: new Date(),
-      })
-      .where(eq(certificates.id, id))
-      .returning();
-    return cert;
+    data: {
+      uid: string;
+      chipType?: string;
+      url: string;
+      actor: string;
+      overwrite: boolean;
+      expectedUid: string | null;
+    }
+  ): Promise<NfcMutationResult> {
+    return db.transaction(async (tx) => {
+      const selected = await tx.execute(sql`
+        SELECT id, nfc_uid, nfc_locked, nfc_lock_pending_token_hash, deleted_at
+          FROM certificates WHERE id = ${id} FOR UPDATE
+      `);
+      const current = selected.rows[0] as
+        | {
+            id: number;
+            nfc_uid: string | null;
+            nfc_locked: boolean | null;
+            nfc_lock_pending_token_hash: string | null;
+            deleted_at: Date | null;
+          }
+        | undefined;
+      if (!current || current.deleted_at) return { outcome: "NOT_FOUND" };
+      if (current.nfc_locked === true) return { outcome: "LOCKED" };
+      if (current.nfc_lock_pending_token_hash) return { outcome: "LOCK_PENDING" };
+      if (normaliseNfcUid(current.nfc_uid) !== normaliseNfcUid(data.expectedUid)) {
+        return { outcome: "STALE_BINDING" };
+      }
+      if (current.nfc_uid && normaliseNfcUid(current.nfc_uid) !== normaliseNfcUid(data.uid) && !data.overwrite) {
+        return { outcome: "ALREADY_ASSIGNED" };
+      }
+
+      const updated = await tx.execute(sql`
+        UPDATE certificates
+           SET nfc_uid = ${data.uid}, nfc_enabled = TRUE, nfc_chip_type = ${data.chipType || null},
+               nfc_url = ${data.url}, nfc_locked = FALSE, nfc_written_at = NOW(),
+               nfc_written_by = ${data.actor}, nfc_last_verified_at = NULL,
+               nfc_locked_at = NULL, updated_at = NOW()
+         WHERE id = ${id}
+           AND nfc_locked IS DISTINCT FROM TRUE
+           AND nfc_uid IS NOT DISTINCT FROM ${current.nfc_uid}
+        RETURNING id
+      `);
+      if (updated.rows.length !== 1) return { outcome: "STALE_BINDING" };
+
+      const details = JSON.stringify({
+        uid: data.uid,
+        chip_type: data.chipType ?? null,
+        previous_uid: current.nfc_uid,
+        overwrite: data.overwrite,
+      });
+      await tx.execute(sql`
+        INSERT INTO audit_log (entity_type, entity_id, action, admin_user, details)
+        VALUES ('certificate', ${String(id)}, 'nfc_bound', ${data.actor}, ${details}::jsonb)
+      `);
+      return { outcome: "UPDATED" };
+    });
   }
 
-  async lockNfc(id: number): Promise<CertificateRecord | undefined> {
-    const [cert] = await db
-      .update(certificates)
-      .set({
-        nfcLocked: true,
-        nfcLockedAt: new Date(),
-        updatedAt: new Date(),
-      })
-      .where(eq(certificates.id, id))
-      .returning();
-    return cert;
+  async prepareNfcLock(
+    id: number,
+    evidence: { uid: string; lockMethod: string; actor: string }
+  ): Promise<NfcMutationResult> {
+    if (evidence.lockMethod !== NFC_PHYSICAL_LOCK_METHOD) return { outcome: "UNSUPPORTED_METHOD" };
+    const requestedUid = normaliseNfcUid(evidence.uid);
+    if (!requestedUid) return { outcome: "INVALID_PROOF" };
+
+    return db.transaction(async (tx) => {
+      const selected = await tx.execute(sql`
+        SELECT id, nfc_uid, nfc_enabled, nfc_url, nfc_written_at, nfc_locked,
+               nfc_lock_pending_token_hash, nfc_lock_pending_uid, nfc_lock_pending_method,
+               deleted_at
+          FROM certificates WHERE id = ${id} FOR UPDATE
+      `);
+      const current = selected.rows[0] as
+        | {
+            id: number;
+            nfc_uid: string | null;
+            nfc_enabled: boolean | null;
+            nfc_url: string | null;
+            nfc_written_at: Date | null;
+            nfc_locked: boolean | null;
+            nfc_lock_pending_token_hash: string | null;
+            nfc_lock_pending_uid: string | null;
+            nfc_lock_pending_method: string | null;
+            deleted_at: Date | null;
+          }
+        | undefined;
+      if (!current || current.deleted_at) return { outcome: "NOT_FOUND" };
+      if (normaliseNfcUid(current.nfc_uid) !== requestedUid) return { outcome: "UID_MISMATCH" };
+      if (current.nfc_locked === true) return { outcome: "UNCHANGED" };
+      if (current.nfc_enabled !== true || !current.nfc_url?.trim() || !current.nfc_written_at) {
+        return { outcome: "INCOMPLETE_BINDING" };
+      }
+      if (current.nfc_lock_pending_token_hash) return { outcome: "LOCK_PENDING" };
+
+      const attemptToken = crypto.randomBytes(32).toString("base64url");
+      const tokenHash = hashNfcLockToken(attemptToken);
+      const updated = await tx.execute(sql`
+        UPDATE certificates
+           SET nfc_lock_pending_token_hash = ${tokenHash},
+               nfc_lock_pending_uid = ${current.nfc_uid},
+               nfc_lock_pending_method = ${NFC_PHYSICAL_LOCK_METHOD},
+               nfc_lock_pending_at = NOW(), nfc_lock_pending_by = ${evidence.actor},
+               updated_at = NOW()
+         WHERE id = ${id}
+           AND nfc_locked IS DISTINCT FROM TRUE
+           AND nfc_lock_pending_token_hash IS NULL
+           AND LOWER(BTRIM(nfc_uid)) = ${requestedUid}
+        RETURNING id
+      `);
+      if (updated.rows.length !== 1) return { outcome: "LOCK_PENDING" };
+
+      const details = JSON.stringify({ uid: current.nfc_uid, lock_method: evidence.lockMethod });
+      await tx.execute(sql`
+        INSERT INTO audit_log (entity_type, entity_id, action, admin_user, details)
+        VALUES ('certificate', ${String(id)}, 'nfc_lock_prepared', ${evidence.actor}, ${details}::jsonb)
+      `);
+      return { outcome: "UPDATED", attemptToken };
+    });
   }
 
-  async clearNfc(id: number): Promise<CertificateRecord | undefined> {
-    const [cert] = await db
-      .update(certificates)
-      .set({
-        nfcUid: null,
-        nfcEnabled: false,
-        nfcChipType: null,
-        nfcUrl: null,
-        nfcLocked: false,
-        nfcWrittenAt: null,
-        nfcLockedAt: null,
-        nfcLastVerifiedAt: null,
-        nfcWrittenBy: null,
-        nfcScanCount: 0,
-        nfcLastScanAt: null,
-        nfcLastScanIp: null,
-        updatedAt: new Date(),
-      })
-      .where(eq(certificates.id, id))
-      .returning();
-    return cert;
+  async lockNfc(
+    id: number,
+    evidence: {
+      uid: string;
+      physicalLockConfirmed: boolean;
+      operatorReadOnlyVerified?: boolean;
+      lockMethod: string;
+      attemptToken?: string;
+      reason?: string;
+      actor: string;
+    }
+  ): Promise<NfcMutationResult> {
+    if (!isSupportedNfcPhysicalLockMethod(evidence.lockMethod)) return { outcome: "UNSUPPORTED_METHOD" };
+    const isRecovery = evidence.lockMethod === NFC_PHYSICAL_LOCK_RECOVERY_METHOD;
+    if (isRecovery) {
+      if (evidence.operatorReadOnlyVerified !== true || !evidence.reason?.trim()) {
+        return { outcome: "INVALID_PROOF" };
+      }
+    } else if (evidence.physicalLockConfirmed !== true || !evidence.attemptToken?.trim()) {
+      return { outcome: "INVALID_PROOF" };
+    }
+    const requestedUid = normaliseNfcUid(evidence.uid);
+    if (!requestedUid) return { outcome: "INVALID_PROOF" };
+
+    return db.transaction(async (tx) => {
+      const selected = await tx.execute(sql`
+        SELECT id, nfc_uid, nfc_enabled, nfc_url, nfc_written_at, nfc_locked,
+               nfc_lock_pending_token_hash, nfc_lock_pending_uid, deleted_at
+          FROM certificates WHERE id = ${id} FOR UPDATE
+      `);
+      const current = selected.rows[0] as
+        | {
+            id: number;
+            nfc_uid: string | null;
+            nfc_enabled: boolean | null;
+            nfc_url: string | null;
+            nfc_written_at: Date | null;
+            nfc_locked: boolean | null;
+            nfc_lock_pending_token_hash: string | null;
+            nfc_lock_pending_uid: string | null;
+            deleted_at: Date | null;
+          }
+        | undefined;
+      if (!current || current.deleted_at) return { outcome: "NOT_FOUND" };
+      if (normaliseNfcUid(current.nfc_uid) !== requestedUid) return { outcome: "UID_MISMATCH" };
+      if (current.nfc_locked === true) return { outcome: "UNCHANGED" };
+      if (current.nfc_enabled !== true || !current.nfc_url?.trim() || !current.nfc_written_at) {
+        return { outcome: "INCOMPLETE_BINDING" };
+      }
+      if (!current.nfc_lock_pending_token_hash || normaliseNfcUid(current.nfc_lock_pending_uid) !== requestedUid) {
+        return { outcome: "INTENT_MISMATCH" };
+      }
+
+      if (isRecovery) {
+        await tx.execute(sql`SELECT set_config('mintvault.nfc_lock_operator_recovery', 'true', true)`);
+      } else {
+        const tokenHash = hashNfcLockToken(evidence.attemptToken!);
+        if (tokenHash !== current.nfc_lock_pending_token_hash) return { outcome: "INTENT_MISMATCH" };
+        await tx.execute(sql`SELECT set_config('mintvault.nfc_lock_confirm_token_hash', ${tokenHash}, true)`);
+      }
+
+      const updated = await tx.execute(sql`
+        UPDATE certificates
+           SET nfc_locked = TRUE, nfc_locked_at = NOW(),
+               nfc_lock_pending_token_hash = NULL, nfc_lock_pending_uid = NULL,
+               nfc_lock_pending_method = NULL, nfc_lock_pending_at = NULL,
+               nfc_lock_pending_by = NULL, updated_at = NOW()
+         WHERE id = ${id}
+           AND nfc_locked IS DISTINCT FROM TRUE
+           AND LOWER(BTRIM(nfc_uid)) = ${requestedUid}
+           AND nfc_lock_pending_token_hash = ${current.nfc_lock_pending_token_hash}
+        RETURNING id
+      `);
+      if (updated.rows.length !== 1) return { outcome: "UID_MISMATCH" };
+
+      const details = JSON.stringify({
+        uid: current.nfc_uid,
+        lock_method: evidence.lockMethod,
+        physical_lock_evidence: isRecovery ? "operator_verified_read_only" : "browser_make_read_only_completion",
+        web_nfc_make_read_only_confirmed: !isRecovery,
+        recovery_reason: isRecovery ? evidence.reason!.trim() : null,
+      });
+      await tx.execute(sql`
+        INSERT INTO audit_log (entity_type, entity_id, action, admin_user, details)
+        VALUES ('certificate', ${String(id)}, 'nfc_locked', ${evidence.actor}, ${details}::jsonb)
+      `);
+      return { outcome: "UPDATED" };
+    });
+  }
+
+  async cancelNfcLock(
+    id: number,
+    evidence: { uid: string; attemptToken: string; verificationMethod: string; actor: string; reason: string }
+  ): Promise<NfcMutationResult> {
+    const requestedUid = normaliseNfcUid(evidence.uid);
+    if (
+      !requestedUid ||
+      !evidence.attemptToken.trim() ||
+      evidence.verificationMethod !== NFC_PHYSICAL_LOCK_CANCEL_METHOD ||
+      !evidence.reason.trim()
+    ) {
+      return { outcome: "INVALID_PROOF" };
+    }
+    const tokenHash = hashNfcLockToken(evidence.attemptToken);
+
+    return db.transaction(async (tx) => {
+      const selected = await tx.execute(sql`
+        SELECT id, nfc_uid, nfc_locked, nfc_lock_pending_token_hash, deleted_at
+          FROM certificates WHERE id = ${id} FOR UPDATE
+      `);
+      const current = selected.rows[0] as
+        | {
+            id: number;
+            nfc_uid: string | null;
+            nfc_locked: boolean | null;
+            nfc_lock_pending_token_hash: string | null;
+            deleted_at: Date | null;
+          }
+        | undefined;
+      if (!current || current.deleted_at) return { outcome: "NOT_FOUND" };
+      if (normaliseNfcUid(current.nfc_uid) !== requestedUid) return { outcome: "UID_MISMATCH" };
+      if (current.nfc_locked === true) return { outcome: "LOCKED" };
+      if (!current.nfc_lock_pending_token_hash) return { outcome: "UNCHANGED" };
+      if (tokenHash !== current.nfc_lock_pending_token_hash) return { outcome: "INTENT_MISMATCH" };
+
+      await tx.execute(sql`SELECT set_config('mintvault.nfc_lock_cancel_token_hash', ${tokenHash}, true)`);
+      const updated = await tx.execute(sql`
+        UPDATE certificates
+           SET nfc_lock_pending_token_hash = NULL, nfc_lock_pending_uid = NULL,
+               nfc_lock_pending_method = NULL, nfc_lock_pending_at = NULL,
+               nfc_lock_pending_by = NULL, updated_at = NOW()
+         WHERE id = ${id}
+           AND nfc_locked IS DISTINCT FROM TRUE
+           AND nfc_lock_pending_token_hash = ${tokenHash}
+        RETURNING id
+      `);
+      if (updated.rows.length !== 1) return { outcome: "INTENT_MISMATCH" };
+
+      const details = JSON.stringify({
+        uid: current.nfc_uid,
+        verification_method: evidence.verificationMethod,
+        reason: evidence.reason.trim(),
+      });
+      await tx.execute(sql`
+        INSERT INTO audit_log (entity_type, entity_id, action, admin_user, details)
+        VALUES ('certificate', ${String(id)}, 'nfc_lock_cancelled', ${evidence.actor}, ${details}::jsonb)
+      `);
+      return { outcome: "UPDATED" };
+    });
+  }
+
+  async clearNfc(id: number, evidence: { actor: string; reason: string | null }): Promise<NfcMutationResult> {
+    return db.transaction(async (tx) => {
+      const selected = await tx.execute(sql`
+        SELECT id, nfc_uid, nfc_locked, nfc_lock_pending_token_hash, nfc_scan_count, deleted_at
+          FROM certificates WHERE id = ${id} FOR UPDATE
+      `);
+      const current = selected.rows[0] as
+        | {
+            id: number;
+            nfc_uid: string | null;
+            nfc_locked: boolean | null;
+            nfc_lock_pending_token_hash: string | null;
+            nfc_scan_count: number | null;
+            deleted_at: Date | null;
+          }
+        | undefined;
+      if (!current || current.deleted_at) return { outcome: "NOT_FOUND" };
+      if (current.nfc_locked === true) return { outcome: "LOCKED" };
+      if (current.nfc_lock_pending_token_hash) return { outcome: "LOCK_PENDING" };
+      if (!current.nfc_uid) return { outcome: "UNCHANGED" };
+
+      const updated = await tx.execute(sql`
+        UPDATE certificates
+           SET nfc_uid = NULL, nfc_enabled = FALSE, nfc_chip_type = NULL, nfc_url = NULL,
+               nfc_locked = FALSE, nfc_written_at = NULL, nfc_locked_at = NULL,
+               nfc_last_verified_at = NULL, nfc_written_by = NULL, nfc_scan_count = 0,
+               nfc_last_scan_at = NULL, nfc_last_scan_ip = NULL, updated_at = NOW()
+         WHERE id = ${id}
+           AND nfc_locked IS DISTINCT FROM TRUE
+           AND nfc_uid IS NOT DISTINCT FROM ${current.nfc_uid}
+        RETURNING id
+      `);
+      if (updated.rows.length !== 1) return { outcome: "STALE_BINDING" };
+
+      const details = JSON.stringify({
+        previous_uid: current.nfc_uid,
+        previous_scan_count: current.nfc_scan_count,
+        reason: evidence.reason,
+      });
+      await tx.execute(sql`
+        INSERT INTO audit_log (entity_type, entity_id, action, admin_user, details)
+        VALUES ('certificate', ${String(id)}, 'nfc_cleared', ${evidence.actor}, ${details}::jsonb)
+      `);
+      return { outcome: "UPDATED" };
+    });
   }
 
   async recordNfcVerified(id: number): Promise<void> {
@@ -1360,53 +1693,6 @@ export class DatabaseStorage implements IStorage {
   }
 
   /**
-   * Idempotent, concurrency-safe creation of the cert_counter allocator table.
-   * Runs ONCE at startup (registerRoutes). This DDL previously ran as
-   * CREATE TABLE IF NOT EXISTS on every getNextCertId() call; two concurrent
-   * scans hitting that runtime DDL raced in the Postgres system catalogs and
-   * threw 23505 (pg_type_typname_nsp_index) / 42710 (type already exists),
-   * 500-ing the scan ingest. We create it once at boot and swallow the
-   * catalog-race SQLSTATEs so two app machines booting at once are safe too.
-   * The schema change is audited exactly once via the LOCKED audit_log schema.
-   */
-  async ensureCertCounterTable(): Promise<void> {
-    try {
-      await db.execute(sql`CREATE TABLE IF NOT EXISTS cert_counter (
-        id integer PRIMARY KEY DEFAULT 1,
-        last_issued integer NOT NULL DEFAULT 0,
-        updated_at timestamptz NOT NULL DEFAULT NOW()
-      )`);
-    } catch (err: any) {
-      const code = err?.code ?? err?.cause?.code;
-      // 23505 pg_type race / 42710 duplicate_object / 42P07 relation exists — a
-      // concurrent creator won the race; the table now exists, which is the goal.
-      if (code !== "23505" && code !== "42710" && code !== "42P07") throw err;
-    }
-    // Seed the single counter row (id=1) once; safe to repeat (DML, not DDL).
-    await db.execute(sql`INSERT INTO cert_counter (id, last_issued) VALUES (1, 0) ON CONFLICT (id) DO NOTHING`);
-    // Audit the schema change exactly once (idempotent via WHERE NOT EXISTS).
-    try {
-      await db.execute(sql`
-        INSERT INTO audit_log (entity_type, entity_id, action, admin_user, details, created_at)
-        SELECT 'schema', 'cert_counter', 'create_table', 'system_migration',
-               ${JSON.stringify({
-                 migration: "ensureCertCounterTable",
-                 reason:
-                   "moved cert_counter DDL off the per-allocation hot path; concurrent CREATE TABLE IF NOT EXISTS raced the catalogs (SQLSTATE 23505 pg_type_typname_nsp_index / 42710)",
-                 columns: ["id", "last_issued", "updated_at"],
-               })}::jsonb, NOW()
-        WHERE NOT EXISTS (
-          SELECT 1 FROM audit_log
-          WHERE entity_type = 'schema' AND entity_id = 'cert_counter' AND action = 'create_table'
-        )
-      `);
-    } catch (auditErr: any) {
-      // Auditing is best-effort — never let it undo a successful table ensure.
-      console.error("[cert_counter-migrate] audit_log insert failed:", auditErr?.message);
-    }
-  }
-
-  /**
    * Allocate the next MV number.
    *
    * MUST be called with the transaction executor that also INSERTs the
@@ -1435,23 +1721,15 @@ export class DatabaseStorage implements IStorage {
    * 30s connection timeout. Failing fast rolls the waiter back, which returns
    * its integer to the sequence — the safe outcome.
    *
-   * DDL-free: the table is created once at startup by ensureCertCounterTable()
-   * (registerRoutes), NOT here — concurrent CREATE TABLE IF NOT EXISTS raced the
-   * system catalogs and 500-ed scan ingest (SQLSTATE 23505/42710).
+   * DDL-free: migrations/0114_certificate_identity_authority.sql creates and
+   * protects the table. A missing row is a broken schema contract and must fail
+   * closed; runtime allocation never invents or repairs schema state.
    */
   async getNextCertId(executor: SqlExecutor): Promise<string> {
     await executor.execute(sql`SET LOCAL lock_timeout = '5s'`);
-    let result = await executor.execute(
+    const result = await executor.execute(
       sql`UPDATE cert_counter SET last_issued = last_issued + 1, updated_at = NOW() WHERE id = 1 RETURNING last_issued`
     );
-    if (!result.rows.length) {
-      // Fresh database that never ran ensureCertCounterTable() — seed the single
-      // counter row once, then retry. Idempotent DML, safe under concurrency.
-      await executor.execute(sql`INSERT INTO cert_counter (id, last_issued) VALUES (1, 0) ON CONFLICT (id) DO NOTHING`);
-      result = await executor.execute(
-        sql`UPDATE cert_counter SET last_issued = last_issued + 1, updated_at = NOW() WHERE id = 1 RETURNING last_issued`
-      );
-    }
     if (!result.rows.length) {
       throw new Error("FATAL: cert_counter UPDATE returned no rows — cannot allocate certificate number");
     }
@@ -1761,18 +2039,27 @@ export class DatabaseStorage implements IStorage {
   }
 
   async updateServiceTier(id: number, data: Partial<ServiceTierRecord>): Promise<ServiceTierRecord | undefined> {
-    const setParts: ReturnType<typeof sql>[] = [sql`updated_at = NOW()`];
-    if (data.pricePerCard !== undefined) setParts.push(sql`price_per_card = ${data.pricePerCard}`);
-    if (data.turnaroundDays !== undefined) setParts.push(sql`turnaround_days = ${data.turnaroundDays}`);
-    if (data.maxValueGbp !== undefined) setParts.push(sql`max_value_gbp = ${data.maxValueGbp}`);
-    if (data.isActive !== undefined) setParts.push(sql`is_active = ${data.isActive}`);
-    if (data.features !== undefined) setParts.push(sql`features = ${data.features}`);
-
-    const result = await db.execute(
-      sql`UPDATE service_tiers SET ${sql.join(setParts, sql`, `)} WHERE id = ${id} RETURNING *`
-    );
-    if (result.rows.length === 0) return undefined;
-    return result.rows[0] as ServiceTierRecord;
+    const [updated] = await db
+      .update(serviceTiers)
+      .set({
+        updatedAt: new Date(),
+        pricePerCard: data.pricePerCard,
+        turnaroundDays: data.turnaroundDays,
+        // A changed numeric turnaround invalidates its old presentation label.
+        // Preserve intentional/custom labels on price-only and unchanged-day edits.
+        turnaroundLabel:
+          data.turnaroundDays === undefined
+            ? undefined
+            : sql`
+        CASE WHEN ${serviceTiers.turnaroundDays} IS DISTINCT FROM ${data.turnaroundDays}
+          THEN NULL ELSE ${serviceTiers.turnaroundLabel} END`,
+        maxValueGbp: data.maxValueGbp,
+        isActive: data.isActive,
+        features: data.features,
+      })
+      .where(eq(serviceTiers.id, id))
+      .returning();
+    return updated;
   }
 
   // ── Label overrides ──────────────────────────────────────────────────────────
@@ -1793,19 +2080,34 @@ export class DatabaseStorage implements IStorage {
     }
   ): Promise<LabelOverride> {
     const now = new Date();
-    const [row] = await db
-      .insert(labelOverrides)
-      .values({ certId, ...data, editedAt: now })
-      .onConflictDoUpdate({
-        target: labelOverrides.certId,
-        set: { ...data, editedAt: now },
-      })
-      .returning();
-    return row;
+    return db.transaction(async (tx) => {
+      // Shared lock authority with PRINT_ARTIFACT finalization. Locking the
+      // certificate first also protects the absence of an override row, so an
+      // insert cannot race between final fingerprint verification and commit.
+      const locked = await tx.execute(
+        sql`SELECT certificate_number FROM certificates WHERE certificate_number=${certId} FOR UPDATE`
+      );
+      if (locked.rows.length !== 1) throw new Error("Certificate not found");
+      const [row] = await tx
+        .insert(labelOverrides)
+        .values({ certId, ...data, editedAt: now })
+        .onConflictDoUpdate({
+          target: labelOverrides.certId,
+          set: { ...data, editedAt: now },
+        })
+        .returning();
+      return row;
+    });
   }
 
   async clearLabelOverride(certId: string): Promise<void> {
-    await db.delete(labelOverrides).where(eq(labelOverrides.certId, certId));
+    await db.transaction(async (tx) => {
+      const locked = await tx.execute(
+        sql`SELECT certificate_number FROM certificates WHERE certificate_number=${certId} FOR UPDATE`
+      );
+      if (locked.rows.length !== 1) throw new Error("Certificate not found");
+      await tx.delete(labelOverrides).where(eq(labelOverrides.certId, certId));
+    });
   }
 
   // ── Reprint log ──────────────────────────────────────────────────────────────
@@ -1856,39 +2158,105 @@ export class DatabaseStorage implements IStorage {
     return Array.from({ length }, () => chars[crypto.randomInt(chars.length)]).join("");
   }
 
+  /**
+   * MINT a NEW claim credential, replacing any existing one. This is a ROTATION:
+   * it invalidates whatever code is already printed on the physical insert for
+   * this certificate. Only call it from an explicitly authorised rotation path
+   * (the admin regenerate route) or when the certificate genuinely has no code.
+   * Everything on the printing path must go through `getOrGenerateClaimCode`,
+   * which never rotates.
+   *
+   * The credential is returned ONLY after the write is confirmed to have landed
+   * on exactly one row. Previously the UPDATE's row count was ignored, so a
+   * certId that matched nothing still returned a perfectly valid-looking code —
+   * which a caller would then render onto a physical insert that the server had
+   * no record of and could never validate. A printed credential the server
+   * cannot recover is unrecoverable by design: the code is random (12 chars from
+   * a 32-symbol alphabet), stored nowhere else, and derivable from nothing.
+   */
+  /**
+   * Mint a NEW claim credential for a certificate. Ownership is not its business.
+   *
+   * This used to also write
+   *   ownership_status = CASE WHEN ownership_status = 'claimed' THEN ... ELSE 'unclaimed' END
+   * which preserved `claimed` and flattened everything else — including `transfer_pending` — to
+   * `unclaimed`. Issuing or rotating a credential on a card that was mid-transfer therefore
+   * destroyed the pending handover silently, with no audit of an ownership decision because nobody
+   * had made one. A credential operation is not an ownership decision, and the two are separately
+   * authorised: transfers move ownership_status through their own guarded paths.
+   *
+   * Removing the write is safe for every caller. getOrGenerateClaimCode must not touch ownership at
+   * all; the backfill only selects certificates with claim_code_hash IS NULL, which are already
+   * unclaimed, so the CASE was a no-op there; and the admin regenerate route rotates a CREDENTIAL,
+   * which was never a reason to reset who owns the card.
+   */
   async generateClaimCode(certId: string): Promise<string> {
     const code = this._generateRandomCode(12);
     const hash = this._hashClaimCode(code);
-    await db.execute(sql`
+    const result = await db.execute(sql`
       UPDATE certificates
       SET claim_code_hash = ${hash},
           claim_code = ${code},
           claim_code_created_at = NOW(),
           claim_code_used_at = NULL,
-          ownership_status = CASE WHEN ownership_status = 'claimed' THEN ownership_status ELSE 'unclaimed' END,
           updated_at = NOW()
       WHERE certificate_number = ${certId}
     `);
+    const persisted = (result as { rowCount?: number | null }).rowCount ?? 0;
+    if (persisted !== 1) {
+      throw new Error(
+        `Refusing to issue a claim code for ${certId}: the write affected ${persisted} rows, ` +
+          `so the credential would not be recoverable by the server. Nothing was printed.`
+      );
+    }
     return code;
   }
 
-  // Returns the existing claim code if the cert is unclaimed, otherwise generates a new one.
-  // Used by claim insert PDF downloads so repeated downloads don't invalidate the code.
+  /**
+   * Return the certificate's EXISTING claim credential, minting one only when it
+   * genuinely has none. This is the only entry point the printing path may use.
+   *
+   * It must never rotate. The printed code stays the customer's credential for
+   * the life of the card: `validateClaimCode` accepts it for the first claim, and
+   * `validateClaimCodeForTransfer` accepts that SAME code on an already-claimed
+   * certificate to authorise a buyer-initiated transfer. The previous predicate
+   * required unclaimed + unused + active, so a reprint of a claimed card fell
+   * through to a fresh mint and silently killed the code on the insert already in
+   * the buyer's hands — the one credential they need to transfer the card.
+   *
+   * We do not know who holds an unclaimed card, so a rotated code cannot be
+   * reissued to anyone. Reuse is the only safe behaviour.
+   */
   async getOrGenerateClaimCode(certId: string): Promise<string> {
     const result = await db.execute(sql`
-      SELECT claim_code FROM certificates
+      SELECT claim_code, (claim_code_hash IS NOT NULL) AS has_hash FROM certificates
       WHERE certificate_number = ${certId}
-        AND ownership_status = 'unclaimed'
-        AND claim_code IS NOT NULL
-        AND claim_code_used_at IS NULL
         AND deleted_at IS NULL
-        AND status = 'active'
       LIMIT 1
     `);
-    if (result.rows.length > 0) {
-      const row = result.rows[0] as any;
-      if (row.claim_code) return row.claim_code as string;
+    const row = result.rows[0] as { claim_code?: string | null; has_hash?: boolean } | undefined;
+    if (row?.claim_code) return row.claim_code;
+
+    /*
+     * HASH PRESENT BUT NO READABLE CODE — refuse, do not mint.
+     *
+     * A recovered historical credential can legitimately exist as a hash alone: the code is on a
+     * physical insert in a customer's hands and was restored here in its hashed form, which is the
+     * stronger representation and the one `validateClaimCode` actually compares against. Minting
+     * over it would rotate a credential that is live, in circulation, and — because we do not know
+     * who holds the card — impossible to reissue to anyone.
+     *
+     * We genuinely cannot reprint what we cannot read, so failing loudly is the only honest
+     * outcome. Rotating deliberately is still available through the admin regenerate route.
+     */
+    if (row?.has_hash) {
+      throw new Error(
+        `Refusing to issue a claim code for ${certId}: it already has a credential whose code is ` +
+          `not readable here (hash only). Reprinting would invalidate the code already on the ` +
+          `physical insert. Use the explicit rotation route if that is genuinely intended.`
+      );
     }
+
     return this.generateClaimCode(certId);
   }
 
@@ -1917,13 +2285,28 @@ export class DatabaseStorage implements IStorage {
     const tokenHash = crypto.createHash("sha256").update(token).digest("hex");
     const expiresAt = new Date(Date.now() + 24 * 60 * 60 * 1000);
 
-    await db.insert(claimVerifications).values({
-      certId,
-      email: email.toLowerCase().trim(),
-      ownerName: ownerName?.trim() || null,
-      tokenHash,
-      expiresAt,
-      declaredNew: declaredNew === true,
+    const recipient = email.toLowerCase().trim();
+    await db.transaction(async (tx) => {
+      const inserted = await tx
+        .insert(claimVerifications)
+        .values({
+          certId,
+          email: recipient,
+          ownerName: ownerName?.trim() || null,
+          tokenHash,
+          expiresAt,
+          declaredNew: declaredNew === true,
+        })
+        .returning({ id: claimVerifications.id });
+      await enqueueCustomerNotification(tx, {
+        eventKey: `claim-verify:${inserted[0].id}`,
+        kind: "CLAIM_VERIFY",
+        aggregateType: "claim_verification",
+        aggregateId: String(inserted[0].id),
+        recipient,
+        payload: { token, certId },
+        expiresAt,
+      });
     });
 
     return token;
@@ -1946,6 +2329,17 @@ export class DatabaseStorage implements IStorage {
 
     const cert = await this.getCertificateByCertId(verification.certId);
     if (!cert) return { success: false, error: "Certificate not found." };
+    // The front door (validateClaimCode) already requires status='active'. Re-assert
+    // it HERE too: a verification token minted while the cert was still active stays
+    // valid for 24h, so without this check a certificate voided inside that window
+    // could still be claimed through the stale link — establishing real ownership on
+    // an invalid certificate. Mirrors the front-door predicate exactly (fail closed).
+    if (cert.status !== "active") {
+      return {
+        success: false,
+        error: "This certificate is no longer valid and cannot be claimed. Contact support@mintvaultuk.com.",
+      };
+    }
     if ((cert as any).stolenStatus === "reported_stolen") {
       return {
         success: false,
@@ -1970,15 +2364,13 @@ export class DatabaseStorage implements IStorage {
 
     const ownershipToken = await this._generateOwnershipToken();
 
-    // Atomic claim — cert UPDATE, ownership_history INSERT, claim_verifications
-    // UPDATE, and the new users.email_verified flip all succeed together or
-    // none. Without the wrapping transaction a partial failure could leave
-    // the user table un-flipped while the cert is already claimed (or vice
-    // versa). The email_verified flip is conditional on email_verified=false
-    // so repeated claims by the same user don't churn the timestamp.
+    // Atomic claim — the certificate UPDATE is a compare-and-set, so the first
+    // claimant wins and every concurrent claimant observes zero affected rows.
+    // The history, verification-token, and email-verified writes occur only
+    // after that authoritative ownership transition succeeds.
     const userId = user.id;
-    await db.transaction(async (tx) => {
-      await tx.execute(sql`
+    const applied = await db.transaction(async (tx) => {
+      const claimed = await tx.execute(sql`
         UPDATE certificates
         SET current_owner_user_id = ${userId},
             ownership_status = 'claimed',
@@ -1990,7 +2382,15 @@ export class DatabaseStorage implements IStorage {
             declared_new = ${verification.declaredNew === true},
             updated_at = NOW()
         WHERE certificate_number = ${verification.certId}
+          AND ownership_status = 'unclaimed'
+          AND claim_code_used_at IS NULL
+          AND deleted_at IS NULL
+          AND status = 'active'
+          AND stolen_status IS DISTINCT FROM 'reported_stolen'
+          AND (claim_code_created_at IS NULL OR claim_code_created_at <= ${verification.createdAt})
+        RETURNING certificate_number
       `);
+      if (claimed.rows.length !== 1) return false;
 
       await tx.insert(ownershipHistory).values({
         certId: verification.certId,
@@ -2012,7 +2412,22 @@ export class DatabaseStorage implements IStorage {
         WHERE id = ${userId}
           AND email_verified = false
       `);
+
+      await enqueueCustomerNotification(tx, {
+        eventKey: `certificate-pdf:claim:${verification.id}`,
+        kind: "CERTIFICATE_PDF",
+        aggregateType: "certificate",
+        aggregateId: verification.certId,
+        recipient: verification.email,
+        payload: { certId: verification.certId, ownerName: verification.ownerName },
+      });
+
+      return true;
     });
+
+    if (!applied) {
+      return { success: false, error: "This certificate is no longer available to claim." };
+    }
 
     return {
       success: true,
@@ -2116,21 +2531,35 @@ export class DatabaseStorage implements IStorage {
     const ownerTokenHash = crypto.createHash("sha256").update(ownerToken).digest("hex");
     const ownerExpiresAt = new Date(Date.now() + 24 * 60 * 60 * 1000);
 
-    await db.insert(transferVerifications).values({
-      certId,
-      fromEmail: fromEmail.toLowerCase().trim(),
-      toEmail: toEmail.toLowerCase().trim(),
-      ownerTokenHash,
-      ownerExpiresAt,
-      newOwnerName: newOwnerName?.trim() || null,
+    await db.transaction(async (tx) => {
+      const claimed = await tx.execute(sql`
+        UPDATE certificates SET ownership_status = 'transfer_pending', updated_at = NOW()
+         WHERE certificate_number = ${certId} AND status = 'active' AND deleted_at IS NULL
+           AND stolen_status IS DISTINCT FROM 'reported_stolen' AND ownership_status = 'claimed'
+        RETURNING id
+      `);
+      if (claimed.rows.length !== 1) throw new Error(INACTIVE_CERTIFICATE_TRANSFER_ERROR);
+      const inserted = await tx
+        .insert(transferVerifications)
+        .values({
+          certId,
+          fromEmail: fromEmail.toLowerCase().trim(),
+          toEmail: toEmail.toLowerCase().trim(),
+          ownerTokenHash,
+          ownerExpiresAt,
+          newOwnerName: newOwnerName?.trim() || null,
+        })
+        .returning({ id: transferVerifications.id });
+      await enqueueCustomerNotification(tx, {
+        eventKey: `transfer-owner-confirm:${inserted[0].id}`,
+        kind: "TRANSFER_OWNER_CONFIRM",
+        aggregateType: "transfer",
+        aggregateId: String(inserted[0].id),
+        recipient: fromEmail,
+        payload: { flowVersion: "v1", token: ownerToken, toEmail, certId },
+        expiresAt: ownerExpiresAt,
+      });
     });
-
-    // Mark cert as transfer_pending
-    await db.execute(sql`
-      UPDATE certificates
-      SET ownership_status = 'transfer_pending', updated_at = NOW()
-      WHERE certificate_number = ${certId}
-    `);
 
     return ownerToken;
   }
@@ -2149,7 +2578,9 @@ export class DatabaseStorage implements IStorage {
     const [verification] = await db
       .select()
       .from(transferVerifications)
-      .where(eq(transferVerifications.ownerTokenHash, ownerTokenHash));
+      .where(
+        and(eq(transferVerifications.ownerTokenHash, ownerTokenHash), eq(transferVerifications.flowVersion, "v1"))
+      );
 
     if (!verification) return { success: false, error: "Invalid confirmation link." };
     if (verification.ownerConfirmedAt)
@@ -2163,14 +2594,44 @@ export class DatabaseStorage implements IStorage {
     const newOwnerTokenHash = crypto.createHash("sha256").update(newOwnerToken).digest("hex");
     const newOwnerExpiresAt = new Date(Date.now() + 48 * 60 * 60 * 1000); // 48h for new owner
 
-    await db
-      .update(transferVerifications)
-      .set({
-        ownerConfirmedAt: new Date(),
-        newOwnerTokenHash,
-        newOwnerExpiresAt,
-      })
-      .where(eq(transferVerifications.id, verification.id));
+    const advanced = await db.transaction(async (tx) => {
+      const rows = await tx
+        .update(transferVerifications)
+        .set({ ownerConfirmedAt: new Date(), newOwnerTokenHash, newOwnerExpiresAt })
+        .where(
+          and(
+            eq(transferVerifications.id, verification.id),
+            eq(transferVerifications.flowVersion, "v1"),
+            isNull(transferVerifications.ownerConfirmedAt),
+            isNull(transferVerifications.usedAt),
+            sql`EXISTS (
+              SELECT 1 FROM certificates c WHERE c.certificate_number = ${verification.certId}
+                AND c.status = 'active' AND c.deleted_at IS NULL
+                AND c.stolen_status IS DISTINCT FROM 'reported_stolen'
+              FOR UPDATE OF c
+            )`
+          )
+        )
+        .returning({ id: transferVerifications.id });
+      if (rows.length === 1) {
+        await enqueueCustomerNotification(tx, {
+          eventKey: `transfer-incoming-confirm:${verification.id}`,
+          kind: "TRANSFER_INCOMING_CONFIRM",
+          aggregateType: "transfer",
+          aggregateId: String(verification.id),
+          recipient: verification.toEmail,
+          payload: {
+            flowVersion: "v1",
+            token: newOwnerToken,
+            fromEmail: verification.fromEmail,
+            certId: verification.certId,
+          },
+          expiresAt: newOwnerExpiresAt,
+        });
+      }
+      return rows;
+    });
+    if (advanced.length !== 1) return { success: false, error: INACTIVE_CERTIFICATE_TRANSFER_ERROR };
 
     return {
       success: true,
@@ -2200,7 +2661,9 @@ export class DatabaseStorage implements IStorage {
     const [verification] = await db
       .select()
       .from(transferVerifications)
-      .where(eq(transferVerifications.newOwnerTokenHash, newOwnerTokenHash));
+      .where(
+        and(eq(transferVerifications.newOwnerTokenHash, newOwnerTokenHash), eq(transferVerifications.flowVersion, "v1"))
+      );
 
     if (!verification) return { success: false, error: "Invalid confirmation link." };
     if (verification.usedAt) return { success: false, error: "This transfer has already been completed." };
@@ -2213,6 +2676,9 @@ export class DatabaseStorage implements IStorage {
 
     const cert = await this.getCertificateByCertId(verification.certId);
     if (!cert) return { success: false, error: "Certificate not found." };
+    if (cert.status !== "active" || cert.deletedAt) {
+      return { success: false, error: INACTIVE_CERTIFICATE_TRANSFER_ERROR };
+    }
     // Same stolen-gate every other transfer path enforces (v2 initiate,
     // buyer-init, claim). Without it a stolen-flagged cert could still change
     // owner via a legacy confirmation link issued before the flag landed.
@@ -2231,31 +2697,51 @@ export class DatabaseStorage implements IStorage {
 
     const ownershipToken = await this._generateOwnershipToken();
 
-    await db.execute(sql`
-      UPDATE certificates
-      SET current_owner_user_id = ${newOwner.id},
-          ownership_status = 'claimed',
-          ownership_token = ${ownershipToken},
-          ownership_token_generated_at = NOW(),
-          owner_name = ${verification.newOwnerName ?? null},
-          owner_email = ${verification.toEmail},
-          updated_at = NOW()
-      WHERE certificate_number = ${verification.certId}
-    `);
-
-    await db.insert(ownershipHistory).values({
-      certId: verification.certId,
-      fromUserId: cert.currentOwnerUserId || null,
-      toUserId: newOwner.id,
-      toEmail: verification.toEmail,
-      eventType: "transfer",
-      notes: `Transferred from ${verification.fromEmail} — both parties confirmed by email`,
+    const completion = await db.transaction(async (tx) => {
+      const locked = await tx.execute(sql`
+        SELECT used_at FROM transfer_verifications
+         WHERE id = ${verification.id} AND flow_version = 'v1' FOR UPDATE
+      `);
+      if (locked.rows.length !== 1 || (locked.rows[0] as { used_at: Date | null }).used_at) return "STALE" as const;
+      const moved = await tx.execute(sql`
+        UPDATE certificates
+        SET current_owner_user_id = ${newOwner.id},
+            ownership_status = 'claimed',
+            ownership_token = ${ownershipToken},
+            ownership_token_generated_at = NOW(),
+            owner_name = ${verification.newOwnerName ?? null},
+            owner_email = ${verification.toEmail},
+            updated_at = NOW()
+        WHERE certificate_number = ${verification.certId}
+          AND status = 'active' AND deleted_at IS NULL
+          AND stolen_status IS DISTINCT FROM 'reported_stolen'
+        RETURNING id
+      `);
+      if (moved.rows.length !== 1) return "INACTIVE" as const;
+      await tx.insert(ownershipHistory).values({
+        certId: verification.certId,
+        fromUserId: cert.currentOwnerUserId || null,
+        toUserId: newOwner.id,
+        toEmail: verification.toEmail,
+        eventType: "transfer",
+        notes: `Transferred from ${verification.fromEmail} — both parties confirmed by email`,
+      });
+      await tx
+        .update(transferVerifications)
+        .set({ usedAt: new Date() })
+        .where(eq(transferVerifications.id, verification.id));
+      await enqueueCustomerNotification(tx, {
+        eventKey: `certificate-pdf:transfer:${verification.id}`,
+        kind: "CERTIFICATE_PDF",
+        aggregateType: "certificate",
+        aggregateId: verification.certId,
+        recipient: verification.toEmail,
+        payload: { certId: verification.certId, ownerName: verification.newOwnerName },
+      });
+      return "COMPLETE" as const;
     });
-
-    await db
-      .update(transferVerifications)
-      .set({ usedAt: new Date() })
-      .where(eq(transferVerifications.id, verification.id));
+    if (completion === "INACTIVE") return { success: false, error: INACTIVE_CERTIFICATE_TRANSFER_ERROR };
+    if (completion === "STALE") return { success: false, error: "This transfer has already been completed." };
 
     return {
       success: true,
@@ -2466,25 +2952,42 @@ export class DatabaseStorage implements IStorage {
     const ownerExpiresAt = new Date(Date.now() + 24 * 60 * 60 * 1000); // 24h
 
     await db.transaction(async (tx) => {
-      await tx.insert(transferVerifications).values({
-        certId: data.certId,
-        fromEmail: data.fromEmail.toLowerCase().trim(),
-        toEmail: data.toEmail.toLowerCase().trim(),
-        ownerTokenHash,
-        ownerExpiresAt,
-        newOwnerName: data.newOwnerName?.trim() || null,
-        flowVersion: "v2",
-        status: "pending_owner",
-        outgoingKeeperUserId: data.outgoingKeeperUserId,
-        referenceNumberProvided: null, // incoming keeper provides this at step 2
-      });
+      const inserted = await tx
+        .insert(transferVerifications)
+        .values({
+          certId: data.certId,
+          fromEmail: data.fromEmail.toLowerCase().trim(),
+          toEmail: data.toEmail.toLowerCase().trim(),
+          ownerTokenHash,
+          ownerExpiresAt,
+          newOwnerName: data.newOwnerName?.trim() || null,
+          flowVersion: "v2",
+          status: "pending_owner",
+          outgoingKeeperUserId: data.outgoingKeeperUserId,
+          referenceNumberProvided: null, // incoming keeper provides this at step 2
+        })
+        .returning({ id: transferVerifications.id });
 
       // Mark cert as transfer_pending
-      await tx.execute(sql`
+      const claimed = await tx.execute(sql`
         UPDATE certificates
         SET ownership_status = 'transfer_pending', updated_at = NOW()
         WHERE certificate_number = ${data.certId}
+          AND status = 'active' AND deleted_at IS NULL
+          AND stolen_status IS DISTINCT FROM 'reported_stolen'
+          AND ownership_status = 'claimed'
+        RETURNING id
       `);
+      if (claimed.rows.length !== 1) throw new Error(INACTIVE_CERTIFICATE_TRANSFER_ERROR);
+      await enqueueCustomerNotification(tx, {
+        eventKey: `transfer-owner-confirm:${inserted[0].id}`,
+        kind: "TRANSFER_OWNER_CONFIRM",
+        aggregateType: "transfer",
+        aggregateId: String(inserted[0].id),
+        recipient: data.fromEmail,
+        payload: { flowVersion: "v2", token: ownerToken, toEmail: data.toEmail, certId: data.certId },
+        expiresAt: ownerExpiresAt,
+      });
     });
 
     return ownerToken;
@@ -2518,6 +3021,9 @@ export class DatabaseStorage implements IStorage {
     // Stolen-cert block — refuse to advance the transfer if the cert was
     // flagged after initiate. Check before any state mutation.
     const certForCheck = await this.getCertificateByCertId(verification.certId);
+    if (!certForCheck || certForCheck.status !== "active" || certForCheck.deletedAt) {
+      return { success: false, error: INACTIVE_CERTIFICATE_TRANSFER_ERROR };
+    }
     if (certForCheck && (certForCheck as any).stolenStatus === "reported_stolen") {
       return {
         success: false,
@@ -2532,16 +3038,54 @@ export class DatabaseStorage implements IStorage {
     const newOwnerTokenHash = crypto.createHash("sha256").update(newOwnerToken).digest("hex");
     const incomingConfirmDeadline = new Date(Date.now() + 14 * 24 * 60 * 60 * 1000); // 14 days
 
-    await db
-      .update(transferVerifications)
-      .set({
-        ownerConfirmedAt: new Date(),
-        newOwnerTokenHash,
-        newOwnerExpiresAt: incomingConfirmDeadline,
-        incomingConfirmDeadline,
-        status: "pending_incoming",
-      })
-      .where(eq(transferVerifications.id, verification.id));
+    const advanced = await db.transaction(async (tx) => {
+      const rows = await tx
+        .update(transferVerifications)
+        .set({
+          ownerConfirmedAt: new Date(),
+          newOwnerTokenHash,
+          newOwnerExpiresAt: incomingConfirmDeadline,
+          incomingConfirmDeadline,
+          status: "pending_incoming",
+        })
+        .where(
+          and(
+            eq(transferVerifications.id, verification.id),
+            eq(transferVerifications.status, "pending_owner"),
+            isNull(transferVerifications.ownerConfirmedAt),
+            isNull(transferVerifications.usedAt),
+            sql`EXISTS (
+              SELECT 1 FROM certificates c WHERE c.certificate_number = ${verification.certId}
+                AND c.status = 'active' AND c.deleted_at IS NULL
+                AND c.stolen_status IS DISTINCT FROM 'reported_stolen'
+              FOR UPDATE OF c
+            )`
+          )
+        )
+        .returning({ id: transferVerifications.id });
+      if (rows.length === 1) {
+        const owners = await tx.execute(sql`
+          SELECT COUNT(*)::int AS count FROM public.ownership_history WHERE cert_id=${verification.certId}
+        `);
+        await enqueueCustomerNotification(tx, {
+          eventKey: `transfer-incoming-confirm:${verification.id}`,
+          kind: "TRANSFER_INCOMING_CONFIRM",
+          aggregateType: "transfer",
+          aggregateId: String(verification.id),
+          recipient: verification.toEmail,
+          payload: {
+            flowVersion: "v2",
+            token: newOwnerToken,
+            fromEmail: verification.fromEmail,
+            certId: verification.certId,
+            previousOwnersCount: Number((owners.rows[0] as { count?: number } | undefined)?.count ?? 0),
+          },
+          expiresAt: incomingConfirmDeadline,
+        });
+      }
+      return rows;
+    });
+    if (advanced.length !== 1) return { success: false, error: INACTIVE_CERTIFICATE_TRANSFER_ERROR };
 
     return {
       success: true,
@@ -2582,6 +3126,9 @@ export class DatabaseStorage implements IStorage {
     // Verify reference number matches the certificate
     const cert = await this.getCertificateByCertId(verification.certId);
     if (!cert) return { success: false, error: "Certificate not found." };
+    if (cert.status !== "active" || cert.deletedAt) {
+      return { success: false, error: INACTIVE_CERTIFICATE_TRANSFER_ERROR };
+    }
 
     if ((cert as any).stolenStatus === "reported_stolen") {
       return {
@@ -2638,15 +3185,47 @@ export class DatabaseStorage implements IStorage {
       incomingUser = await this.createUser({ email: verification.toEmail });
     }
 
-    await db
-      .update(transferVerifications)
-      .set({
-        referenceNumberProvided: referenceNumberProvided.trim(),
-        incomingKeeperUserId: incomingUser.id,
-        disputeDeadline,
-        status: "pending_dispute",
-      })
-      .where(eq(transferVerifications.id, verification.id));
+    const advanced = await db.transaction(async (tx) => {
+      const rows = await tx
+        .update(transferVerifications)
+        .set({
+          referenceNumberProvided: referenceNumberProvided.trim(),
+          incomingKeeperUserId: incomingUser.id,
+          disputeDeadline,
+          status: "pending_dispute",
+        })
+        .where(
+          and(
+            eq(transferVerifications.id, verification.id),
+            eq(transferVerifications.status, "pending_incoming"),
+            isNull(transferVerifications.usedAt),
+            sql`EXISTS (
+              SELECT 1 FROM certificates c WHERE c.certificate_number = ${verification.certId}
+                AND c.status = 'active' AND c.deleted_at IS NULL
+                AND c.stolen_status IS DISTINCT FROM 'reported_stolen'
+              FOR UPDATE OF c
+            )`
+          )
+        )
+        .returning({ id: transferVerifications.id });
+      if (rows.length === 1) {
+        for (const notice of [
+          { role: "outgoing", recipient: verification.fromEmail },
+          { role: "incoming", recipient: verification.toEmail },
+        ] as const) {
+          await enqueueCustomerNotification(tx, {
+            eventKey: `transfer-dispute-window:${verification.id}:${notice.role}`,
+            kind: "TRANSFER_DISPUTE_WINDOW",
+            aggregateType: "transfer",
+            aggregateId: String(verification.id),
+            recipient: notice.recipient,
+            payload: { certId: verification.certId, role: notice.role, disputeDeadline: disputeDeadline.toISOString() },
+          });
+        }
+      }
+      return rows;
+    });
+    if (advanced.length !== 1) return { success: false, error: INACTIVE_CERTIFICATE_TRANSFER_ERROR };
 
     return {
       success: true,
@@ -2722,11 +3301,24 @@ export class DatabaseStorage implements IStorage {
         .where(eq(transferVerifications.id, transferId));
 
       // Reset cert to claimed (transfer no longer proceeding)
-      await tx.execute(sql`
+      const moved = await tx.execute(sql`
         UPDATE certificates
         SET ownership_status = 'claimed', updated_at = NOW()
         WHERE certificate_number = ${transfer.certId}
+          AND status = 'active' AND deleted_at IS NULL
+          AND stolen_status IS DISTINCT FROM 'reported_stolen'
+        RETURNING id
       `);
+      if (moved.rows.length !== 1) throw new Error(INACTIVE_CERTIFICATE_TRANSFER_ERROR);
+      const otherRecipient = disputedBy === "outgoing" ? transfer.toEmail : transfer.fromEmail;
+      await enqueueCustomerNotification(tx, {
+        eventKey: `transfer-disputed:${transferId}:${disputedBy}`,
+        kind: "TRANSFER_DISPUTED",
+        aggregateType: "transfer",
+        aggregateId: String(transferId),
+        recipient: otherRecipient,
+        payload: { certId: transfer.certId, disputedBy },
+      });
     });
 
     return { success: true };
@@ -2759,7 +3351,21 @@ export class DatabaseStorage implements IStorage {
         UPDATE certificates
         SET ownership_status = 'claimed', updated_at = NOW()
         WHERE certificate_number = ${transfer.certId}
+          AND status = 'active' AND deleted_at IS NULL
       `);
+      for (const notice of [
+        { role: "outgoing", recipient: transfer.fromEmail },
+        { role: "incoming", recipient: transfer.toEmail },
+      ] as const) {
+        await enqueueCustomerNotification(tx, {
+          eventKey: `transfer-cancelled:${transferId}:${notice.role}`,
+          kind: "TRANSFER_CANCELLED",
+          aggregateType: "transfer",
+          aggregateId: String(transferId),
+          recipient: notice.recipient,
+          payload: { certId: transfer.certId, reason },
+        });
+      }
     });
 
     return { success: true };
@@ -2791,6 +3397,9 @@ export class DatabaseStorage implements IStorage {
 
     const cert = await this.getCertificateByCertId(transfer.certId);
     if (!cert) return { success: false, error: "Certificate not found." };
+    if (cert.status !== "active" || cert.deletedAt || (cert as any).stolenStatus === "reported_stolen") {
+      return { success: false, error: INACTIVE_CERTIFICATE_TRANSFER_ERROR };
+    }
 
     // Create or find incoming keeper user
     let incomingUser = await this.getUserByEmail(transfer.toEmail);
@@ -2834,9 +3443,21 @@ export class DatabaseStorage implements IStorage {
     // could leave DRN rotated without an ownership_history row, or a transfer
     // marked completed without the cert ever flipping owner. Recovery from
     // partial state would require a manual repair script.
-    await db.transaction(async (tx) => {
-      // Transfer ownership on the certificate (rotate DRN + bump logbook version)
-      await tx.execute(sql`
+    try {
+      await db.transaction(async (tx) => {
+        const lockedTransfer = await tx.execute(sql`
+        SELECT transfer_status, finalised_at FROM transfer_verifications
+         WHERE id = ${transferId} AND flow_version = 'v2' FOR UPDATE
+      `);
+        const current = lockedTransfer.rows[0] as { transfer_status: string; finalised_at: Date | null } | undefined;
+        const statusAllowed = opts?.skipStatusCheck
+          ? current?.transfer_status === "pending_dispute" || current?.transfer_status === "disputed"
+          : current?.transfer_status === "pending_dispute";
+        if (!current || !statusAllowed || current.finalised_at) {
+          throw new Error("Transfer state changed before finalisation.");
+        }
+        // Transfer ownership on the certificate (rotate DRN + bump logbook version)
+        const moved = await tx.execute(sql`
         UPDATE certificates
         SET current_owner_user_id = ${incomingUser.id},
             ownership_status = 'claimed',
@@ -2849,44 +3470,75 @@ export class DatabaseStorage implements IStorage {
             logbook_last_issued_at = NOW(),
             updated_at = NOW()
         WHERE certificate_number = ${transfer.certId}
+          AND status = 'active' AND deleted_at IS NULL
+          AND stolen_status IS DISTINCT FROM 'reported_stolen'
+        RETURNING id
       `);
+        if (moved.rows.length !== 1) throw new Error(INACTIVE_CERTIFICATE_TRANSFER_ERROR);
 
-      // Audit log — DRN rotation event paired with transfer completion
-      await tx.insert(auditLog).values({
-        entityType: "certificate",
-        entityId: transfer.certId,
-        action: "drn_rotated_on_transfer",
-        adminUser: null,
-        details: {
-          transferId,
-          previousDrn: oldReferenceNumber,
-          newDrn: newReferenceNumber,
-          logbookVersionBefore: currentLogbookVersion,
-          logbookVersionAfter: currentLogbookVersion + 1,
-        },
+        // Audit log — DRN rotation event paired with transfer completion
+        await tx.insert(auditLog).values({
+          entityType: "certificate",
+          entityId: transfer.certId,
+          action: "drn_rotated_on_transfer",
+          adminUser: null,
+          details: {
+            transferId,
+            previousDrn: oldReferenceNumber,
+            newDrn: newReferenceNumber,
+            logbookVersionBefore: currentLogbookVersion,
+            logbookVersionAfter: currentLogbookVersion + 1,
+          },
+        });
+
+        // Record in ownership history
+        await tx.insert(ownershipHistory).values({
+          certId: transfer.certId,
+          fromUserId: transfer.outgoingKeeperUserId || cert.currentOwnerUserId || null,
+          toUserId: incomingUser.id,
+          toEmail: transfer.toEmail,
+          eventType: "transfer_completed",
+          notes: `v2 transfer — ref number verified, dispute window passed. From ${transfer.fromEmail}`,
+        });
+
+        // Mark transfer as completed
+        await tx
+          .update(transferVerifications)
+          .set({
+            status: "completed",
+            finalisedAt: new Date(),
+            usedAt: new Date(),
+            incomingKeeperUserId: incomingUser.id,
+          })
+          .where(eq(transferVerifications.id, transferId));
+        for (const notice of [
+          { role: "outgoing", recipient: transfer.fromEmail },
+          { role: "incoming", recipient: transfer.toEmail },
+        ] as const) {
+          await enqueueCustomerNotification(tx, {
+            eventKey: `transfer-completed:${transferId}:${notice.role}`,
+            kind: "TRANSFER_COMPLETED",
+            aggregateType: "transfer",
+            aggregateId: String(transferId),
+            recipient: notice.recipient,
+            payload: { certId: transfer.certId, role: notice.role, newKeeperName: transfer.newOwnerName },
+          });
+        }
+        await enqueueCustomerNotification(tx, {
+          eventKey: `certificate-pdf:transfer:${transferId}`,
+          kind: "CERTIFICATE_PDF",
+          aggregateType: "certificate",
+          aggregateId: transfer.certId,
+          recipient: transfer.toEmail,
+          payload: { certId: transfer.certId, ownerName: transfer.newOwnerName },
+        });
       });
-
-      // Record in ownership history
-      await tx.insert(ownershipHistory).values({
-        certId: transfer.certId,
-        fromUserId: transfer.outgoingKeeperUserId || cert.currentOwnerUserId || null,
-        toUserId: incomingUser.id,
-        toEmail: transfer.toEmail,
-        eventType: "transfer_completed",
-        notes: `v2 transfer — ref number verified, dispute window passed. From ${transfer.fromEmail}`,
-      });
-
-      // Mark transfer as completed
-      await tx
-        .update(transferVerifications)
-        .set({
-          status: "completed",
-          finalisedAt: new Date(),
-          usedAt: new Date(),
-          incomingKeeperUserId: incomingUser.id,
-        })
-        .where(eq(transferVerifications.id, transferId));
-    });
+    } catch (error) {
+      if (error instanceof Error && error.message === INACTIVE_CERTIFICATE_TRANSFER_ERROR) {
+        return { success: false, error: INACTIVE_CERTIFICATE_TRANSFER_ERROR };
+      }
+      throw error;
+    }
 
     return {
       success: true,
@@ -2992,7 +3644,21 @@ export class DatabaseStorage implements IStorage {
           SET ownership_status = 'claimed', updated_at = NOW()
           WHERE certificate_number = ${row.certId}
             AND ownership_status = 'transfer_pending'
+            AND status = 'active' AND deleted_at IS NULL
         `);
+        for (const notice of [
+          { role: "outgoing", recipient: row.fromEmail },
+          { role: "incoming", recipient: row.toEmail },
+        ] as const) {
+          await enqueueCustomerNotification(tx, {
+            eventKey: `transfer-expired:${row.transferId}:${notice.role}`,
+            kind: "TRANSFER_EXPIRED",
+            aggregateType: "transfer",
+            aggregateId: String(row.transferId),
+            recipient: notice.recipient,
+            payload: { certId: row.certId, reason: row.reason },
+          });
+        }
       }
     });
 
@@ -3081,11 +3747,30 @@ export class DatabaseStorage implements IStorage {
       // active transfer on the same cert. The select-then-insert sequence
       // upstream is wrapped by the caller, which checks `getTransferV2ByCertId`
       // before calling us.
-      await tx.execute(sql`
+      const claimed = await tx.execute(sql`
         UPDATE certificates
         SET ownership_status = 'transfer_pending', updated_at = NOW()
         WHERE certificate_number = ${data.certId}
+          AND status = 'active' AND deleted_at IS NULL
+          AND stolen_status IS DISTINCT FROM 'reported_stolen'
+          AND ownership_status = 'claimed'
+        RETURNING id
       `);
+      if (claimed.rows.length !== 1) throw new Error(INACTIVE_CERTIFICATE_TRANSFER_ERROR);
+      await enqueueCustomerNotification(tx, {
+        eventKey: `transfer-buyer-invite:${transferId}`,
+        kind: "TRANSFER_BUYER_INVITE",
+        aggregateType: "transfer",
+        aggregateId: String(transferId),
+        recipient: data.currentOwnerEmail,
+        payload: {
+          token: ownerToken,
+          certId: data.certId,
+          maskedClaimantEmail: maskNotificationEmail(data.claimantEmail),
+          ownerExpiresAt: ownerExpiresAt.toISOString(),
+        },
+        expiresAt: ownerExpiresAt,
+      });
     });
 
     return { ownerToken, transferId };
@@ -3132,6 +3817,9 @@ export class DatabaseStorage implements IStorage {
     // cert was flagged after the buyer claimed by code. Check before any
     // state mutation.
     const certForCheck = await this.getCertificateByCertId(verification.certId);
+    if (!certForCheck || certForCheck.status !== "active" || certForCheck.deletedAt) {
+      return { success: false, error: INACTIVE_CERTIFICATE_TRANSFER_ERROR };
+    }
     if (certForCheck && (certForCheck as any).stolenStatus === "reported_stolen") {
       return {
         success: false,
@@ -3151,15 +3839,55 @@ export class DatabaseStorage implements IStorage {
     // 14-day dispute window starts now.
     const disputeDeadline = new Date(Date.now() + 14 * 24 * 60 * 60 * 1000);
 
-    await db
-      .update(transferVerifications)
-      .set({
-        status: "pending_dispute",
-        ownerConfirmedAt: new Date(),
-        disputeDeadline,
-        incomingKeeperUserId: incomingUser.id,
-      })
-      .where(eq(transferVerifications.id, verification.id));
+    const advanced = await db.transaction(async (tx) => {
+      const rows = await tx
+        .update(transferVerifications)
+        .set({
+          status: "pending_dispute",
+          ownerConfirmedAt: new Date(),
+          disputeDeadline,
+          incomingKeeperUserId: incomingUser.id,
+        })
+        .where(
+          and(
+            eq(transferVerifications.id, verification.id),
+            eq(transferVerifications.status, "pending_owner_invited_by_buyer"),
+            isNull(transferVerifications.usedAt),
+            sql`EXISTS (
+              SELECT 1 FROM certificates c WHERE c.certificate_number = ${verification.certId}
+                AND c.status = 'active' AND c.deleted_at IS NULL
+                AND c.stolen_status IS DISTINCT FROM 'reported_stolen'
+              FOR UPDATE OF c
+            )`
+          )
+        )
+        .returning({ id: transferVerifications.id });
+      if (rows.length === 1) {
+        await enqueueCustomerNotification(tx, {
+          eventKey: `transfer-buyer-confirmed:${verification.id}`,
+          kind: "TRANSFER_BUYER_CONFIRMED",
+          aggregateType: "transfer",
+          aggregateId: String(verification.id),
+          recipient: verification.toEmail,
+          payload: { certId: verification.certId, disputeDeadline: disputeDeadline.toISOString() },
+        });
+        for (const notice of [
+          { role: "outgoing", recipient: verification.fromEmail },
+          { role: "incoming", recipient: verification.toEmail },
+        ] as const) {
+          await enqueueCustomerNotification(tx, {
+            eventKey: `transfer-dispute-window:${verification.id}:${notice.role}`,
+            kind: "TRANSFER_DISPUTE_WINDOW",
+            aggregateType: "transfer",
+            aggregateId: String(verification.id),
+            recipient: notice.recipient,
+            payload: { certId: verification.certId, role: notice.role, disputeDeadline: disputeDeadline.toISOString() },
+          });
+        }
+      }
+      return rows;
+    });
+    if (advanced.length !== 1) return { success: false, error: INACTIVE_CERTIFICATE_TRANSFER_ERROR };
 
     return {
       success: true,
@@ -3226,7 +3954,16 @@ export class DatabaseStorage implements IStorage {
         UPDATE certificates
         SET ownership_status = 'claimed', updated_at = NOW()
         WHERE certificate_number = ${verification.certId}
+          AND status = 'active' AND deleted_at IS NULL
       `);
+      await enqueueCustomerNotification(tx, {
+        eventKey: `transfer-buyer-rejected:${verification.id}`,
+        kind: "TRANSFER_BUYER_REJECTED",
+        aggregateType: "transfer",
+        aggregateId: String(verification.id),
+        recipient: verification.toEmail,
+        payload: { certId: verification.certId, reason: reason || "Rejected by current keeper" },
+      });
     });
 
     return {

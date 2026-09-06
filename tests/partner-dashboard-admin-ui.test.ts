@@ -32,6 +32,7 @@ const read = (p: string) => readFileSync(resolve(process.cwd(), p), "utf8");
 const PAGE = read("client/src/pages/admin/partner-dashboard.tsx");
 const APP = read("client/src/App.tsx");
 const SHELL = read("client/src/components/admin/admin-shell.tsx");
+const ADMIN_SESSION = read("client/src/lib/admin-session.tsx");
 
 // ---------------------------------------------------------------------------
 // Helper units
@@ -250,9 +251,11 @@ describe("page is shell-unified and correctly registered", () => {
 });
 
 describe("page follows admin auth and data conventions", () => {
-  it("gates on the admin session while preserving its exact direct-link destination", () => {
-    expect(PAGE).toContain('"/api/admin/session"');
-    expect(PAGE).toContain("encodeURIComponent(`${pathname}${window.location.search}${window.location.hash}`)");
+  it("is dominated by the shared Admin session authority rather than a page-local fetch", () => {
+    expect(APP).toContain("<AdminSessionProvider>");
+    expect(ADMIN_SESSION).toContain('fetch("/api/admin/session"');
+    expect(ADMIN_SESSION).toContain("fullAdminReturnPath");
+    expect(PAGE).not.toContain('fetch("/api/admin/session"');
   });
 
   it("passes an explicit queryFn (the default fetcher would join the key array into a bad URL)", () => {

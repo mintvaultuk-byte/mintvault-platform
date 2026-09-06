@@ -28,6 +28,14 @@ vi.mock("@/lib/queryClient", () => ({
   apiRequest: (...a: unknown[]) => apiRequest(...a),
   queryClient: { invalidateQueries: (...a: unknown[]) => invalidateQueries(...a) },
 }));
+vi.mock("@/lib/admin-session", () => ({
+  useAdminSession: () => ({
+    principal: { email: "admin@example.test", isSuperAdmin: true },
+    logout: vi.fn(),
+    logoutPending: false,
+    logoutError: null,
+  }),
+}));
 vi.mock("wouter", () => ({
   useLocation: () => ["/admin/partner-network/partners", vi.fn()],
   Link: ({ href, children, ...p }: any) => createElement("a", { href, ...p }, children),
@@ -233,6 +241,7 @@ describe("Super Admin station approval — the real UI path", () => {
     const stepUps = apiRequest.mock.calls.filter((c) => c[1] === "/api/admin/step-up");
     expect(stepUps).toHaveLength(1);
     expect(stepUps[0][2]).toEqual({ password: "admin-password", pin: "123456" });
+    expect(stepUps[0][3]).toMatchObject({ adminUnauthorizedPolicy: "credential-rejection-aware" });
     expect(approvals).toHaveLength(2); // original + exactly one retry
     expect(q("dialog-admin-step-up")).toBeNull(); // prompt closed
   });

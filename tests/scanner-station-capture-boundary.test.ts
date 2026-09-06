@@ -13,6 +13,7 @@ const read = (path: string) => readFileSync(join(process.cwd(), path), "utf8");
 const routes = read("server/routes.ts");
 const staffRoutes = read("server/routes/staff.ts");
 const sessions = read("server/scanner-capture-service.ts");
+const operationalAuthority = read("server/partner/operational-authority.ts");
 const stations = read("server/partner/station-service.ts");
 const partnerStationRoutes = read("server/partner/station-routes.ts");
 const partnerGrading = read("client/src/pages/partner/grading.tsx");
@@ -34,10 +35,16 @@ describe("signed-station capture boundary", () => {
   });
 
   it("binds station-owned sessions through the actual connector tenant/location bridge", () => {
-    expect(sessions).toContain("FROM partner_stations station");
-    expect(sessions).toContain("imported.partner_organisation_id=station.tenant_id");
-    expect(sessions).toContain("imported.partner_location_id=station.location_id");
-    expect(sessions).toContain("Certificate is not bound to this station's tenant and location");
+    expect(sessions).not.toMatch(/\b(?:FROM|JOIN)\s+(?:public\.)?partner_/i);
+    expect(sessions).toContain("withScannerCaptureOperationalAuthority");
+    expect(operationalAuthority).toContain("FROM public.partner_stations station");
+    expect(operationalAuthority).toContain("imported.partner_organisation_id=$2::uuid");
+    expect(operationalAuthority).toContain("imported.partner_location_id=$3::uuid");
+    expect(operationalAuthority).toContain("connector operational authority: lock record first");
+    expect(operationalAuthority).toMatch(
+      /FROM public\.partner_connector_records[\s\S]+FOR SHARE[\s\S]+FROM public\.partner_connector_imports[\s\S]+FOR SHARE/
+    );
+    expect(operationalAuthority).toContain("Certificate is not bound to this station's tenant and location");
   });
 
   it("denies production capture operations without the signed Mac principal", async () => {
@@ -92,10 +99,11 @@ describe("signed-station capture boundary", () => {
 
   it("invalidates calibration when the locked scanner profile changes", () => {
     expect(stations).toMatch(
-      /const profileChanged\s*=\s*previous\.scanner_profile_version != null && previous\.scanner_profile_version !== scannerProfileVersion/
+      /const profileChanged\s*=\s*input\.scannerConnected === true &&\s*previous\.scanner_profile_version != null &&\s*previous\.scanner_profile_version !== reportedScannerProfileVersion/
     );
     expect(stations).toContain("const calibrationInvalidated = hardwareChanged || profileChanged");
-    expect(stations).toContain("current_calibration_id=CASE WHEN $11 THEN NULL ELSE current_calibration_id END");
+    expect(stations).toContain("current_calibration_id=CASE");
+    expect(stations).toContain("WHEN $11 THEN NULL");
     expect(stations).toContain('"scanner_profile_changed"');
   });
 
@@ -137,7 +145,7 @@ describe("signed-station capture boundary", () => {
     const renderer = read("scripts/scanner-app/renderer/app.js");
     const scannerMain = read("scripts/scanner-app/main.js");
     expect(sessions).toContain("isScannerCaptureCardRegistered");
-    expect(scannerRoutes).toContain("card_registered: cardRegistered");
+    expect(scannerRoutes).toMatch(/card_registered:\s*(?:cardRegistered|reconciled\.cardRegistered|result\.cardRegistered)/);
     expect(watcher).toContain("cardRegistered: uploaded.body?.card_registered === true");
     expect(renderer).toContain("state.lastAcceptedCapture?.cardRegistered === true && !active");
     expect(renderer).toContain("window.scanner.acknowledgeCardRegistered()");

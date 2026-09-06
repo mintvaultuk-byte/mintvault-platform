@@ -56,9 +56,9 @@ describe("supplies is reachable only by an authenticated Partner", () => {
 
   it("keeps catalogue WRITES on the Super Admin router only", () => {
     expect(adminRoutes).toContain("r.use(requireSuperAdmin)");
-    for (const write of ['r.post("/catalogue"', 'r.put("/catalogue/:code"', 'r.post("/catalogue/:code/image"']) {
-      expect(adminRoutes).toContain(write);
-    }
+    expect(adminRoutes).toMatch(/r\.post\(\s*"\/catalogue"/);
+    expect(adminRoutes).toMatch(/r\.put\(\s*"\/catalogue\/:code"/);
+    expect(adminRoutes).toMatch(/r\.post\(\s*"\/catalogue\/:code\/image"/);
     // A Partner can never reach a catalogue mutation: none exists on the partner router.
     expect(partnerRoutes).not.toContain("/catalogue");
     expect(partnerRoutes).not.toContain("activePricePence");
@@ -75,7 +75,8 @@ describe("supplies is reachable only by an authenticated Partner", () => {
 
   it("shows the Partner only ACTIVE products, and lets only priced ones be bought", () => {
     expect(partnerPage).toContain("filter((product) => product.active)");
-    expect(partnerPage).toContain("disabled={!product.purchasable || busy}");
+    expect(partnerPage).toContain("disabled={!canPurchase || !product.purchasable || busy}");
+    expect(partnerPage).toContain('hasPermission("partner.orders.submit") && hasPermission("partner.credits.purchase")');
   });
 });
 

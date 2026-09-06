@@ -4,6 +4,7 @@ import { sql } from "drizzle-orm";
 import { db } from "./db";
 import { requireSuperAdmin } from "./auth";
 import { upload } from "./lib/multer-configs";
+import { uploadMemoryAdmission } from "./lib/upload-memory-admission";
 import { normalizeCertId } from "./lib/cert-id";
 import { SUMMARIZED_AUDIT_FIELDS, CORRECTION_DISPLAY_EXCLUDED_FIELDS } from "./lib/correction-fields";
 import { uploadToR2 } from "./r2";
@@ -604,6 +605,7 @@ export function registerCorrectionModeRoutes(app: ExpressApp): void {
   app.put(
     "/api/admin/certificates/:id/correction",
     requireSuperAdmin,
+    uploadMemoryAdmission("admin_certificate_correction", 256),
     upload.fields([
       { name: "frontImage", maxCount: 1 },
       { name: "backImage", maxCount: 1 },

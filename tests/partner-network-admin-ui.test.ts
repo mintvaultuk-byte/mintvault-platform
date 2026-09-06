@@ -88,11 +88,14 @@ describe("G4 UI pure helpers", () => {
 
 describe("G4 ops page source assertions", () => {
   const src = readFileSync(join(process.cwd(), "client/src/pages/admin/partner-network.tsx"), "utf8");
+  const app = readFileSync(join(process.cwd(), "client/src/App.tsx"), "utf8");
+  const session = readFileSync(join(process.cwd(), "client/src/lib/admin-session.tsx"), "utf8");
 
-  it("uses the existing admin shell + admin session gate (no new app)", () => {
+  it("uses the existing admin shell under the shared Admin session gate", () => {
     expect(src).toContain("AdminShell");
-    expect(src).toContain("/api/admin/session");
-    expect(src).toContain("encodeURIComponent(`${pathname}${window.location.search}${window.location.hash}`)");
+    expect(app).toContain("<AdminSessionProvider>");
+    expect(session).toContain('fetch("/api/admin/session"');
+    expect(src).not.toContain('fetch("/api/admin/session"');
   });
 
   it("carries the required data-testids for overview, records, detail, and reason modal", () => {

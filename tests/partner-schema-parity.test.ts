@@ -19,7 +19,7 @@ const foundationMigration = readFileSync(join(process.cwd(), "migrations", "0001
 const suppliesMigration = readFileSync(join(process.cwd(), "migrations", "0104_partner_supplies_orders.sql"), "utf8");
 const firstShopDeliveryAddressMigration = readFileSync(
   join(process.cwd(), "migrations", "0105_partner_first_shop_delivery_address.sql"),
-  "utf8",
+  "utf8"
 );
 const SUPPLIES_TABLES = [
   "partner_supplies_orders",
@@ -45,14 +45,19 @@ function drizzleTableNames(): string[] {
 
 describe("partner schema ↔ migration parity", () => {
   it("every typed Drizzle partner table exists in its authoritative migration", () => {
-    const inMigration = new Set([...migrationTableNames(foundationMigration), ...migrationTableNames(suppliesMigration)]);
+    const inMigration = new Set([
+      ...migrationTableNames(foundationMigration),
+      ...migrationTableNames(suppliesMigration),
+    ]);
     for (const t of drizzleTableNames()) {
       expect(inMigration.has(t), `Drizzle table ${t} missing from its migration authority`).toBe(true);
     }
   });
 
   it("keeps the 14 foundation tables in 0001 and the four Supplies tables in 0102", () => {
-    const foundationTables = drizzleTableNames().filter((name) => !SUPPLIES_TABLES.includes(name as (typeof SUPPLIES_TABLES)[number]));
+    const foundationTables = drizzleTableNames().filter(
+      (name) => !SUPPLIES_TABLES.includes(name as (typeof SUPPLIES_TABLES)[number])
+    );
     expect(foundationTables).toEqual(migrationTableNames(foundationMigration));
     expect(foundationTables).toHaveLength(14);
     expect([...SUPPLIES_TABLES].sort()).toEqual(migrationTableNames(suppliesMigration));
@@ -326,6 +331,15 @@ describe("partner schema ↔ migration parity", () => {
       "0111_mvgs_rules_version.sql",
       "0112_partner_supply_commerce.sql",
       "0113_lineage_convergence_mvgs_rules_version.sql",
+      "0114_certificate_identity_authority.sql",
+      "0115_runtime_schema_convergence.sql",
+      "0116_nfc_physical_lock_integrity.sql",
+      "0117_grading_payment_fulfilment_outbox.sql",
+      "0118_nfc_lock_intent_reconciliation.sql",
+      "0119_session_store_authority.sql",
+      "0120_customer_notification_outbox.sql",
+      "0121_main_runtime_role_authority.sql",
+      "0122_object_write_intent_reconciliation.sql",
     ]);
   });
 
@@ -387,13 +401,13 @@ describe("partner schema ↔ migration parity", () => {
         "partner_locations",
         new Set(
           [...firstShopDeliveryAddressMigration.matchAll(/ADD COLUMN IF NOT EXISTS\s+(address_[a-z0-9_]+)/gi)].map(
-            (match) => match[1],
-          ),
+            (match) => match[1]
+          )
         ),
       ],
     ]);
     expect(approvedAdditiveColumns.get("partner_locations")).toEqual(
-      new Set(["address_line1", "address_line2", "address_city", "address_postcode", "address_country"]),
+      new Set(["address_line1", "address_line2", "address_city", "address_postcode", "address_country"])
     );
 
     for (const table of Object.values(partnerSchema).filter((v): v is PgTable => is(v, PgTable))) {
@@ -403,7 +417,7 @@ describe("partner schema ↔ migration parity", () => {
       for (const col of Object.values(getTableColumns(table))) {
         expect(
           migCols!.has(col.name) || approvedAdditiveColumns.get(name)?.has(col.name),
-          `column ${name}.${col.name} missing from migration`,
+          `column ${name}.${col.name} missing from migration`
         ).toBe(true);
       }
     }

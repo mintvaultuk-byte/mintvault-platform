@@ -37,11 +37,31 @@ import { createRoot, type Root } from "react-dom/client";
 
 const VIEWER = readFileSync("client/src/components/grading/image-viewer.tsx", "utf8");
 const ASIDE = readFileSync("client/src/components/grading-workflow/WorkstationPreviewAside.tsx", "utf8");
+const PANEL = readFileSync("client/src/components/grading/grading-panel.tsx", "utf8");
 
 describe("rail containment — ImageViewer reserves space for its controls", () => {
   it("the rail root is a flex COLUMN that fills the host, not block flow", () => {
     // `space-y-2` in the rail is the defect. It must remain for the inline layout only.
     expect(VIEWER).toMatch(/className=\{fillHost \? "flex h-full min-h-0 flex-col gap-1" : "space-y-2"\}/);
+  });
+
+  it("the portal wrappers carry definite remaining height from the rail host into the viewer", () => {
+    // The ImageViewer's own `h-full` is inert if any portaled ancestor remains
+    // an auto-height block. Keep the whole host -> section -> inset -> viewer
+    // chain height-bearing in the canonical rail while leaving inline layout
+    // unchanged.
+    expect(PANEL).toContain(
+      'className={previewHost ? "flex h-full min-h-0 flex-col" : "space-y-2"}'
+    );
+    expect(PANEL).toContain('className={previewHost ? "min-h-0 flex-1" : undefined}');
+    expect(PANEL).toContain('className={previewHost ? "relative h-full min-h-0" : "relative"}');
+  });
+
+  it("preserves the panel lifecycle gate when image-delete moves into the rail viewer", () => {
+    expect(PANEL).toMatch(
+      /sourceImageDeletionEnabled=\{\s*active && !adminReview && !approvalInteractionLocked && workstationCapabilities\.imageMutations\s*\}/
+    );
+    expect(VIEWER).toContain("hasImage && certId && !fullscreen && mayDeleteSourceImage");
   });
 
   it("the card frame absorbs ONLY the leftover height (flex-1 min-h-0)", () => {
@@ -52,17 +72,16 @@ describe("rail containment — ImageViewer reserves space for its controls", () 
     // utility row. The containment contract this test exists to protect — `min-h-0
     // flex-1`, so the card area takes the leftover and never pushes the controls out —
     // is identical.
-    expect(VIEWER).toMatch(/<div className="flex min-h-0 flex-1 flex-col">\{renderImageArea\("100%"\)\}/);
+    expect(VIEWER).toContain('<div className="flex min-h-0 flex-1 flex-col">{renderImageArea("100%")}</div>');
     // Centring belongs to the measured inspection viewport inside that region, whose
     // overflow containment also stops the card re-inflating the rail.
-    expect(VIEWER).toMatch(/relative flex min-h-0 min-w-0 flex-1 items-center justify-center overflow-hidden/);
+    expect(VIEWER).toContain("relative h-full w-full min-h-0 min-w-0 flex-1 overflow-hidden overscroll-contain");
   });
 
   it("the controls row never shrinks and is a real in-flow sibling", () => {
-    // The row now also carries a ref: the fit has to reserve room for it, because the
-    // card's ceiling is the visible screen minus everything rendered beneath the card.
-    expect(VIEWER).toMatch(/ref=\{railControlsRef\}/);
-    expect(VIEWER).toMatch(/className="flex shrink-0 flex-wrap items-center gap-2"/);
+    // The row stays outside the measured card viewport. Horizontal overflow is
+    // scrollable instead of wrapping and consuming unpredictable card height.
+    expect(VIEWER).toContain('className="flex shrink-0 flex-nowrap items-center gap-2 overflow-x-auto pb-1"');
     expect(VIEWER).toMatch(/data-testid="grading-card-controls"/);
   });
 
@@ -72,7 +91,9 @@ describe("rail containment — ImageViewer reserves space for its controls", () 
     // them costs the card vertical space beyond the row that already exists. The
     // certificate is the flexible member: controls keep their intrinsic size and it
     // absorbs the squeeze, because compressing a control makes it overlap its neighbour.
-    expect(VIEWER).toMatch(/topRowSlot \? <div className="flex min-w-0 flex-1 justify-end">\{topRowSlot\}<\/div> : null/);
+    expect(VIEWER).toMatch(
+      /topRowSlot \? <div className="flex min-w-0 flex-1 justify-end">\{topRowSlot\}<\/div> : null/
+    );
   });
 
   it("the controls row is NOT absolutely or fixed positioned — it cannot float over anything", () => {

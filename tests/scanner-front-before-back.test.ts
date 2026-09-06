@@ -33,9 +33,10 @@ describe("§23 FRONT-before-BACK is enforced server-side", () => {
     expect(src).toMatch(/Back capture refused until an immutable front master exists/);
   });
 
-  it("the legacy multipart evidence route carries the same refusal", () => {
+  it("the multipart compatibility route delegates to the same finalisation authority", () => {
     const src = read("server/routes.ts");
-    expect(src).toMatch(/Back capture refused until an immutable front master exists/);
+    expect(src).toMatch(/finaliseScannerEvidence\(/);
+    expect(src).toMatch(/reconcileAcceptedScannerEvidence\(/);
   });
 
   it("the staged BACK-before-FRONT refusal is retryable, so a valid BACK upload is not discarded", () => {
@@ -56,12 +57,21 @@ describe("§23 FRONT-before-BACK is enforced server-side", () => {
     expect(guard).toBeLessThan(decode);
   });
 
-  it("the legacy staff upload route refuses a BACK-only request", () => {
+  it("the legacy staff upload route is retired after bounded pre-body gates", () => {
     const src = read("server/routes/staff.ts");
-    // This route writes the display image columns directly and never reaches the
-    // immutable-master guard, so it needs its own front-first precondition.
-    expect(src).toMatch(/front_image_path IS NOT NULL/);
-    expect(src).toMatch(/Scan the front of this card before the back/);
+    const route = src.slice(
+      src.indexOf('"/api/staff/scan/certificates/:id/upload"'),
+      src.indexOf("// ── Printer", src.indexOf('"/api/staff/scan/certificates/:id/upload"'))
+    );
+    const capability = route.indexOf('requireCapability("scan")');
+    const admission = route.indexOf('uploadMemoryAdmission("staff_scan", 128)');
+    const multer = route.indexOf("scanUpload.fields");
+    const refusal = route.indexOf('code: "STAFF_SCAN_UPLOAD_RETIRED"');
+    expect(capability).toBeGreaterThanOrEqual(0);
+    expect(admission).toBeGreaterThan(capability);
+    expect(multer).toBeGreaterThan(admission);
+    expect(refusal).toBeGreaterThan(multer);
+    expect(route).not.toMatch(/UPDATE\s+certificates|uploadToR2|finaliseScannerEvidence/);
   });
 });
 
@@ -82,14 +92,14 @@ describe("§33 a committed FRONT survives a BACK failure", () => {
   });
 
   it("a supersede is scoped to one side, so a BACK write cannot retire the FRONT", () => {
-    const src = read("server/scan-ingest-service.ts");
+    const src = read("server/lib/scanner-evidence-persistence.ts");
     // The current-row lookup that feeds the supersede is bound to a single side.
     expect(src).toMatch(/certificate_id\s*=\s*\$1\s+AND\s+side\s*=\s*\$2\s+AND\s+is_current\s*=\s*true/i);
   });
 
   it("the per-side advisory lock keys on the side, so the two sides never contend", () => {
-    const src = read("server/scan-ingest-service.ts");
-    expect(src).toMatch(/evidence:\$\{certId\}:\$\{side\}/);
+    const src = read("server/lib/scanner-evidence-persistence.ts");
+    expect(src).toMatch(/evidence:\$\{intent\.certificateId\}:\$\{intent\.side\}/);
   });
 });
 

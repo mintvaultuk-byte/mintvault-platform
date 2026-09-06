@@ -475,8 +475,10 @@ export async function createPartnerSupplyCheckout(
       },
       { idempotencyKey: `partner-supply-checkout:${orderId}` }
     );
-  } catch (err) {
-    console.error("[partner-supply] Stripe checkout creation failed", (err as Error).message);
+  } catch {
+    // Stripe exceptions can embed request URLs, checkout metadata or customer
+    // fields. The public error and log event are intentionally stable.
+    console.error("[partner-supply] stripe_checkout_creation_failed", { orderId });
     throw new PartnerSupplyError(502, "checkout_unavailable", "Could not start checkout. Try again.");
   }
   if (!session.url) throw new PartnerSupplyError(502, "checkout_unavailable", "Could not start checkout. Try again.");
@@ -762,8 +764,8 @@ export async function refundSupplyOrderForSuperAdmin(
           idempotencyKey: `partner-supply-refund:${id}:${current.refunded_total_pence}:${amount}`,
         }
       );
-    } catch (err) {
-      console.error("[partner-supply] Stripe refund failed", (err as Error).message);
+    } catch {
+      console.error("[partner-supply] stripe_refund_failed", { orderId: id });
       throw new PartnerSupplyError(502, "refund_unavailable", "Stripe could not process this refund. Try again.");
     }
     const inserted = await client.query<{ id: string }>(
@@ -987,7 +989,7 @@ export async function updateSupplyCatalogueForSuperAdmin(
   );
   console.info("[partner-supply] catalogue updated", {
     code,
-    actor: actor.email,
+    actorUserId: actor.userId ?? null,
     active,
     priceChanged: price !== current.active_price_pence,
     configuredPrice: price != null,
@@ -1085,7 +1087,11 @@ export async function createSupplyProductForSuperAdmin(
     // A duplicate NAME is the realistic mistake, and it must not silently overwrite a live product.
     throw new PartnerSupplyError(409, "duplicate_product", "A supply product with that name already exists.");
   }
-  console.info("[partner-supply] product created", { code, actor: actor.email, priced: price != null });
+  console.info("[partner-supply] product created", {
+    code,
+    actorUserId: actor.userId ?? null,
+    priced: price != null,
+  });
   return { code };
 }
 
@@ -1141,7 +1147,11 @@ export async function setSupplyProductImageForSuperAdmin(
   if (current.image_key && current.image_key !== key) {
     await deleteFromR2(current.image_key).catch(() => {});
   }
-  console.info("[partner-supply] product image set", { code, actor: actor.email, contentType: detected });
+  console.info("[partner-supply] product image set", {
+    code,
+    actorUserId: actor.userId ?? null,
+    contentType: detected,
+  });
   return { imageUrl: await getR2SignedUrl(key, 3600) };
 }
 
@@ -1158,7 +1168,7 @@ export async function removeSupplyProductImageForSuperAdmin(actor: SupplyAdminAc
     [code]
   );
   if (current.image_key) await deleteFromR2(current.image_key).catch(() => {});
-  console.info("[partner-supply] product image removed", { code, actor: actor.email });
+  console.info("[partner-supply] product image removed", { code, actorUserId: actor.userId ?? null });
 }
 
 /**
@@ -1205,5 +1215,8 @@ export async function updateSupplyTaxForSuperAdmin(
     "UPDATE partner_supply_tax_settings SET tax_treatment=$1, vat_rate_basis_points=$2, updated_at=now() WHERE singleton=true",
     [treatment, treatment === "VAT_INCLUDED" ? rate : null]
   );
-  console.info("[partner-supply] tax configuration updated", { actor: actor.email, treatment });
+  console.info("[partner-supply] tax configuration updated", {
+    actorUserId: actor.userId ?? null,
+    treatment,
+  });
 }

@@ -25,6 +25,7 @@ import {
   requestReprint,
   markCompleted,
   resolveActor,
+  PrintReprintIdempotencyConflictError,
 } from "../print-workflow";
 
 const BATCH_ID_RE = /^[a-f0-9]{16}$/;
@@ -99,12 +100,17 @@ export function registerPrintWorkflowRoutes(app: Express): void {
   app.post("/api/admin/printing/workflow/batch", requireAdmin, async (req: Request, res: Response) => {
     try {
       if (!ensurePermission(req, res, "create_batch")) return;
+      const idempotencyKey = req.header("Idempotency-Key")?.trim() ?? "";
+      if (!idempotencyKey) {
+        return res.status(400).json({ error: "Idempotency-Key header required" });
+      }
       const parsed = batchSchema.safeParse(req.body);
       if (!parsed.success) return res.status(400).json({ error: parsed.error.issues[0]?.message ?? "Invalid body" });
       const ids = parsed.data.certIds.map((c) => normalizeCertId(c));
       const result = await createBatchAtomic({
         certIds: ids,
         identity: resolveActor(req),
+        idempotencyKey,
         notes: parsed.data.notes ?? null,
       });
       res.json(result);
@@ -130,6 +136,10 @@ export function registerPrintWorkflowRoutes(app: Express): void {
   app.post("/api/admin/printing/workflow/reprint", requireAdmin, async (req: Request, res: Response) => {
     try {
       if (!ensurePermission(req, res, "reprint")) return;
+      const idempotencyKey = req.header("Idempotency-Key")?.trim() ?? "";
+      if (!idempotencyKey || idempotencyKey.length > 200) {
+        return res.status(400).json({ error: "Idempotency-Key header (1-200 characters) required" });
+      }
       const parsed = reprintSchema.safeParse(req.body);
       if (!parsed.success) return res.status(400).json({ error: parsed.error.issues[0]?.message ?? "Invalid body" });
       const ids = parsed.data.certIds.map((c) => normalizeCertId(c));
@@ -138,9 +148,13 @@ export function registerPrintWorkflowRoutes(app: Express): void {
         reason: parsed.data.reason,
         reasonCategory: parsed.data.reasonCategory,
         identity: resolveActor(req),
+        idempotencyKey,
       });
       res.json(result);
     } catch (err) {
+      if (err instanceof PrintReprintIdempotencyConflictError) {
+        return res.status(409).json({ code: err.code, error: err.message });
+      }
       sendServerError(res, err);
     }
   });

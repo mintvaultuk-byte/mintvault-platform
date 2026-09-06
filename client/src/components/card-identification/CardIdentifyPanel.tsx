@@ -1,3 +1,4 @@
+import { adminFetch } from "@/lib/queryClient";
 /**
  * AI Card Identification panel — embedded in the grading/certificate form.
  *
@@ -117,7 +118,7 @@ export function CardIdentifyPanel({
       if (backImage) body.backImageBase64 = await fileToBase64(backImage);
       else if (backImageKey) body.backImageKey = backImageKey;
 
-      const res = await fetch(`${apiBase}/card-identification`, {
+      const res = await adminFetch(`${apiBase}/card-identification`, {
         method: "POST",
         credentials: "include",
         headers: { "Content-Type": "application/json" },
@@ -161,7 +162,7 @@ export function CardIdentifyPanel({
       provider: suggestion.provider,
       model: suggestion.model,
     }));
-    void fetch(`${apiBase}/card-identification/corrections`, {
+    void adminFetch(`${apiBase}/card-identification/corrections`, {
       method: "POST",
       credentials: "include",
       headers: { "Content-Type": "application/json" },

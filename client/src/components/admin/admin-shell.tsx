@@ -25,6 +25,7 @@ import {
   Users,
   Sparkles,
   ShieldCheck,
+  KeyRound,
   Library,
   PackageCheck,
   Share2,
@@ -33,6 +34,7 @@ import {
 } from "lucide-react";
 import GrainOverlay from "./grain-overlay";
 import InstallAppButton from "../install-app-button";
+import { useAdminSession } from "@/lib/admin-session";
 
 /** Canonical admin tab contract — owned by the shell, imported by the dashboard. */
 export type AdminTab =
@@ -53,7 +55,8 @@ export type AdminTab =
   | "scans"
   | "sets"
   | "growth"
-  | "command-centre";
+  | "command-centre"
+  | "claim-register";
 
 interface DbInfo {
   env: string;
@@ -100,6 +103,7 @@ const NAV: NavSection[] = [
       { key: "printing", label: "Printing", icon: Printer },
       { key: "print-queue", label: "Print Queue", icon: PrinterCheck },
       { href: "/admin/staff", label: "Staff", icon: Users },
+      { href: "/admin/claim-register", label: "Claim Register", icon: KeyRound },
       { href: "/admin/security", label: "Security", icon: ShieldCheck },
       { href: "/admin/partners", label: "Partner Network", icon: PackageCheck },
     ],
@@ -211,7 +215,6 @@ function adminTabDestination(tab: AdminTab): string {
 interface AdminShellProps {
   activeTab: AdminTab;
   onTabChange: (t: AdminTab) => void;
-  onLogout: () => void;
   /** Controlled global cert search, surfaced in the topbar (same state the certs list uses). */
   search?: { value: string; onChange: (v: string) => void; placeholder?: string };
   /** Override the topbar title/crumb (defaults derive from the active tab). */
@@ -232,12 +235,9 @@ interface AdminShellProps {
   children: ReactNode;
 }
 
-type AdminSession = { authenticated: boolean; isSuperAdmin?: boolean };
-
 export default function AdminShell({
   activeTab,
   onTabChange,
-  onLogout,
   search,
   title,
   crumb,
@@ -248,21 +248,13 @@ export default function AdminShell({
   children,
 }: AdminShellProps) {
   const [pathname] = useLocation();
+  const { principal, logout, logoutPending, logoutError } = useAdminSession();
   const [commandGroupOpen, setCommandGroupOpen] = useState(pathname === "/admin/command");
   const { data: dbInfo } = useQuery<DbInfo>({
     queryKey: ["/api/admin/db-info"],
     enabled: !commandCentreMode,
     refetchInterval: disableEnvironmentPolling ? false : 60000,
   });
-  const { data: adminSession } = useQuery<AdminSession>({
-    queryKey: ["/api/admin/session"],
-    queryFn: async () => {
-      const response = await fetch("/api/admin/session", { credentials: "include" });
-      return response.ok ? ((await response.json()) as AdminSession) : { authenticated: false };
-    },
-    staleTime: 60_000,
-  });
-
   const isStagingHost = typeof window !== "undefined" && window.location.hostname.includes("mintvault-v2");
   const envLabel = isStagingHost ? "STAGING" : dbInfo?.env === "production" ? "PRODUCTION" : "DEVELOPMENT";
   const envIsProd = !isStagingHost && dbInfo?.env === "production";
@@ -360,7 +352,7 @@ export default function AdminShell({
                   );
                 }
                 if ("href" in item) {
-                  if (item.superAdminOnly && adminSession?.isSuperAdmin !== true) return null;
+                  if (item.superAdminOnly && principal?.isSuperAdmin !== true) return null;
                   return (
                     <Link
                       key={item.href}
@@ -486,13 +478,19 @@ export default function AdminShell({
               <InstallAppButton className="admin-btn" label="Install app" />
               <button
                 type="button"
-                onClick={onLogout}
+                onClick={() => void logout()}
+                disabled={logoutPending}
                 className="admin-icon-btn admin-btn"
-                title="Log out"
+                title={logoutPending ? "Logging out…" : "Log out"}
                 data-testid="button-logout"
               >
                 <LogOut />
               </button>
+              {logoutError && (
+                <span className="text-xs text-red-300" role="alert" data-testid="admin-logout-error">
+                  {logoutError}
+                </span>
+              )}
               <div className="admin-avatar" aria-hidden="true">
                 C
               </div>

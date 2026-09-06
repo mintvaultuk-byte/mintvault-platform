@@ -14,6 +14,15 @@
       <button class="hdr-btn hdr-btn--icon" id="hideBtn" data-tip="Hide this window">×</button>
     </header>
 
+    <!--
+      THE OPERATIONAL WORKFLOW IS ABSENT UNTIL THIS MAC IS AUTHORITATIVELY ACTIVE.
+
+      Static HTML used to paint NEW CARD / PREVIEW / SCAN CARD / FIX MISSING IMAGES while the
+      asynchronous station-state read was still deciding whether this Mac was signed in, pending,
+      or active. That made an expired or pending first-shop Scanner look like the old capture app.
+      The renderer opens this only after the canonical station response says ACTIVE.
+    -->
+    <main id="operationalWorkflow" hidden>
     <section class="row device" id="deviceRow">
       <span class="row-label">Canon LiDE 400</span>
       <span class="row-value" id="scannerHealth">Checking device…</span>
@@ -37,7 +46,7 @@
       actually answered: "0 Grading Credits" and "we have not asked yet" are different facts, and a
       shop that reads the second as the first stops working for no reason.
     -->
-      <div class="station-identity-cell">
+      <div class="station-identity-cell" id="stationCreditsCell">
         <span class="identity-key">GRADING CREDITS</span>
         <span class="identity-value" id="stationCredits">—</span>
         <span class="credit-low-warning" id="lowCreditsWarning" hidden>LOW CREDITS — TOP UP</span>
@@ -91,7 +100,7 @@
     <section class="row capture-actions" id="captureActionsRow">
       <div class="action-grid" aria-label="Scanner actions">
         <button class="btn primary capture-primary" id="newCardBtn">NEW CARD</button>
-        <button class="btn capture-primary" id="positioningPreviewBtn">PREVIEW</button>
+        <button class="btn capture-primary" id="positioningPreviewBtn" hidden>PREVIEW FRONT</button>
         <button class="btn primary capture-primary" id="scanCardBtn" disabled>SCAN CARD</button>
         <!--
         FOURTH PRIMARY ACTION. Recovering a card that is missing a side is normal shop work, not
@@ -135,20 +144,6 @@
         <strong class="card-complete-title" id="cardCompleteTitle">MV— COMPLETE</strong>
         <p class="card-complete-instruction" id="cardCompleteInstruction">MARK CARD MV—</p>
         <button class="btn primary" id="completeNextCardBtn">NEXT CARD</button>
-      </div>
-      <div class="positioning-panel" id="positioningPanel" hidden>
-        <div class="positioning-card-preview-viewport" id="positioningCardPreviewViewport">
-          <img
-            class="positioning-card-preview"
-            id="positioningCardPreview"
-            alt="Detected card with surrounding scanner background"
-          />
-        </div>
-        <p class="positioning-result" id="positioningResult"></p>
-        <p class="hint" id="positioningHint">
-          Preview is a local placement check only. It never becomes card evidence.
-        </p>
-        <p class="preview-note">PLACEMENT PREVIEW — NOT A CARD SCAN</p>
       </div>
       <!--
       THE PER-SIDE PLACEMENT GATE.
@@ -226,47 +221,6 @@
           </div>
           <p class="hint positioning-geometry" id="positioningGeometry"></p>
         </div>
-        <!--
-        PHASE C — the movable capture window.
-
-        Station setup, not card capture: it lives inside Service & Diagnostics and refuses while a
-        card is open, so an ordinary grader cannot nudge the capture area mid-job. Dragging the
-        window is the deliberate act; the numbers below it are a readout, never the control.
-      -->
-        <!--
-        CAPTURE AREA — FIXED, AND NOT A NORMAL SHOP CONTROL.
-
-        The 100 x 130 mm capture area sits in a proven physical position on the scanner bed. Normal
-        work is: place the card inside it, PREVIEW, SCAN. Nobody on the shop floor moves it, so for a
-        Scanner Operator this panel is a READ-OUT — it says where the area is and nothing more.
-
-        Moving it is maintenance (scanner replaced, Mac replaced, profile change, proven alignment
-        fault) and appears only for an operator holding `partner.stations.calibrate`. Hiding the
-        controls is presentation, NOT the gate: the server refuses the write regardless.
-      -->
-        <div class="settings-test capture-window-setup" id="captureWindowSetup">
-          <span class="row-header">Capture area</span>
-          <div class="platen-viewport" id="platenViewport">
-            <div class="platen-window" id="platenWindow"><span>CAPTURE AREA</span></div>
-          </div>
-          <p class="hint" id="captureWindowReadout"></p>
-          <p class="hint" id="captureWindowFixedNote">
-            This is where cards are scanned on this station. It is fixed and does not move during normal use — place the
-            card inside it and press PREVIEW.
-          </p>
-          <div class="capture-window-maintenance" id="captureWindowMaintenance" hidden>
-            <p class="hint">
-              <strong>MAINTENANCE ONLY.</strong> Move this only when the scanner or Mac has been replaced, the profile
-              has changed, or a hardware alignment fault has been proven. Every card captured afterwards is framed
-              differently from every card captured before.
-            </p>
-            <div class="preview-actions">
-              <button class="btn" id="captureWindowResetBtn">RESET TO DEFAULT</button>
-              <button class="btn primary" id="captureWindowSaveBtn">SAVE NEW POSITION</button>
-            </div>
-          </div>
-          <p class="hint" id="captureWindowStatus"></p>
-        </div>
         <label class="checkbox">
           <input type="checkbox" id="autoOpenOnError" />
           <span>Auto-open this window on error <span class="hint inline">(default on)</span></span>
@@ -310,6 +264,7 @@
         </div>
       </div>
     </details>
+    </main>
 
     <!-- Exceptional recovery. The app never attaches an arbitrary TIFF: it
        opens the selected certificate in MintVault, where an authenticated
@@ -395,6 +350,24 @@
           <button class="btn primary" type="button" id="stationRegisterBtn">REGISTER THIS MAC</button>
         </div>
         <p class="hint station-setup-error" id="stationSetupError"></p>
+        <!--
+          THE WAY OUT, on the screen that used to have none.
+
+          Every stage of this modal is blocking by design — an unauthorised Mac must not scan. But
+          "blocking" was implemented as "no controls at all", so an operator who reached a state they
+          could not resolve (a Mac registered to another shop, a station awaiting an approval that
+          had not come) had nothing to press, in a window they could not close, in an app whose tray
+          had no Quit. These four are always rendered and never disabled by station state.
+        -->
+        <p class="hint" id="stationRefreshStatus" aria-live="polite"></p>
+        <div class="station-setup-recovery" id="stationSetupRecovery">
+          <span class="station-setup-environment" id="stationSetupEnvironment"></span>
+          <div class="station-setup-recovery-actions">
+            <button class="linklike" type="button" id="stationRefreshBtn">REFRESH STATUS</button>
+            <button class="linklike" type="button" id="stationSignOutBtn">SIGN OUT</button>
+            <button class="linklike" type="button" id="stationDiagnosticsBtn">DIAGNOSTICS</button>
+          </div>
+        </div>
       </div>
     </div>
 

@@ -73,6 +73,7 @@ describe("Partner Pilot certificate allocation", () => {
 describe("Partner Pilot physical evidence and output gate", () => {
   const grading = read("server/partner/grading-routes.ts");
   const eligibility = read("server/partner/print-eligibility.ts");
+  const operationalAuthority = read("server/partner/operational-authority.ts");
   const workflow = read("server/print-workflow.ts");
   const legacyRoutes = read("server/routes.ts");
   const preview = read("server/routes/admin/label-preview.ts");
@@ -122,17 +123,22 @@ describe("Partner Pilot physical evidence and output gate", () => {
       "partner_credit_unsettled",
       "partner_capture_evidence_missing",
       "partner_print_state_invalid",
-      "grader_status = 'approved'",
-      "review_required = true",
-      "grade_approved_at IS NOT NULL",
-      "reservation.status = 'consumed'",
-      "print_state IN ('needs_printing', 'reprint_required', 'printing', 'printed', 'reprinted')",
-      "count(DISTINCT evidence.side) = 2",
-      "station.approved_at IS NOT NULL",
       "isUndefinedOriginColumn",
       "if (isUndefinedOriginColumn(error)) return [];",
     ]) {
       expect(eligibility).toContain(token);
+    }
+    expect(eligibility).toContain("readPartnerPrintAuthority");
+    for (const token of [
+      "grader_status='approved'",
+      "review_required=true",
+      "grade_approved_at IS NOT NULL",
+      "reservation.status='consumed'",
+      "print_state IN ('needs_printing','reprint_required','printing','printed','reprinted')",
+      "count(DISTINCT evidence.side)=2",
+      "station.approved_at IS NOT NULL",
+    ]) {
+      expect(operationalAuthority).toContain(token);
     }
   });
 
@@ -148,9 +154,13 @@ describe("Partner Pilot physical evidence and output gate", () => {
   it("gives Super Admin QA the Partner, operator, station, evidence, and correction context", () => {
     expect(qaRoutes).toContain("/partner-context");
     expect(qaRoutes).toContain("origin_partner_legal_name");
-    expect(qaRoutes).toContain("operator.first_name");
-    expect(qaRoutes).toContain("station_codes");
-    expect(qaRoutes).toContain("evidence_complete");
+    expect(qaRoutes).toContain("readPartnerQaAuthority");
+    expect(qaRoutes).toContain("operator: authority.operatorName");
+    expect(qaRoutes).toContain("stationCodes: authority.stationCodes");
+    expect(qaRoutes).toContain("evidenceComplete:");
+    expect(operationalAuthority).toContain("first_name");
+    expect(operationalAuthority).toContain("station_code");
+    expect(operationalAuthority).toContain("approved_at IS NOT NULL AS approved");
     expect(qaUi).toContain("partner-qa-provenance");
   });
 
@@ -178,6 +188,7 @@ describe("Partner Pilot physical evidence and output gate", () => {
   it("binds an NFC tag only to an approved certificate, under a real database constraint, and audits it", () => {
     const nfcGuard = read("shared/nfc-binding.ts");
     const migration = read("migrations/0088_nfc_binding_integrity.sql");
+    const storage = read("server/storage.ts");
 
     // The bind gate is the SAME fact the public scan route uses, so the two cannot drift apart.
     expect(nfcGuard).toContain("cert.gradeApprovedAt == null");
@@ -195,8 +206,8 @@ describe("Partner Pilot physical evidence and output gate", () => {
 
     // Binding, overwriting and clearing were entirely unlogged, and nfc_written_by was always NULL
     // because no client ever sent it. Attribution now comes from the authenticated admin.
-    expect(legacyRoutes).toContain('"nfc_bound"');
-    expect(legacyRoutes).toContain('"nfc_cleared"');
+    expect(storage).toContain("'nfc_bound'");
+    expect(storage).toContain("'nfc_cleared'");
     expect(legacyRoutes).toContain("renderAdminUser(req)");
   });
 

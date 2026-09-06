@@ -75,6 +75,8 @@ const OWNER = "aa31aa31-0000-0000-0000-0000000000a1";
     );
     process.env.__PARTNER_PUBLIC_TEST_TOKEN = token;
 
+    const { MemoryRateLimitStore, setPartnerRateLimitStore } = await import("../server/partner/rate-limit");
+    setPartnerRateLimitStore(new MemoryRateLimitStore());
     const { registerPartnerPublicRoutes } = await import("../server/partner/public-routes");
     const app = express();
     app.use(express.json());
@@ -88,6 +90,8 @@ const OWNER = "aa31aa31-0000-0000-0000-0000000000a1";
     await new Promise<void>((resolve) => server?.close(() => resolve()));
     const { closePartnerPools } = await import("../server/partner/db");
     await closePartnerPools();
+    const { markSharedPostgresPartnerRateLimitStoreUnavailable } = await import("../server/partner/rate-limit");
+    markSharedPostgresPartnerRateLimitStoreUnavailable();
     await admin?.end().catch(() => {});
   });
 

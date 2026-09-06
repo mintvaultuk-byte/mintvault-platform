@@ -1,5 +1,5 @@
 #!/usr/bin/env node
-import { appendFileSync, readdirSync } from "node:fs";
+import { appendFileSync } from "node:fs";
 import { spawnSync } from "node:child_process";
 import { CRITICAL_SUITES, CLUSTERS, assertDisposable, envForSuite, urlFor } from "./partner-suite-env-matrix.mjs";
 
@@ -46,7 +46,7 @@ function run(command, args, options = {}) {
   const result = spawnSync(command, args, {
     encoding: "utf8",
     stdio: options.capture ? "pipe" : "inherit",
-    env: process.env,
+    env: options.env ?? process.env,
   });
   if (result.status !== 0) {
     const output = [result.stdout, result.stderr].filter(Boolean).join("\n");
@@ -107,12 +107,14 @@ for (const [name, cluster] of Object.entries(CLUSTERS)) {
 ensureDatabase("pg16", "mintvault_vq_phase10_local");
 psql(sharedTestUrl, "CREATE EXTENSION IF NOT EXISTS vector");
 run("npx", ["drizzle-kit", "push", "--force"]);
-for (const migration of readdirSync("migrations-vq")
-  .filter((file) => file.endsWith(".sql"))
-  .sort()) {
-  console.log(`[ci-db] applying migrations-vq/${migration}`);
-  run("psql", [sharedTestUrl, "-v", "ON_ERROR_STOP=1", "-f", `migrations-vq/${migration}`]);
-}
+run(process.execPath, ["--import", "tsx", "scripts/ci/prepare-vq-test-db.mjs"]);
+run(
+  process.execPath,
+  ["node_modules/tsx/dist/cli.mjs", "scripts/db/migrate.ts", "--estate", "vault-quest", "--apply"],
+  {
+    env: { ...process.env, MINTVAULT_MIGRATION_DATABASE_URL: sharedTestUrl },
+  }
+);
 const featureConstraint = psql(
   sharedTestUrl,
   "SELECT pg_get_constraintdef(oid) FROM pg_constraint WHERE conname = 'vq_feature_flags_feature_check'",

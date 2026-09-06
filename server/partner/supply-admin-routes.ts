@@ -2,6 +2,7 @@ import { Router, type Express, type Request, type Response } from "express";
 import rateLimit from "express-rate-limit";
 import { requireSuperAdmin } from "../auth";
 import { supplyProductImageUpload } from "../lib/multer-configs";
+import { uploadMemoryAdmission } from "../lib/upload-memory-admission";
 import {
   PartnerSupplyError,
   cancelSupplyOrderForSuperAdmin,
@@ -137,13 +138,19 @@ export function partnerSupplyAdminRouter(): Router {
    * before anything is stored, and generates the object key itself — the browser never chooses a
    * storage path and never sees one.
    */
-  r.post("/catalogue/:code/image", mutationLimit, supplyProductImageUpload.single("image"), async (req, res) => {
-    try {
-      res.json(await setSupplyProductImageForSuperAdmin(actor(req), req.params.code, req.file));
-    } catch (err) {
-      sendError(res, err);
+  r.post(
+    "/catalogue/:code/image",
+    mutationLimit,
+    uploadMemoryAdmission("partner_supply_image", 64),
+    supplyProductImageUpload.single("image"),
+    async (req, res) => {
+      try {
+        res.json(await setSupplyProductImageForSuperAdmin(actor(req), req.params.code, req.file));
+      } catch (err) {
+        sendError(res, err);
+      }
     }
-  });
+  );
 
   r.delete("/catalogue/:code/image", mutationLimit, async (req, res) => {
     try {

@@ -1,6 +1,6 @@
-import { useState, useEffect, useMemo } from "react";
+import { useState, useEffect, useMemo, useRef } from "react";
 import { useQuery, useMutation } from "@tanstack/react-query";
-import { apiRequest, queryClient } from "@/lib/queryClient";
+import { adminFetch, apiRequest, queryClient } from "@/lib/queryClient";
 import {
   SUBMISSION_STATUS_LABELS,
   SUBMISSION_STATUS_TRANSITIONS,
@@ -134,7 +134,7 @@ export default function AdminSubmissions() {
   const { data: subs = [], isLoading } = useQuery<SubmissionRow[]>({
     queryKey: ["/api/admin/submissions", statusFilter, dateFrom, dateTo],
     queryFn: async () => {
-      const res = await fetch(apiUrl, { credentials: "include" });
+      const res = await adminFetch(apiUrl, { credentials: "include" });
       if (!res.ok) throw new Error("Failed to fetch submissions");
       return res.json();
     },
@@ -332,6 +332,7 @@ function SubmissionDetail({ submissionId, onBack }: { submissionId: string; onBa
   const [notesSaved, setNotesSaved] = useState(false);
   const [showMarkReceived, setShowMarkReceived] = useState(false);
   const [receiptFiles, setReceiptFiles] = useState<File[]>([]);
+  const receiptIdempotencyKey = useRef<string | null>(null);
   // Stable object URLs for the receipt previews. Creating them inline in the
   // render loop minted a new URL every render with no revoke — a memory leak
   // that grew each time the modal re-rendered. Revoked on change/unmount.
@@ -388,7 +389,7 @@ function SubmissionDetail({ submissionId, onBack }: { submissionId: string; onBa
   const editShippingMutation = useMutation({
     mutationFn: async () => {
       const wasShipped = !!sub?.shippedAt;
-      const res = await fetch(`/api/admin/submissions/${submissionId}/return-label`, {
+      const res = await adminFetch(`/api/admin/submissions/${submissionId}/return-label`, {
         method: "POST",
         credentials: "include",
         headers: { "Content-Type": "application/json" },
@@ -422,7 +423,7 @@ function SubmissionDetail({ submissionId, onBack }: { submissionId: string; onBa
 
   const resendShippingMutation = useMutation({
     mutationFn: async () => {
-      const res = await fetch(`/api/admin/submissions/${submissionId}/resend-shipping`, {
+      const res = await adminFetch(`/api/admin/submissions/${submissionId}/resend-shipping`, {
         method: "POST",
         credentials: "include",
       });
@@ -442,7 +443,7 @@ function SubmissionDetail({ submissionId, onBack }: { submissionId: string; onBa
   // already delivered is a no-op (unchanged:true).
   const markDeliveredMutation = useMutation({
     mutationFn: async () => {
-      const res = await fetch(`/api/admin/submissions/${submissionId}/mark-delivered`, {
+      const res = await adminFetch(`/api/admin/submissions/${submissionId}/mark-delivered`, {
         method: "POST",
         credentials: "include",
       });
@@ -461,7 +462,7 @@ function SubmissionDetail({ submissionId, onBack }: { submissionId: string; onBa
   // affordance is deliberately small (icon-only on the stepper area).
   const clearDeliveredMutation = useMutation({
     mutationFn: async () => {
-      const res = await fetch(`/api/admin/submissions/${submissionId}/mark-delivered/clear`, {
+      const res = await adminFetch(`/api/admin/submissions/${submissionId}/mark-delivered/clear`, {
         method: "POST",
         credentials: "include",
       });
@@ -497,7 +498,7 @@ function SubmissionDetail({ submissionId, onBack }: { submissionId: string; onBa
   // floor (received) hard with a 400.
   const stepBackMutation = useMutation({
     mutationFn: async () => {
-      const res = await fetch(`/api/admin/submissions/${submissionId}/step-back`, {
+      const res = await adminFetch(`/api/admin/submissions/${submissionId}/step-back`, {
         method: "POST",
         credentials: "include",
       });
@@ -514,11 +515,13 @@ function SubmissionDetail({ submissionId, onBack }: { submissionId: string; onBa
 
   const markReceivedMutation = useMutation({
     mutationFn: async (files: File[]) => {
+      receiptIdempotencyKey.current ??= crypto.randomUUID();
       const form = new FormData();
       files.forEach((f) => form.append("photos", f));
-      const res = await fetch(`/api/admin/submissions/${submissionId}/mark-received`, {
+      const res = await adminFetch(`/api/admin/submissions/${submissionId}/mark-received`, {
         method: "POST",
         credentials: "include",
+        headers: { "Idempotency-Key": receiptIdempotencyKey.current },
         body: form,
       });
       if (!res.ok) {
@@ -532,6 +535,7 @@ function SubmissionDetail({ submissionId, onBack }: { submissionId: string; onBa
       queryClient.invalidateQueries({ queryKey: ["/api/admin/submissions", submissionId] });
       setShowMarkReceived(false);
       setReceiptFiles([]);
+      receiptIdempotencyKey.current = null;
     },
   });
 
@@ -904,6 +908,7 @@ function SubmissionDetail({ submissionId, onBack }: { submissionId: string; onBa
               onClick={() => {
                 setShowMarkReceived(false);
                 setReceiptFiles([]);
+                receiptIdempotencyKey.current = null;
               }}
               className="text-[var(--admin-ink-faint)] hover:text-[var(--admin-ink)] transition-colors"
             >
@@ -926,6 +931,7 @@ function SubmissionDetail({ submissionId, onBack }: { submissionId: string; onBa
               onChange={(e) => {
                 const newFiles = Array.from(e.target.files ?? []).slice(0, 6 - receiptFiles.length);
                 setReceiptFiles((prev) => [...prev, ...newFiles].slice(0, 6));
+                receiptIdempotencyKey.current = null;
                 e.target.value = "";
               }}
             />
@@ -942,7 +948,10 @@ function SubmissionDetail({ submissionId, onBack }: { submissionId: string; onBa
                     className="w-16 h-16 object-cover rounded border border-[var(--admin-line)]"
                   />
                   <button
-                    onClick={() => setReceiptFiles((prev) => prev.filter((_, idx) => idx !== i))}
+                    onClick={() => {
+                      setReceiptFiles((prev) => prev.filter((_, idx) => idx !== i));
+                      receiptIdempotencyKey.current = null;
+                    }}
                     className="absolute -top-1 -right-1 bg-[var(--admin-red)] text-[var(--admin-bg)] rounded-full w-4 h-4 flex items-center justify-center opacity-0 group-hover:opacity-100 transition-opacity"
                   >
                     <X size={9} />
@@ -974,6 +983,7 @@ function SubmissionDetail({ submissionId, onBack }: { submissionId: string; onBa
               onClick={() => {
                 setShowMarkReceived(false);
                 setReceiptFiles([]);
+                receiptIdempotencyKey.current = null;
               }}
               className="text-[var(--admin-ink-dim)] hover:text-[var(--admin-ink)] text-sm px-4 py-2 rounded border border-[var(--admin-line-soft)] hover:border-[var(--admin-line)] transition-colors"
             >
@@ -1791,7 +1801,7 @@ export function AdminIntake() {
     setResult(null);
     setLoading(true);
     try {
-      const res = await fetch(`/api/admin/submissions/${trimmed}`, { credentials: "include" });
+      const res = await adminFetch(`/api/admin/submissions/${trimmed}`, { credentials: "include" });
       if (!res.ok) {
         setError("Submission not found");
         return;

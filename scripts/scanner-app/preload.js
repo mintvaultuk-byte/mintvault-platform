@@ -38,13 +38,10 @@ contextBridge.exposeInMainWorld("scanner", {
   acknowledgeCardRegistered: () => ipcRenderer.invoke("acknowledge-card-registered"),
   setSetting: (key, value) => ipcRenderer.invoke("set-setting", { key, value }),
   scanTarget: () => ipcRenderer.invoke("scan-target"),
-  runPositioningPreview: () => ipcRenderer.invoke("run-positioning-preview"),
-  getPositioningPreview: (previewId) => ipcRenderer.invoke("get-positioning-preview", previewId),
   // Per-side placement gate. Takes no identity: the main process binds the
   // resulting approval to whichever side is currently awaiting Scan.
   runPlacementPreview: () => ipcRenderer.invoke("run-placement-preview"),
   getPlacementPreview: (previewId) => ipcRenderer.invoke("get-placement-preview", previewId),
-  saveCaptureWindow: (originMm) => ipcRenderer.invoke("save-capture-window", originMm),
   getCapturePreview: (previewId) => ipcRenderer.invoke("get-capture-preview", previewId),
   rescanCapturePreview: (previewId) => ipcRenderer.invoke("rescan-capture-preview", previewId),
 });

@@ -20,7 +20,7 @@ import { useMemo, useRef, useState } from "react";
 import { useLocation } from "wouter";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { AdminButton, AdminShell, Badge, Chip, Panel } from "@/components/admin";
-import { apiRequest } from "@/lib/queryClient";
+import { adminFetch, apiRequest } from "@/lib/queryClient";
 
 /*
  * The path the supply admin router is ACTUALLY mounted on (supply-admin-routes.ts). Distinct from
@@ -102,7 +102,7 @@ function ProductEditor({ product, onDone }: { product: AdminProduct | null; onDo
       if (file) {
         const form = new FormData();
         form.append("image", file);
-        const response = await fetch(`${BASE}/catalogue/${result.code}/image`, {
+        const response = await adminFetch(`${BASE}/catalogue/${result.code}/image`, {
           method: "POST",
           body: form,
           credentials: "include",
@@ -321,7 +321,6 @@ export default function AdminPartnerSuppliesPage() {
     <AdminShell
       activeTab="dashboard"
       onTabChange={() => navigate("/admin")}
-      onLogout={() => navigate("/admin")}
       title="Partner Network"
       crumb="Supplies"
     >

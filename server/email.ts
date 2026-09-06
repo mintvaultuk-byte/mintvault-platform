@@ -3,6 +3,8 @@ import { APP_BASE_URL } from "./app-url";
 import { COMPANY, formatPostalAddress } from "@shared/company";
 import { trackUrl, serviceLabel, carrierLabel, carrierIdFromLegacyName } from "@shared/carriers";
 import { recordApplicationOutcome } from "./growth-runtime-telemetry";
+import { AsyncLocalStorage } from "node:async_hooks";
+import type { CustomerNotificationKind } from "./customer-notification-outbox";
 
 // Pre-formatted postal address as HTML <br />-joined block. Sourced from
 // the canonical record on shared/company.ts so any address change updates
@@ -19,6 +21,12 @@ const FALLBACK_FROM = "MintVault UK <onboarding@resend.dev>";
 const REPLY_TO = "mintvaultuk@gmail.com";
 
 let resendClient: Resend | null = null;
+interface StrictNotificationDeliveryContext {
+  idempotencyKey: string;
+  receipt?: { id: string };
+  error?: Error;
+}
+const strictNotificationDelivery = new AsyncLocalStorage<StrictNotificationDeliveryContext>();
 
 function getResend(): Resend | null {
   if (!process.env.RESEND_API_KEY) {
@@ -56,19 +64,35 @@ async function sendViaResend(
   },
   options: { idempotencyKey?: string } = {}
 ): Promise<{ id: string }> {
+  const strictContext = strictNotificationDelivery.getStore();
   try {
-    const result = await resend.emails.send(payload, options);
+    const result = await resend.emails.send(payload, {
+      idempotencyKey: options.idempotencyKey ?? strictContext?.idempotencyKey,
+    });
     if (result.error) {
-      throw new Error(`Resend API error: ${result.error.message || JSON.stringify(result.error)}`);
+      // Provider errors can contain the submitted recipient, request payload,
+      // URLs or credentials. Preserve the retry-classification prefix without
+      // allowing provider-controlled text to escape this boundary.
+      throw new Error("Resend API error: delivery failed");
     }
     if (!result.data?.id) {
       throw new Error("Resend returned no message id");
     }
     recordApplicationOutcome("email", "SUCCESS");
-    return { id: result.data.id };
+    const receipt = { id: result.data.id };
+    if (strictContext) strictContext.receipt = receipt;
+    return receipt;
   } catch (error) {
     recordApplicationOutcome("email", "PLATFORM_FAILURE");
-    throw error;
+    const sanitized =
+      error instanceof Error &&
+      (error.message.startsWith("Resend API error:") || error.message === "Resend returned no message id")
+        ? error
+        : new Error("Resend API error: delivery failed");
+    if (strictContext) strictContext.error = sanitized;
+    // SDK/network exceptions are equally untrusted and can include serialized
+    // request headers or payloads. Never propagate them to application logs.
+    throw sanitized;
   }
 }
 
@@ -330,6 +354,7 @@ export async function sendSubmissionConfirmation(data: {
   crossoverOriginalGrade?: string;
   crossoverCertNumber?: string;
   labelToken?: string;
+  idempotencyKey?: string;
 }) {
   const resend = getResend();
   if (!resend) return;
@@ -383,17 +408,22 @@ ${
 </p>`;
 
   try {
-    const sent = await sendViaResend(resend, {
-      from: getFromEmail(),
-      replyTo: REPLY_TO,
-      to: data.email,
-      subject: `MintVault — Submission Confirmed (${data.submissionId})`,
-      html: baseHtml("Submission Confirmed", body),
-    });
-    console.log(`[email] submission_confirmation_sent submissionId=${data.submissionId} providerMessageId=${sent.id}`);
-  } catch (err: any) {
+    const sent = await sendViaResend(
+      resend,
+      {
+        from: getFromEmail(),
+        replyTo: REPLY_TO,
+        to: data.email,
+        subject: `MintVault — Submission Confirmed (${data.submissionId})`,
+        html: baseHtml("Submission Confirmed", body),
+      },
+      { idempotencyKey: data.idempotencyKey }
+    );
+    console.log(`[email] submission_confirmation_sent submissionId=${data.submissionId}`);
+    return sent;
+  } catch (error: unknown) {
     console.error(`[email] submission_confirmation_failed submissionId=${data.submissionId}`);
-    throw err;
+    throw error;
   }
 }
 
@@ -409,6 +439,7 @@ export async function sendSubmissionConfirmationV2(data: {
   labelToken?: string;
   termsVersion?: string;
   termsAcceptedAt?: string;
+  idempotencyKey?: string;
 }) {
   const resend = getResend();
   if (!resend) return;
@@ -469,19 +500,22 @@ ${data.termsVersion ? `<p style="color:#666;font-size:10px;margin:8px 0 0 0;">Yo
 </div>`;
 
   try {
-    const sent = await sendViaResend(resend, {
-      from: getFromEmail(),
-      replyTo: REPLY_TO,
-      to: data.email,
-      subject: `MintVault — Submission Confirmed (${data.submissionId})`,
-      html: baseHtml("Submission Confirmed", body),
-    });
-    console.log(
-      `[email] submission_confirmation_v2_sent submissionId=${data.submissionId} providerMessageId=${sent.id}`
+    const sent = await sendViaResend(
+      resend,
+      {
+        from: getFromEmail(),
+        replyTo: REPLY_TO,
+        to: data.email,
+        subject: `MintVault — Submission Confirmed (${data.submissionId})`,
+        html: baseHtml("Submission Confirmed", body),
+      },
+      { idempotencyKey: data.idempotencyKey }
     );
-  } catch (err: any) {
+    console.log(`[email] submission_confirmation_v2_sent submissionId=${data.submissionId}`);
+    return sent;
+  } catch (error: unknown) {
     console.error(`[email] submission_confirmation_v2_failed submissionId=${data.submissionId}`);
-    throw err;
+    throw error;
   }
 }
 
@@ -517,17 +551,17 @@ ${photosHtml}
 </p>`;
 
   try {
-    const sent = await sendViaResend(resend, {
+    await sendViaResend(resend, {
       from: getFromEmail(),
       replyTo: REPLY_TO,
       to: data.email,
       subject: `MintVault — Cards Received (${data.submissionId})`,
       html: baseHtml("Cards Received", body),
     });
-    console.log(`[email] cards_received_sent submissionId=${data.submissionId} providerMessageId=${sent.id}`);
-  } catch (err: any) {
+    console.log(`[email] cards_received_sent submissionId=${data.submissionId}`);
+  } catch (error: unknown) {
     console.error(`[email] cards_received_failed submissionId=${data.submissionId}`);
-    throw err;
+    throw error;
   }
 }
 
@@ -565,17 +599,17 @@ ${turnaroundLine}
 </p>`;
 
   try {
-    const sent = await sendViaResend(resend, {
+    await sendViaResend(resend, {
       from: getFromEmail(),
       replyTo: REPLY_TO,
       to: data.email,
       subject: `MintVault — Grading Started (${data.submissionId})`,
       html: baseHtml("Grading Started", body),
     });
-    console.log(`[email] grading_started_sent submissionId=${data.submissionId} providerMessageId=${sent.id}`);
-  } catch (err: any) {
+    console.log(`[email] grading_started_sent submissionId=${data.submissionId}`);
+  } catch (error: unknown) {
     console.error(`[email] grading_started_failed submissionId=${data.submissionId}`);
-    throw err;
+    throw error;
   }
 }
 
@@ -601,17 +635,17 @@ export async function sendGradingComplete(data: {
 </p>`;
 
   try {
-    const sent = await sendViaResend(resend, {
+    await sendViaResend(resend, {
       from: getFromEmail(),
       replyTo: REPLY_TO,
       to: data.email,
       subject: `MintVault — Grading Complete (${data.submissionId})`,
       html: baseHtml("Grading Complete", body),
     });
-    console.log(`[email] grading_complete_sent submissionId=${data.submissionId} providerMessageId=${sent.id}`);
-  } catch (err: any) {
+    console.log(`[email] grading_complete_sent submissionId=${data.submissionId}`);
+  } catch (error: unknown) {
     console.error(`[email] grading_complete_failed submissionId=${data.submissionId}`);
-    throw err;
+    throw error;
   }
 }
 
@@ -668,17 +702,17 @@ ${trackingBtn}
 </p>`;
 
   try {
-    const sent = await sendViaResend(resend, {
+    await sendViaResend(resend, {
       from: getFromEmail(),
       replyTo: REPLY_TO,
       to: data.email,
       subject: `MintVault — Your Cards Have Been Shipped (${data.submissionId})`,
       html: baseHtml("Your Cards Have Been Shipped", body),
     });
-    console.log(`[email] shipped_sent submissionId=${data.submissionId} providerMessageId=${sent.id}`);
-  } catch (err: any) {
+    console.log(`[email] shipped_sent submissionId=${data.submissionId}`);
+  } catch (error: unknown) {
     console.error(`[email] shipped_failed submissionId=${data.submissionId}`);
-    throw err;
+    throw error;
   }
 }
 
@@ -704,17 +738,17 @@ export async function sendSubmissionDelivered(data: {
 <a href="${vaultLink}" style="display:inline-block;padding:10px 24px;background:rgba(212,175,55,0.15);border:1px solid #D4AF37;color:#D4AF37;text-decoration:none;border-radius:4px;font-weight:bold;letter-spacing:1px;">VIEW VAULT REPORT</a>
 </p>`;
   try {
-    const sent = await sendViaResend(resend, {
+    await sendViaResend(resend, {
       from: getFromEmail(),
       replyTo: REPLY_TO,
       to: data.email,
       subject: `Your MintVault slab has arrived — ${data.submissionId}`,
       html: baseHtml("Slab Delivered", body),
     });
-    console.log(`[email] delivered_sent submissionId=${data.submissionId} providerMessageId=${sent.id}`);
-  } catch (err: any) {
+    console.log(`[email] delivered_sent submissionId=${data.submissionId}`);
+  } catch (error: unknown) {
     console.error(`[email] delivered_failed submissionId=${data.submissionId}`);
-    throw err;
+    throw error;
   }
 }
 
@@ -860,7 +894,7 @@ function ctaButton(href: string, label: string): string {
 export async function sendClaimVerification(data: { email: string; certId: string; verifyUrl: string }): Promise<void> {
   const resend = getResend();
   if (!resend) {
-    console.log(`[email] SKIPPED claim verification email to ${data.email} (no Resend client)`);
+    console.log(`[email] claim_verification_skipped certId=${data.certId} reason=provider_disabled`);
     return;
   }
 
@@ -880,10 +914,10 @@ ${ctaButton(data.verifyUrl, "Verify &amp; Register Ownership")}
       subject: `MintVault — Verify Ownership Registration for ${data.certId}`,
       html: ownershipBaseHtml("Ownership Registration — Email Verification", body),
     });
-    console.log(`[email] Claim verification email sent to ${data.email} for ${data.certId}`);
-  } catch (err: any) {
-    console.error(`[email] Failed to send claim verification to ${data.email}:`, err.message);
-    throw err;
+    console.log(`[email] claim_verification_sent certId=${data.certId}`);
+  } catch (error: unknown) {
+    console.error(`[email] claim_verification_failed certId=${data.certId}`);
+    throw error;
   }
 }
 
@@ -895,7 +929,7 @@ export async function sendTransferOwnerConfirmation(data: {
 }): Promise<void> {
   const resend = getResend();
   if (!resend) {
-    console.log(`[email] SKIPPED transfer confirmation email to ${data.fromEmail} (no Resend client)`);
+    console.log(`[email] transfer_owner_confirmation_skipped certId=${data.certId} reason=provider_disabled`);
     return;
   }
 
@@ -919,10 +953,10 @@ ${ctaButton(data.confirmUrl, "Authorise Transfer")}
       subject: `MintVault — Authorise Ownership Transfer for ${data.certId}`,
       html: ownershipBaseHtml("Ownership Transfer — Your Authorisation Required", body),
     });
-    console.log(`[email] Transfer confirmation email sent to ${data.fromEmail} for ${data.certId}`);
-  } catch (err: any) {
-    console.error(`[email] Failed to send transfer confirmation to ${data.fromEmail}:`, err.message);
-    throw err;
+    console.log(`[email] transfer_owner_confirmation_sent certId=${data.certId}`);
+  } catch (error: unknown) {
+    console.error(`[email] transfer_owner_confirmation_failed certId=${data.certId}`);
+    throw error;
   }
 }
 
@@ -934,7 +968,7 @@ export async function sendTransferNewOwnerConfirmation(data: {
 }): Promise<void> {
   const resend = getResend();
   if (!resend) {
-    console.log(`[email] SKIPPED new owner transfer email to ${data.toEmail} (no Resend client)`);
+    console.log(`[email] transfer_new_owner_confirmation_skipped certId=${data.certId} reason=provider_disabled`);
     return;
   }
 
@@ -958,10 +992,10 @@ ${ctaButton(data.confirmUrl, "Accept Ownership")}
       subject: `MintVault — Accept Ownership of ${data.certId}`,
       html: ownershipBaseHtml("Ownership Transfer — Acceptance Required", body),
     });
-    console.log(`[email] New owner transfer email sent to ${data.toEmail} for ${data.certId}`);
-  } catch (err: any) {
-    console.error(`[email] Failed to send new owner transfer email to ${data.toEmail}:`, err.message);
-    throw err;
+    console.log(`[email] transfer_new_owner_confirmation_sent certId=${data.certId}`);
+  } catch (error: unknown) {
+    console.error(`[email] transfer_new_owner_confirmation_failed certId=${data.certId}`);
+    throw error;
   }
 }
 
@@ -975,7 +1009,7 @@ export async function sendTransferV2OutgoingConfirmation(data: {
 }): Promise<void> {
   const resend = getResend();
   if (!resend) {
-    console.log(`[email] SKIPPED v2 transfer outgoing email to ${data.fromEmail} (no Resend client)`);
+    console.log(`[email] transfer_v2_outgoing_skipped certId=${data.certId} reason=provider_disabled`);
     return;
   }
 
@@ -999,10 +1033,10 @@ ${ctaButton(data.confirmUrl, "Authorise Transfer")}
       subject: `MintVault — Authorise Keepership Transfer for ${data.certId}`,
       html: ownershipBaseHtml("Keepership Transfer — Your Authorisation Required", body),
     });
-    console.log(`[email] v2 transfer outgoing email sent to ${data.fromEmail} for ${data.certId}`);
-  } catch (err: any) {
-    console.error(`[email] Failed v2 transfer outgoing to ${data.fromEmail}:`, err.message);
-    throw err;
+    console.log(`[email] transfer_v2_outgoing_sent certId=${data.certId}`);
+  } catch (error: unknown) {
+    console.error(`[email] transfer_v2_outgoing_failed certId=${data.certId}`);
+    throw error;
   }
 }
 
@@ -1026,7 +1060,7 @@ export async function sendTransferV2OwnerInvitedByBuyer(data: {
 }): Promise<void> {
   const resend = getResend();
   if (!resend) {
-    console.log(`[email] SKIPPED v2 buyer-init owner email to ${data.ownerEmail} (no Resend client)`);
+    console.log(`[email] transfer_v2_buyer_init_owner_skipped certId=${data.certId} reason=provider_disabled`);
     return;
   }
 
@@ -1058,10 +1092,10 @@ ${ctaButton(data.disputeUrl, "Dispute this transfer")}
       subject: `Transfer requested for your MintVault certificate ${data.certId}`,
       html: ownershipBaseHtml("Transfer Requested — Action Required", body),
     });
-    console.log(`[email] v2 buyer-init owner email sent to ${data.ownerEmail} for ${data.certId}`);
-  } catch (err: any) {
-    console.error(`[email] Failed v2 buyer-init owner email to ${data.ownerEmail}:`, err.message);
-    throw err;
+    console.log(`[email] transfer_v2_buyer_init_owner_sent certId=${data.certId}`);
+  } catch (error: unknown) {
+    console.error(`[email] transfer_v2_buyer_init_owner_failed certId=${data.certId}`);
+    throw error;
   }
 }
 
@@ -1092,9 +1126,9 @@ ${certBlock(data.certId)}`;
       subject: `MintVault — Transfer of ${data.certId} confirmed by previous keeper`,
       html: ownershipBaseHtml("Owner confirmed your transfer — dispute window started", body),
     });
-  } catch (err: any) {
-    console.error(`[email] Failed v2 buyer-init owner-confirmed email to ${data.claimantEmail}:`, err.message);
-    throw err;
+  } catch (error: unknown) {
+    console.error(`[email] transfer_v2_buyer_init_owner_confirmed_failed certId=${data.certId}`);
+    throw error;
   }
 }
 
@@ -1125,9 +1159,9 @@ ${data.reason ? `<p style="color:rgba(255,255,255,0.40);font-size:12px;line-heig
       subject: `MintVault — Transfer of ${data.certId} disputed`,
       html: ownershipBaseHtml("Transfer disputed by current keeper", body),
     });
-  } catch (err: any) {
-    console.error(`[email] Failed v2 buyer-init owner-rejected email to ${data.claimantEmail}:`, err.message);
-    throw err;
+  } catch (error: unknown) {
+    console.error(`[email] transfer_v2_buyer_init_owner_rejected_failed certId=${data.certId}`);
+    throw error;
   }
 }
 
@@ -1140,7 +1174,7 @@ export async function sendTransferV2IncomingConfirmation(data: {
 }): Promise<void> {
   const resend = getResend();
   if (!resend) {
-    console.log(`[email] SKIPPED v2 transfer incoming email to ${data.toEmail} (no Resend client)`);
+    console.log(`[email] transfer_v2_incoming_skipped certId=${data.certId} reason=provider_disabled`);
     return;
   }
 
@@ -1166,10 +1200,10 @@ ${ctaButton(data.confirmUrl, "Accept &amp; Verify")}
       subject: `MintVault — Accept Keepership of ${data.certId}`,
       html: ownershipBaseHtml("Keepership Transfer — Verification Required", body),
     });
-    console.log(`[email] v2 transfer incoming email sent to ${data.toEmail} for ${data.certId}`);
-  } catch (err: any) {
-    console.error(`[email] Failed v2 transfer incoming to ${data.toEmail}:`, err.message);
-    throw err;
+    console.log(`[email] transfer_v2_incoming_sent certId=${data.certId}`);
+  } catch (error: unknown) {
+    console.error(`[email] transfer_v2_incoming_failed certId=${data.certId}`);
+    throw error;
   }
 }
 
@@ -1181,7 +1215,7 @@ export async function sendTransferV2DisputeWindowStarted(data: {
 }): Promise<void> {
   const resend = getResend();
   if (!resend) {
-    console.log(`[email] SKIPPED v2 dispute-window email to ${data.email} (no Resend client)`);
+    console.log(`[email] transfer_v2_dispute_window_skipped certId=${data.certId} reason=provider_disabled`);
     return;
   }
 
@@ -1208,10 +1242,10 @@ ${certBlock(data.certId)}
       subject: `MintVault — Transfer Dispute Window Open for ${data.certId}`,
       html: ownershipBaseHtml("Keepership Transfer — Dispute Window", body),
     });
-    console.log(`[email] v2 dispute-window email sent to ${data.email} (${data.role}) for ${data.certId}`);
-  } catch (err: any) {
-    console.error(`[email] Failed v2 dispute-window email to ${data.email}:`, err.message);
-    throw err;
+    console.log(`[email] transfer_v2_dispute_window_sent certId=${data.certId} role=${data.role}`);
+  } catch (error: unknown) {
+    console.error(`[email] transfer_v2_dispute_window_failed certId=${data.certId} role=${data.role}`);
+    throw error;
   }
 }
 
@@ -1223,7 +1257,7 @@ export async function sendTransferV2Completed(data: {
 }): Promise<void> {
   const resend = getResend();
   if (!resend) {
-    console.log(`[email] SKIPPED v2 transfer complete email to ${data.email} (no Resend client)`);
+    console.log(`[email] transfer_v2_complete_skipped certId=${data.certId} reason=provider_disabled`);
     return;
   }
 
@@ -1248,10 +1282,10 @@ ${certBlock(data.certId)}
       subject: `MintVault — Keepership Transfer Complete for ${data.certId}`,
       html: ownershipBaseHtml(title, body),
     });
-    console.log(`[email] v2 transfer complete email sent to ${data.email} (${data.role}) for ${data.certId}`);
-  } catch (err: any) {
-    console.error(`[email] Failed v2 transfer complete to ${data.email}:`, err.message);
-    throw err;
+    console.log(`[email] transfer_v2_complete_sent certId=${data.certId} role=${data.role}`);
+  } catch (error: unknown) {
+    console.error(`[email] transfer_v2_complete_failed certId=${data.certId} role=${data.role}`);
+    throw error;
   }
 }
 
@@ -1273,9 +1307,9 @@ ${certBlock(data.certId)}
       subject: `MintVault — Transfer Cancelled for ${data.certId}`,
       html: ownershipBaseHtml("Keepership Transfer Cancelled", body),
     });
-  } catch (err: any) {
-    console.error(`[email] Failed v2 transfer cancelled to ${data.email}:`, err.message);
-    throw err;
+  } catch (error: unknown) {
+    console.error(`[email] transfer_v2_cancelled_failed certId=${data.certId}`);
+    throw error;
   }
 }
 
@@ -1301,9 +1335,9 @@ ${certBlock(data.certId)}
       subject: `MintVault — Transfer Disputed for ${data.certId}`,
       html: ownershipBaseHtml("Keepership Transfer — Dispute Raised", body),
     });
-  } catch (err: any) {
-    console.error(`[email] Failed v2 transfer disputed to ${data.email}:`, err.message);
-    throw err;
+  } catch (error: unknown) {
+    console.error(`[email] transfer_v2_disputed_failed certId=${data.certId}`);
+    throw error;
   }
 }
 
@@ -1325,9 +1359,9 @@ ${certBlock(data.certId)}
       subject: `MintVault — Transfer Expired for ${data.certId}`,
       html: ownershipBaseHtml("Keepership Transfer Expired", body),
     });
-  } catch (err: any) {
-    console.error(`[email] Failed v2 transfer expired to ${data.email}:`, err.message);
-    throw err;
+  } catch (error: unknown) {
+    console.error(`[email] transfer_v2_expired_failed certId=${data.certId}`);
+    throw error;
   }
 }
 
@@ -1354,9 +1388,9 @@ ${ctaButton(data.confirmUrl, "Verify & Accept")}
       subject: `MintVault — Reminder: Accept Keepership of ${data.certId} (${data.daysRemaining} days left)`,
       html: ownershipBaseHtml("Keepership Transfer — Reminder", body),
     });
-  } catch (err: any) {
-    console.error(`[email] Failed v2 transfer reminder to ${data.email}:`, err.message);
-    throw err;
+  } catch (error: unknown) {
+    console.error(`[email] transfer_v2_reminder_failed certId=${data.certId}`);
+    throw error;
   }
 }
 
@@ -1364,7 +1398,7 @@ ${ctaButton(data.confirmUrl, "Verify & Accept")}
 export async function sendMagicLink(data: { email: string; loginUrl: string }): Promise<void> {
   const resend = getResend();
   if (!resend) {
-    console.log(`[email] SKIPPED magic link email to ${data.email} (no Resend client)`);
+    console.log("[email] customer_magic_link_skipped reason=provider_disabled");
     return;
   }
 
@@ -1382,10 +1416,10 @@ ${ctaButton(data.loginUrl, "Log In to Dashboard")}
       subject: "MintVault — Your Dashboard Login Link",
       html: ownershipBaseHtml("Dashboard Login Link", body),
     });
-    console.log(`[email] Magic link sent to ${data.email}`);
-  } catch (err: any) {
-    console.error(`[email] Failed to send magic link to ${data.email}:`, err.message);
-    throw err;
+    console.log("[email] customer_magic_link_sent");
+  } catch (error: unknown) {
+    console.error("[email] customer_magic_link_failed");
+    throw error;
   }
 }
 
@@ -1395,7 +1429,7 @@ ${ctaButton(data.loginUrl, "Log In to Dashboard")}
 export async function sendPinResetLink(data: { email: string; resetUrl: string }): Promise<void> {
   const resend = getResend();
   if (!resend) {
-    console.log(`[email] SKIPPED PIN reset email to ${data.email} (no Resend client)`);
+    console.log("[email] customer_pin_reset_skipped reason=provider_disabled");
     return;
   }
 
@@ -1413,10 +1447,10 @@ ${ctaButton(data.resetUrl, "Reset Your PIN")}
       subject: "MintVault — Reset Your PIN",
       html: ownershipBaseHtml("Reset Your PIN", body),
     });
-    console.log(`[email] PIN reset link sent to ${data.email}`);
-  } catch (err: any) {
-    console.error(`[email] Failed to send PIN reset link to ${data.email}:`, err.message);
-    throw err;
+    console.log("[email] customer_pin_reset_sent");
+  } catch (error: unknown) {
+    console.error("[email] customer_pin_reset_failed");
+    throw error;
   }
 }
 
@@ -1449,6 +1483,11 @@ export async function sendCertificatePdf(data: {
     mintvaultuk.com/cert/${data.certId}
   </a>
 </p>
+<p style="margin:0 0 24px 0;">
+  Your card is now in your MintVault collection. Sign in with your email at
+  <a href="${APP_BASE_URL}/customer-login" style="color:#D4AF37;">mintvaultuk.com/customer-login</a>
+  to view it any time — no password needed the first time.
+</p>
 <p style="margin:0;color:#666;font-size:12px;">
   Keep this certificate safe. It serves as your official proof of registered ownership in the MintVault UK registry.
 </p>`;
@@ -1467,10 +1506,10 @@ export async function sendCertificatePdf(data: {
         },
       ],
     });
-    console.log(`[email] Certificate PDF sent to ${data.email} for ${data.certId}`);
-  } catch (err: any) {
-    console.error(`[email] Failed to send certificate PDF to ${data.email}:`, err.message);
-    throw err;
+    console.log(`[email] certificate_pdf_sent certId=${data.certId}`);
+  } catch (error: unknown) {
+    console.error(`[email] certificate_pdf_failed certId=${data.certId}`);
+    throw error;
   }
 }
 
@@ -1515,10 +1554,10 @@ export async function sendStolenVerificationEmail(
       subject: `Confirm Your Stolen Card Report — ${certId}`,
       html: baseHtml(`Stolen Card Report — ${certId}`, body),
     });
-    console.log(`[email] Stolen verification email sent to ${email} for ${certId}`);
-  } catch (err: any) {
-    console.error(`[email] Failed to send stolen verification to ${email}:`, err.message);
-    throw err;
+    console.log(`[email] stolen_verification_sent certId=${certId}`);
+  } catch (error: unknown) {
+    console.error(`[email] stolen_verification_failed certId=${certId}`);
+    throw error;
   }
 }
 
@@ -1550,8 +1589,8 @@ export async function sendWelcomeVerificationEmail(
       subject: "Verify your MintVault account",
       html: baseHtml("Verify Your Email", body),
     });
-  } catch (err: any) {
-    console.error(`[email] Welcome/verify failed for ${email}:`, err.message);
+  } catch {
+    console.error("[email] account_welcome_verification_failed");
   }
 }
 
@@ -1575,8 +1614,8 @@ export async function sendAccountMagicLinkEmail(email: string, loginUrl: string)
       subject: "Your MintVault login link",
       html: baseHtml("Your Login Link", body),
     });
-  } catch (err: any) {
-    console.error(`[email] Magic link failed for ${email}:`, err.message);
+  } catch {
+    console.error("[email] account_magic_link_failed");
   }
 }
 
@@ -1600,8 +1639,8 @@ export async function sendPasswordResetEmail(email: string, resetUrl: string): P
       subject: "Reset your MintVault password",
       html: baseHtml("Password Reset", body),
     });
-  } catch (err: any) {
-    console.error(`[email] Password reset failed for ${email}:`, err.message);
+  } catch {
+    console.error("[email] account_password_reset_failed");
   }
 }
 
@@ -1620,8 +1659,8 @@ export async function sendPasswordChangedEmail(email: string): Promise<void> {
       subject: "Your MintVault password was changed",
       html: baseHtml("Password Changed", body),
     });
-  } catch (err: any) {
-    console.error(`[email] Password changed notice failed for ${email}:`, err.message);
+  } catch {
+    console.error("[email] account_password_changed_notice_failed");
   }
 }
 
@@ -1641,8 +1680,8 @@ export async function sendEmailChangedNotification(oldEmail: string, newEmail: s
       subject: "Your MintVault email address was changed",
       html: baseHtml("Email Address Changed", body),
     });
-  } catch (err: any) {
-    console.error(`[email] Email changed notice failed for ${oldEmail}:`, err.message);
+  } catch {
+    console.error("[email] account_email_changed_notice_failed");
   }
 }
 
@@ -1661,8 +1700,8 @@ export async function sendAccountDeletedEmail(email: string): Promise<void> {
       subject: "Your MintVault account has been deleted",
       html: baseHtml("Account Deleted", body),
     });
-  } catch (err: any) {
-    console.error(`[email] Account deleted notice failed for ${email}:`, err.message);
+  } catch {
+    console.error("[email] account_deleted_notice_failed");
   }
 }
 
@@ -1697,8 +1736,8 @@ export async function sendVaultClubWelcomeEmail(data: {
       subject: `Welcome to Vault Club ${tierLabel} — MintVault`,
       html: baseHtml(`Welcome to Vault Club ${tierLabel}`, body),
     });
-  } catch (err: any) {
-    console.error(`[email] Vault Club welcome failed for ${data.email}:`, err.message);
+  } catch {
+    console.error("[email] vault_club_welcome_failed");
   }
 }
 
@@ -1723,8 +1762,8 @@ export async function sendVaultClubCancelledEmail(data: { email: string; display
       subject: "Your Vault Club membership has been cancelled — MintVault",
       html: baseHtml("Vault Club Cancelled", body),
     });
-  } catch (err: any) {
-    console.error(`[email] Vault Club cancelled notice failed for ${data.email}:`, err.message);
+  } catch {
+    console.error("[email] vault_club_cancelled_notice_failed");
   }
 }
 
@@ -1752,8 +1791,8 @@ export async function sendVaultClubPaymentFailedEmail(data: {
       subject: "Action required — Vault Club payment failed",
       html: baseHtml("Payment Failed", body),
     });
-  } catch (err: any) {
-    console.error(`[email] Vault Club payment failed notice for ${data.email}:`, err.message);
+  } catch {
+    console.error("[email] vault_club_payment_failed_notice_failed");
   }
 }
 
@@ -1780,8 +1819,8 @@ export async function sendVaultClubGraceExpiredEmail(data: {
       subject: "We miss you — Vault Club membership ended",
       html: baseHtml("Membership Ended", body),
     });
-  } catch (err: any) {
-    console.error(`[email] Vault Club grace expired notice for ${data.email}:`, err.message);
+  } catch {
+    console.error("[email] vault_club_grace_expired_notice_failed");
   }
 }
 
@@ -1789,7 +1828,7 @@ export async function sendVaultClubGraceExpiredEmail(data: {
  * Partner Portal password-reset email.
  *
  * SECRECY: the reset URL embeds a single-use token. Nothing in this function logs, returns, or
- * embeds the URL in an error message — sendViaResend surfaces only the provider's own error text.
+ * embeds the URL in an error message; sendViaResend reduces provider failures to a stable message.
  */
 export async function sendPartnerResetEmail(data: {
   email: string;
@@ -1844,4 +1883,225 @@ export async function sendPartnerInvitationEmail(data: {
     subject: `MintVault Partner invitation — ${data.partnerName}`,
     html: baseHtml("Partner Portal Invitation", body),
   });
+}
+
+function notificationString(payload: Record<string, unknown>, name: string, optional = false): string {
+  const value = payload[name];
+  if (optional && (value === undefined || value === null)) return "";
+  if (typeof value !== "string" || (!optional && !value.trim())) {
+    throw new Error(`customer notification payload is missing ${name}`);
+  }
+  return value;
+}
+
+function notificationNumber(payload: Record<string, unknown>, name: string): number {
+  const value = payload[name];
+  if (typeof value !== "number" || !Number.isFinite(value)) {
+    throw new Error(`customer notification payload is missing ${name}`);
+  }
+  return value;
+}
+
+/**
+ * Strict durable-outbox adapter over the existing reviewed templates.
+ *
+ * The AsyncLocalStorage context injects one stable Resend idempotency key into
+ * every existing template without changing legacy call signatures. It also
+ * observes failures swallowed by older best-effort helpers and turns them back
+ * into a stable failure for the worker. No recipient, secure URL, provider
+ * response, or raw error is logged here.
+ */
+export async function sendCustomerNotificationEmail(
+  kind: CustomerNotificationKind,
+  envelope: { recipient: string; payload: Record<string, unknown> },
+  options: { idempotencyKey: string; templateVersion: number }
+): Promise<{ id: string }> {
+  if (options.templateVersion !== 1) throw new Error("unsupported customer notification template version");
+  if (!getResend()) throw new Error("email provider unavailable");
+  const context: StrictNotificationDeliveryContext = { idempotencyKey: options.idempotencyKey };
+  await strictNotificationDelivery.run(context, async () => {
+    const p = envelope.payload;
+    switch (kind) {
+      case "ACCOUNT_VERIFY":
+        await sendWelcomeVerificationEmail(
+          envelope.recipient,
+          notificationString(p, "displayName", true) || null,
+          `${APP_BASE_URL}/api/auth/verify-email?token=${notificationString(p, "token")}`
+        );
+        break;
+      case "ACCOUNT_MAGIC_LINK":
+        await sendAccountMagicLinkEmail(
+          envelope.recipient,
+          `${APP_BASE_URL}/api/auth/magic-link/verify?token=${notificationString(p, "token")}`
+        );
+        break;
+      case "PASSWORD_RESET":
+        await sendPasswordResetEmail(
+          envelope.recipient,
+          `${APP_BASE_URL}/reset-password?token=${notificationString(p, "token")}`
+        );
+        break;
+      case "PASSWORD_CHANGED":
+        await sendPasswordChangedEmail(envelope.recipient);
+        break;
+      case "EMAIL_CHANGED":
+        await sendEmailChangedNotification(envelope.recipient, notificationString(p, "newEmail"));
+        break;
+      case "ACCOUNT_DELETED":
+        await sendAccountDeletedEmail(envelope.recipient);
+        break;
+      case "CUSTOMER_MAGIC_LINK":
+        await sendMagicLink({
+          email: envelope.recipient,
+          loginUrl: `${APP_BASE_URL}/m/login/${notificationString(p, "token")}`,
+        });
+        break;
+      case "PIN_RESET":
+        await sendPinResetLink({
+          email: envelope.recipient,
+          resetUrl: `${APP_BASE_URL}/m/reset/${notificationString(p, "token")}`,
+        });
+        break;
+      case "STOLEN_VERIFY":
+        await sendStolenVerificationEmail(
+          envelope.recipient,
+          notificationString(p, "name"),
+          notificationString(p, "certId"),
+          notificationString(p, "cardName"),
+          `${APP_BASE_URL}/api/stolen/verify/${notificationString(p, "token")}`
+        );
+        break;
+      case "CLAIM_VERIFY":
+        await sendClaimVerification({
+          email: envelope.recipient,
+          certId: notificationString(p, "certId"),
+          verifyUrl: `${APP_BASE_URL}/api/claim/verify?token=${notificationString(p, "token")}`,
+        });
+        break;
+      case "CERTIFICATE_PDF": {
+        const certId = notificationString(p, "certId");
+        const [{ storage }, { generateCertificateDocument }] = await Promise.all([
+          import("./storage"),
+          import("./certificate-document"),
+        ]);
+        const cert = await storage.getCertificateByCertId(certId);
+        if (!cert || cert.status === "voided") throw new Error("certificate notification authority unavailable");
+        const ownerName = notificationString(p, "ownerName", true) || null;
+        const pdfBuffer = await generateCertificateDocument(cert, ownerName ?? undefined);
+        await sendCertificatePdf({
+          email: envelope.recipient,
+          ownerName,
+          certId,
+          cardName: cert.cardName,
+          pdfBuffer,
+        });
+        break;
+      }
+      case "TRANSFER_OWNER_CONFIRM":
+        if (notificationString(p, "flowVersion") === "v2") {
+          await sendTransferV2OutgoingConfirmation({
+            fromEmail: envelope.recipient,
+            toEmail: notificationString(p, "toEmail"),
+            certId: notificationString(p, "certId"),
+            confirmUrl: `${APP_BASE_URL}/api/v2/transfers/outgoing-confirm?token=${notificationString(p, "token")}`,
+          });
+        } else {
+          await sendTransferOwnerConfirmation({
+            fromEmail: envelope.recipient,
+            toEmail: notificationString(p, "toEmail"),
+            certId: notificationString(p, "certId"),
+            confirmUrl: `${APP_BASE_URL}/api/transfer/owner-confirm?token=${notificationString(p, "token")}`,
+          });
+        }
+        break;
+      case "TRANSFER_INCOMING_CONFIRM":
+        if (notificationString(p, "flowVersion") === "v2") {
+          await sendTransferV2IncomingConfirmation({
+            toEmail: envelope.recipient,
+            fromEmail: notificationString(p, "fromEmail"),
+            certId: notificationString(p, "certId"),
+            confirmUrl: `${APP_BASE_URL}/transfer/accept?token=${notificationString(p, "token")}&v=2`,
+            previousOwnersCount: notificationNumber(p, "previousOwnersCount"),
+          });
+        } else {
+          await sendTransferNewOwnerConfirmation({
+            toEmail: envelope.recipient,
+            fromEmail: notificationString(p, "fromEmail"),
+            certId: notificationString(p, "certId"),
+            confirmUrl: `${APP_BASE_URL}/api/transfer/new-owner-confirm?token=${notificationString(p, "token")}`,
+          });
+        }
+        break;
+      case "TRANSFER_DISPUTE_WINDOW":
+        await sendTransferV2DisputeWindowStarted({
+          email: envelope.recipient,
+          certId: notificationString(p, "certId"),
+          role: notificationString(p, "role") === "incoming" ? "incoming" : "outgoing",
+          disputeDeadline: new Date(notificationString(p, "disputeDeadline")),
+        });
+        break;
+      case "TRANSFER_BUYER_INVITE": {
+        const token = notificationString(p, "token");
+        await sendTransferV2OwnerInvitedByBuyer({
+          ownerEmail: envelope.recipient,
+          certId: notificationString(p, "certId"),
+          maskedClaimantEmail: notificationString(p, "maskedClaimantEmail"),
+          ownerExpiresAt: new Date(notificationString(p, "ownerExpiresAt")),
+          disputeUrl: `${APP_BASE_URL}/api/v2/transfers/buyer-init/owner-dispute?token=${token}`,
+          confirmUrl: `${APP_BASE_URL}/api/v2/transfers/buyer-init/owner-confirm?token=${token}`,
+        });
+        break;
+      }
+      case "TRANSFER_BUYER_CONFIRMED":
+        await sendTransferV2BuyerInitOwnerConfirmed({
+          claimantEmail: envelope.recipient,
+          certId: notificationString(p, "certId"),
+          disputeDeadline: new Date(notificationString(p, "disputeDeadline")),
+        });
+        break;
+      case "TRANSFER_BUYER_REJECTED":
+        await sendTransferV2BuyerInitOwnerRejected({
+          claimantEmail: envelope.recipient,
+          certId: notificationString(p, "certId"),
+          reason: notificationString(p, "reason", true) || undefined,
+        });
+        break;
+      case "TRANSFER_COMPLETED":
+        await sendTransferV2Completed({
+          email: envelope.recipient,
+          certId: notificationString(p, "certId"),
+          role: notificationString(p, "role") === "incoming" ? "incoming" : "outgoing",
+          newKeeperName: notificationString(p, "newKeeperName", true) || null,
+        });
+        break;
+      case "TRANSFER_CANCELLED":
+        await sendTransferV2Cancelled({
+          email: envelope.recipient,
+          certId: notificationString(p, "certId"),
+          reason: notificationString(p, "reason"),
+        });
+        break;
+      case "TRANSFER_DISPUTED":
+        await sendTransferV2Disputed({
+          email: envelope.recipient,
+          certId: notificationString(p, "certId"),
+          disputedBy: notificationString(p, "disputedBy"),
+        });
+        break;
+      case "TRANSFER_EXPIRED":
+        await sendTransferV2Expired({
+          email: envelope.recipient,
+          certId: notificationString(p, "certId"),
+          reason: notificationString(p, "reason"),
+        });
+        break;
+      default: {
+        const exhaustive: never = kind;
+        throw new Error(`unsupported customer notification kind: ${exhaustive}`);
+      }
+    }
+  });
+  if (context.error) throw context.error;
+  if (!context.receipt) throw new Error("customer notification provider returned no receipt");
+  return context.receipt;
 }

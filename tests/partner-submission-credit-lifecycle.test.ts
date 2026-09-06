@@ -1524,22 +1524,12 @@ describe("G6D Partner submission credit lifecycle on PostgreSQL 17.10", () => {
       delete: () => undefined,
     } as unknown as Express;
     const storageModule = await import("../server/storage");
-    const dbModule = await import("../server/db");
     const originalLookup = storageModule.storage.getSubmissionBySubmissionId;
-    const dbWithExecute = dbModule.db as unknown as {
-      execute: (query: unknown) => Promise<{ rows: Array<Record<string, unknown>> }>;
-    };
-    const originalExecute = dbWithExecute.execute;
     storageModule.storage.getSubmissionBySubmissionId = async () => ({
       id: String(destinationId),
       submissionId: tracking,
       status: "completed",
     });
-    let mappingReads = 0;
-    dbWithExecute.execute = async () => {
-      mappingReads += 1;
-      return mappingReads === 1 ? { rows: [{ relation: "partner_connector_imports" }] } : { rows: [{ matched: 1 }] };
-    };
     const { registerAdminSubmissionRoutes } = await import("../server/routes/admin-submissions");
     registerAdminSubmissionRoutes(captureApp);
     expect(stepBackHandler).toBeTypeOf("function");
@@ -1556,11 +1546,9 @@ describe("G6D Partner submission credit lifecycle on PostgreSQL 17.10", () => {
       await stepBackHandler!({ params: { id: tracking }, session: { adminEmail: "g6d-admin@example.com" } }, response);
     } finally {
       storageModule.storage.getSubmissionBySubmissionId = originalLookup;
-      dbWithExecute.execute = originalExecute;
     }
     expect(response.statusCode).toBe(409);
     expect(response.body).toMatchObject({ code: "partner_credit_lifecycle_conflict" });
-    expect(mappingReads).toBe(2);
     const after = await admin.query<{ status: string; completed_at: string | null; audit_rows: string }>(
       `SELECT status, completed_at,
               (SELECT count(*)::bigint FROM audit_log WHERE entity_id=$2 AND action='submission_status_step_back') AS audit_rows

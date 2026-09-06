@@ -209,11 +209,14 @@ describe("admin auth reliability", () => {
         body: JSON.stringify({ password: "wrong" }),
       });
       expect(failed.status).toBe(401);
+      expect(await failed.json()).toMatchObject({ code: "admin_credential_rejected" });
 
       let cookies = await login(base);
       const refresh = await request(base, "/api/admin/session", {}, cookies);
       expect(refresh.status).toBe(200);
       expect(await refresh.json()).toMatchObject({ authenticated: true });
+      expect(refresh.headers.get("cache-control")).toBe("private, no-store");
+      expect(refresh.headers.get("vary")).toContain("Cookie");
 
       const [tabA, tabB] = await Promise.all([
         request(base, "/api/admin/session", {}, cookies),
@@ -221,6 +224,12 @@ describe("admin auth reliability", () => {
       ]);
       expect(tabA.status).toBe(200);
       expect(tabB.status).toBe(200);
+
+      const getLogout = await request(base, "/api/admin/logout", {}, cookies);
+      expect(getLogout.status).toBe(404);
+      const afterGetLogout = await request(base, "/api/admin/session", {}, cookies);
+      expect(afterGetLogout.status).toBe(200);
+      expect(await afterGetLogout.json()).toMatchObject({ authenticated: true });
 
       const logout = await request(base, "/api/admin/logout", { method: "POST" }, cookies);
       expect(logout.status).toBe(200);
@@ -230,6 +239,9 @@ describe("admin auth reliability", () => {
       const afterLogout = await request(base, "/api/admin/session", {}, cookies);
       expect(afterLogout.status).toBe(200);
       expect(await afterLogout.json()).toMatchObject({ authenticated: false, reason: "not_authenticated" });
+
+      const idempotentLogout = await request(base, "/api/admin/logout", { method: "POST" }, cookies);
+      expect(idempotentLogout.status).toBe(200);
     });
   });
 
@@ -282,6 +294,89 @@ describe("admin auth reliability", () => {
       const expired = await request(base, "/api/admin/session", {}, cookies);
       expect(expired.status).toBe(401);
       expect(await expired.json()).toMatchObject({ authenticated: false, reason: "session_expired" });
+    });
+  });
+
+  it("never lets a password-only pending admin replace an existing PIN through setup", async () => {
+    await withAuthApp(async ({ base }) => {
+      let cookies: string[] = [];
+      const password = await request(
+        base,
+        "/api/admin/session",
+        {
+          method: "POST",
+          headers: { "content-type": "application/json" },
+          body: JSON.stringify({ password: "correct-passphrase" }),
+        },
+        cookies
+      );
+      expect(password.status).toBe(200);
+      cookies = mergeCookies(cookies, password);
+
+      const setup = await request(
+        base,
+        "/api/auth/pin/setup",
+        {
+          method: "POST",
+          headers: { "content-type": "application/json" },
+          body: JSON.stringify({ pin: "654321" }),
+        },
+        cookies
+      );
+
+      expect(setup.status).toBe(401);
+      expect(await setup.json()).toMatchObject({ error: expect.stringMatching(/expired|start again/i) });
+      expect(dbExecute).toHaveBeenCalledTimes(2); // lockout read + successful-password counter reset only
+    });
+  });
+
+  it("allows first-time admin PIN setup only after the live no-PIN check establishes setup authority", async () => {
+    adminUserState.user.pinHash = "";
+    dbExecute
+      .mockResolvedValueOnce({ rows: [] }) // durable password lockout read
+      .mockResolvedValueOnce({ rows: [] }) // successful-password counter reset
+      .mockResolvedValueOnce({ rows: [{ id: "admin-user-1", credential_version: 2 }] }); // guarded PIN write
+
+    await withAuthApp(async ({ base }) => {
+      let cookies: string[] = [];
+      const password = await request(
+        base,
+        "/api/admin/session",
+        {
+          method: "POST",
+          headers: { "content-type": "application/json" },
+          body: JSON.stringify({ password: "correct-passphrase" }),
+        },
+        cookies
+      );
+      cookies = mergeCookies(cookies, password);
+
+      const pinCheck = await request(
+        base,
+        "/api/admin/pin",
+        {
+          method: "POST",
+          headers: { "content-type": "application/json" },
+          body: JSON.stringify({ pin: "654321" }),
+        },
+        cookies
+      );
+      expect(pinCheck.status).toBe(200);
+      expect(await pinCheck.json()).toEqual({ step: "PIN_SETUP_REQUIRED" });
+      cookies = mergeCookies(cookies, pinCheck);
+
+      const setup = await request(
+        base,
+        "/api/auth/pin/setup",
+        {
+          method: "POST",
+          headers: { "content-type": "application/json" },
+          body: JSON.stringify({ pin: "654321" }),
+        },
+        cookies
+      );
+      expect(setup.status).toBe(200);
+      expect(await setup.json()).toEqual({ ok: true, redirect: "/admin" });
     });
   });
 
@@ -397,6 +492,7 @@ describe("admin auth reliability", () => {
         cookies
       );
       expect(wrongPin.status).toBe(401);
+      expect(await wrongPin.json()).toMatchObject({ code: "admin_credential_rejected" });
     });
   });
 

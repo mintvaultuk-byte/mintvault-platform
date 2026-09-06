@@ -16,6 +16,47 @@ const SUPPORT = process.env.MINTVAULT_SCANS_DIR
   : path.join(os.homedir(), "Library", "Application Support", "MintVaultScanner");
 const IDENTITY_FILE = path.join(SUPPORT, "station-identity.enc.json");
 
+/*
+ * A stored operator token is not proof that its person belongs to the stored
+ * station.  The token and station become one usable authority only after the
+ * server's tenant-scoped enrolment-status read accepts this exact station code.
+ *
+ * Process-local deliberately: every restart must validate the pairing again.
+ * Nothing here is persisted, copied between profiles or allowed to re-home an
+ * identity.  Replacing/clearing the operator token invalidates the pairing.
+ */
+let validatedOperatorScope = null;
+
+function operatorSessionFingerprint(operatorSession) {
+  return typeof operatorSession === "string" ? crypto.createHash("sha256").update(operatorSession).digest("hex") : null;
+}
+
+function operatorScopeMatches(identity) {
+  return Boolean(
+    validatedOperatorScope &&
+    validatedOperatorScope.stationCode === identity?.stationCode &&
+    validatedOperatorScope.stationStatus === identity?.stationStatus &&
+    validatedOperatorScope.operatorSessionFingerprint === operatorSessionFingerprint(identity?.operatorSession)
+  );
+}
+
+function operatorSessionChangedError() {
+  const error = new Error("The signed-in operator session changed during station validation");
+  error.code = "OPERATOR_SESSION_CHANGED";
+  return error;
+}
+
+function assertOperatorSession(expectedOperatorSession) {
+  const identity = readIdentity();
+  if (
+    !expectedOperatorSession ||
+    !identity?.operatorSession ||
+    operatorSessionFingerprint(identity.operatorSession) !== operatorSessionFingerprint(expectedOperatorSession)
+  ) {
+    throw operatorSessionChangedError();
+  }
+}
+
 function getSafeStorage() {
   let electron;
   try { electron = require("electron"); } catch { electron = null; }
@@ -130,22 +171,40 @@ function signRequest(identity, { method, path: requestPath, body }) {
 
 function signStoredRequest({ method, path: requestPath, body }) {
   const identity = loadOrCreateIdentity();
+  if (!operatorScopeMatches(identity) || identity.stationStatus !== "ACTIVE" || !identity.operatorSession) {
+    throw new Error("The signed-in operator has not been validated for this active station");
+  }
   const signed = signRequest(identity, { method, path: requestPath, body });
   identity.requestNonce = signed.nextNonce;
   writeIdentity(identity); // persist before network I/O: never reuse after crash.
   return signed.headers;
 }
 
-function saveEnrollment({ stationCode, publicKeyFingerprint: expectedFingerprint, status = "PENDING" }) {
+function saveEnrollment({
+  stationCode,
+  publicKeyFingerprint: expectedFingerprint,
+  status = "PENDING",
+  expectedOperatorSession,
+}) {
   if (typeof stationCode !== "string" || !/^MV-STN-[A-Z2-7]{10,24}$/.test(stationCode)) {
     throw new Error("Server returned an invalid station code");
   }
   const identity = loadOrCreateIdentity();
+  if (
+    expectedOperatorSession !== undefined &&
+    operatorSessionFingerprint(identity.operatorSession) !== operatorSessionFingerprint(expectedOperatorSession)
+  ) {
+    throw operatorSessionChangedError();
+  }
   if (expectedFingerprint && expectedFingerprint !== publicKeyFingerprint(identity.publicKeyPem)) {
     throw new Error("Station enrolment does not match this Mac's Keychain identity");
   }
+  if (identity.stationCode && identity.stationCode !== stationCode) {
+    throw new Error("This Scanner profile is already enrolled as a different MintVault station");
+  }
   identity.stationCode = stationCode;
   identity.stationStatus = status;
+  validatedOperatorScope = null;
   writeIdentity(identity);
   return { stationCode, status, publicKeyFingerprint: publicKeyFingerprint(identity.publicKeyPem) };
 }
@@ -156,6 +215,7 @@ function setStationStatus(status) {
   }
   const identity = loadOrCreateIdentity();
   if (!identity.stationCode) throw new Error("This Mac is not enrolled as a MintVault station");
+  if (identity.stationStatus !== status) validatedOperatorScope = null;
   identity.stationStatus = status;
   writeIdentity(identity);
 }
@@ -166,6 +226,7 @@ function setOperatorSession(token) {
   }
   const identity = loadOrCreateIdentity();
   identity.operatorSession = token || null;
+  validatedOperatorScope = null;
   writeIdentity(identity);
 }
 
@@ -188,6 +249,32 @@ function readOperatorSession() {
   return readIdentity()?.operatorSession || null;
 }
 
+/** Mark only the pairing the server just accepted under this operator session. */
+function validateOperatorScope(stationCode, stationStatus, expectedOperatorSession) {
+  validatedOperatorScope = null;
+  const identity = readIdentity();
+  if (
+    !expectedOperatorSession ||
+    !identity?.operatorSession ||
+    !identity.stationCode ||
+    identity.stationCode !== stationCode ||
+    identity.stationStatus !== stationStatus ||
+    operatorSessionFingerprint(identity.operatorSession) !== operatorSessionFingerprint(expectedOperatorSession)
+  ) {
+    throw new Error("Authenticated operator scope does not match the stored station identity");
+  }
+  validatedOperatorScope = {
+    stationCode,
+    stationStatus,
+    operatorSessionFingerprint: operatorSessionFingerprint(identity.operatorSession),
+  };
+}
+
+/** Session failure or mismatch immediately closes every signed station path. */
+function invalidateOperatorScope() {
+  validatedOperatorScope = null;
+}
+
 // These read-only helpers are deliberately fail-closed.  A non-Electron test
 // process, an unavailable Keychain, or corrupt local state must never make an
 // unregistered Mac look enrolled merely because an old .env exists.
@@ -202,7 +289,12 @@ function currentStationCode() {
 function hasActiveStationSession() {
   try {
     const identity = readIdentity();
-    return Boolean(identity?.stationCode && identity?.stationStatus === "ACTIVE" && identity?.operatorSession);
+    return Boolean(
+      identity?.stationCode &&
+      identity?.stationStatus === "ACTIVE" &&
+      identity?.operatorSession &&
+      operatorScopeMatches(identity)
+    );
   } catch {
     return false;
   }
@@ -214,8 +306,10 @@ module.exports = {
   setStationStatus,
   setOperatorSession,
   clearOperatorSession,
+  validateOperatorScope,
+  invalidateOperatorScope,
   signStoredRequest,
   currentStationCode,
   hasActiveStationSession,
-  _private: { canonicalRequest, freshIdentity, installationFingerprint, publicKeyFingerprint, signRequest, readOperatorSession },
+  _private: { canonicalRequest, freshIdentity, installationFingerprint, publicKeyFingerprint, signRequest, readOperatorSession, assertOperatorSession },
 };

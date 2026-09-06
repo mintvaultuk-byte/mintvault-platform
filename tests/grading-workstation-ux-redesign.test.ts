@@ -107,7 +107,8 @@ describe("manual card-detail fields are ALWAYS visible (spec: normal process, no
 
 describe("intelligent set search wired to the existing catalogue (spec 3)", () => {
   it("PokemonSetPicker still reads the EXISTING /api/pokemon-sets source", () => {
-    expect(FORM).toContain('fetch("/api/pokemon-sets")');
+    expect(FORM).toContain('import { adminFetch } from "@/lib/queryClient"');
+    expect(FORM).toContain('adminFetch("/api/pokemon-sets")');
   });
   it("catalogue edits from the shared picker use the set-library endpoint, not certificate save", () => {
     expect(FORM).toContain('"/api/staff/sets"');

@@ -1,3 +1,4 @@
+import { adminFetch } from "@/lib/queryClient";
 import { useEffect, useState, useCallback } from "react";
 import { useLocation } from "wouter";
 import { AdminHeaderRow } from "@/components/admin/AdminHeaderRow";
@@ -106,31 +107,15 @@ function labelField(field: string | null): string {
 
 export default function AdminOperatorStatsPage() {
   const [, navigate] = useLocation();
-  const [authed, setAuthed] = useState<boolean | null>(null);
   const [ops, setOps] = useState<OperatorStat[]>([]);
   const [loading, setLoading] = useState(true);
   const [err, setErr] = useState<string | null>(null);
-
-  useEffect(() => {
-    (async () => {
-      try {
-        const res = await fetch("/api/admin/session", { credentials: "include" });
-        const d = await res.json();
-        setAuthed(res.ok && d.authenticated === true);
-      } catch {
-        setAuthed(false);
-      }
-    })();
-  }, []);
-  useEffect(() => {
-    if (authed === false) navigate("/admin/login?next=/admin/operator-stats", { replace: true });
-  }, [authed, navigate]);
 
   const load = useCallback(async () => {
     setLoading(true);
     setErr(null);
     try {
-      const res = await fetch("/api/admin/operator-stats", { credentials: "include" });
+      const res = await adminFetch("/api/admin/operator-stats", { credentials: "include" });
       const d = await res.json().catch(() => ({}));
       if (!res.ok) {
         setErr(d.error || "Failed to load operator stats");
@@ -145,16 +130,8 @@ export default function AdminOperatorStatsPage() {
     }
   }, []);
   useEffect(() => {
-    if (authed) load();
-  }, [authed, load]);
-
-  if (authed !== true) {
-    return (
-      <div className="admin-root flex min-h-screen items-center justify-center bg-[var(--admin-bg)]">
-        <div className="h-8 w-32 animate-pulse rounded bg-[var(--admin-gold)]/10" />
-      </div>
-    );
-  }
+    void load();
+  }, [load]);
 
   const anyGraded = ops.some((o) => o.graded > 0);
 

@@ -1,10 +1,11 @@
 /** Super Admin operational view for canonical Partner supplies orders. */
-import { useEffect, useState } from "react";
+import { useState } from "react";
 import { useMutation, useQuery } from "@tanstack/react-query";
 import { Link, useLocation } from "wouter";
 import { AdminShell, Badge, Panel } from "@/components/admin";
 import { isAdminStepUpCancelled, runAdminProtected } from "@/components/admin/admin-step-up";
 import { apiRequest, queryClient } from "@/lib/queryClient";
+import { useAdminSession } from "@/lib/admin-session";
 
 const BASE = "/api/super-admin/partner-supplies/orders";
 type SuppliesStatus = "RECEIVED" | "PROCESSING" | "DISPATCHED" | "CANCELLED";
@@ -44,33 +45,15 @@ function errorMessage(error: unknown): string {
 }
 
 export default function PartnerSuppliesOrdersAdminPage() {
-  const [pathname, navigate] = useLocation();
-  const [authenticated, setAuthenticated] = useState<boolean | null>(null);
+  const [, navigate] = useLocation();
+  const { principal } = useAdminSession();
+  const authorized = principal?.isSuperAdmin === true;
   const [notice, setNotice] = useState<string | null>(null);
-
-  useEffect(() => {
-    let live = true;
-    fetch("/api/admin/session", { credentials: "include" })
-      .then((response) => (response.ok ? response.json() : null))
-      .then((value) => live && setAuthenticated(value?.authenticated === true && value?.isSuperAdmin === true))
-      .catch(() => live && setAuthenticated(false));
-    return () => {
-      live = false;
-    };
-  }, []);
-
-  useEffect(() => {
-    if (authenticated === false) {
-      navigate(`/admin/login?next=${encodeURIComponent(`${pathname}${window.location.search}${window.location.hash}`)}`, {
-        replace: true,
-      });
-    }
-  }, [authenticated, navigate, pathname]);
 
   const orders = useQuery<{ orders: SuppliesOrder[] }>({
     queryKey: [BASE],
     queryFn: () => apiRequest("GET", BASE).then((response) => response.json()),
-    enabled: authenticated === true,
+    enabled: authorized,
     refetchInterval: 60_000,
   });
   const transition = useMutation({
@@ -100,10 +83,14 @@ export default function PartnerSuppliesOrdersAdminPage() {
     <AdminShell
       activeTab="dashboard"
       onTabChange={() => navigate("/admin")}
-      onLogout={() => navigate("/admin")}
       title="Partner Supplies Orders"
       crumb="Partner Network / Supplies Orders"
     >
+      {!authorized ? (
+        <Panel title="Super Admin access required">
+          <p role="alert">This supplies operation is restricted to a Super Admin.</p>
+        </Panel>
+      ) : (
       <Panel
         title="Partner Supplies Orders"
         sub="Canonical operational requests. Partner snapshots are immutable; status actions require a fresh Super Admin step-up."
@@ -187,6 +174,7 @@ export default function PartnerSuppliesOrdersAdminPage() {
           ))}
         </div>
       </Panel>
+      )}
     </AdminShell>
   );
 }

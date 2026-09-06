@@ -545,7 +545,7 @@ function SectionAHero() {
             letterSpacing: "0.05em", textTransform: "uppercase",
             margin: 0,
           }}>
-            From £19 · 40 day turnaround · UK return shipping insured
+            <a href="/pricing" style={{ color: "inherit" }}>View current grading prices and turnaround →</a>
           </p>
         </div>
 
@@ -778,7 +778,7 @@ function SectionC() {
             fontSize: 48, lineHeight: 1.1, color: "#FFFFFF",
             margin: 0,
           }}>
-            Three tiers.<br />
+            Your grading options.<br />
             <span style={{ color: V.goldSoft, fontWeight: 400 }}>One standard.</span>
           </h2>
           <p style={{
@@ -789,112 +789,22 @@ function SectionC() {
             margin: 0,
           }}>
             Every card, regardless of service level, passes the same four-point
-            inspection (centering, corners, edges, surface). Tier only changes
-            how quickly you see it back.
+            inspection (centering, corners, edges, surface). Compare current
+            service features and turnaround on the pricing page.
           </p>
         </div>
 
-        <div style={{
-          display: "grid", gridTemplateColumns: "repeat(3, 1fr)",
-          gap: 24, maxWidth: 1080, margin: "0 auto",
-        }}>
-          {[
-            { name: "Vault Queue", price: "19", days: "45 day", featured: false, features: ["Same 4-point grading inspection", "NFC ownership chip", "Registry listing", "Value up to £500"] },
-            { name: "Standard", price: "25", days: "21 day", featured: true, features: ["Same 4-point grading inspection", "NFC ownership chip", "Registry listing", "Photographic report", "Value up to £2,500"] },
-            { name: "Express", price: "45", days: "5 day", featured: false, features: ["Same 4-point grading inspection", "NFC ownership chip", "Registry listing", "Photographic report", "Priority handling", "Value up to £10,000"] },
-          ].map((tier) => (
-            <div key={tier.name} style={{
-              position: "relative",
-              padding: "48px 40px",
-              borderRadius: 12,
-              backgroundColor: "transparent",
-              border: tier.featured
-                ? `1px solid rgba(212, 175, 55, 0.6)`
-                : `1px solid rgba(212, 175, 55, 0.25)`,
-              display: "flex", flexDirection: "column",
-            }}>
-              {tier.featured && (
-                <span style={{
-                  position: "absolute",
-                  top: -14, left: "50%",
-                  transform: "translateX(-50%)",
-                  backgroundColor: V.gold, color: V.panelDark,
-                  fontFamily: "'JetBrains Mono', ui-monospace, monospace",
-                  fontSize: 9, letterSpacing: "0.15em",
-                  textTransform: "uppercase",
-                  padding: "6px 16px", borderRadius: 4,
-                }}>
-                  Most chosen
-                </span>
-              )}
-              <p style={{
-                fontFamily: "'Geist Variable', system-ui, sans-serif",
-                fontSize: 12, color: "rgba(255,255,255,0.4)",
-                letterSpacing: "0.15em", textTransform: "uppercase",
-                margin: 0, marginBottom: 20, fontWeight: 500,
-              }}>
-                {tier.name}
-              </p>
-              <div style={{ position: "relative", marginBottom: 4, lineHeight: 1 }}>
-                <span style={{
-                  position: "absolute",
-                  fontFamily: "'Fraunces', Georgia, serif",
-                  color: "rgba(255,255,255,0.4)",
-                  fontSize: 32,
-                  top: 4, left: -2,
-                  transform: "translateX(-100%)",
-                  fontWeight: 600,
-                }}>£</span>
-                <span style={{
-                  fontFamily: "'Fraunces', Georgia, serif",
-                  color: "#FFFFFF",
-                  fontSize: 88, marginLeft: 20, fontWeight: 600,
-                }}>{tier.price}</span>
-              </div>
-              <p style={{
-                fontFamily: "'JetBrains Mono', ui-monospace, monospace",
-                fontSize: 10, color: "#888",
-                letterSpacing: "0.15em", textTransform: "uppercase",
-                margin: 0, marginBottom: 32,
-              }}>
-                {tier.days} turnaround
-              </p>
-              <ul style={{
-                listStyle: "none", padding: 0, margin: 0, marginBottom: 40,
-                flex: 1, display: "flex", flexDirection: "column", gap: 16,
-              }}>
-                {tier.features.map((f) => (
-                  <li key={f} style={{
-                    display: "flex", alignItems: "flex-start", gap: 12,
-                    fontFamily: "'Geist Variable', system-ui, sans-serif",
-                    fontSize: 14, color: "#E8E4DC",
-                  }}>
-                    <span style={{ color: V.gold, flexShrink: 0 }}>—</span>
-                    {f}
-                  </li>
-                ))}
-              </ul>
-              <button style={{
-                width: "100%", padding: "12px 20px",
-                borderRadius: 999,
-                border: tier.featured ? "none" : `1px solid ${V.gold}`,
-                backgroundColor: tier.featured ? V.gold : "transparent",
-                color: tier.featured ? V.panelDark : V.gold,
-                fontFamily: "'Geist Variable', system-ui, sans-serif",
-                fontSize: 14, fontWeight: 600, cursor: "pointer",
-                display: "inline-flex", alignItems: "center", justifyContent: "center", gap: 8,
-              }}>
-                Start a submission →
-              </button>
-            </div>
-          ))}
+        <div style={{ textAlign: "center", padding: "32px 24px", border: `1px solid ${V.gold}`, borderRadius: 12 }}>
+          <a href="/pricing" style={{ color: V.goldSoft, fontSize: 20, fontWeight: 600 }}>
+            View current grading prices and turnaround →
+          </a>
         </div>
         <p style={{
           textAlign: "center", marginTop: 32,
           fontFamily: "'Geist Variable', system-ui, sans-serif",
           fontSize: 12, color: "rgba(255,255,255,0.35)",
         }}>
-          Bulk discounts from 10 cards.
+          Available services, features and discounts are shown on the current pricing page.
         </p>
       </div>
     </section>
@@ -1283,7 +1193,7 @@ function SectionF() {
           fontSize: 16, color: "rgba(255,255,255,0.5)",
           margin: 0, marginBottom: 40,
         }}>
-          From £19. UK-based. Insured in transit.
+          <a href="/pricing" style={{ color: "inherit" }}>View current grading prices and turnaround →</a>
         </p>
         <div style={{
           display: "flex", flexWrap: "wrap",

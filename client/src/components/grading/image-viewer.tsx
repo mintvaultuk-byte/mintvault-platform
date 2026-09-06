@@ -1,9 +1,8 @@
+import { adminFetch } from "@/lib/queryClient";
 import { useState, useRef, useEffect, useLayoutEffect, lazy, Suspense } from "react";
 import { cardToolEnabled } from "./card-tool-image-source";
-import { sessionRequiredRailWidth } from "@shared/rail-width";
-import { usePublishRailWidth } from "@/components/grading-workflow/rail-width-context";
 import { createPortal } from "react-dom";
-import type { ReactNode } from "react";
+import type { CSSProperties, ReactNode } from "react";
 import {
   Pencil,
   Eye,
@@ -25,12 +24,21 @@ import type { Defect, MvgsCode } from "./defect-annotation";
 import DefectTypePicker from "./defect-type-picker";
 import { detectEdge, coverageFromSegment, creaseSpanFromSegment } from "./measurement-math";
 import {
+  CARD_INSPECTION_MAX_ZOOM,
+  CARD_INSPECTION_MIN_ZOOM,
   inspectionViewToPercentFocus,
   normaliseCardInspectionState,
   percentFocusToInspectionView,
   updateCardInspectionView,
   type CardInspectionState,
 } from "../grading-workflow/card-inspection-state";
+import {
+  inspectionPlacement,
+  panInspectionFocus,
+  zoomInspectionFocusAtPoint,
+  type InspectionPlacement,
+  type InspectionSize,
+} from "./inspection-viewport-geometry";
 
 type Side = "front" | "back" | "angled" | "closeup";
 type Variant = "original" | "greyscale" | "highcontrast" | "edgeenhanced" | "inverted";
@@ -138,8 +146,9 @@ interface Props {
   onSideChange?: (side: string) => void;
   onZoomChange?: (zoom: number) => void;
   onModeChange?: (mode: { fullscreen: boolean; markMode: boolean }) => void;
-  /** Shared presentation-only state. It is ignored by mark/crop coordinate
-   * paths, which retain their transform-free image-relative geometry. */
+  /** Shared presentation-only front/back zoom + focus state. It changes only
+   * the inspection plane; stored defect, line, centering and crop coordinates
+   * remain image-relative and are never rewritten. */
   inspectionState?: CardInspectionState;
   onInspectionStateChange?: (state: CardInspectionState) => void;
   /** False outside the active Grade stage. Inspection remains interactive,
@@ -153,6 +162,10 @@ interface Props {
    * callers so this is an explicit capability split, not a second workflow.
    */
   sourceImageMutationsEnabled?: boolean;
+  /** Delete-image is gated separately because the canonical rail owns its side
+   * tabs inside this viewer. Preserve the panel's active/non-review lifecycle
+   * boundary rather than treating general source-tool access as delete access. */
+  sourceImageDeletionEnabled?: boolean;
   /** When true, defect markers render but clicks are inert (tooltip explains
    *  why). Used by the post-approval read-only state in the parent's edit-mode
    *  gate so admins can still SEE the defects but can't edit until they click
@@ -285,8 +298,7 @@ function hasAny(urls: ImageUrls, side: Side): boolean {
   );
 }
 
-const ZOOM_STEPS = [1, 1.5, 2, 3, 4, 6, 8, 12];
-const WORKING_EVIDENCE_MAX_ZOOM = 12;
+const ZOOM_STEPS = [0.5, 0.75, 1, 1.25, 1.5, 2, 3, 4, 5];
 
 /**
  * Grading-rail SAFE FIT insets, in CSS pixels, applied symmetrically on each
@@ -303,87 +315,10 @@ const WORKING_EVIDENCE_MAX_ZOOM = 12;
  * Full visibility of the scan outranks card size. Do not reduce these to make
  * the card larger.
  */
-const RAIL_SAFE_INSET_X = 10;
-const RAIL_SAFE_INSET_Y = 14;
+export const INSPECTION_SAFE_INSET_X = 10;
+export const INSPECTION_SAFE_INSET_Y = 12;
 /** The contractual floor these insets exist to satisfy. */
 export const RAIL_MIN_BOTTOM_CLEARANCE_PX = 12;
-
-/**
- * Gap kept between the bottom of the rail's controls and the bottom of the REAL visible
- * viewport, so nothing in the left workstation sits on the very edge of the screen or
- * requires page scrolling to reach.
- */
-export const RAIL_VISIBLE_BOTTOM_SAFETY_PX = 14;
-
-/**
- * The card's available height, derived from the REAL VISIBLE VIEWPORT rather than from
- * the container it lives in.
- *
- * Exported pure so the contract can be driven directly: a right pane with a large
- * scrollHeight must not change the answer. The card is in flow, so it inflates its own
- * container; that container sits in a scrollable page, so `clientHeight` can report a
- * box far taller than the physical screen. Measuring the container cannot detect that —
- * the container is the thing being inflated.
- *
- * Every input here is card-INDEPENDENT: the card cannot move its own top (fixed-height
- * header above) and cannot change the controls' height below it.
- */
-export function railAvailableHeight(input: {
-  /** The measured container height. Applies only when it is the TIGHTER ceiling. */
-  containerH: number;
-  /** window.visualViewport?.height ?? window.innerHeight */
-  visibleH: number;
-  /** The card viewport's top, in viewport coordinates. */
-  top: number;
-  /** Height of the controls row rendered beneath the card. */
-  controlsH: number;
-}): number {
-  const { containerH, visibleH, top, controlsH } = input;
-  if (!(visibleH > 0) || !Number.isFinite(visibleH)) return containerH;
-  const fromVisible = visibleH - top - controlsH - RAIL_VISIBLE_BOTTOM_SAFETY_PX;
-  if (!Number.isFinite(fromVisible)) return containerH;
-  return Math.min(containerH, fromVisible);
-}
-
-/**
- * THE RATCHET — the single decision that keeps the card from oscillating.
- *
- * Exported as a pure function so the stability contract can be driven over many
- * measurement cycles in a test, rather than asserted from the shape of the source.
- *
- * A committed fit is replaced only when:
- *   - nothing is committed yet, or
- *   - the viewport WIDTH changed. Width is card-independent (the viewport is `min-w-0`
- *     + `overflow-hidden`), so this is the one-way dependency: layout -> width -> fit.
- *   - the available HEIGHT SHRANK. Shrinking must be honoured or the card overflows;
- *     GROWTH is refused, and growth is the only thing the feedback loop can offer.
- *
- * Refusing growth is what makes the loop provably terminating: the card growing can
- * only ever increase the measured height, and an increase is ignored.
- */
-export function shouldRecommitRailFit(
-  prev: { vw: number; vh: number; h: number } | null,
-  next: { vw: number; vh: number }
-): boolean {
-  if (!prev) return true;
-  // Width is the one card-independent input: the viewport is `min-w-0` +
-  // `overflow-hidden`, so the card cannot widen the rail. A real width change is
-  // always worth refitting for.
-  if (Math.abs(prev.vw - next.vw) >= 1) return true;
-  // ECHO GUARD — the defect the convergence model caught.
-  //
-  // Where the host's height is content-driven, the viewport's height IS the card we
-  // just committed. Treating that as an external constraint subtracts the safety inset
-  // from the card AGAIN on the next cycle, and again on the one after: the model shrank
-  // the card by 28px per cycle, 18 times, until width finally bound. That is not a
-  // flicker, it is a slow visible shrink — and it is the "shrinking/growing cycles" in
-  // the owner's report. A measured height that equals our own committed card height is
-  // our own output coming back, not new information.
-  if (Math.abs(next.vh - prev.h) <= 2) return false;
-  // A genuine shrink must still be honoured, or the card overflows its box. Growth is
-  // refused — growth is all the feedback loop can offer, so refusing it terminates.
-  return next.vh <= prev.vh - 1;
-}
 
 function nextZoomStep(current: number): number {
   for (const s of ZOOM_STEPS) {
@@ -396,7 +331,7 @@ function prevZoomStep(current: number): number {
   for (let i = ZOOM_STEPS.length - 1; i >= 0; i--) {
     if (ZOOM_STEPS[i] < current - 0.01) return ZOOM_STEPS[i];
   }
-  return 1;
+  return ZOOM_STEPS[0];
 }
 
 const PULSE_CSS = `
@@ -417,6 +352,15 @@ const PIN_CURSOR_SVG = encodeURIComponent(
     "</svg>"
 );
 const PIN_CURSOR = `url("data:image/svg+xml,${PIN_CURSOR_SVG}") 12 12, crosshair`;
+
+export function isInspectionShortcutTarget(target: EventTarget | null): boolean {
+  if (!(target instanceof Element)) return false;
+  return Boolean(
+    target.closest(
+      "input, textarea, select, [contenteditable='true'], [role='textbox'], [role='combobox'], [role='listbox'], [role='option']"
+    )
+  );
+}
 
 export default function ImageViewer({
   urls,
@@ -439,6 +383,7 @@ export default function ImageViewer({
   onInspectionStateChange,
   mutationsEnabled = true,
   sourceImageMutationsEnabled,
+  sourceImageDeletionEnabled,
   readOnly,
   side: controlledSide,
   omitSideTabs,
@@ -452,6 +397,7 @@ export default function ImageViewer({
   apiBase = "/api/admin",
 }: Props) {
   const mayMutateSourceImage = sourceImageMutationsEnabled ?? mutationsEnabled;
+  const mayDeleteSourceImage = sourceImageDeletionEnabled ?? mayMutateSourceImage;
   // Inline defect-edit popover anchored to a clicked marker. Null = closed.
   // Stores the defect id rather than the whole defect so we always read fresh
   // values from the live `defects` array (avoids stale closures during edit).
@@ -518,11 +464,14 @@ export default function ImageViewer({
   // now matches.)
   const [showReference, setShowReference] = useState(false);
   const [zoom, setZoomRaw] = useState(1);
-  /** Normal inspection mode stores the image-relative focal point as percent.
-   * Mark mode still uses its existing native-scroll geometry below. */
+  /** Both normal inspection and MARK store an image-relative focal point as percent. */
   const [pan, setPanRaw] = useState({ x: 50, y: 50 });
   const [dragging, setDragging] = useState(false);
   const [dragStart, setDragStart] = useState({ pointerX: 0, pointerY: 0, focusX: 50, focusY: 50 });
+  const panDragMovedRef = useRef(false);
+  const inspectionViewportRef = useRef<HTMLDivElement>(null);
+  const [inspectionViewport, setInspectionViewport] = useState<InspectionSize | null>(null);
+  const [imgNaturalDims, setImgNaturalDims] = useState<InspectionSize | null>(null);
   const [showDefects, setShowDefects] = useState(true);
   const [showCentering, setShowCentering] = useState(false);
   const [markMode, setMarkModeRaw] = useState(false);
@@ -553,13 +502,8 @@ export default function ImageViewer({
   const canDrawWhitening = mutationsEnabled && !!onWhiteningLinesChange;
   const canDrawCrease = mutationsEnabled && !!onCreaseLinesChange;
 
-  function maxZoom() {
-    if (!markMode) return WORKING_EVIDENCE_MAX_ZOOM;
-    return 6;
-  }
-
   const publishInspection = (nextZoom: number, nextPan: { x: number; y: number }) => {
-    if (!inspectionState || !onInspectionStateChange || markMode) return;
+    if (!inspectionState || !onInspectionStateChange || (side !== "front" && side !== "back")) return;
     onInspectionStateChange(
       updateCardInspectionView(
         inspectionState,
@@ -570,11 +514,27 @@ export default function ImageViewer({
   };
 
   function commitViewport(nextZoom: number, nextPan: { x: number; y: number }) {
-    const boundedPan = {
-      x: Math.max(0, Math.min(100, nextPan.x)),
-      y: Math.max(0, Math.min(100, nextPan.y)),
-    };
-    const boundedZoom = Math.min(maxZoom(), Math.max(1, nextZoom));
+    const boundedZoom = Math.min(CARD_INSPECTION_MAX_ZOOM, Math.max(CARD_INSPECTION_MIN_ZOOM, nextZoom));
+    const requestedPan =
+      boundedZoom <= 1
+        ? { x: 50, y: 50 }
+        : {
+            x: Math.max(0, Math.min(100, nextPan.x)),
+            y: Math.max(0, Math.min(100, nextPan.y)),
+          };
+    const boundedPan =
+      inspectionViewport && imgNaturalDims
+        ? (() => {
+            const placement = inspectionPlacement(
+              inspectionViewport,
+              imgNaturalDims,
+              boundedZoom,
+              { x: requestedPan.x / 100, y: requestedPan.y / 100 },
+              { x: INSPECTION_SAFE_INSET_X, y: INSPECTION_SAFE_INSET_Y }
+            );
+            return { x: placement.focus.x * 100, y: placement.focus.y * 100 };
+          })()
+        : requestedPan;
     setZoomRaw(boundedZoom);
     setPanRaw(boundedPan);
     publishInspection(boundedZoom, boundedPan);
@@ -606,19 +566,19 @@ export default function ImageViewer({
       prevSideRef.current = side;
       setShowReference(false);
       const saved = inspectionState?.views[side as "front" | "back"];
-      const nextZoom = !markMode && saved ? saved.zoom : 1;
-      const nextPan = !markMode && saved ? inspectionViewToPercentFocus(saved) : { x: 50, y: 50 };
+      const nextZoom = saved ? saved.zoom : 1;
+      const nextPan = saved ? inspectionViewToPercentFocus(saved) : { x: 50, y: 50 };
       setZoomRaw(nextZoom);
       setPanRaw(nextPan);
       onZoomChange?.(nextZoom);
     }
-  }, [inspectionState, markMode, side, onZoomChange]);
+  }, [inspectionState, side, onZoomChange]);
   useEffect(() => {
-    if (!inspectionState || markMode || (side !== "front" && side !== "back")) return;
+    if (!inspectionState || (side !== "front" && side !== "back")) return;
     const saved = inspectionState.views[side];
     setZoomRaw(saved.zoom);
     setPanRaw(inspectionViewToPercentFocus(saved));
-  }, [inspectionState, markMode, side]);
+  }, [inspectionState, side]);
   function setZoom(z: number | ((prev: number) => number)) {
     const requested = typeof z === "function" ? z(zoom) : z;
     commitViewport(requested, pan);
@@ -680,344 +640,54 @@ export default function ImageViewer({
   const containerRef = useRef<HTMLDivElement>(null);
   const imgElRef = useRef<HTMLImageElement>(null);
 
-  // ── Mark-mode shrink-wrap state (mirrors manual-card-tool.tsx) ──────────
-  // Card Tool's working pattern: img has EXPLICIT pixel dimensions (no
-  // object-contain letterbox), the container shrink-wraps the img, pins are
-  // direct absolute children of the container. The IMG element box then
-  // always equals the visible image area on both sides — no element-box-vs-
-  // visible-image mismatch (the bug that left BACK pin placement broken
-  // after the b17cc57 fix worked only on FRONT).
-  //
-  // fitBox = the scrollable area's measured dimensions; baseFit scales the
-  // image to fit inside fitBox preserving the image's intrinsic aspect;
-  // renderW × renderH = baseFit × zoom drives the img's explicit
-  // width/height. At zoom > 1 the img grows beyond fitBox and native scroll
-  // on the wrapper handles panning. Inline (non-mark-mode) view keeps its
-  // existing aspectRatio + object-contain layout untouched.
-  const fitRef = useRef<HTMLDivElement>(null);
-  const [fitBox, setFitBox] = useState<{ w: number; h: number } | null>(null);
-  const [imgNaturalDims, setImgNaturalDims] = useState<{ w: number; h: number } | null>(null);
-
-  // ── Rail SAFE FIT (owner defect 2026-08-16: the physical card's bottom edge) ──
-  //
-  // Every previous geometry check measured the FRAME rectangle and reported
-  // "clipped = 0" while the owner still could not see the bottom of the scan.
-  // Both halves of that contradiction were real, and neither was about the frame:
-  //
-  //   1. The frame sized itself with `aspectRatio: 5/7` + `maxHeight: 100%` and
-  //      the <img> filled its content box exactly (`w-full h-full`). The only
-  //      separation was the frame's own `padding: 1.5%` — about 4.5px, which is
-  //      padding, not visible clearance. The card ran to the very edge.
-  //   2. The frame carried `rounded-[5%]` together with `overflow-hidden`. At a
-  //      ~370px-wide card that is an ~18px corner radius cutting into the scan's
-  //      lower corners — exactly where the set symbol, card number and copyright
-  //      line sit. The image RECTANGLE was inside the frame RECTANGLE the whole
-  //      time; the rounded mask removed content anyway, so a rect-vs-rect test
-  //      could never see it.
-  //
-  // The fix is to stop asking CSS to infer the fit. We measure the real
-  // remaining-space viewport, read the scan's own natural dimensions, and
-  // compute explicit rendered pixels with a guaranteed safety inset — so the
-  // <img> itself, not a wrapper, is the fitted authority. Scoped to the grading
-  // rail (`fillHost` && !markMode); the inline and public viewers are untouched.
-  const railViewportRef = useRef<HTMLDivElement>(null);
-  const [railViewport, setRailViewport] = useState<{ w: number; h: number } | null>(null);
-  const [railNaturalDims, setRailNaturalDims] = useState<{ w: number; h: number } | null>(null);
   /**
-   * Natural dimensions of every SIDE seen this session, keyed by railFitKey.
-   *
-   * The rail requirement is the widest across all known sides, never the active
-   * one — Front and Back are separate scans with their own aspects, and sizing
-   * the rail to whichever is showing would shove the workstation sideways on
-   * every Front/Back click. These are DECODED SOURCE dimensions, fixed before
-   * layout, so reading them never observes a rendered card.
+   * One measured viewport drives both the authoritative inline viewer and MARK
+   * DEFECTS. ResizeObserver reports the stable flex box, never the rendered card.
+   * Every resize (including browser page zoom changing CSS pixels) recomputes FIT
+   * from the current viewport + natural image dimensions, with no previous render
+   * in the dependency chain and therefore no ratchet or cumulative shrink.
    */
-  const railNaturalBySideRef = useRef<Record<string, { w: number; h: number }>>({});
-  const [railSidesRevision, setRailSidesRevision] = useState(0);
-  const publishRailWidth = usePublishRailWidth();
-
-  // Measure the scrollable fitRef's box on mount + resize. ResizeObserver
-  // re-fires whenever the parent flex layout reflows (e.g. toolbar wraps,
-  // window resizes). Only meaningful in mark mode — outside mark mode
-  // fitRef is unmounted and the effect bails on the null ref.
   useLayoutEffect(() => {
-    const el = fitRef.current;
+    const el = inspectionViewportRef.current;
     if (!el) return;
     const measure = () => {
-      const w = Math.floor(el.clientWidth);
-      const h = Math.floor(el.clientHeight);
-      setFitBox((prev) => (prev && prev.w === w && prev.h === h ? prev : { w, h }));
+      const width = el.clientWidth;
+      const height = el.clientHeight;
+      if (!(width > 0) || !(height > 0)) return;
+      setInspectionViewport((prev) =>
+        prev && Math.abs(prev.width - width) < 0.01 && Math.abs(prev.height - height) < 0.01 ? prev : { width, height }
+      );
     };
     measure();
-    const ro = new ResizeObserver(measure);
-    ro.observe(el);
-    return () => ro.disconnect();
-  }, [markMode]);
+    const observer = new ResizeObserver(measure);
+    observer.observe(el);
+    return () => observer.disconnect();
+  }, [fillHost, fullscreen, markMode, showReference]);
 
-  // Re-measure the img's natural dimensions on side / variant change. The
-  // onLoad handler on the <img> sets this; null until first load completes.
-  // Reset to null on side / variant switch so a stale dim doesn't drive
-  // renderW/H for the new image.
-  useEffect(() => {
-    setImgNaturalDims(null);
-    // Same reasoning for the rail: a stale natural size from the previous side
-    // would fit the NEW scan to the OLD aspect and could push content off-edge.
-    setRailNaturalDims(null);
+  useLayoutEffect(() => {
+    const image = imgElRef.current;
+    // FRONT and BACK can legitimately resolve to the same already-cached URL
+    // (including review fixtures and duplicated captures). React then keeps the
+    // same <img> node and the browser emits no second `load` event. Re-read the
+    // decoded element synchronously so FIT and every image-relative overlay do
+    // not fall back to an unmeasured, letterboxed plane after the side switch.
+    if (image?.complete && image.naturalWidth > 0 && image.naturalHeight > 0) {
+      setImgNaturalDims({ width: image.naturalWidth, height: image.naturalHeight });
+    } else {
+      setImgNaturalDims(null);
+    }
   }, [side, variant]);
 
-  // baseFit: the image scaled to fit inside fitBox preserving its intrinsic
-  // aspect ratio (the math object-contain would do, but expressed as
-  // explicit pixel dims so the IMG element box matches the visible image).
-  const baseFit =
-    fitBox && imgNaturalDims && imgNaturalDims.w > 0 && imgNaturalDims.h > 0
-      ? (() => {
-          const s = Math.min(fitBox.w / imgNaturalDims.w, fitBox.h / imgNaturalDims.h);
-          return { w: imgNaturalDims.w * s, h: imgNaturalDims.h * s };
-        })()
+  const fittedPlacement: InspectionPlacement | null =
+    inspectionViewport && imgNaturalDims
+      ? inspectionPlacement(
+          inspectionViewport,
+          imgNaturalDims,
+          zoom,
+          { x: pan.x / 100, y: pan.y / 100 },
+          { x: INSPECTION_SAFE_INSET_X, y: INSPECTION_SAFE_INSET_Y }
+        )
       : null;
-  // renderW / renderH apply directly to the <img> as width/height. At
-  // zoom > 1 the image grows past fitBox; the wrapper's overflow:auto
-  // scrolls. No CSS transform in this mode — the math stays
-  // transform-free, so getBoundingClientRect and CSS dims line up exactly.
-  const renderW = baseFit ? baseFit.w * zoom : null;
-  const renderH = baseFit ? baseFit.h * zoom : null;
-
-  // The rail's safe fit applies to the inspection view only. Mark mode already
-  // owns its own explicit-pixel fit (fitBox / baseFit above) and must not change.
-  const railFitEnabled = fillHost && !markMode;
-
-  // Measure the REAL remaining-space card viewport — the `min-h-0 flex-1` box
-  // that sits between the tabs row and the controls row. Its border box is the
-  // rectangle the owner sees, so it is also the rectangle clearances are
-  // measured against.
-  useLayoutEffect(() => {
-    const el = railViewportRef.current;
-    if (!el) return;
-    const measure = () => {
-      const w = Math.floor(el.clientWidth);
-      const h = Math.floor(el.clientHeight);
-      railObserverCountRef.current += 1;
-      setRailViewport((prev) => (prev && prev.w === w && prev.h === h ? prev : { w, h }));
-    };
-    measure();
-    const ro = new ResizeObserver(measure);
-    ro.observe(el);
-    return () => ro.disconnect();
-  }, [railFitEnabled, showReference]);
-
-  /**
-   * FIT STABILITY — owner P0, staging v492: the card alternated between visible and
-   * not-visible, fast enough that the workstation was unusable.
-   *
-   * The cause was a two-mode limit cycle, and it existed because the fit's OUTPUT could
-   * become its own INPUT. The card is in flow inside the measured viewport, so wherever
-   * an ancestor's height is content-driven the card's fitted height IS the viewport's
-   * height:
-   *
-   *   no usable height -> fit by width -> card is tall (width x natural aspect)
-   *     -> viewport now measures tall -> height "usable" -> fit by height
-   *     -> card shrinks -> viewport measures short -> height unusable
-   *     -> fit by width -> card is tall again -> ...
-   *
-   * Each lap re-rendered the card at a different size, and the transient between laps is
-   * the disappearance the owner photographed.
-   *
-   * The cure is a RATCHET, not a debounce. A feedback loop of this shape needs the
-   * available height to GROW in response to the card growing; refusing to act on growth
-   * makes it provably terminating. A committed fit is therefore replaced only when:
-   *
-   *   - there is no committed fit for this source yet, or
-   *   - the viewport WIDTH changed. Width is card-independent: the viewport is
-   *     `min-w-0` + `overflow-hidden`, so the card cannot widen the rail. This is the
-   *     one-way dependency (rail layout -> width -> fit -> image).
-   *   - the available HEIGHT SHRANK. Shrinking must be honoured or the card would
-   *     overflow its box; growth is exactly what closes the loop, so it is ignored.
-   *
-   * Anything else — a transient zero, an invalid measurement, a sub-pixel jitter, a
-   * height increase caused by the card itself — keeps the LAST KNOWN GOOD fit. Once the
-   * card is visible it stays visible.
-   */
-  const railObserverCountRef = useRef(0);
-  const railControlsRef = useRef<HTMLDivElement>(null);
-  /**
-   * A tick that changes whenever the REAL VISIBLE viewport changes, so the fit effect
-   * re-runs. The value itself is unused — the measurement is taken live inside the
-   * effect, from element rects, at the moment it matters.
-   */
-  const [visibleViewportTick, setVisibleViewportTick] = useState(0);
-
-  useLayoutEffect(() => {
-    if (!railFitEnabled) return;
-    const bump = () => setVisibleViewportTick((t) => t + 1);
-    const vv = window.visualViewport;
-    window.addEventListener("resize", bump);
-    vv?.addEventListener("resize", bump);
-    vv?.addEventListener("scroll", bump);
-    return () => {
-      window.removeEventListener("resize", bump);
-      vv?.removeEventListener("resize", bump);
-      vv?.removeEventListener("scroll", bump);
-    };
-  }, [railFitEnabled]);
-  const railFitRef = useRef<{
-    key: string;
-    vw: number;
-    vh: number;
-    w: number;
-    h: number;
-    mode: "safe-fit" | "width-fit";
-    clearanceX: number;
-    clearanceY: number;
-    revision: number;
-  } | null>(null);
-  const [railFitRevision, setRailFitRevision] = useState(0);
-
-  /** Last-known-good is per SOURCE. Front's fit must never be reused for Back. */
-  const railFitKey = `${side}|${variant}`;
-
-  useLayoutEffect(() => {
-    if (!railFitEnabled) return;
-    const nat = railNaturalDims;
-    const vp = railViewport;
-    if (!nat || !vp || nat.w <= 0 || nat.h <= 0) return;
-    // An unusable width is never authoritative — keep whatever is already rendered.
-    if (vp.w <= RAIL_SAFE_INSET_X * 2) return;
-
-    const prev = railFitRef.current?.key === railFitKey ? railFitRef.current : null;
-
-    /**
-     * THE VISIBLE VIEWPORT IS THE CEILING — owner P0, real staging screenshot: roughly
-     * half the card was BELOW the bottom of the MacBook screen while every measurement
-     * said it fitted.
-     *
-     * Both statements were true. The card is in flow, so it makes its own container
-     * taller; that container is inside a page that can scroll, so `clientHeight` happily
-     * reported a box far taller than the physical screen. The card fitted its container
-     * and the container ran off the display. Measuring the container can never detect
-     * this — the container is the thing being inflated.
-     *
-     * So the authority is the real visible viewport, and the card is given only what is
-     * left of it after the chrome above and the controls below:
-     *
-     *   available = visibleViewportHeight - cardViewportTop - controlsHeight - safety
-     *
-     * Every term is card-INDEPENDENT. The card cannot move its own top (the header above
-     * is fixed height) and cannot change the controls' height, so this closes the
-     * feedback path at the source rather than damping it. `visualViewport` is preferred
-     * over `innerHeight` because it excludes browser UI and is correct under pinch-zoom.
-     */
-    const el = railViewportRef.current;
-    const visibleH = window.visualViewport?.height ?? window.innerHeight;
-    const availableH = el
-      ? railAvailableHeight({
-          containerH: vp.h,
-          visibleH,
-          top: el.getBoundingClientRect().top,
-          controlsH: railControlsRef.current?.getBoundingClientRect().height ?? 0,
-        })
-      : vp.h;
-
-    const heightUsable = availableH > RAIL_SAFE_INSET_Y * 2;
-    // Sticky: once this source has been fitted against a real height, never drop back to
-    // width-only. Mode flapping was half of the limit cycle.
-    const mode: "safe-fit" | "width-fit" = heightUsable || prev?.mode === "safe-fit" ? "safe-fit" : "width-fit";
-    const effectiveH = heightUsable ? availableH : (prev?.vh ?? 0);
-    if (mode === "safe-fit" && effectiveH <= RAIL_SAFE_INSET_Y * 2) return;
-
-    // The ratchet: ignore growth and sub-pixel jitter, keep the last known good fit.
-    if (!shouldRecommitRailFit(prev ? { vw: prev.vw, vh: prev.vh, h: prev.h } : null, { vw: vp.w, vh: effectiveH }))
-      return;
-
-    const safeW = vp.w - RAIL_SAFE_INSET_X * 2;
-    const safeH = effectiveH - RAIL_SAFE_INSET_Y * 2;
-    const widthScale = safeW / nat.w;
-    const scale = mode === "safe-fit" ? Math.min(widthScale, safeH / nat.h) : widthScale;
-    if (!Number.isFinite(scale) || scale <= 0) return;
-
-    const w = nat.w * scale;
-    const h = nat.h * scale;
-    railFitRef.current = {
-      key: railFitKey,
-      vw: vp.w,
-      vh: effectiveH,
-      w,
-      h,
-      mode,
-      clearanceX: (vp.w - w) / 2,
-      clearanceY: mode === "safe-fit" ? (effectiveH - h) / 2 : RAIL_SAFE_INSET_Y,
-      revision: (railFitRef.current?.revision ?? 0) + 1,
-    };
-    setRailFitRevision((r) => r + 1);
-  }, [railFitEnabled, railViewport, railNaturalDims, railFitKey, visibleViewportTick]);
-
-  /**
-   * PREDICT THE RAIL'S WIDTH — a PASSIVE effect, deliberately separate from the
-   * fit above.
-   *
-   * It must not run inside the fit's `useLayoutEffect`. Publishing there updates
-   * the provider synchronously mid-layout, which re-renders the aside (and the
-   * portal host inside it) before the browser has settled; the card viewport's
-   * ResizeObserver then reports height 0, the fit falls back to width-only mode,
-   * and the card blows up to fill the rail. Reproduced on a cold load at
-   * 1280x800: card 523x729.6 with the controls stranded at y=899, off-screen.
-   * The fit's timing is load-bearing and is left exactly as it was.
-   *
-   * So the prediction runs AFTER paint, reads the same card-INDEPENDENT inputs
-   * for itself, and never perturbs the fit that produced them. Every input is
-   * upstream of layout: the visible viewport, the chrome above the card, the
-   * chrome below it, and the SOURCE image's decoded aspect. No rendered card box
-   * is read, so no card -> rail -> card loop can form.
-   */
-  useEffect(() => {
-    if (!railFitEnabled) return;
-    const el = railViewportRef.current;
-    if (!el) return;
-    const sides = Object.values(railNaturalBySideRef.current);
-    if (sides.length === 0) return;
-    const visibleH = window.visualViewport?.height ?? window.innerHeight;
-    const box = el.getBoundingClientRect();
-    const availableH = railAvailableHeight({
-      containerH: box.height,
-      visibleH,
-      top: box.top,
-      controlsH: railControlsRef.current?.getBoundingClientRect().height ?? 0,
-    });
-    const safeCardHeight = availableH - RAIL_SAFE_INSET_Y * 2;
-    if (!(safeCardHeight > 0)) return;
-    const required = sessionRequiredRailWidth(
-      sides.map((d) => ({ naturalWidth: d.w, naturalHeight: d.h })),
-      safeCardHeight
-    );
-    // Keyed on the input set. A genuinely new viewport, or a newly decoded side,
-    // may legitimately need a NARROWER rail and must settle once; a narrowing at
-    // an UNCHANGED key is the controls-wrap feedback signature, refused by
-    // shouldAdoptRailWidth.
-    publishRailWidth(`${Math.round(visibleH)}|${sides.length}`, required);
-  }, [railFitEnabled, railFitRevision, railSidesRevision, visibleViewportTick, publishRailWidth]);
-
-  // A new source starts with no last-known-good — Front's dimensions must never be
-  // reused for Back, which has its own natural aspect.
-  useLayoutEffect(() => {
-    railFitRef.current = null;
-    setRailFitRevision((r) => r + 1);
-  }, [railFitKey]);
-
-  /**
-   * Height is fitted only when the viewport actually HAS a usable height.
-   *
-   * If an ancestor's height is content-driven rather than definite, the card is what
-   * gives the rail its height — there is no "available height" to fit into, and
-   * treating a 0 measurement as authoritative is what strands the image invisible.
-   * In that case we fit by WIDTH alone and let the natural aspect decide the height,
-   * which is both correct and always visible.
-   */
-  /**
-   * The committed fit. Read from the ref rather than recomputed each render, so a
-   * re-render caused by anything else (certificate state, defect edits, zoom) can never
-   * resize the card. `railFitRevision` is what makes the ref-read reactive.
-   */
-  void railFitRevision;
-  const railFit = railFitRef.current?.key === railFitKey ? railFitRef.current : null;
 
   const workingEvidenceAsset = getWorkingEvidenceAsset(urls, side);
   const workingEvidenceStatus = workingEvidence?.[side as "front" | "back"];
@@ -1062,15 +732,19 @@ export default function ImageViewer({
   const frontDefectCount = defects.filter((d) => d.image_side === "front").length;
   const backDefectCount = defects.filter((d) => d.image_side === "back").length;
 
-  // Keyboard shortcuts for fullscreen mode. Esc unwinds in order:
+  // Keyboard shortcuts for the active inspection surface. Esc unwinds in order:
   // picker → pending batch → exit. Enter on a non-empty batch opens
-  // the type picker. F/B switch sides (skipped while typing in a field).
+  // the type picker. F/B switch sides, D opens MARK, +/- zoom and 0 fits.
+  // Form, select-like and editable targets are always excluded.
   useEffect(() => {
-    if (!fullscreen) return;
+    if (!fillHost && !fullscreen) return;
     function onKey(e: KeyboardEvent) {
-      const t = e.target as HTMLElement | null;
-      const inField = !!t && (t.tagName === "INPUT" || t.tagName === "TEXTAREA" || (t as any).isContentEditable);
-      if (e.key === "Escape") {
+      if (isInspectionShortcutTarget(e.target)) return;
+      // Plain inspection shortcuts must never consume browser/OS chords such
+      // as Ctrl/Cmd +/- for page zoom. Shift remains allowed because `+`
+      // commonly requires it on physical keyboards.
+      if (e.ctrlKey || e.metaKey || e.altKey) return;
+      if (e.key === "Escape" && fullscreen) {
         if (pickerOpen) {
           setPickerOpen(false);
           setPickerAnchor(null);
@@ -1082,16 +756,26 @@ export default function ImageViewer({
         }
         setFullscreen(false);
         setMarkMode(false);
-      } else if (e.key === "Enter" && !inField && pendingBatch.length > 0 && !pickerOpen) {
+      } else if (e.key === "Enter" && fullscreen && pendingBatch.length > 0 && !pickerOpen) {
         e.preventDefault();
         openTypePicker();
-      } else if (!inField && (e.key === "f" || e.key === "F")) setSide("front");
-      else if (!inField && (e.key === "b" || e.key === "B")) setSide("back");
+      } else if (e.key === "+" || e.key === "=") {
+        e.preventDefault();
+        zoomIn();
+      } else if (e.key === "-" || e.key === "_") {
+        e.preventDefault();
+        zoomOut();
+      } else if (e.key === "0") {
+        e.preventDefault();
+        zoomReset();
+      } else if (e.key === "f" || e.key === "F") setSide("front");
+      else if (e.key === "b" || e.key === "B") setSide("back");
+      else if ((e.key === "d" || e.key === "D") && !fullscreen && mutationsEnabled && !readOnly) enterMarkMode();
     }
     document.addEventListener("keydown", onKey);
     return () => document.removeEventListener("keydown", onKey);
     // eslint-disable-next-line
-  }, [fullscreen, pendingBatch, pickerOpen]);
+  }, [fillHost, fullscreen, pendingBatch, pickerOpen, mutationsEnabled, readOnly, zoom, pan, side]);
 
   function enterMarkMode() {
     if (!mutationsEnabled) return;
@@ -1112,7 +796,10 @@ export default function ImageViewer({
   }
 
   function handleContainerClick(e: React.MouseEvent<HTMLDivElement>) {
-    if (dragging) return;
+    if (dragging || panDragMovedRef.current) {
+      panDragMovedRef.current = false;
+      return;
+    }
     // Line tools intercept clicks via mousedown/mouseup (see handleMouseDown
     // /handleMouseUp); on click here we just skip so the existing pin path
     // doesn't fire too. lineStart != null = a drag is in progress.
@@ -1145,14 +832,10 @@ export default function ImageViewer({
       ]);
       return;
     }
-    if (zoom >= ZOOM_STEPS[ZOOM_STEPS.length - 1] - 0.01) {
+    if (zoom >= CARD_INSPECTION_MAX_ZOOM - 0.01) {
       zoomReset();
     } else {
-      const rect = e.currentTarget.getBoundingClientRect();
-      commitViewport(nextZoomStep(zoom), {
-        x: ((e.clientX - rect.left) / Math.max(1, rect.width)) * 100,
-        y: ((e.clientY - rect.top) / Math.max(1, rect.height)) * 100,
-      });
+      zoomAtClientPoint(nextZoomStep(zoom), e.clientX, e.clientY);
     }
   }
 
@@ -1235,12 +918,78 @@ export default function ImageViewer({
     setLineEnd(null);
   }
 
-  function handleWheel(e: React.WheelEvent) {
-    e.preventDefault(); // prevent page scroll but don't zoom — use buttons instead
+  function zoomAtClientPoint(nextZoom: number, clientX: number, clientY: number) {
+    const viewportEl = inspectionViewportRef.current;
+    if (!viewportEl || !inspectionViewport || !imgNaturalDims) {
+      const viewportRect = viewportEl?.getBoundingClientRect();
+      const rect =
+        viewportRect && viewportRect.width > 0 && viewportRect.height > 0
+          ? viewportRect
+          : containerRef.current?.getBoundingClientRect();
+      commitViewport(
+        nextZoom,
+        rect && rect.width > 0 && rect.height > 0
+          ? {
+              x: ((clientX - rect.left) / rect.width) * 100,
+              y: ((clientY - rect.top) / rect.height) * 100,
+            }
+          : pan
+      );
+      return;
+    }
+    const rect = viewportEl.getBoundingClientRect();
+    const nextFocus = zoomInspectionFocusAtPoint(
+      inspectionViewport,
+      imgNaturalDims,
+      zoom,
+      nextZoom,
+      { x: pan.x / 100, y: pan.y / 100 },
+      { x: clientX - rect.left, y: clientY - rect.top },
+      { x: INSPECTION_SAFE_INSET_X, y: INSPECTION_SAFE_INSET_Y }
+    );
+    commitViewport(nextZoom, { x: nextFocus.x * 100, y: nextFocus.y * 100 });
   }
 
+  function handleWheel(e: WheelEvent) {
+    if (e.ctrlKey || e.metaKey) {
+      e.preventDefault();
+      const factor = Math.exp(-e.deltaY * 0.002);
+      zoomAtClientPoint(
+        Math.min(CARD_INSPECTION_MAX_ZOOM, Math.max(CARD_INSPECTION_MIN_ZOOM, zoom * factor)),
+        e.clientX,
+        e.clientY
+      );
+      return;
+    }
+    // Inline wheel/trackpad input remains page scroll. In fullscreen MARK
+    // DEFECTS, normal two-finger movement pans only while magnified.
+    if (!fullscreen || zoom <= 1 || !inspectionViewport || !imgNaturalDims) return;
+    e.preventDefault();
+    const nextFocus = panInspectionFocus(
+      inspectionViewport,
+      imgNaturalDims,
+      zoom,
+      { x: pan.x / 100, y: pan.y / 100 },
+      { x: -e.deltaX, y: -e.deltaY },
+      { x: INSPECTION_SAFE_INSET_X, y: INSPECTION_SAFE_INSET_Y }
+    );
+    commitViewport(zoom, { x: nextFocus.x * 100, y: nextFocus.y * 100 });
+  }
+
+  // React delegates wheel handlers passively in supported browsers, which can
+  // make preventDefault ineffective and let Ctrl/Cmd+wheel zoom both the card
+  // and the browser UI. Bind this inspection-only handler explicitly as
+  // non-passive so image zoom and browser page zoom remain separate.
+  useLayoutEffect(() => {
+    const el = inspectionViewportRef.current;
+    if (!el) return;
+    const onWheel = (event: WheelEvent) => handleWheel(event);
+    el.addEventListener("wheel", onWheel, { passive: false });
+    return () => el.removeEventListener("wheel", onWheel);
+  }, [fullscreen, imgNaturalDims, inspectionViewport, pan, side, zoom]);
+
   function zoomIn() {
-    setZoom((z) => Math.min(maxZoom(), nextZoomStep(z)));
+    setZoom((z) => nextZoomStep(z));
   }
   function zoomOut() {
     setZoom((z) => prevZoomStep(z));
@@ -1256,12 +1005,8 @@ export default function ImageViewer({
       lineMouseDown(e);
       return;
     }
-    // Mark mode never uses the CSS-transform drag-pan — at zoom > 1 the
-    // Card-Tool-style native scroll on fitRef handles panning. Activating
-    // the custom drag here would set `dragging=true`, which bails out of
-    // handleContainerClick → swallows pin-drop clicks. Skip entirely.
-    if (markMode) return;
     if (zoom <= 1) return;
+    panDragMovedRef.current = false;
     setDragging(true);
     setDragStart({ pointerX: e.clientX, pointerY: e.clientY, focusX: pan.x, focusY: pan.y });
   }
@@ -1272,12 +1017,19 @@ export default function ImageViewer({
       return;
     }
     if (!dragging) return;
-    const rect = containerRef.current?.getBoundingClientRect();
-    if (!rect) return;
-    setPan({
-      x: dragStart.focusX - ((e.clientX - dragStart.pointerX) / Math.max(1, rect.width)) * 100,
-      y: dragStart.focusY - ((e.clientY - dragStart.pointerY) / Math.max(1, rect.height)) * 100,
-    });
+    if (Math.hypot(e.clientX - dragStart.pointerX, e.clientY - dragStart.pointerY) > 8) {
+      panDragMovedRef.current = true;
+    }
+    if (!inspectionViewport || !imgNaturalDims) return;
+    const nextFocus = panInspectionFocus(
+      inspectionViewport,
+      imgNaturalDims,
+      zoom,
+      { x: dragStart.focusX / 100, y: dragStart.focusY / 100 },
+      { x: e.clientX - dragStart.pointerX, y: e.clientY - dragStart.pointerY },
+      { x: INSPECTION_SAFE_INSET_X, y: INSPECTION_SAFE_INSET_Y }
+    );
+    setPan({ x: nextFocus.x * 100, y: nextFocus.y * 100 });
   }
 
   function handleMouseUp() {
@@ -1332,10 +1084,6 @@ export default function ImageViewer({
     setPickerAnchor(null);
   }
 
-  const transformStyle =
-    zoom > 1 ? `scale(${zoom}) translate(${(50 - pan.x) / zoom}%, ${(50 - pan.y) / zoom}%)` : "none";
-  const transitionStyle = dragging ? "none" : "transform 0.15s";
-
   // ── Shared tab bar ──────────────────────────────────────────────────────
   // The chip row (FRONT/BACK + trash) is suppressed when `omitSideTabs` is
   // true — used by the normal-inline grading-panel layout where the parent
@@ -1361,7 +1109,9 @@ export default function ImageViewer({
                       if (!inspectionState) zoomReset();
                     }}
                     disabled={!hasImage}
-                    className={`flex-shrink-0 rounded-l px-3 py-2 text-[10px] font-bold uppercase tracking-wider border transition-all ${
+                    className={`flex-shrink-0 rounded-l text-[10px] font-bold uppercase tracking-wider border transition-all ${
+                      fillHost && !fullscreen ? "px-2 py-1" : "px-3 py-2"
+                    } ${
                       side === s && !showReference
                         ? "border-[var(--admin-gold)] text-[var(--admin-gold)] bg-[var(--admin-gold)]/10"
                         : hasImage
@@ -1372,7 +1122,7 @@ export default function ImageViewer({
                     {s}
                     {count > 0 ? ` (${count})` : ""}
                   </button>
-                  {hasImage && certId && !fullscreen && mayMutateSourceImage && (
+                  {hasImage && certId && !fullscreen && mayDeleteSourceImage && (
                     <button
                       type="button"
                       title={`Delete ${s} image`}
@@ -1380,7 +1130,7 @@ export default function ImageViewer({
                         e.stopPropagation();
                         if (!confirm(`Delete the ${s} image? You'll need to re-upload before grading.`)) return;
                         try {
-                          const r = await fetch(`${apiBase}/certificates/${certId}/images/${s}`, {
+                          const r = await adminFetch(`${apiBase}/certificates/${certId}/images/${s}`, {
                             method: "DELETE",
                             credentials: "include",
                           });
@@ -1416,85 +1166,45 @@ export default function ImageViewer({
 
   // ── Shared image area ───────────────────────────────────────────────────
   function renderImageArea(maxH: string | number) {
-    // The inner "card frame" — the same outer container in both modes, but
-    // it switches between aspectRatio-5:7 + object-contain layout (inline
-    // view) and Card-Tool-style shrink-wrap with explicit pixel dimensions
-    // (mark mode). The mark-mode path eliminates the element-box-vs-visible-
-    // image gap that left BACK pins misaligned after b17cc57 — when the img
-    // has explicit pixel dims (no object-contain), the IMG element box
-    // EQUALS the visible image area on both sides.
+    const frameStyle: CSSProperties = fittedPlacement
+      ? {
+          position: "absolute",
+          left: fittedPlacement.left,
+          top: fittedPlacement.top,
+          width: fittedPlacement.width,
+          height: fittedPlacement.height,
+          transition: "none",
+          cursor: markMode && markTool === "pin" ? PIN_CURSOR : undefined,
+        }
+      : {
+          position: "absolute",
+          left: INSPECTION_SAFE_INSET_X,
+          right: INSPECTION_SAFE_INSET_X,
+          top: INSPECTION_SAFE_INSET_Y,
+          bottom: INSPECTION_SAFE_INSET_Y,
+          cursor: markMode && markTool === "pin" ? PIN_CURSOR : undefined,
+        };
+
+    // Image, pins, whitening/crease lines and centering all occupy this exact
+    // explicit plane. No object-fit letterbox and no CSS scale transform sits
+    // between stored image percentages and the rendered overlay coordinates.
     const cardFrame = (
       <div
         ref={containerRef}
-        className={`relative select-none ${
-          // The decorative 5% corner radius is DROPPED on the grading rail. Paired
-          // with overflow-hidden it masks roughly 18px off each corner of a ~370px
-          // card — the set symbol, card number and copyright line — while every
-          // rectangle-based check still reports the image as fully inside the frame.
-          // The grader must inspect the true scan, so the inspection viewport does
-          // not crop it decoratively. Every other surface keeps the rounding.
-          railFitEnabled ? "" : "rounded-[5%] "
-        }${
+        className={`select-none ${
           markMode
-            ? "flex-shrink-0"
-            : `overflow-hidden ${zoom > 1 ? (dragging ? "cursor-grabbing" : "cursor-grab") : "cursor-zoom-in"}`
+            ? markTool === "pin"
+              ? ""
+              : "cursor-crosshair"
+            : zoom > 1
+              ? dragging
+                ? "cursor-grabbing"
+                : "cursor-grab"
+              : "cursor-zoom-in"
         }`}
-        style={
-          markMode
-            ? // Mark mode: no aspectRatio, no padding — the container
-              // shrink-wraps the img's explicit pixel dimensions, so its
-              // box equals the visible image area. Pin coord math then
-              // aligns on both sides regardless of natural aspect.
-              { cursor: PIN_CURSOR }
-            : railFit
-              ? // RAIL SAFE FIT — the computed result, applied literally, IN FLOW.
-                //
-                // In flow is not incidental; it is the visibility guarantee. The
-                // previous pass positioned this absolutely, which took the card out
-                // of flow — and the card is the only thing in the rail with real
-                // height. Wherever the host's height is content-driven rather than
-                // definite, removing the card from flow collapsed the column to 0
-                // and the card disappeared entirely on the real /admin route.
-                //
-                // `flexShrink: 0` keeps the computed size exact; the viewport's
-                // `overflow-hidden` is what stops this explicit size propagating back
-                // up as an ancestor's min-content width (a flex item whose overflow
-                // is not visible has an automatic minimum size of 0), which is the
-                // feedback loop that made an in-flow explicit width oscillate before.
-                // `transition: none` is explicit and required. The frame inherits
-                // `transition: all` from the global styles, so a refit ANIMATED the
-                // card's width and height — a visible pulse on every measurement, and
-                // part of what the owner saw as the card moving on its own. Automatic
-                // fit must settle instantly; only deliberate user zoom animates.
-                { width: railFit.w, height: railFit.h, flexShrink: 0, transition: "none" }
-              : railFitEnabled
-                ? // Not yet measurable — no viewport, or no natural size yet.
-                  //
-                  // This is the LAST-KNOWN-GOOD rendering path, deliberately: it is
-                  // the sizing the rail shipped with before this work, so the worst
-                  // case is the old appearance, never a blank rail. A fallback that
-                  // can only be reached when measurement fails must not itself be a
-                  // new, unproven layout. minWidth/minHeight are pinned to 0 so it
-                  // cannot contribute the scan's natural width upward.
-                  {
-                    aspectRatio: "5/7",
-                    maxWidth: "100%",
-                    maxHeight: "100%",
-                    minHeight: 0,
-                    minWidth: 0,
-                  }
-                : {
-                    aspectRatio: "5/7",
-                    maxHeight: maxH,
-                    // Flex items default to `min-height: auto`, which would let the
-                    // aspect-derived height win and overflow the rail. 0 lets it shrink.
-                    minHeight: 0,
-                    padding: "1.5%",
-                  }
-        }
+        style={frameStyle}
         onPointerDown={handleMarkPointerDown}
         onClick={handleContainerClick}
-        onWheel={handleWheel}
         onMouseDown={handleMouseDown}
         onMouseMove={handleMouseMove}
         onMouseUp={handleMouseUp}
@@ -1504,44 +1214,28 @@ export default function ImageViewer({
         data-inspection-side={side}
         data-inspection-source={inspectionAsset?.source ?? "working-evidence-unavailable"}
         data-inspection-zoom={zoom}
-        data-inspection-focus-x={pan.x / 100}
-        data-inspection-focus-y={pan.y / 100}
-        {...(railFitEnabled
-          ? {
-              // READ-ONLY runtime diagnostics. These report the computed safe fit
-              // so acceptance can be checked without inferring geometry from CSS.
-              // They describe the rendered <img> box against the visible viewport
-              // box — never a wrapper, never padding.
-              "data-card-fit-state": railFit ? railFit.mode : "measuring",
-              // Stability instrumentation. `fit-revision` counts COMMITTED fits and
-              // `observer-count` counts ResizeObserver callbacks: if the two climb
-              // together the ratchet has failed and the loop is back.
-              "data-card-fit-revision": railFit ? railFit.revision : 0,
-              "data-card-observer-count": railObserverCountRef.current,
-              "data-card-natural-w": railNaturalDims?.w ?? "",
-              "data-card-natural-h": railNaturalDims?.h ?? "",
-              "data-card-rendered-w": railFit ? railFit.w.toFixed(1) : "",
-              "data-card-rendered-h": railFit ? railFit.h.toFixed(1) : "",
-              "data-card-clearance-top": railFit ? railFit.clearanceY.toFixed(1) : "",
-              "data-card-clearance-bottom": railFit ? railFit.clearanceY.toFixed(1) : "",
-              "data-card-clearance-left": railFit ? railFit.clearanceX.toFixed(1) : "",
-              "data-card-clearance-right": railFit ? railFit.clearanceX.toFixed(1) : "",
-            }
-          : {})}
+        data-inspection-focus-x={fittedPlacement?.focus.x ?? pan.x / 100}
+        data-inspection-focus-y={fittedPlacement?.focus.y ?? pan.y / 100}
+        data-card-fit-state={fittedPlacement ? (zoom === 1 ? "fit" : "magnified") : "measuring"}
+        data-card-natural-w={imgNaturalDims?.width ?? ""}
+        data-card-natural-h={imgNaturalDims?.height ?? ""}
+        data-card-rendered-w={fittedPlacement?.width.toFixed(1) ?? ""}
+        data-card-rendered-h={fittedPlacement?.height.toFixed(1) ?? ""}
+        data-card-clearance-top={fittedPlacement?.top.toFixed(1) ?? ""}
+        data-card-clearance-bottom={
+          fittedPlacement && inspectionViewport
+            ? (inspectionViewport.height - fittedPlacement.top - fittedPlacement.height).toFixed(1)
+            : ""
+        }
+        data-card-clearance-left={fittedPlacement?.left.toFixed(1) ?? ""}
+        data-card-clearance-right={
+          fittedPlacement && inspectionViewport
+            ? (inspectionViewport.width - fittedPlacement.left - fittedPlacement.width).toFixed(1)
+            : ""
+        }
       >
         {currentUrl ? (
-          <div
-            className={`relative ${markMode ? "" : `w-full h-full ${markMode ? "" : "overflow-hidden"}`}`}
-            style={
-              markMode
-                ? // Mark mode: no CSS transform on the zoom-pan div — zoom
-                  // is applied via renderW/renderH on the img instead, and
-                  // native scroll on the fitRef wrapper handles panning.
-                  // This removes the transform's coord-space gap entirely.
-                  {}
-                : { transform: transformStyle, transition: transitionStyle }
-            }
-          >
+          <div className="relative h-full w-full" data-testid="grading-coordinate-plane">
             <img
               ref={imgElRef}
               src={currentUrl}
@@ -1550,48 +1244,14 @@ export default function ImageViewer({
                   ? `${side} authoritative bound scan image`
                   : `${side} full-resolution working evidence`
               }
-              className={markMode ? "block" : "w-full h-full object-contain"}
-              style={
-                markMode
-                  ? // Mark mode: explicit pixel dimensions = visible image
-                    // size. No object-contain letterbox, no CSS transform.
-                    // IMG element box equals visible image area. Click and
-                    // render share that single reference frame on both
-                    // sides. While imgNaturalDims / fitBox haven't been
-                    // captured yet (first paint), fall back to a maxWidth/
-                    // maxHeight intrinsic-sized img so onLoad can fire.
-                    renderW != null && renderH != null
-                    ? { width: renderW, height: renderH }
-                    : {
-                        maxWidth: fitBox?.w ?? "100vw",
-                        maxHeight: fitBox?.h ?? "85vh",
-                        width: "auto",
-                        height: "auto",
-                      }
-                  : undefined
-              }
+              className={`block h-full w-full ${fittedPlacement ? "" : "object-contain"}`}
               data-working-evidence={inspectionAsset?.source === "working-evidence" ? "full-resolution" : undefined}
               data-review-evidence={
                 inspectionAsset?.source === "review-evidence" ? "certificate-bound-image" : undefined
               }
-              data-testid={railFitEnabled ? "grading-card-image" : undefined}
+              data-testid="grading-card-image"
               onLoad={(e) => {
-                const w = e.currentTarget.naturalWidth;
-                const h = e.currentTarget.naturalHeight;
-                // The rail's safe fit is computed from the SCAN's own natural
-                // dimensions, not from an assumed 5:7 card ratio — a scan that is
-                // not exactly 5:7 is precisely the case where assuming the ratio
-                // pushes real card content past the viewport edge.
-                if (railFitEnabled) {
-                  setRailNaturalDims({ w, h });
-                  const known = railNaturalBySideRef.current[railFitKey];
-                  if (!known || known.w !== w || known.h !== h) {
-                    railNaturalBySideRef.current = { ...railNaturalBySideRef.current, [railFitKey]: { w, h } };
-                    setRailSidesRevision((r) => r + 1);
-                  }
-                }
-                if (!markMode) return;
-                setImgNaturalDims({ w, h });
+                setImgNaturalDims({ width: e.currentTarget.naturalWidth, height: e.currentTarget.naturalHeight });
               }}
               onError={() => setFailedWorkingUrl(currentUrl)}
               draggable={false}
@@ -2043,67 +1703,22 @@ export default function ImageViewer({
 
     return (
       <>
-        {/* Mark mode wraps the cardFrame in a fit-scroll + safe-center
-            scaffold (Card Tool pattern, manual-card-tool.tsx:1099-1131).
-            At zoom = 1 the centering keeps the card in the middle of the
-            visible area. At zoom > 1, renderW/renderH grow past fitBox
-            and the wrapper's overflow:auto provides native scroll for
-            panning. Inline (non-mark-mode) renders cardFrame directly —
-            its aspectRatio + maxHeight already constrain it. */}
-        {markMode ? (
-          <div ref={fitRef} className="w-full h-full overflow-auto overscroll-contain">
-            <div
-              className="min-w-full min-h-full flex"
-              style={{ justifyContent: "safe center", alignItems: "safe center" }}
-            >
-              {cardFrame}
-            </div>
-          </div>
-        ) : fillHost ? (
-          /*
-           * RAIL FIT (owner defect 2026-08-16: the card's BOTTOM EDGE was still cut off on the
-           * real /admin route, hiding the set/rarity/promo/copyright strip graders must read).
-           *
-           * cardFrame was a DIRECT flex item of the rail root with `aspectRatio: 5/7` and
-           * `maxHeight: "100%"`. A percentage max-height resolves against the item's containing
-           * block — the ROOT — not against the space left after the shrink-0 tabs and controls.
-           * So the frame was allowed to be as tall as the WHOLE rail while only part of it
-           * remained, and the host's `overflow-hidden` clipped the difference off the bottom.
-           * As a flex item it also had the default `min-height: auto`, so its aspect-derived
-           * height stopped it shrinking to fit.
-           *
-           * THIS element is the visible inspection viewport: the rectangle the card is
-           * fitted into, the rectangle every clearance is measured against, and the
-           * element the ResizeObserver watches. It deliberately wraps the card frame
-           * ALONE. renderImageArea returns a fragment of `frame + zoom toolbar`, so
-           * measuring their shared parent would fold the toolbar's width into the card's
-           * available space and report a viewport the card never had.
-           */
-          <div
-            ref={railViewportRef}
-            // `overflow-hidden` is load-bearing: a flex item whose overflow is not
-            // `visible` has an automatic minimum size of 0, which is what stops the
-            // card's explicit width propagating upward as an ancestor's min-content
-            // width and re-inflating the rail on the next measurement.
-            className="relative flex min-h-0 min-w-0 flex-1 items-center justify-center overflow-hidden"
-            data-testid="grading-card-viewport"
-            data-card-viewport-w={railViewport?.w ?? ""}
-            data-card-viewport-h={railViewport?.h ?? ""}
-            data-card-safe-inset-x={RAIL_SAFE_INSET_X}
-            data-card-safe-inset-y={RAIL_SAFE_INSET_Y}
-          >
-            {cardFrame}
-          </div>
-        ) : (
-          cardFrame
-        )}
+        <div
+          ref={inspectionViewportRef}
+          className="relative h-full w-full min-h-0 min-w-0 flex-1 overflow-hidden overscroll-contain"
+          style={!fillHost && !fullscreen ? { height: maxH } : undefined}
+          data-testid="grading-card-viewport"
+          data-card-viewport-w={inspectionViewport?.width.toFixed(1) ?? ""}
+          data-card-viewport-h={inspectionViewport?.height.toFixed(1) ?? ""}
+          data-card-safe-inset-x={INSPECTION_SAFE_INSET_X}
+          data-card-safe-inset-y={INSPECTION_SAFE_INSET_Y}
+        >
+          {cardFrame}
+        </div>
 
-        {/* Zoom toolbar — sibling of the card frame so it doesn't overlap card art.
-          IN THE RAIL it is not rendered here at all: it lives in the top utility row
-          beside the Front/Back tabs (see renderZoomPill). Below the card it was a row
-          sibling that took ~110px out of the rail's width, and stacked under the card
-          it cost height. In a row that already exists it costs the card neither. */}
-        {railFitEnabled ? null : <div className="mt-2 flex shrink-0 items-center justify-end">{renderZoomPill()}</div>}
+        {!fillHost && !fullscreen ? (
+          <div className="mt-2 flex shrink-0 items-center justify-end">{renderZoomPill()}</div>
+        ) : null}
       </>
     );
   }
@@ -2122,7 +1737,7 @@ export default function ImageViewer({
             e.stopPropagation();
             zoomOut();
           }}
-          disabled={zoom <= 1}
+          disabled={zoom <= CARD_INSPECTION_MIN_ZOOM + 0.001}
           className="h-8 w-8 flex items-center justify-center text-white hover:text-[var(--admin-gold)] disabled:text-[var(--admin-ink-dim)] transition-colors rounded-full"
         >
           <ZoomOut size={14} />
@@ -2135,24 +1750,22 @@ export default function ImageViewer({
             e.stopPropagation();
             zoomIn();
           }}
-          disabled={zoom >= maxZoom()}
+          disabled={zoom >= CARD_INSPECTION_MAX_ZOOM - 0.001}
           className="h-8 w-8 flex items-center justify-center text-white hover:text-[var(--admin-gold)] disabled:text-[var(--admin-ink-dim)] transition-colors rounded-full"
         >
           <ZoomIn size={14} />
         </button>
-        {zoom > 1 && (
-          <button
-            type="button"
-            aria-label="Reset zoom"
-            onClick={(e) => {
-              e.stopPropagation();
-              zoomReset();
-            }}
-            className="h-8 w-8 flex items-center justify-center text-[var(--admin-ink-dim)] hover:text-white transition-colors rounded-full"
-          >
-            <RotateCcw size={12} />
-          </button>
-        )}
+        <button
+          type="button"
+          aria-label="Fit to screen / reset zoom"
+          onClick={(e) => {
+            e.stopPropagation();
+            zoomReset();
+          }}
+          className="flex h-8 items-center gap-1 rounded-full px-2 text-[9px] font-bold text-[var(--admin-ink-dim)] transition-colors hover:text-white"
+        >
+          <RotateCcw size={11} /> FIT
+        </button>
       </div>
     );
   }
@@ -2176,18 +1789,16 @@ export default function ImageViewer({
           </div>
 
           {/* Main image — fills remaining space */}
-          <div className="flex-1 flex items-center justify-center p-4 min-h-0">
-            <div className="w-full h-full max-w-[85vh]">{renderImageArea("85vh")}</div>
+          <div className="flex min-h-0 flex-1 items-center justify-center p-4">
+            <div className="flex h-full w-full min-h-0 min-w-0">{renderImageArea("85vh")}</div>
           </div>
 
-          {/* Dropdown rendered below via Portal — see DropdownPortal at the
-              bottom of the fullscreen JSX so it escapes any ancestor
-              transform (the image container has transform: scale(...) for
-              zoom, which would break position: fixed otherwise). */}
+          {/* Dropdown renders via Portal so the annotation plane can never clip it. */}
 
-          {/* Bottom toolbar */}
-          <div className="flex-shrink-0 px-4 py-3 flex items-center justify-between border-t border-[var(--admin-line-hard)]">
-            <div className="flex items-center gap-3">
+          {/* Bottom toolbar is one horizontally scrollable row. Browser UI scaling
+              cannot wrap it and feed a new height back into the image viewport. */}
+          <div className="flex shrink-0 items-center justify-between gap-4 overflow-x-auto border-t border-[var(--admin-line-hard)] px-4 py-3">
+            <div className="flex shrink-0 items-center gap-3">
               {/* MVGS v2.1 tool palette — Pin | Whitening line | Crease line.
                   Pin path is unchanged; the line tools are gated on the
                   parent wiring onWhiteningLinesChange / onCreaseLinesChange. */}
@@ -2263,7 +1874,8 @@ export default function ImageViewer({
                     : `${creaseLines.length} crease line${creaseLines.length !== 1 ? "s" : ""} · Click-drag across the card`}
               </p>
             </div>
-            <div className="flex items-center gap-3">
+            <div className="flex shrink-0 items-center gap-3">
+              {renderZoomPill()}
               {pendingBatch.length > 0 && !pickerOpen && (
                 <button
                   type="button"
@@ -2320,21 +1932,9 @@ export default function ImageViewer({
       <style>{PULSE_CSS}</style>
 
       {fillHost ? (
-        /* TOP UTILITY ROW — one compact row that owns every control that is not the
-           card: Front/Back and the zoom pill on the left, the ONE live certificate
-           preview on the far right. Everything here is `shrink-0`, so the row costs a
-           fixed height once and the card takes all the rest. Nothing in this row is
-           allowed to sit beside or beneath the card and take space from it. */
+        /* One non-wrapping row owns side, zoom and certificate controls. */
         <div className="flex shrink-0 items-center justify-between gap-2" data-testid="grading-top-utility-row">
-          {/* LEFT COLUMN — Front/Back with the zoom pill stacked beneath, both left
-              aligned. Stacking them turns the header's dead horizontal space into
-              usable width for the certificate: side by side they consumed ~260px of a
-              373px rail and left the certificate nothing to grow into.
-
-              Controls are shrink-0: they have a fixed intrinsic size and overlap their
-              neighbours if allowed to compress. The certificate absorbs the squeeze
-              instead — it is the one element here that scales cleanly. */}
-          <div className="flex shrink-0 flex-col items-start gap-1">
+          <div className="flex shrink-0 items-center gap-1 overflow-x-auto">
             <div className="shrink-0">{renderTabs()}</div>
             <div className="shrink-0">{renderZoomPill()}</div>
           </div>
@@ -2383,7 +1983,7 @@ export default function ImageViewer({
         (fillHost ? (
           // THE VISIBLE INSPECTION VIEWPORT. This is the rectangle the owner sees and
           // the rectangle every clearance is measured against — it is measured directly
-          // (ResizeObserver on railViewportRef) rather than inferred, and the fitted
+          // (ResizeObserver on inspectionViewportRef) rather than inferred, and the fitted
           // image is centred inside it with a guaranteed safety inset on every edge.
           // The card region now contains ONLY the card. The zoom controls moved up into
           // the top utility row, so nothing competes with the card for the rail's width
@@ -2396,12 +1996,11 @@ export default function ImageViewer({
 
       {/* Controls row — shrink-0 so it always reserves its own space in the rail. */}
       <div
-        ref={railControlsRef}
-        className="flex shrink-0 flex-wrap items-center gap-2"
+        className="flex shrink-0 flex-nowrap items-center gap-2 overflow-x-auto pb-1"
         data-testid="grading-card-controls"
       >
         <p
-          className={`text-[9px] font-bold uppercase tracking-widest ${
+          className={`shrink-0 text-[9px] font-bold uppercase tracking-widest ${
             currentUrl ? "text-emerald-300" : "text-amber-300"
           }`}
           data-testid="working-evidence-status"
@@ -2533,7 +2132,7 @@ function InlineDropZone({
     try {
       const fd = new FormData();
       fd.append(side, f);
-      const res = await fetch(`/api/admin/certificates/${certId}/upload-images`, {
+      const res = await adminFetch(`/api/admin/certificates/${certId}/upload-images`, {
         method: "POST",
         credentials: "include",
         body: fd,
@@ -2680,11 +2279,9 @@ function DefectEditPopover({
   }, [onClose]);
 
   // Position in viewport-fixed coords against the marker's rect, then portal
-  // into document.body. The marker's parent (image container) has
-  // `transform: scale(...)` (creates a stacking context) AND `overflow: hidden`
-  // — without portaling, the popover would either render below the image OR
-  // get clipped off the edge of the visible area. Same pattern as the picker
-  // dropdown earlier in this file (~L670).
+  // into document.body. The inspection viewport deliberately clips magnified
+  // evidence; without portaling, the popover would be clipped at that boundary.
+  // Same pattern as the picker dropdown earlier in this file.
   //
   // GAP = 20px clears the 32px marker cleanly. Width = 256 (Tailwind w-64).
   // Clamp to viewport edges with 8px padding so the popover never slides

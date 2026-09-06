@@ -11,6 +11,7 @@ import { partnerRateLimit } from "./rate-limit";
 import { StationIdentityError } from "./station-identity";
 import {
   StationServiceError,
+  approvedStagingCanonCalibrationRecoveryId,
   assertStationCaptureReady,
   authenticateStationRequest,
   getStationEnrollmentStatus,
@@ -19,7 +20,7 @@ import {
   recordStationHeartbeat,
   resolveActiveStationByCode,
   requestStationEnrollment,
-  saveStationCalibration,
+  strictStagingCalibrationRecoveryRuntime,
   type StationPrincipal,
 } from "./station-service";
 import { authorizePartnerScannerCertificate } from "./grading-routes";
@@ -86,25 +87,6 @@ const partnerStationCaptureRateLimit = rateLimit({
 // This deliberately runs before signature/session validation: authentication itself
 // verifies a signed payload and resolves the operator session, so it must be protected
 // from unauthenticated request floods as well as the authenticated write below.
-const partnerStationCalibrationIngressRateLimit = rateLimit({
-  windowMs: 60_000,
-  max: 60,
-  standardHeaders: true,
-  legacyHeaders: false,
-  passOnStoreError: false,
-  message: { error: "Too many station calibration requests. Please wait a minute and try again." },
-});
-
-const partnerStationCalibrationRateLimit = rateLimit({
-  windowMs: 60_000,
-  max: 10,
-  standardHeaders: true,
-  legacyHeaders: false,
-  passOnStoreError: false,
-  keyGenerator: (req) => `partner-station-calibration:${req.station?.id ?? "unknown"}`,
-  message: { error: "Too many station calibration requests. Please wait a minute and try again." },
-});
-
 /*
  * RC-F11 — the three signed-station hot paths that carried NO rate limit at all.
  *
@@ -248,29 +230,6 @@ async function requireSignedStation(req: Request, res: Response, next: NextFunct
   } catch (error) {
     stationError(res, error);
   }
-}
-
-/**
- * MOVING THE CAPTURE AREA IS MAINTENANCE, NOT OPERATION.
- *
- * Identical to `requireSignedStationOperator` in every respect except the capability it demands.
- * The capture area sits in a proven physical position on the scanner bed and normal shop work never
- * moves it — place the card inside it, Preview, Scan. Gating recalibration on `partner.cards.scan`
- * meant the least-privileged role in the system could silently repoint a station's physical
- * acquisition rectangle, and the damage from that is invisible at the time: every card afterwards is
- * framed differently from every card before, and any certificate straddling the change has two sides
- * from two rectangles.
- *
- * Written as its own middleware rather than a parameter, because `tests/release-route-rate-limits.
- * test.ts` pins each route's middleware chain BY NAME — so the authority a route requires is legible
- * in the chain itself and cannot be changed without the pin noticing.
- */
-async function requireSignedStationMaintainer(req: Request, res: Response, next: NextFunction): Promise<void> {
-  return requireSignedStationCapability(req, res, next, {
-    capability: "partner.stations.calibrate",
-    code: "operator_calibrate_forbidden",
-    message: "Moving the capture area requires station maintenance authority",
-  });
 }
 
 async function requireSignedStationOperator(req: Request, res: Response, next: NextFunction): Promise<void> {
@@ -467,15 +426,31 @@ export function partnerStationRouter(): Router {
     partnerStationHeartbeatRateLimit,
     async (req, res) => {
       try {
-        const result = await recordStationHeartbeat(req.station!, {
-          appVersion: req.body?.appVersion,
-          scannerConnected: req.body?.scannerConnected,
-          scannerHardware: req.body?.scannerHardware,
-          scannerProfileVersion: req.body?.scannerProfileVersion,
-          pendingUploadCount: req.body?.pendingUploadCount,
-          captureState: req.body?.captureState,
-          lastFailureCode: req.body?.lastFailureCode,
-        });
+        const result = await recordStationHeartbeat(
+          req.station!,
+          {
+            appVersion: req.body?.appVersion,
+            scannerConnected: req.body?.scannerConnected,
+            scannerHardware: req.body?.scannerHardware,
+            scannerProfileVersion: req.body?.scannerProfileVersion,
+            pendingUploadCount: req.body?.pendingUploadCount,
+            captureState: req.body?.captureState,
+            lastFailureCode: req.body?.lastFailureCode,
+          },
+          req.partner!.userId,
+          {
+            // Recovery authority is derived only from the already-resolved,
+            // MFA-passed operator session. It is never accepted from the body,
+            // and the service repeats the strict staging runtime check.
+            approvedExistingCalibrationId:
+              strictStagingCalibrationRecoveryRuntime() &&
+              !req.partner!.viewOnly &&
+              !req.partner!.sensitiveDisabled &&
+              req.partner!.permissions.has("partner.stations.calibrate")
+                ? approvedStagingCanonCalibrationRecoveryId(req.station!.code)
+                : null,
+          }
+        );
         res.json({ ok: true, ...result });
       } catch (error) {
         stationError(res, error);
@@ -791,37 +766,6 @@ export function partnerStationRouter(): Router {
           });
           return;
         }
-        stationError(res, error);
-      }
-    }
-  );
-
-  // From origin/main: `partnerStationCalibrationIngressRateLimit` runs BEFORE authentication on
-  // purpose. requireSignedStation verifies a signed payload and resolves the operator session, so
-  // the endpoint must be protected from unauthenticated floods as well as from an authenticated one.
-  //
-  // KEEP THIS COMMENT ABOVE THE ROUTE, NOT INSIDE THE MIDDLEWARE CHAIN — see the note on
-  // /stations/heartbeat above. tests/release-route-rate-limits.test.ts pins this exact
-  // ingress-limit -> authentication -> operator -> per-station-limit ORDER with `\s*` between the
-  // middleware names, and `\s*` cannot span a comment.
-  r.post(
-    "/stations/calibrations",
-    partnerStationCalibrationIngressRateLimit,
-    requireSignedStation,
-    requireSignedStationMaintainer,
-    partnerStationCalibrationRateLimit,
-    async (req, res) => {
-      try {
-        const calibration = await saveStationCalibration(req.station!, req.partner!.userId, {
-          scannerHardware: req.body?.scannerHardware,
-          scannerProfileVersion: req.body?.scannerProfileVersion,
-          acquisitionRegion: req.body?.acquisitionRegion,
-          workingRegion: req.body?.workingRegion,
-          placementToleranceMm: req.body?.placementToleranceMm,
-          calibrationVersion: req.body?.calibrationVersion,
-        });
-        res.status(201).json({ calibration });
-      } catch (error) {
         stationError(res, error);
       }
     }

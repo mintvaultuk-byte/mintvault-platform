@@ -60,8 +60,14 @@ const PRIMARY_NAV_ITEMS: NavItem[] = [
 
 const SECONDARY_NAV_ITEMS: NavItem[] = [
   // Supplies deliberately lives in More: shop-floor primary navigation remains exactly five items.
-  { href: "/partner/supplies", label: "Supplies", icon: Package, permission: "partner.supplies.view" },
-  { href: "/partner/orders", label: "My Orders", icon: PackageCheck, permission: "partner.supplies.view" },
+  { href: "/partner/supplies", label: "Supplies", icon: Package, permission: "partner.orders.view" },
+  { href: "/partner/orders", label: "My Orders", icon: PackageCheck, permission: "partner.orders.view" },
+  {
+    href: "/partner/supplies/requests",
+    label: "Supply Requests",
+    icon: PackageCheck,
+    permission: "partner.supplies.view",
+  },
   { href: "/partner/submissions", label: "Submissions", icon: FileText, permission: "partner.orders.view" },
   { href: "/partner/users", label: "Users", icon: Users, permission: "partner.users.view" },
   { href: "/partner/locations", label: "Locations", icon: MapPin, permission: "partner.location.view" },
@@ -70,6 +76,7 @@ const SECONDARY_NAV_ITEMS: NavItem[] = [
 ];
 
 function isActiveNavItem(location: string, item: NavItem): boolean {
+  if (item.href === "/partner/supplies" && location.startsWith("/partner/supplies/requests")) return false;
   if (location === item.href) return true;
   // The historic submission index is deliberately secondary; its primary new-submission route
   // must not light both links at once.

@@ -1,0 +1,79 @@
+# Task ledger — Staff Admin grading inspection viewport
+
+## Stage 0 — Baseline (recorded 2026-08-25T04:36:10Z)
+
+- Repository: `/Users/cornelius/mintvault-platform`
+- Worktree: `/private/tmp/mintvault-staff-admin-inspection-viewport-20260825`
+- Branch: `codex/staff-admin-inspection-viewport-20260825`
+- Commit: `01d5e4daab30d58ad53943585ebecc972befaa8a`
+- `git status`: clean; ignored `node_modules` reuses the existing dependency tree.
+- Production commit: `01d5e4da` via two live `/api/version` reads; uniquely resolves to the full baseline SHA above.
+- `origin/main`: freshly fetched and byte-identical to the full production baseline SHA.
+- Baseline proof: 13 focused viewer/Card Tool/MVGS files, 330/330 assertions passed.
+- Engineering preflight: `CRITICAL`, required mode `HOSTILE`; code-only graph current at 13,935 nodes / 31,385 edges.
+- Governance version: 1.2; snapshot recorded in `governance-snapshot.json`.
+- Protected systems in play: grading workstation presentation and image-relative annotations. Protected MVGS v1.4 semantics remain frozen.
+- Explicit scope: responsive parent geometry; main authoritative card FIT sizing; shared FIT-relative inspection zoom/pan; overlay anchoring; local/browser regressions across grading roles.
+- Explicit prohibited actions: grading semantics, Card Tool/Manual Crop math, crop/server evidence provenance, schemas/data/migrations, auth, payments, certificates, claims, NFC, dependencies, push, staging mutation, production deployment.
+
+## Stage progress
+
+| Stage | Status | Date | Notes |
+|---|---|---|---|
+| 0 — Baseline | done | 2026-08-25 | production/origin identity and clean isolated tree proven |
+| 1 — Review plan | done | 2026-08-25 | owner-routed independent Fable review plus Lead independent code investigation; no Codex subagent authorised |
+| 2 — Investigation | done | 2026-08-25 | graph-first/source-verified root causes SIV-001..003 |
+| 3 — Lead verification | done | 2026-08-25 | coordinate/data/blast-radius contracts re-read at production baseline |
+| 4 — Implementation authorisation | done | 2026-08-25 | owner attachment explicitly authorises the locked presentation scope |
+| 5 — Implementation | done | 2026-08-25 | bounded presentation-only viewport, stable shell and regression replacements complete |
+| 6 — Regression | partial / release-held | 2026-08-25 | first candidate rejected by runtime acceptance; repaired tree is locally green; exact new-SHA Chrome and hostile gates pending |
+| 7 — Final report | pending local freeze | 2026-08-25 | report must state staging unsafe and stop before deployment |
+
+## Reviewer status
+
+- No Codex subagent was spawned; current orchestration rules do not authorise delegation.
+- The owner independently commissioned Fable review and converted the compared findings into the attached locked implementation decisions.
+- Required `HOSTILE` release review remains a Stage 6 gate against the final diff.
+
+## Stage 6 evidence
+
+- `npm run check`: pass.
+- `npm run lint`: pass, 0 errors / 2,749 repository warnings.
+- `npm run build`: pass; Vite transformed 3,355 modules and server/one-off bundles built.
+- First frozen candidate `82cbf17d4d6e7a4ed35a2170cae0ba24054b925d`
+  was rejected after supported in-app browser acceptance proved two HIGH viewer
+  defects: zero rendered height through the canonical portal wrapper chain
+  (SIV-006), and loss of natural dimensions when FRONT/BACK reused one decoded
+  image URL (SIV-007).
+- Both HIGHs were reproduced with RED regressions and repaired without changing
+  stored coordinates, evidence authority, grading semantics or role capability.
+- Independent Claude Opus review of replacement `b1952f1f…` returned PASS at
+  BLOCKER/HIGH but found actionable MEDIUM SIV-008: the new rail-owned side tabs
+  had lost the former panel delete-image lifecycle gate. Lead source verification
+  confirmed it, rejected that candidate, and added a delete-specific capability
+  plus mounted/wiring regressions.
+- Current exact focused/protected matrix: 30 files / 780 assertions passed.
+- Current `npm run check`, lint and production build pass; lint remains at the
+  repository baseline of 0 errors / 2,749 warnings.
+- Near-final broad disposable-DB run: 429 files / 6,860 tests passed / 6 skipped.
+- Final broad retry was stopped after the repository's documented monolithic
+  Partner `process.env` collision produced skips and two Partner migration
+  failures; it is not represented as source-green or as an in-scope viewer
+  failure. The final viewer delta has direct mounted regression coverage.
+- Graphify code graph refreshed: 13,955 nodes / 31,399 edges; its existing
+  parser limitation still flags JSX text containing `&` in `grading-panel.tsx`,
+  while TypeScript and production build parse the source successfully.
+- Browser control diagnostics: Chrome running, extension ID
+  `hehggadaopoacecdllhhajmbjkdcmajg` absent from all inspected profiles; no
+  Chrome page-zoom matrix is claimed. The supported in-app browser supplied
+  rendered responsive/interaction evidence and exposed SIV-006/SIV-007, but it
+  has no browser page-zoom capability and cannot satisfy SIV-005.
+- No migration, schema change, defect rewrite, evidence-authority change or
+  protected grading-file change.
+
+## Next authorised action
+
+Freeze the next replacement candidate, rerun the independent Claude Opus hostile review
+against that exact SHA, complete every supported in-app acceptance proof, and
+retry the Chrome connection. Push, staging mutation, migration and deployment
+remain unauthorised.

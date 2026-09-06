@@ -6,6 +6,40 @@
 # ruleset impossible to change without the owner seeing it.
 # ─────────────────────────────────────────────────────────────────────────────
 
+# Default owner: every change has an accountable reviewer, including newly
+# added files that have not yet received a more specific rule below.
+*                                      @mintvaultuk-byte
+
+# Repository governance, build/release configuration, and dependency authority.
+/.github/                              @mintvaultuk-byte
+/.engineering/                         @mintvaultuk-byte
+/AGENTS.md                             @mintvaultuk-byte
+/CLAUDE.md                             @mintvaultuk-byte
+/docs/NO_BULLSHIT_COMPLETION_CONTROLLER.md @mintvaultuk-byte
+/docs/GRAPH_OF_LOOPS_BUILD_CONTROLLER.md   @mintvaultuk-byte
+/Dockerfile                            @mintvaultuk-byte
+/.dockerignore                         @mintvaultuk-byte
+/.nvmrc                               @mintvaultuk-byte
+/fly.toml                              @mintvaultuk-byte
+/fly.v2.toml                           @mintvaultuk-byte
+/package.json                          @mintvaultuk-byte
+/package-lock.json                     @mintvaultuk-byte
+/scripts/db/                           @mintvaultuk-byte
+/migrations/                           @mintvaultuk-byte
+/shared/schema.ts                      @mintvaultuk-byte
+
+# Consequence-bearing runtime surfaces.
+/server/auth/                          @mintvaultuk-byte
+/server/auth.ts                        @mintvaultuk-byte
+/server/routes.ts                      @mintvaultuk-byte
+/server/storage.ts                     @mintvaultuk-byte
+/server/stripeClient.ts                @mintvaultuk-byte
+/server/webhookHandlers.ts             @mintvaultuk-byte
+/server/partner/                       @mintvaultuk-byte
+/server/scan-ingest-service.ts         @mintvaultuk-byte
+/server/scanner-capture-service.ts     @mintvaultuk-byte
+/server/workers/                       @mintvaultuk-byte
+
 # ═════════════════════════════════════════════════════════════════════════════
 # MVGS v1.4 — IMMUTABLE GRADING RULESET
 #
@@ -34,6 +68,5 @@
 # The published standard is the customer-facing statement of those same rules.
 /client/src/pages/standard.tsx         @mintvaultuk-byte
 
-# Payments and auth remain owner-reviewed for the same reason: consequence.
-/server/stripeClient.ts                @mintvaultuk-byte
-/migrations/                           @mintvaultuk-byte
+# Payments, auth, identity, scanner evidence, and data migrations remain
+# owner-reviewed for the same reason: consequence.

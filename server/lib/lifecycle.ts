@@ -68,6 +68,21 @@ export function activeJobCount(): number {
   return activeJobs;
 }
 
+/**
+ * Refuse new background work after shutdown begins and keep an admitted job in
+ * the drain count until its promise settles. The `finally` is the important
+ * fault boundary: a rejected database/provider operation cannot leak the count.
+ */
+export async function runTrackedJob<T>(fn: () => Promise<T>): Promise<T | undefined> {
+  if (isShuttingDown()) return undefined;
+  beginJob();
+  try {
+    return await fn();
+  } finally {
+    endJob();
+  }
+}
+
 export interface ShutdownDeps {
   /** stop accepting new connections and let in-flight requests finish */
   closeServer: () => Promise<void> | void;

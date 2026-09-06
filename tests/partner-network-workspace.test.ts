@@ -37,9 +37,11 @@ describe("Partner Network P8 workspace contract", () => {
 
   it("fails an invalid Partner UUID safely before any Partner or fleet read", () => {
     expect(workspace).toContain("UUID_RE.test(partnerId)");
-    expect(workspace).toContain("const on = authed === true && validPartnerId");
+    expect(workspace).toContain("const on = validPartnerId");
+    expect(workspace).toContain("enabled: on");
+    expect(app).toMatch(/<AdminSessionProvider>[\s\S]*<Router\s*\/>[\s\S]*<\/AdminSessionProvider>/);
     expect(stations).toContain("const validPartnerId = !partnerId || UUID_RE.test(partnerId)");
-    expect(stations).toContain("enabled: authed === true && validPartnerId");
+    expect(stations).toContain("enabled: validPartnerId");
     expect(stations).toContain("Partner not found.");
   });
 

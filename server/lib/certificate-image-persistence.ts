@@ -30,6 +30,18 @@
 import { sql } from "drizzle-orm";
 import { db } from "../db";
 import { deleteFromR2 } from "../r2";
+import { randomUUID } from "node:crypto";
+import type { PoolClient } from "pg";
+import {
+  ObjectWriteAbandonError,
+  ObjectWriteCoordinator,
+  createPoolTransactionRunner,
+  type ObjectStorePort,
+  type ObjectWriteFinalizeContext,
+  type ObjectWriteItemRecord,
+  type ObjectWriteTransactionRunner,
+} from "./object-write-coordinator";
+import { objectWriteStore } from "./object-write-store";
 
 /**
  * The EXHAUSTIVE set of certificate columns this route may commit.
@@ -178,6 +190,446 @@ function classifyPersistFailure(err: unknown): { category: string; sqlState?: st
 
 const normVal = (v: unknown): string | null =>
   v == null ? null : typeof v === "object" ? JSON.stringify(v) : String(v);
+
+export interface AtomicImageUploadPersistArgs {
+  id: number;
+  certId: string;
+  updates: Record<string, string>;
+  expectedState: Record<string, unknown>;
+  items: ObjectWriteItemRecord[];
+  actor: string;
+  action?: string;
+  auditMetadata?: Record<string, unknown>;
+  imageHistory?: Array<{
+    side: "front" | "back";
+    objectKey: string;
+    sortOrder: number;
+  }>;
+  evidenceUpdates?: Array<{
+    side: "front" | "back";
+    expectedSourceSha256: string;
+    workingObjectKey: string;
+    workingSha256: string;
+    workingWidth: number;
+    workingHeight: number;
+    workingFormat: string;
+    workingSettings: Record<string, unknown>;
+  }>;
+}
+
+/**
+ * Finalizer used by the durable object-write coordinator. The certificate
+ * pointer mutation, content audit and operation COMMITTED transition all use
+ * the same PoolClient transaction; this function must never open or commit one.
+ */
+export async function persistImageUploadAuditedTx(
+  client: PoolClient,
+  args: AtomicImageUploadPersistArgs
+): Promise<Record<string, unknown>> {
+  const committed = Object.entries(args.updates).filter(([column]) => IMAGE_UPLOAD_COLUMN_SET.has(column));
+  if (committed.length !== Object.keys(args.updates).length || committed.length === 0) {
+    throw new Error("Atomic image finalizer received an empty or non-allowlisted update set");
+  }
+  for (const column of Object.keys(args.expectedState)) {
+    if (!IMAGE_UPLOAD_COLUMN_SET.has(column)) throw new Error(`Atomic image finalizer cannot guard ${column}`);
+  }
+
+  const selected = await client.query<Record<string, unknown>>(
+    `SELECT deleted_at,${IMAGE_UPLOAD_OWNED_COLUMNS.map((column) => `"${column}"`).join(",")}
+       FROM certificates WHERE id=$1 FOR UPDATE`,
+    [args.id]
+  );
+  const prior = selected.rows[0];
+  if (!prior || prior.deleted_at != null) {
+    throw new ObjectWriteAbandonError("Atomic image finalizer certificate row is unavailable");
+  }
+  for (const [column, expected] of Object.entries(args.expectedState)) {
+    if (normVal(prior[column]) !== normVal(expected)) {
+      throw new ObjectWriteAbandonError(`Atomic image finalizer conflict on ${column}`);
+    }
+  }
+
+  for (const evidence of args.evidenceUpdates ?? []) {
+    if (
+      !["front", "back"].includes(evidence.side) ||
+      !/^[0-9a-f]{64}$/.test(evidence.expectedSourceSha256) ||
+      !/^[0-9a-f]{64}$/.test(evidence.workingSha256) ||
+      !Number.isSafeInteger(evidence.workingWidth) ||
+      !Number.isSafeInteger(evidence.workingHeight) ||
+      evidence.workingWidth <= 0 ||
+      evidence.workingHeight <= 0
+    ) {
+      throw new Error("Atomic image finalizer received malformed evidence lineage");
+    }
+    const lineage = await client.query(
+      `UPDATE certificate_image_evidence SET
+         working_object_key=$4,working_sha256=$5,working_width=$6,working_height=$7,
+         working_format=$8,working_settings=$9::jsonb
+       WHERE certificate_id=$1 AND side=$2 AND is_current=true AND sha256=$3
+       RETURNING id`,
+      [
+        args.id,
+        evidence.side,
+        evidence.expectedSourceSha256,
+        evidence.workingObjectKey,
+        evidence.workingSha256,
+        evidence.workingWidth,
+        evidence.workingHeight,
+        evidence.workingFormat,
+        JSON.stringify(evidence.workingSettings),
+      ]
+    );
+    if (lineage.rows.length !== 1) throw new Error(`Atomic image finalizer lost ${evidence.side} evidence lineage`);
+  }
+
+  const changes = committed
+    .filter(([column, value]) => normVal(prior[column]) !== normVal(value))
+    .map(([field, to]) => ({ field, from: prior[field] ?? null, to }));
+  const values: unknown[] = committed.map(([, value]) => value);
+  const assignments = committed.map(
+    ([column], index) => `"${column}"=$${index + 1}${IMAGE_UPLOAD_JSONB_COLUMNS.has(column) ? "::jsonb" : ""}`
+  );
+  values.push(args.id);
+  const updated = await client.query(
+    `UPDATE certificates SET ${assignments.join(",")},updated_at=now()
+      WHERE id=$${values.length} RETURNING id`,
+    values
+  );
+  if (updated.rows.length !== 1) throw new Error("Atomic image finalizer certificate update was not applied");
+
+  const uploadedObjects = args.items.map((item) => ({
+    key: item.objectKey,
+    column: item.logicalSlot,
+    sha256: item.contentSha256,
+    bytes: item.byteLength,
+    contentType: item.contentType,
+    pathChanged: normVal(prior[item.logicalSlot]) !== normVal(item.objectKey),
+    writeDisposition: item.writeDisposition,
+  }));
+  for (const history of args.imageHistory ?? []) {
+    if (
+      (history.side !== "front" && history.side !== "back") ||
+      !history.objectKey ||
+      !Number.isSafeInteger(history.sortOrder) ||
+      history.sortOrder < 0
+    ) {
+      throw new Error("Atomic image finalizer received malformed image history");
+    }
+    await client.query(
+      `INSERT INTO certificate_images(certificate_id,image_type,url,sort_order,created_at)
+       VALUES ($1,$2,$3,$4,now())`,
+      [args.id, history.side, history.objectKey, history.sortOrder]
+    );
+  }
+  const details = {
+    certificateId: args.id,
+    certId: args.certId,
+    scope: "grading_image_upload",
+    objectWriteAtomic: true,
+    changes,
+    changedFields: changes.map((change) => change.field),
+    uploadedObjects,
+    requestMetadata: args.auditMetadata ?? null,
+    outcome: "committed",
+  };
+  await client.query(
+    `INSERT INTO audit_log(entity_type,entity_id,action,admin_user,details,created_at)
+     VALUES ('certificate',$1,$2,$3,$4::jsonb,now())`,
+    [args.certId, args.action ?? IMAGE_UPLOAD_AUDIT_ACTION, args.actor, JSON.stringify(details)]
+  );
+  return {
+    certificateId: args.id,
+    certId: args.certId,
+    changedFields: changes.map((change) => change.field),
+    objectKeys: args.items.map((item) => item.objectKey),
+  };
+}
+
+export async function finalizeCertificateImageObjectWrite(
+  client: PoolClient,
+  context: ObjectWriteFinalizeContext
+): Promise<Record<string, unknown>> {
+  const intent = context.intentPayload;
+  const id = Number(intent.id);
+  const certId = typeof intent.certId === "string" ? intent.certId : "";
+  const actor = typeof intent.actor === "string" ? intent.actor : "";
+  const action = typeof intent.action === "string" ? intent.action : undefined;
+  const updates = intent.updates;
+  const rawEvidenceUpdates = intent.evidenceUpdates;
+  const rawAuditMetadata = intent.auditMetadata;
+  const rawImageHistory = intent.imageHistory;
+  if (
+    !Number.isSafeInteger(id) ||
+    id <= 0 ||
+    !certId ||
+    !actor ||
+    !updates ||
+    typeof updates !== "object" ||
+    Array.isArray(updates)
+  ) {
+    throw new Error("Certificate image object-write intent is malformed");
+  }
+  const stringUpdates: Record<string, string> = {};
+  for (const [column, value] of Object.entries(updates as Record<string, unknown>)) {
+    if (!IMAGE_UPLOAD_COLUMN_SET.has(column) || typeof value !== "string") {
+      throw new Error("Certificate image object-write intent contains an invalid update");
+    }
+    stringUpdates[column] = value;
+  }
+  if (context.aggregateType !== "certificate" || context.aggregateId !== String(id)) {
+    throw new Error("Certificate image object-write aggregate does not match its intent");
+  }
+  let evidenceUpdates: AtomicImageUploadPersistArgs["evidenceUpdates"];
+  if (rawEvidenceUpdates !== undefined) {
+    if (!Array.isArray(rawEvidenceUpdates)) throw new Error("Certificate evidence updates must be an array");
+    evidenceUpdates = rawEvidenceUpdates.map((entry) => {
+      if (!entry || typeof entry !== "object" || Array.isArray(entry)) {
+        throw new Error("Certificate evidence update is malformed");
+      }
+      const value = entry as Record<string, unknown>;
+      if (
+        (value.side !== "front" && value.side !== "back") ||
+        typeof value.expectedSourceSha256 !== "string" ||
+        typeof value.workingObjectKey !== "string" ||
+        typeof value.workingSha256 !== "string" ||
+        typeof value.workingWidth !== "number" ||
+        typeof value.workingHeight !== "number" ||
+        typeof value.workingFormat !== "string" ||
+        !value.workingSettings ||
+        typeof value.workingSettings !== "object" ||
+        Array.isArray(value.workingSettings)
+      ) {
+        throw new Error("Certificate evidence update is malformed");
+      }
+      return value as unknown as NonNullable<AtomicImageUploadPersistArgs["evidenceUpdates"]>[number];
+    });
+  }
+  let auditMetadata: Record<string, unknown> | undefined;
+  if (rawAuditMetadata !== undefined) {
+    if (!rawAuditMetadata || typeof rawAuditMetadata !== "object" || Array.isArray(rawAuditMetadata)) {
+      throw new Error("Certificate image audit metadata must be an object");
+    }
+    auditMetadata = rawAuditMetadata as Record<string, unknown>;
+  }
+  let imageHistory: AtomicImageUploadPersistArgs["imageHistory"];
+  if (rawImageHistory !== undefined) {
+    if (!Array.isArray(rawImageHistory)) throw new Error("Certificate image history must be an array");
+    imageHistory = rawImageHistory.map((entry) => {
+      if (!entry || typeof entry !== "object" || Array.isArray(entry)) {
+        throw new Error("Certificate image history entry is malformed");
+      }
+      const value = entry as Record<string, unknown>;
+      if (
+        (value.side !== "front" && value.side !== "back") ||
+        typeof value.objectKey !== "string" ||
+        typeof value.sortOrder !== "number"
+      ) {
+        throw new Error("Certificate image history entry is malformed");
+      }
+      return value as NonNullable<AtomicImageUploadPersistArgs["imageHistory"]>[number];
+    });
+  }
+  return persistImageUploadAuditedTx(client, {
+    id,
+    certId,
+    updates: stringUpdates,
+    expectedState: context.expectedState,
+    items: context.items,
+    actor,
+    action,
+    auditMetadata,
+    imageHistory,
+    evidenceUpdates,
+  });
+}
+
+export interface ManualCertificateImagePublicationInput {
+  id: number;
+  certId: string;
+  side: "front" | "back";
+  previousKey: string | null;
+  body: Buffer;
+  actor: string;
+  replaceExisting: boolean;
+  originalFilename?: string | null;
+  mimeReceived?: string | null;
+  sizeInBytes: number;
+  recordImageHistory?: boolean;
+  /** Test/recovery hook. Production callers normally let this be generated. */
+  writeVersion?: string;
+}
+
+export interface ManualCertificateImagePublicationDependencies {
+  runner?: ObjectWriteTransactionRunner;
+  store?: ObjectStorePort;
+  workerId?: string;
+}
+
+export interface CertificateImageArtifactRevisionInput {
+  id: number;
+  certId: string;
+  actor: string;
+  action: string;
+  expectedState: Record<string, unknown>;
+  artifacts: Array<{
+    column: (typeof IMAGE_UPLOAD_OWNED_COLUMNS)[number];
+    filename: string;
+    body: Buffer;
+    contentType: string;
+    objectClass?: "CANONICAL" | "DERIVATIVE";
+  }>;
+  auditMetadata?: Record<string, unknown>;
+  writeVersion?: string;
+}
+
+/** Publish an explicitly rendered image revision through the same manifest/CAS finalizer. */
+export async function persistCertificateImageArtifactRevision(
+  input: CertificateImageArtifactRevisionInput,
+  dependencies: ManualCertificateImagePublicationDependencies = {}
+): Promise<{ operationId: string; replayed: boolean; objectKeys: Record<string, string> }> {
+  if (!Number.isSafeInteger(input.id) || input.id <= 0 || !input.certId.trim() || !input.actor.trim()) {
+    throw new Error("Certificate image artifact identity is invalid");
+  }
+  if (!input.action.trim() || input.artifacts.length === 0) {
+    throw new Error("Certificate image artifact revision is empty");
+  }
+  const writeVersion = input.writeVersion ?? randomUUID();
+  if (!/^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(writeVersion)) {
+    throw new Error("Certificate image artifact write version is invalid");
+  }
+  const objectKeys: Record<string, string> = {};
+  const seenColumns = new Set<string>();
+  for (const artifact of input.artifacts) {
+    if (!IMAGE_UPLOAD_COLUMN_SET.has(artifact.column) || seenColumns.has(artifact.column)) {
+      throw new Error("Certificate image artifact contains a duplicate or unowned column");
+    }
+    if (!Buffer.isBuffer(artifact.body) || artifact.body.length === 0 || !/^[a-z0-9][a-z0-9._-]*$/i.test(artifact.filename)) {
+      throw new Error("Certificate image artifact body or filename is invalid");
+    }
+    seenColumns.add(artifact.column);
+    objectKeys[artifact.column] = `images/grading/${input.id}/revisions/${writeVersion}/${artifact.filename}`;
+  }
+  if (
+    Object.keys(input.expectedState).length !== input.artifacts.length ||
+    Object.keys(input.expectedState).some((column) => !seenColumns.has(column))
+  ) {
+    throw new Error("Certificate image artifact expected state must cover every artifact exactly");
+  }
+  const runner = dependencies.runner ?? createPoolTransactionRunner((await import("../db")).pool);
+  const coordinator = new ObjectWriteCoordinator(
+    runner,
+    dependencies.store ?? objectWriteStore,
+    dependencies.workerId ?? `certificate-artifact:${process.pid}`
+  );
+  const result = await coordinator.execute(
+    {
+      idempotencyKey: `certificate-artifact:${input.id}:${input.action}:${writeVersion}`,
+      operationKind: "CERTIFICATE_IMAGE_REVISION",
+      aggregateType: "certificate",
+      aggregateId: String(input.id),
+      actorId: input.actor,
+      expectedState: input.expectedState,
+      intentPayload: {
+        id: input.id,
+        certId: input.certId,
+        actor: input.actor,
+        action: input.action,
+        updates: objectKeys,
+        evidenceUpdates: [],
+        ...(input.auditMetadata ? { auditMetadata: input.auditMetadata } : {}),
+      },
+      items: input.artifacts.map((artifact) => ({
+        store: "R2" as const,
+        logicalSlot: artifact.column,
+        objectKey: objectKeys[artifact.column],
+        priorObjectKey: (input.expectedState[artifact.column] as string | null | undefined) ?? null,
+        body: artifact.body,
+        contentType: artifact.contentType,
+        objectClass: artifact.objectClass ?? "DERIVATIVE",
+      })),
+    },
+    finalizeCertificateImageObjectWrite
+  );
+  return { operationId: result.operationId, replayed: result.replayed, objectKeys };
+}
+
+/**
+ * Durable publication boundary for POST /api/admin/certs/:certId/image.
+ *
+ * The route owns decode/admission and the downstream derivative pipeline. This
+ * helper owns the irreversible boundary: create-only object publication plus a
+ * certificate-pointer CAS and audit row in the operation's COMMITTED
+ * transaction. Supplying the same writeVersion is an exact replay; a different
+ * version competing from the same previous pointer is abandoned.
+ */
+export async function persistManualCertificateImageObjectWrite(
+  input: ManualCertificateImagePublicationInput,
+  dependencies: ManualCertificateImagePublicationDependencies = {}
+): Promise<{ objectKey: string; operationId: string; replayed: boolean }> {
+  if (!Number.isSafeInteger(input.id) || input.id <= 0 || !input.certId.trim() || !input.actor.trim()) {
+    throw new Error("Manual certificate image identity is invalid");
+  }
+  if (!Buffer.isBuffer(input.body) || input.body.length === 0) {
+    throw new Error("Manual certificate image body is empty");
+  }
+  if (!Number.isSafeInteger(input.sizeInBytes) || input.sizeInBytes <= 0) {
+    throw new Error("Manual certificate image source size is invalid");
+  }
+  const writeVersion = input.writeVersion ?? randomUUID();
+  if (!/^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(writeVersion)) {
+    throw new Error("Manual certificate image write version is invalid");
+  }
+  const sideColumn = input.side === "front" ? "grading_front_original" : "grading_back_original";
+  const objectKey = `images/grading/${input.id}/manual-revisions/${writeVersion}/${input.side}_original.jpg`;
+  const runner =
+    dependencies.runner ?? createPoolTransactionRunner((await import("../db")).pool);
+  const coordinator = new ObjectWriteCoordinator(
+    runner,
+    dependencies.store ?? objectWriteStore,
+    dependencies.workerId ?? `manual-cert-image:${process.pid}`
+  );
+  const result = await coordinator.execute(
+    {
+      idempotencyKey: `manual-cert-image:${input.id}:${input.side}:${writeVersion}`,
+      operationKind: "CERTIFICATE_IMAGE_REVISION",
+      aggregateType: "certificate",
+      aggregateId: String(input.id),
+      actorId: input.actor,
+      expectedState: { [sideColumn]: input.previousKey },
+      intentPayload: {
+        id: input.id,
+        certId: input.certId,
+        actor: input.actor,
+        action: "image_attached_manual",
+        updates: { [sideColumn]: objectKey },
+        evidenceUpdates: [],
+        auditMetadata: {
+          side: input.side,
+          replace_existing: input.replaceExisting,
+          original_filename: input.originalFilename ?? null,
+          mime_received: input.mimeReceived ?? null,
+          size_in_bytes: input.sizeInBytes,
+        },
+        imageHistory: input.recordImageHistory
+          ? [{ side: input.side, objectKey, sortOrder: input.side === "front" ? 0 : 1 }]
+          : [],
+      },
+      items: [
+        {
+          store: "R2",
+          logicalSlot: sideColumn,
+          objectKey,
+          priorObjectKey: input.previousKey,
+          body: input.body,
+          contentType: "image/jpeg",
+          objectClass: "CANONICAL",
+        },
+      ],
+    },
+    finalizeCertificateImageObjectWrite
+  );
+  return { objectKey, operationId: result.operationId, replayed: result.replayed };
+}
 
 /**
  * Commit an image upload's column changes together with a truthful audit row.

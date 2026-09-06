@@ -195,6 +195,8 @@ describe("P0-F lockout recovery coverage is wired up", () => {
       delivered.push({ email, token, at: Date.now() });
     });
 
+    const { MemoryRateLimitStore, setPartnerRateLimitStore } = await import("../server/partner/rate-limit");
+    setPartnerRateLimitStore(new MemoryRateLimitStore());
     const { registerPartnerPublicRoutes } = await import("../server/partner/public-routes");
     const app = express();
     app.use(express.json());
@@ -210,6 +212,8 @@ describe("P0-F lockout recovery coverage is wired up", () => {
     await new Promise<void>((resolve) => server?.close(() => resolve()));
     const { closePartnerPools } = await import("../server/partner/db");
     await closePartnerPools();
+    const { markSharedPostgresPartnerRateLimitStoreUnavailable } = await import("../server/partner/rate-limit");
+    markSharedPostgresPartnerRateLimitStoreUnavailable();
     await admin?.end().catch(() => {});
   });
 

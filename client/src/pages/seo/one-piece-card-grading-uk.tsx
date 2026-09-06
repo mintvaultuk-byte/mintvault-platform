@@ -21,7 +21,7 @@ const faqs = [
   },
   {
     question: "How much does One Piece card grading cost in the UK?",
-    answer: "MintVault UK grading starts from £19 per card on the Vault Queue tier (40 working days). Standard is £25 (15 working days) and Express is £45 (5 working days). Bulk discounts are available for submissions of 10 or more cards.",
+    answer: "See the current pricing page for available grading services, prices and turnaround. Your submission quote confirms applicable discounts, insurance, return shipping and the total before payment.",
   },
   {
     question: "How are One Piece cards returned after grading?",
@@ -52,7 +52,7 @@ export default function OnePieceCardGradingUk() {
     <div className="max-w-5xl mx-auto px-4 py-10 no-text-shadow">
       <SeoHead
         title="One Piece Card Grading UK | Professional TCG Grading | MintVault"
-        description="Professional One Piece card grading in the UK. Protect and authenticate your rarest One Piece cards with MintVault — NFC-enabled slabs from £19."
+        description="Professional One Piece card grading in the UK. Protect and authenticate your rarest One Piece cards with MintVault — NFC-enabled slabs. View current service options and pricing."
         canonical="https://mintvaultuk.com/one-piece-card-grading-uk"
         ogImage="https://mintvaultuk.com/images/collector-lifestyle.webp"
         schema={schema}
@@ -76,20 +76,12 @@ export default function OnePieceCardGradingUk() {
         <section className="mb-10" data-testid="section-onepiece-tiers">
           <h2 className="text-2xl font-bold text-[#D4AF37] tracking-wide mb-4">Service Tiers & Pricing</h2>
           <div className="space-y-3">
-            {[
-              { tier: "Vault Queue", days: "40 working days", price: "£19/card" },
-              { tier: "Standard", days: "15 working days", price: "£25/card" },
-              { tier: "Express", days: "5 working days", price: "£45/card" },
-            ].map((t) => (
-              <div key={t.tier} className="flex items-center justify-between border border-[#D4AF37]/20 bg-[#0a0e1a]/85 backdrop-blur-sm rounded-lg px-4 py-3">
-                <span className="text-white text-sm font-medium">{t.tier}</span>
-                <span className="text-[#d4d4d4] text-sm">{t.days}</span>
-                <span className="text-[#D4AF37] font-bold text-sm">{t.price}</span>
-              </div>
-            ))}
+            <Link href="/pricing" className="block px-4 py-3 text-[#D4AF37] hover:underline">
+              View current grading prices and turnaround →
+            </Link>
           </div>
           <p className="text-[#d4d4d4] text-sm mt-3">
-            All tiers include fully insured return shipping. <Link href="/pricing" className="text-[#D4AF37] hover:underline">View full pricing</Link>.
+            Your quote confirms insurance and return shipping before payment. <Link href="/pricing" className="text-[#D4AF37] hover:underline">View full pricing</Link>.
           </p>
         </section>
 
@@ -107,7 +99,7 @@ export default function OnePieceCardGradingUk() {
               { icon: <Shield size={16} />, title: "Protect your investment", desc: "Tamper-evident slabs prevent damage and preserve card condition indefinitely." },
               { icon: <Award size={16} />, title: "Increase resale value", desc: "High-grade One Piece cards command premium prices on eBay and other markets." },
               { icon: <CheckCircle size={16} />, title: "Verify authenticity", desc: "Grading confirms your card is genuine. All certs verifiable at mintvaultuk.com/cert." },
-              { icon: <Clock size={16} />, title: "UK-based, fast turnaround", desc: "No international shipping or customs. Express tier available in 5 working days." },
+              { icon: <Clock size={16} />, title: "UK-based, fast turnaround", desc: "No international shipping or customs. See the pricing page for current service turnaround." },
             ].map((item, i) => (
               <div key={i} className="flex gap-3 border border-[#D4AF37]/20 bg-[#0a0e1a]/85 backdrop-blur-sm rounded-2xl p-4">
                 <div className="text-[#D4AF37] shrink-0 mt-0.5">{item.icon}</div>

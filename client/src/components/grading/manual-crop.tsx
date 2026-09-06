@@ -1,3 +1,4 @@
+import { adminFetch } from "@/lib/queryClient";
 import { useState, useRef, useEffect } from "react";
 import { Loader2, Crop, X, RotateCcw, Crosshair } from "lucide-react";
 import { useToast } from "@/hooks/use-toast";
@@ -258,7 +259,7 @@ export default function ManualCrop({
     // ── LEGACY SYNCHRONOUS PATH (no panel upload owner) ─────────────────────
     setSaving(true);
     try {
-      const r = await fetch(`${apiBase}/certificates/${certId}/recrop`, {
+      const r = await adminFetch(`${apiBase}/certificates/${certId}/recrop`, {
         method: "POST",
         credentials: "include",
         headers: { "Content-Type": "application/json" },

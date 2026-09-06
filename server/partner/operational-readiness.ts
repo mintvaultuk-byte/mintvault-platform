@@ -538,10 +538,10 @@ function deriveScanner(f: PartnerReadinessFacts): ReadinessDimension {
   if (calibrationIncomplete) {
     const wording =
       active.calibrationStatus === "EXPIRED"
-        ? "The Scanner's colour calibration has expired and must be redone."
-        : "The Scanner needs to be calibrated before it can capture cards.";
+        ? "The Scanner's automatic profile is no longer current."
+        : "The Scanner is applying its automatic profile before it can capture cards.";
     return dim("BLOCKED", "CALIBRATION_REQUIRED", wording, [
-      { audience: "PARTNER", label: "Run calibration in MintVault Scanner" },
+      { audience: "PARTNER", label: "Open MintVault Scanner on the shop Mac" },
     ]);
   }
   /*
@@ -567,7 +567,7 @@ function deriveScanner(f: PartnerReadinessFacts): ReadinessDimension {
           "The MintVault Scanner version on this Mac could not be confirmed."
         );
   }
-  return pass("READY", "The Scanner is connected, calibrated and up to date.");
+  return pass("READY", "The Scanner is connected, profile-ready and up to date.");
 }
 
 function deriveCredits(f: PartnerReadinessFacts): ReadinessDimension {

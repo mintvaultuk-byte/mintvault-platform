@@ -165,6 +165,7 @@ function isolatedTargetedWatcher(t) {
   const { Watcher } = require("../lib/watcher");
   const state = require("../lib/state");
   const server = require("../lib/server-client");
+  const stationClient = require("../lib/station-client");
   const lide = require("../lib/lide400-controller");
   const originals = {
     claimNextCapture: server.claimNextCapture,
@@ -179,8 +180,10 @@ function isolatedTargetedWatcher(t) {
     scan: lide.scan,
     positioningPreview: lide.positioningPreview,
     persistJigOrigin: lide.persistJigOrigin,
+    persistCalibrationSaveState: lide.persistCalibrationSaveState,
     deviceId: lide.deviceId,
     health: lide.health,
+    saveCalibration: stationClient.saveCalibration,
   };
   for (const dir of ["capture-staging", "processed", "failed", "discarded"]) {
     fs.mkdirSync(path.join(tempDir, dir), { recursive: true });
@@ -201,8 +204,10 @@ function isolatedTargetedWatcher(t) {
     lide.scan = originals.scan;
     lide.positioningPreview = originals.positioningPreview;
     lide.persistJigOrigin = originals.persistJigOrigin;
+    lide.persistCalibrationSaveState = originals.persistCalibrationSaveState;
     lide.deviceId = originals.deviceId;
     lide.health = originals.health;
+    stationClient.saveCalibration = originals.saveCalibration;
     if (previousScansDir === undefined) delete process.env.MINTVAULT_SCANS_DIR;
     else process.env.MINTVAULT_SCANS_DIR = previousScansDir;
     delete require.cache[watcherPath];
@@ -230,7 +235,7 @@ function isolatedTargetedWatcher(t) {
   // card-frame tests cover boundary math; ordinary state-machine tests inject
   // a safe assessed frame so they remain about Scan/automatic-upload/Rescan behaviour.
   watcher.assessCaptureFrame = async () => ({ accepted: true, reason: null, evidenceMarginMm: { left: 8, top: 8, right: 8, bottom: 8 } });
-  return { tempDir, watcher, state, server, lide };
+  return { tempDir, watcher, state, server, stationClient, lide };
 }
 
 function claimedTarget(overrides = {}) {
@@ -411,7 +416,7 @@ test("positioning Preview is single-flight and can no longer persist local jig X
    * THE PROPERTY THAT REPLACED "only an exact safe result can persist". A Preview is now incapable of
    * writing station configuration, safe result or not: `applyPositioningPreview` and the whole
    * card-chasing proposal it consumed are gone, so a card lying somewhere can no longer calibrate a
-   * station by being previewed. The only writer is the deliberate `saveCaptureWindowOrigin` drag.
+   * station by being previewed. Fixed profile provisioning is server-owned and automatic.
    */
   assert.equal(typeof fixture.watcher.applyPositioningPreview, "undefined");
   assert.equal(persisted, null, "a Preview must not write the local jig origin");
@@ -419,6 +424,21 @@ test("positioning Preview is single-flight and can no longer persist local jig X
   assert.equal(entry.status, "detected");
   assert.equal(entry.placement, undefined, "no acquisition rectangle may be proposed from card position");
   assert.equal(typeof fixture.watcher.saveCaptureWindowOrigin, "function");
+});
+
+test("legacy geometry writes are quarantined before local persistence or a server request", async (t) => {
+  const fixture = isolatedTargetedWatcher(t);
+  let localWrites = 0;
+  let requests = 0;
+  fixture.lide.persistCalibrationSaveState = () => { localWrites++; };
+  fixture.lide.persistJigOrigin = () => { localWrites++; };
+  fixture.stationClient.saveCalibration = async () => { requests++; };
+
+  const result = await fixture.watcher.saveCaptureWindowOrigin({ x: 20, y: 20 });
+  assert.equal(result.ok, false);
+  assert.match(result.error, /automatic fixed Scanner profile/);
+  assert.equal(localWrites, 0, "a stale caller cannot change local scanner geometry");
+  assert.equal(requests, 0, "a stale caller cannot reach the calibration endpoint");
 });
 
 /*

@@ -6,13 +6,13 @@
  */
 
 import { db, pool } from "./db";
-import { createHash } from "node:crypto";
+import { createHash, randomUUID } from "node:crypto";
 import { hashLockKey } from "./lib/advisory-lock";
 import { orientLide400Presentation } from "./lib/lide400-presentation";
 import { CANON_LIDE_400_PROFILE } from "./lib/lide400-profile";
 import { sql } from "drizzle-orm";
 import { storage } from "./storage";
-import { uploadToR2, uploadImmutableEvidenceToR2, getR2Buffer, listR2Keys } from "./r2";
+import { getR2Buffer, listR2Keys } from "./r2";
 import {
   assertCompatibleEvidencePair,
   inspectScannerEvidence,
@@ -29,6 +29,14 @@ import {
   type AiGrading,
 } from "./ai-grading-service";
 import { CERTIFICATE_ORIGIN_SNAPSHOT_VERSION } from "@shared/schema";
+import { finalizeCertificateImageObjectWrite, IMAGE_UPLOAD_OWNED_COLUMNS } from "./lib/certificate-image-persistence";
+import {
+  ObjectWriteCoordinator,
+  createPoolTransactionRunner,
+  type ObjectWriteItemInput,
+} from "./lib/object-write-coordinator";
+import { objectWriteStore } from "./lib/object-write-store";
+import { persistScannerEvidenceCapture } from "./lib/scanner-evidence-persistence";
 
 /**
  * Build a server-log suffix exposing the Postgres SQLSTATE + detail behind a
@@ -99,108 +107,6 @@ export async function makeNativeWorkingEvidence(master: Buffer, isLide400: boole
 /** Elapsed ms since a process.hrtime.bigint() mark. */
 function elapsedMs(start: bigint): number {
   return Number(process.hrtime.bigint() - start) / 1e6;
-}
-
-/**
- * Boot migration — scanner durability columns on `certificates`. Additive +
- * idempotent (safe on every startup; cert_counter idiom).
- *   raw_uploaded: false until the raw scans are CONFIRMED in R2 — the scanner's
- *     precondition for moving the inbox file (the core invariant).
- *   ingest_idempotency_key: content-derived, stable-across-retries key. Its
- *     UNIQUE index is the atomic gate that makes a re-driven/raced ingest
- *     resolve to the SAME cert instead of allocating a duplicate.
- */
-export async function ensureCertDurabilitySchema(): Promise<void> {
-  await db.execute(sql`ALTER TABLE certificates
-    ADD COLUMN IF NOT EXISTS raw_uploaded BOOLEAN NOT NULL DEFAULT false,
-    ADD COLUMN IF NOT EXISTS ingest_idempotency_key TEXT`);
-  // The unique index IS the concurrency gate (a check-then-insert would race —
-  // the cert_counter lesson). NULLs are non-distinct in a Postgres unique index,
-  // so legacy / non-idempotent rows (null key) never collide. Swallow the
-  // catalog-race SQLSTATEs so two machines booting at once are safe.
-  try {
-    await db.execute(
-      sql`CREATE UNIQUE INDEX IF NOT EXISTS uq_certificates_ingest_idem ON certificates (ingest_idempotency_key)`
-    );
-  } catch (err: any) {
-    const code = err?.code ?? err?.cause?.code;
-    if (code !== "23505" && code !== "42710" && code !== "42P07") throw err;
-  }
-  try {
-    await db.execute(sql`
-      INSERT INTO audit_log (entity_type, entity_id, action, admin_user, details, created_at)
-      SELECT 'schema', 'certificates', 'cert_durability_migrate', 'system_migration',
-             ${JSON.stringify({ columns: ["raw_uploaded", "ingest_idempotency_key"], index: "uq_certificates_ingest_idem" })}::jsonb, NOW()
-      WHERE NOT EXISTS (SELECT 1 FROM audit_log WHERE action = 'cert_durability_migrate')`);
-  } catch (auditErr: any) {
-    console.error("[cert-durability-migrate] audit insert failed:", auditErr?.message);
-  }
-  console.log("[cert-durability-migrate] certificates.raw_uploaded + ingest_idempotency_key + unique index ensured");
-}
-
-/**
- * Phase 58A additive evidence ledger. This deliberately has no numbered
- * migration: the active migration sequence is owned by the release lead and
- * must be reconciled before a numbered file is allocated. It mirrors the
- * project's existing idempotent boot-schema pattern and is safe on an empty or
- * live database; it never mutates historical certificate rows.
- */
-export async function ensureImageEvidenceSchema(): Promise<void> {
-  await db.execute(sql`
-    CREATE TABLE IF NOT EXISTS certificate_image_evidence (
-      id SERIAL PRIMARY KEY,
-      certificate_id INTEGER NOT NULL REFERENCES certificates(id) ON DELETE RESTRICT,
-      side VARCHAR(5) NOT NULL CHECK (side IN ('front', 'back')),
-      evidence_class VARCHAR(32) NOT NULL CHECK (evidence_class IN ('NEW_IMMUTABLE_MASTER', 'LEGACY_DERIVED_ONLY')),
-      evidence_version VARCHAR(32) NOT NULL DEFAULT 'v1',
-      object_key TEXT NOT NULL UNIQUE,
-      sha256 VARCHAR(64) NOT NULL CHECK (sha256 ~ '^[0-9a-f]{64}$'),
-      byte_length BIGINT NOT NULL CHECK (byte_length > 0),
-      pixel_width INTEGER NOT NULL CHECK (pixel_width > 0),
-      pixel_height INTEGER NOT NULL CHECK (pixel_height > 0),
-      bit_depth INTEGER,
-      dpi INTEGER,
-      format VARCHAR(16) NOT NULL,
-      capture_metadata JSONB NOT NULL DEFAULT '{}'::jsonb,
-      working_object_key TEXT,
-      working_sha256 VARCHAR(64),
-      working_width INTEGER,
-      working_height INTEGER,
-      working_format VARCHAR(16),
-      working_settings JSONB,
-      is_current BOOLEAN NOT NULL DEFAULT true,
-      superseded_at TIMESTAMPTZ,
-      superseded_by_id INTEGER,
-      created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
-      CONSTRAINT fk_certificate_image_evidence_superseded_by
-        FOREIGN KEY (superseded_by_id) REFERENCES certificate_image_evidence(id) ON DELETE RESTRICT
-    )
-  `);
-  await db.execute(sql`ALTER TABLE certificate_image_evidence ADD COLUMN IF NOT EXISTS working_object_key TEXT`);
-  await db.execute(sql`ALTER TABLE certificate_image_evidence ADD COLUMN IF NOT EXISTS working_sha256 VARCHAR(64)`);
-  await db.execute(sql`ALTER TABLE certificate_image_evidence ADD COLUMN IF NOT EXISTS working_width INTEGER`);
-  await db.execute(sql`ALTER TABLE certificate_image_evidence ADD COLUMN IF NOT EXISTS working_height INTEGER`);
-  await db.execute(sql`ALTER TABLE certificate_image_evidence ADD COLUMN IF NOT EXISTS working_format VARCHAR(16)`);
-  await db.execute(sql`ALTER TABLE certificate_image_evidence ADD COLUMN IF NOT EXISTS working_settings JSONB`);
-  await db.execute(
-    sql`ALTER TABLE certificate_image_evidence ADD COLUMN IF NOT EXISTS is_current BOOLEAN NOT NULL DEFAULT true`
-  );
-  await db.execute(sql`ALTER TABLE certificate_image_evidence ADD COLUMN IF NOT EXISTS superseded_at TIMESTAMPTZ`);
-  await db.execute(sql`ALTER TABLE certificate_image_evidence ADD COLUMN IF NOT EXISTS superseded_by_id INTEGER`);
-  // v2 turns the prior single-master-side ledger into immutable revisions.
-  // No rows are removed: the old uniqueness rule is replaced by a partial
-  // uniqueness rule that permits history while retaining one current source.
-  await db.execute(
-    sql`ALTER TABLE certificate_image_evidence DROP CONSTRAINT IF EXISTS uq_certificate_image_evidence_side`
-  );
-  await db.execute(sql`DROP INDEX IF EXISTS uq_certificate_image_evidence_side`);
-  await db.execute(
-    sql`CREATE UNIQUE INDEX IF NOT EXISTS uq_certificate_image_evidence_current_side
-        ON certificate_image_evidence (certificate_id, side) WHERE is_current`
-  );
-  await db.execute(
-    sql`CREATE INDEX IF NOT EXISTS idx_certificate_image_evidence_sha ON certificate_image_evidence (sha256)`
-  );
 }
 
 /**
@@ -511,102 +417,15 @@ export async function uploadRawScansToR2(
     input: { buffer: Buffer },
     inspection: ScannerEvidenceInspection
   ): Promise<string> => {
-    // TIFF is content-addressed and immutable. A JPEG is retained only to keep
-    // existing scanner clients operational, under an explicit legacy prefix.
-    const key =
-      inspection.evidenceClass === "NEW_IMMUTABLE_MASTER"
-        ? `evidence/masters/${certId}/${side}/${inspection.sha256}.tif`
-        : `evidence/legacy/${certId}/${side}/${inspection.sha256}.jpg`;
-    if (inspection.evidenceClass === "NEW_IMMUTABLE_MASTER") {
-      await uploadImmutableEvidenceToR2(key, input.buffer, {
-        sha256: inspection.sha256,
-        evidenceclass: inspection.evidenceClass,
-        evidenceversion: "v1",
-        side,
-        certificateid: String(certId),
-      });
-    } else {
-      await uploadToR2(key, input.buffer, inspection.mimeType);
-    }
-
-    // Object storage is content-addressed and immutable.  The database pointer
-    // switch below is serialized separately, so a retry can never replace an
-    // earlier master and concurrent recaptures cannot both become current.
-    const client = await pool.connect();
-    try {
-      await client.query("BEGIN");
-      await client.query("SELECT pg_advisory_xact_lock($1)", [hashLockKey(`evidence:${certId}:${side}`)]);
-      const existing = await client.query(
-        `SELECT id, object_key, sha256, byte_length, evidence_class
-           FROM certificate_image_evidence
-          WHERE certificate_id = $1 AND side = $2 AND is_current = true
-          FOR UPDATE`,
-        [certId, side]
-      );
-      const current = existing.rows[0] as
-        | { id: number; object_key: string; sha256: string; byte_length: string | number; evidence_class: string }
-        | undefined;
-      if (
-        current?.sha256 === inspection.sha256 &&
-        Number(current.byte_length) === inspection.byteLength &&
-        current.evidence_class === inspection.evidenceClass
-      ) {
-        await client.query("COMMIT");
-        return String(current.object_key); // exact replay; no duplicate revision
-      }
-      if (current && !options.allowRecapture) {
-        throw new Error(`Refusing to replace existing ${side} scanner evidence for certificate ${certId}`);
-      }
-      if (current) {
-        await client.query(
-          `UPDATE certificate_image_evidence
-              SET is_current = false, superseded_at = NOW()
-            WHERE id = $1`,
-          [current.id]
-        );
-      }
-      const metadata = JSON.stringify({
-        channels: inspection.channels,
-        colourSpace: inspection.colourSpace,
-        hasIccProfile: inspection.hasIccProfile,
-        ...(options.captureMetadata ?? {}),
-      });
-      const inserted = await client.query(
-        `INSERT INTO certificate_image_evidence
-          (certificate_id, side, evidence_class, evidence_version, object_key, sha256, byte_length,
-           pixel_width, pixel_height, bit_depth, dpi, format, capture_metadata, is_current)
-         VALUES ($1, $2, $3, 'v2', $4, $5, $6, $7, $8, $9, $10, $11, $12::jsonb, true)
-         RETURNING id, object_key`,
-        [
-          certId,
-          side,
-          inspection.evidenceClass,
-          key,
-          inspection.sha256,
-          inspection.byteLength,
-          inspection.width,
-          inspection.height,
-          inspection.bitDepth,
-          inspection.dpi,
-          inspection.format,
-          metadata,
-        ]
-      );
-      const next = inserted.rows[0] as { id: number; object_key: string };
-      if (current) {
-        await client.query("UPDATE certificate_image_evidence SET superseded_by_id = $1 WHERE id = $2", [
-          next.id,
-          current.id,
-        ]);
-      }
-      await client.query("COMMIT");
-      return next.object_key;
-    } catch (error) {
-      await client.query("ROLLBACK").catch(() => {});
-      throw error;
-    } finally {
-      client.release();
-    }
+    const persisted = await persistScannerEvidenceCapture({
+      certificateId: certId,
+      side,
+      body: input.buffer,
+      inspection,
+      allowRecapture: options.allowRecapture === true,
+      captureMetadata: options.captureMetadata ?? {},
+    });
+    return persisted.objectKey;
   };
 
   const primarySide = options.primarySide ?? "front";
@@ -773,8 +592,9 @@ export async function processCurrentScannerEvidenceInBackground(
 export async function uploadImagesToCert(
   certId: number,
   frontBuffer: Buffer,
-  backBuffer: Buffer | null
-): Promise<{ frontVariants: any; backVariants: any | null; timing: { sharpMs: number; r2Ms: number } }> {
+  backBuffer: Buffer | null,
+  options: CertificateImagePipelineOptions = {}
+): Promise<CertificateImagePipelineResult> {
   // Per-cert cross-machine serialization (two-scanner safety): the scan
   // background job and the manual image-attach endpoint can both regenerate
   // this cert's variants at the same instant from DIFFERENT Fly machines —
@@ -783,6 +603,34 @@ export async function uploadImagesToCert(
   // lock (waiting, max 60s) makes runs take turns; on timeout we throw, the
   // caller's existing failure path marks scan_status='failed' and the
   // reconciler re-drives — visible failure over silent corruption.
+  return withCertificateImagePipelineLock(certId, () =>
+    uploadImagesToCertUnlocked(certId, frontBuffer, backBuffer, options)
+  );
+}
+
+export interface CertificateImagePipelineOptions {
+  actor?: string;
+  action?: string;
+  auditMetadata?: Record<string, unknown>;
+  /** Stable UUID supplied by an idempotent caller; generated for ordinary runs. */
+  writeVersion?: string;
+}
+
+export interface CertificateImagePipelineResult {
+  frontVariants: any;
+  backVariants: any | null;
+  timing: { sharpMs: number; r2Ms: number };
+  objectKeys: Record<string, string>;
+  /** Identity of the exact buffers verified and committed by the coordinator. */
+  objectIdentities: Record<string, { sha256: string; bytes: number; contentType: string }>;
+}
+
+/**
+ * One cross-machine authority for every mutation of a certificate's image
+ * pointers. Callers that must read current sources and then publish derived
+ * objects keep that entire read/process/finalise sequence inside this lock.
+ */
+export async function withCertificateImagePipelineLock<T>(certId: number, operation: () => Promise<T>): Promise<T> {
   const lockKey = hashLockKey(`img-pipeline:${certId}`);
   const client = await pool.connect();
   let acquired = false;
@@ -799,18 +647,168 @@ export async function uploadImagesToCert(
     if (!acquired) {
       throw new Error(`image pipeline for cert ${certId} is locked by another run (waited 60s)`);
     }
-    return await uploadImagesToCertUnlocked(certId, frontBuffer, backBuffer);
+    return await operation();
   } finally {
     if (acquired) await client.query("SELECT pg_advisory_unlock($1)", [lockKey]).catch(() => {});
     client.release();
   }
 }
 
+function stableWriteVersion(idempotencyKey: string): string {
+  const hex = createHash("sha256").update(idempotencyKey).digest("hex");
+  return `${hex.slice(0, 8)}-${hex.slice(8, 12)}-4${hex.slice(13, 16)}-8${hex.slice(17, 20)}-${hex.slice(20, 32)}`;
+}
+
+async function readCurrentCertificateSourceBuffers(certId: number): Promise<{
+  certId: string;
+  frontKey: string;
+  backKey: string | null;
+  frontBuffer: Buffer;
+  backBuffer: Buffer | null;
+}> {
+  const certResult = await pool.query<{
+    certificate_number: string;
+    grading_front_original: string | null;
+    grading_back_original: string | null;
+    front_image_path: string | null;
+    back_image_path: string | null;
+    deleted_at: Date | null;
+  }>(
+    `SELECT certificate_number,grading_front_original,grading_back_original,front_image_path,back_image_path,deleted_at
+       FROM certificates WHERE id=$1`,
+    [certId]
+  );
+  const cert = certResult.rows[0];
+  if (!cert || cert.deleted_at) throw new Error(`certificate ${certId} is unavailable for image processing`);
+
+  // New scanner captures must always be reprocessed from immutable masters.
+  // Legacy/manual certificates have no current master rows and use their
+  // versioned grading originals instead.
+  const evidence = (
+    await db.execute(sql`
+      SELECT side,object_key FROM certificate_image_evidence
+      WHERE certificate_id=${certId} AND is_current=true`)
+  ).rows as Array<{ side: "front" | "back"; object_key: string }>;
+  const frontKey =
+    evidence.find((row) => row.side === "front")?.object_key ?? cert.grading_front_original ?? cert.front_image_path;
+  const backKey =
+    evidence.find((row) => row.side === "back")?.object_key ?? cert.grading_back_original ?? cert.back_image_path;
+  if (!frontKey) throw new Error(`certificate ${certId} has no current front source image`);
+  const [frontBuffer, backBuffer] = await Promise.all([
+    getR2Buffer(frontKey),
+    backKey ? getR2Buffer(backKey) : Promise.resolve(null),
+  ]);
+  if (!frontBuffer || (backKey && !backBuffer)) {
+    throw new Error(`certificate ${certId} current source image is missing from R2`);
+  }
+  return {
+    certId: cert.certificate_number,
+    frontKey,
+    backKey: backKey ?? null,
+    frontBuffer,
+    backBuffer,
+  };
+}
+
+/** Reprocess exactly the sources that are current after this cert's lock is held. */
+export async function reprocessCurrentCertificateImages(
+  certId: number,
+  options: CertificateImagePipelineOptions = {}
+): Promise<CertificateImagePipelineResult> {
+  return withCertificateImagePipelineLock(certId, async () => {
+    const current = await readCurrentCertificateSourceBuffers(certId);
+    return uploadImagesToCertUnlocked(certId, current.frontBuffer, current.backBuffer, options);
+  });
+}
+
+export interface ManualCertificateSideAttachInput {
+  certId: number;
+  certificateNumber: string;
+  side: "front" | "back";
+  expectedPreviousKey: string | null;
+  body: Buffer;
+  actor: string;
+  replaceExisting: boolean;
+  originalFilename?: string | null;
+  mimeReceived?: string | null;
+  sizeInBytes: number;
+  idempotencyKey?: string | null;
+  recordImageHistory?: boolean;
+}
+
+export interface ManualCertificateSideAttachResult {
+  originalObjectKey: string;
+  replayed: boolean;
+  pipeline: CertificateImagePipelineResult | null;
+  pipelineError: string | null;
+}
+
+/**
+ * Serialize original publication and derivative generation as one logical
+ * certificate mutation. A concurrent attach cannot make an older caller's
+ * bytes win after a newer original has committed.
+ */
+export async function attachManualCertificateSideAndReprocess(
+  input: ManualCertificateSideAttachInput
+): Promise<ManualCertificateSideAttachResult> {
+  return withCertificateImagePipelineLock(input.certId, async () => {
+    const sideColumn = input.side === "front" ? "grading_front_original" : "grading_back_original";
+    const currentResult = await pool.query<Record<string, unknown>>(
+      `SELECT certificate_number,deleted_at,grading_front_original,grading_back_original
+         FROM certificates WHERE id=$1`,
+      [input.certId]
+    );
+    const current = currentResult.rows[0];
+    if (!current || current.deleted_at != null || current.certificate_number !== input.certificateNumber) {
+      throw new Error(`certificate ${input.certId} is unavailable for manual image attachment`);
+    }
+    if ((current[sideColumn] ?? null) !== input.expectedPreviousKey) {
+      throw new Error(`${input.side} image changed before the attachment lock was acquired`);
+    }
+    const writeVersion = input.idempotencyKey?.trim()
+      ? stableWriteVersion(input.idempotencyKey.trim())
+      : randomUUID();
+    const { persistManualCertificateImageObjectWrite } = await import("./lib/certificate-image-persistence");
+    const original = await persistManualCertificateImageObjectWrite({
+      id: input.certId,
+      certId: input.certificateNumber,
+      side: input.side,
+      previousKey: input.expectedPreviousKey,
+      body: input.body,
+      actor: input.actor,
+      replaceExisting: input.replaceExisting,
+      originalFilename: input.originalFilename,
+      mimeReceived: input.mimeReceived,
+      sizeInBytes: input.sizeInBytes,
+      writeVersion,
+      recordImageHistory: input.recordImageHistory,
+    });
+    try {
+      const sources = await readCurrentCertificateSourceBuffers(input.certId);
+      const pipeline = await uploadImagesToCertUnlocked(input.certId, sources.frontBuffer, sources.backBuffer, {
+        actor: input.actor,
+        action: "certificate_image_derivatives_generated",
+        auditMetadata: { source: "manual_attach", side: input.side, originalOperationId: original.operationId },
+        writeVersion,
+        preserveOriginalPointers: true,
+      });
+      return { pipeline, pipelineError: null, originalObjectKey: original.objectKey, replayed: original.replayed };
+    } catch (error) {
+      const message = error instanceof Error ? error.message : String(error);
+      if (input.side === "back" && message.includes("has no current front source image")) {
+        return { pipeline: null, pipelineError: null, originalObjectKey: original.objectKey, replayed: original.replayed };
+      }
+      return { pipeline: null, pipelineError: message, originalObjectKey: original.objectKey, replayed: original.replayed };
+    }
+  });
+}
+
 async function uploadImagesToCertUnlocked(
   certId: number,
   frontBuffer: Buffer,
-  backBuffer: Buffer | null
-): Promise<{ frontVariants: any; backVariants: any | null; timing: { sharpMs: number; r2Ms: number } }> {
+  backBuffer: Buffer | null,
+  options: CertificateImagePipelineOptions & { preserveOriginalPointers?: boolean } = {}
+): Promise<CertificateImagePipelineResult> {
   const tImg = process.hrtime.bigint();
   const { maskRoundedCorners, tightenForDisplay } = await import("./image-processing");
   const sharp = (await import("sharp")).default;
@@ -824,8 +822,13 @@ async function uploadImagesToCertUnlocked(
   // images under a key belonging to a DIFFERENT real certificate. A missing row
   // (the cert was hard-deleted mid-pipeline) must abort the image write, never
   // invent an identity.
-  const certRow = (await db.execute(sql`SELECT certificate_number FROM certificates WHERE id = ${certId}`)).rows[0] as
-    { certificate_number?: string } | undefined;
+  const certRow = (
+    await pool.query<Record<string, unknown>>(
+      `SELECT certificate_number,${IMAGE_UPLOAD_OWNED_COLUMNS.map((column) => `"${column}"`).join(",")}
+         FROM certificates WHERE id=$1`,
+      [certId]
+    )
+  ).rows[0] as ({ certificate_number?: string } & Record<string, unknown>) | undefined;
   const certNumber = certRow?.certificate_number;
   if (!certNumber) {
     throw new Error(
@@ -989,10 +992,36 @@ async function uploadImagesToCertUnlocked(
   // inside the upload — counted under r2; negligible for sizing).
   const sharpMs = elapsedMs(tImg);
 
-  // Upload all to R2 — explicit extension map per variant kind
-  const prefix = `images/grading/${certId}`;
+  // Build one immutable manifest. No object is exposed through a certificate
+  // pointer until every item has been create-only written and GET/hash verified.
+  const writeVersion = options.writeVersion ?? randomUUID();
+  const prefix = `images/grading/${certId}/revisions/${writeVersion}`;
   const uploadKeys: Record<string, string> = {};
-  const uploads: Promise<void>[] = [];
+  const objectItems: ObjectWriteItemInput[] = [];
+  const objectIdentities: CertificateImagePipelineResult["objectIdentities"] = {};
+  const addObject = (
+    logicalSlot: string,
+    objectKey: string,
+    body: Buffer,
+    contentType: string,
+    objectClass: "CANONICAL" | "DERIVATIVE" = "DERIVATIVE",
+    priorObjectKey?: string | null
+  ) => {
+    objectIdentities[objectKey] = {
+      sha256: createHash("sha256").update(body).digest("hex"),
+      bytes: body.length,
+      contentType,
+    };
+    objectItems.push({
+      store: "R2",
+      logicalSlot,
+      objectKey,
+      priorObjectKey,
+      body,
+      contentType,
+      objectClass,
+    });
+  };
 
   // Persist native working assets under content-addressed keys. The ledger
   // ties each output to its source master hash and settings before the
@@ -1004,10 +1033,11 @@ async function uploadImagesToCertUnlocked(
   const frontSource = evidenceRows.find((r) => r.side === "front");
   const backSource = evidenceRows.find((r) => r.side === "back");
   const frontWorkingKey = `evidence/working/${certId}/front/${frontWorking.sha256}.v1.jpg`;
-  uploads.push(uploadToR2(frontWorkingKey, frontWorking.buffer, "image/jpeg").then(() => {}));
+  if (frontSource) addObject("evidence_front_working", frontWorkingKey, frontWorking.buffer, "image/jpeg", "CANONICAL");
   const backWorkingKey = backWorking ? `evidence/working/${certId}/back/${backWorking.sha256}.v1.jpg` : null;
-  if (backWorking && backWorkingKey)
-    uploads.push(uploadToR2(backWorkingKey, backWorking.buffer, "image/jpeg").then(() => {}));
+  if (backSource && backWorking && backWorkingKey) {
+    addObject("evidence_back_working", backWorkingKey, backWorking.buffer, "image/jpeg", "CANONICAL");
+  }
 
   // Flat JPG variants. Phase 2 — "cropped" REMOVED from this loop: it wrote the
   // SAME R2 key (front_cropped.jpg / back_cropped.jpg) as the canonical display
@@ -1017,19 +1047,35 @@ async function uploadImagesToCertUnlocked(
   // AND the collision source. Dropping it makes the key deterministic.
   const jpgVariants = ["original", "greyscale", "highcontrast", "edgeenhanced", "inverted"] as const;
   for (const vName of jpgVariants) {
+    if (options.preserveOriginalPointers && vName === "original") continue;
     const buf = (frontVariants as any)[vName] as Buffer | undefined;
     if (!buf) continue;
     const k = `${prefix}/front_${vName}.jpg`;
     uploadKeys[`front_${vName}`] = k;
-    uploads.push(uploadToR2(k, buf, "image/jpeg").then(() => {}));
+    addObject(
+      `grading_front_${vName}`,
+      k,
+      buf,
+      "image/jpeg",
+      "DERIVATIVE",
+      certRow[`grading_front_${vName}`] as string | null
+    );
   }
   if (backVariants) {
     for (const vName of jpgVariants) {
+      if (options.preserveOriginalPointers && vName === "original") continue;
       const buf = (backVariants as any)[vName] as Buffer | undefined;
       if (!buf) continue;
       const k = `${prefix}/back_${vName}.jpg`;
       uploadKeys[`back_${vName}`] = k;
-      uploads.push(uploadToR2(k, buf, "image/jpeg").then(() => {}));
+      addObject(
+        `grading_back_${vName}`,
+        k,
+        buf,
+        "image/jpeg",
+        "DERIVATIVE",
+        certRow[`grading_back_${vName}`] as string | null
+      );
     }
   }
 
@@ -1039,18 +1085,46 @@ async function uploadImagesToCertUnlocked(
   // different encoding). DB column front_image_path / back_image_path are
   // extension-agnostic text — consumers derive media-type from the key.
   const frontJpegKey = `${prefix}/front_cropped.jpg`;
-  const frontDisplayKey = `images/${certNumber}/front.png`;
+  const frontDisplayKey = `images/${certNumber}/revisions/${writeVersion}/front.png`;
   uploadKeys["front_cropped_display"] = frontJpegKey;
   uploadKeys["front_display"] = frontDisplayKey;
-  uploads.push(uploadToR2(frontJpegKey, frontDisplayJpeg, "image/jpeg").then(() => {}));
-  uploads.push(uploadToR2(frontDisplayKey, frontDisplayPng, "image/png").then(() => {}));
+  addObject(
+    "grading_front_cropped",
+    frontJpegKey,
+    frontDisplayJpeg,
+    "image/jpeg",
+    "DERIVATIVE",
+    certRow.grading_front_cropped as string | null
+  );
+  addObject(
+    "front_image_path",
+    frontDisplayKey,
+    frontDisplayPng,
+    "image/png",
+    "DERIVATIVE",
+    certRow.front_image_path as string | null
+  );
   if (backDisplayJpeg && backDisplayPng) {
     const backJpegKey = `${prefix}/back_cropped.jpg`;
-    const backDisplayKey = `images/${certNumber}/back.png`;
+    const backDisplayKey = `images/${certNumber}/revisions/${writeVersion}/back.png`;
     uploadKeys["back_cropped_display"] = backJpegKey;
     uploadKeys["back_display"] = backDisplayKey;
-    uploads.push(uploadToR2(backJpegKey, backDisplayJpeg, "image/jpeg").then(() => {}));
-    uploads.push(uploadToR2(backDisplayKey, backDisplayPng, "image/png").then(() => {}));
+    addObject(
+      "grading_back_cropped",
+      backJpegKey,
+      backDisplayJpeg,
+      "image/jpeg",
+      "DERIVATIVE",
+      certRow.grading_back_cropped as string | null
+    );
+    addObject(
+      "back_image_path",
+      backDisplayKey,
+      backDisplayPng,
+      "image/png",
+      "DERIVATIVE",
+      certRow.back_image_path as string | null
+    );
   }
 
   // 1600px q80 viewer derivatives — the grading panel loads these instead of
@@ -1058,50 +1132,38 @@ async function uploadImagesToCertUnlocked(
   const { makeDisplayDerivative } = await import("./image-processing");
   const frontViewerKey = `${prefix}/front_display.jpg`;
   uploadKeys["front_viewer_display"] = frontViewerKey;
-  uploads.push(
-    makeDisplayDerivative(frontDisplayJpeg)
-      .then((buf) => uploadToR2(frontViewerKey, buf, "image/jpeg"))
-      .then(() => {})
+  const frontViewer = await makeDisplayDerivative(frontDisplayJpeg);
+  addObject(
+    "grading_front_display",
+    frontViewerKey,
+    frontViewer,
+    "image/jpeg",
+    "DERIVATIVE",
+    certRow.grading_front_display as string | null
   );
   if (backDisplayJpeg) {
     const backViewerKey = `${prefix}/back_display.jpg`;
     uploadKeys["back_viewer_display"] = backViewerKey;
-    uploads.push(
-      makeDisplayDerivative(backDisplayJpeg)
-        .then((buf) => uploadToR2(backViewerKey, buf, "image/jpeg"))
-        .then(() => {})
+    const backViewer = await makeDisplayDerivative(backDisplayJpeg);
+    addObject(
+      "grading_back_display",
+      backViewerKey,
+      backViewer,
+      "image/jpeg",
+      "DERIVATIVE",
+      certRow.grading_back_display as string | null
     );
   }
 
   const tR2 = process.hrtime.bigint();
-  await Promise.all(uploads);
-  const r2Ms = elapsedMs(tR2);
-  console.log(`[scan-ingest] cert=${certId}: uploaded ${uploads.length} image artefacts to R2 (incl. display PNG)`);
-
-  const workingSettings = JSON.stringify({
+  const workingSettings = {
     version: "v1",
     format: "jpeg",
     quality: 95,
     chromaSubsampling: "4:4:4",
     orientation: "rotate",
     resize: null,
-  });
-  if (frontSource) {
-    await db.execute(sql`
-      UPDATE certificate_image_evidence SET
-        working_object_key = ${frontWorkingKey}, working_sha256 = ${frontWorking.sha256},
-        working_width = ${frontWorking.width}, working_height = ${frontWorking.height},
-        working_format = 'jpeg', working_settings = ${workingSettings}::jsonb
-      WHERE certificate_id = ${certId} AND side = 'front' AND is_current = true AND sha256 = ${frontSource.sha256}`);
-  }
-  if (backSource && backWorking && backWorkingKey) {
-    await db.execute(sql`
-      UPDATE certificate_image_evidence SET
-        working_object_key = ${backWorkingKey}, working_sha256 = ${backWorking.sha256},
-        working_width = ${backWorking.width}, working_height = ${backWorking.height},
-        working_format = 'jpeg', working_settings = ${workingSettings}::jsonb
-      WHERE certificate_id = ${certId} AND side = 'back' AND is_current = true AND sha256 = ${backSource.sha256}`);
-  }
+  };
 
   // Persist R2 keys + crop_geometry forensics
   const cropGeometry = {
@@ -1111,30 +1173,91 @@ async function uploadImagesToCertUnlocked(
     recorded_at: new Date().toISOString(),
   };
 
-  await db.execute(sql`
-    UPDATE certificates SET
-      grading_front_original    = ${uploadKeys.front_original || null},
-      grading_front_cropped     = ${uploadKeys.front_cropped_display || uploadKeys.front_cropped_png || uploadKeys.front_cropped || null},
-      grading_front_greyscale   = ${uploadKeys.front_greyscale || null},
-      grading_front_highcontrast = ${uploadKeys.front_highcontrast || null},
-      grading_front_edgeenhanced = ${uploadKeys.front_edgeenhanced || null},
-      grading_front_inverted    = ${uploadKeys.front_inverted || null},
-      grading_back_original     = ${uploadKeys.back_original || null},
-      grading_back_cropped      = ${uploadKeys.back_cropped_display || uploadKeys.back_cropped_png || uploadKeys.back_cropped || null},
-      grading_back_greyscale    = ${uploadKeys.back_greyscale || null},
-      grading_back_highcontrast  = ${uploadKeys.back_highcontrast || null},
-      grading_back_edgeenhanced  = ${uploadKeys.back_edgeenhanced || null},
-      grading_back_inverted     = ${uploadKeys.back_inverted || null},
-      grading_front_display     = ${uploadKeys.front_viewer_display || null},
-      grading_back_display      = ${uploadKeys.back_viewer_display || null},
-      front_image_path          = ${uploadKeys.front_display || uploadKeys.front_cropped_display || uploadKeys.front_cropped_png || uploadKeys.front_cropped || uploadKeys.front_original || null},
-      back_image_path           = ${uploadKeys.back_display || uploadKeys.back_cropped_display || uploadKeys.back_cropped_png || uploadKeys.back_cropped || uploadKeys.back_original || null},
-      crop_geometry             = ${JSON.stringify(cropGeometry)}::jsonb,
-      updated_at                = NOW()
-    WHERE id = ${certId} AND deleted_at IS NULL
-  `);
+  const updates: Record<string, string> = {
+    ...(!options.preserveOriginalPointers ? { grading_front_original: uploadKeys.front_original } : {}),
+    grading_front_cropped: uploadKeys.front_cropped_display,
+    grading_front_greyscale: uploadKeys.front_greyscale,
+    grading_front_highcontrast: uploadKeys.front_highcontrast,
+    grading_front_edgeenhanced: uploadKeys.front_edgeenhanced,
+    grading_front_inverted: uploadKeys.front_inverted,
+    grading_front_display: uploadKeys.front_viewer_display,
+    front_image_path: uploadKeys.front_display,
+    crop_geometry: JSON.stringify(cropGeometry),
+  };
+  if (backVariants) {
+    Object.assign(updates, {
+      ...(!options.preserveOriginalPointers ? { grading_back_original: uploadKeys.back_original } : {}),
+      grading_back_cropped: uploadKeys.back_cropped_display,
+      grading_back_greyscale: uploadKeys.back_greyscale,
+      grading_back_highcontrast: uploadKeys.back_highcontrast,
+      grading_back_edgeenhanced: uploadKeys.back_edgeenhanced,
+      grading_back_inverted: uploadKeys.back_inverted,
+      grading_back_display: uploadKeys.back_viewer_display,
+      back_image_path: uploadKeys.back_display,
+    });
+  }
+  const expectedState = Object.fromEntries(Object.keys(updates).map((column) => [column, certRow[column]]));
+  if (options.preserveOriginalPointers) {
+    // Manual originals remain canonical, but a concurrent source change must
+    // still prevent stale derived displays from committing over newer work.
+    expectedState.grading_front_original = certRow.grading_front_original;
+    expectedState.grading_back_original = certRow.grading_back_original;
+  }
+  const evidenceUpdates = [] as Array<Record<string, unknown>>;
+  if (frontSource) {
+    evidenceUpdates.push({
+      side: "front",
+      expectedSourceSha256: String(frontSource.sha256),
+      workingObjectKey: frontWorkingKey,
+      workingSha256: frontWorking.sha256,
+      workingWidth: frontWorking.width,
+      workingHeight: frontWorking.height,
+      workingFormat: "jpeg",
+      workingSettings,
+    });
+  }
+  if (backSource && backWorking && backWorkingKey) {
+    evidenceUpdates.push({
+      side: "back",
+      expectedSourceSha256: String(backSource.sha256),
+      workingObjectKey: backWorkingKey,
+      workingSha256: backWorking.sha256,
+      workingWidth: backWorking.width,
+      workingHeight: backWorking.height,
+      workingFormat: "jpeg",
+      workingSettings,
+    });
+  }
+  const coordinator = new ObjectWriteCoordinator(
+    createPoolTransactionRunner(pool),
+    objectWriteStore,
+    `scan-derivatives:${process.pid}`
+  );
+  await coordinator.execute(
+    {
+      idempotencyKey: `certificate-derivative:${certId}:${writeVersion}`,
+      operationKind: "CERTIFICATE_DERIVATIVE_SET",
+      aggregateType: "certificate",
+      aggregateId: String(certId),
+      actorId: options.actor ?? "scanner-pipeline",
+      expectedState,
+      intentPayload: {
+        id: certId,
+        certId: certNumber,
+        actor: options.actor ?? "scanner-pipeline",
+        action: options.action ?? "certificate_image_derivatives_generated",
+        updates,
+        evidenceUpdates,
+        ...(options.auditMetadata ? { auditMetadata: options.auditMetadata } : {}),
+      },
+      items: objectItems,
+    },
+    finalizeCertificateImageObjectWrite
+  );
+  const r2Ms = elapsedMs(tR2);
+  console.log(`[scan-ingest] cert=${certId}: committed ${objectItems.length} verified image artefacts`);
 
-  return { frontVariants, backVariants, timing: { sharpMs, r2Ms } };
+  return { frontVariants, backVariants, timing: { sharpMs, r2Ms }, objectKeys: uploadKeys, objectIdentities };
 }
 
 /**

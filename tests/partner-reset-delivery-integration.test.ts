@@ -135,6 +135,8 @@ const NEW_PASSWORD = "rotated-partner-password-1";
       delivered.push({ email, token });
     });
 
+    const { MemoryRateLimitStore, setPartnerRateLimitStore } = await import("../server/partner/rate-limit");
+    setPartnerRateLimitStore(new MemoryRateLimitStore());
     const { registerPartnerPublicRoutes } = await import("../server/partner/public-routes");
     const app = express();
     app.use(express.json());
@@ -153,6 +155,8 @@ const NEW_PASSWORD = "rotated-partner-password-1";
     await new Promise<void>((resolve) => server?.close(() => resolve()));
     const { closePartnerPools } = await import("../server/partner/db");
     await closePartnerPools();
+    const { markSharedPostgresPartnerRateLimitStoreUnavailable } = await import("../server/partner/rate-limit");
+    markSharedPostgresPartnerRateLimitStoreUnavailable();
     await admin?.end().catch(() => {});
   }, 60_000);
 

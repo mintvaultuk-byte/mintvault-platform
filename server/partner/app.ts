@@ -12,6 +12,8 @@ import express, { type Express, type Request, type Response, type NextFunction }
 import { partnerDbConfigured, partnerRuntimeQuery } from "./db";
 import { assertDefinerModel } from "./definer-guard";
 import { mountPartnerPortal } from "./mount";
+import { registerPartnerPublicRoutes } from "./public-routes";
+import { requestBodyMemoryAdmission } from "../lib/upload-memory-admission";
 
 export { __resetDefinerHealthForTests } from "./mount";
 
@@ -35,6 +37,7 @@ export async function assertPartnerDbCapability(): Promise<void> {
 export function createPartnerApp(): Express {
   const app = express();
   app.disable("x-powered-by");
+  app.use(requestBodyMemoryAdmission);
   app.use(express.json({ limit: "1mb" }));
 
   // fail closed if the restricted runtime DB isn't configured (never fall back to privileged conn).
@@ -48,8 +51,14 @@ export function createPartnerApp(): Express {
     next();
   });
 
-  // H1/M1/DB-F1: portal-wide kill switches + definer-model health, then session + the three route
-  // families. All of it lives in server/partner/mount.ts (single source of truth for gate order).
+  // Use the same canonical public-auth router and ordering as the main application. The standalone
+  // factory must be able to establish the sessions consumed by its authenticated surface; keeping
+  // the router implementation in public-routes.ts avoids restoring the shadow login implementation
+  // that previously drifted inside routes.ts.
+  registerPartnerPublicRoutes(app);
+
+  // H1/M1/DB-F1: portal-wide kill switches + definer-model health, then session + the route
+  // families. All authenticated wiring lives in mount.ts (single source of truth for gate order).
   mountPartnerPortal(app);
 
   // minimal UI shell route (SPA placeholder — no data, no secrets)

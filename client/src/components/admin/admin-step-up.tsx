@@ -118,7 +118,11 @@ export function AdminStepUpHost() {
     setBusy(true);
     setError(null);
     try {
-      await apiRequest("POST", "/api/admin/step-up", { password, pin });
+      await apiRequest("POST", "/api/admin/step-up", { password, pin }, {
+        // A rejected step-up secret does not invalidate the already verified
+        // Admin session; keep the challenge mounted so the operator can retry.
+        adminUnauthorizedPolicy: "credential-rejection-aware",
+      });
       const p = pending.current;
       pending.current = null;
       close();

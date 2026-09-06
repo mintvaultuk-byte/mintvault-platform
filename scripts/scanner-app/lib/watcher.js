@@ -21,9 +21,6 @@ const { EventEmitter } = require("node:events");
 
 const stateMod   = require("./state");
 const server     = require("./server-client");
-// The station-signed API. Used here only to record a calibration — the capture
-// window's server-side authority — never for evidence.
-const stationClient = require("./station-client");
 const backDetect = require("./back-detect");
 const lide400    = require("./lide400-controller");
 const cardFrame  = require("./lide400-card-frame");
@@ -677,10 +674,8 @@ class Watcher extends EventEmitter {
       .toBuffer({ resolveWithObject: true });
     if (info.channels !== 3) throw new Error("Positioning preview requires RGB scanner pixels");
     /*
-     * ADVISORY ONLY. This is the full-platen setup diagnostic, and it reports WHERE A CARD IS — it
-     * does not propose where the capture area should go. The capture area's origin comes from
-     * `saveCaptureWindowOrigin` and nowhere else; deriving it from a card here is the card-chasing
-     * architecture that was removed on 2026-08-17.
+     * ADVISORY ONLY. This is a legacy full-platen diagnostic and never proposes or changes the
+     * fixed capture region. The target-bound placement gate remains the only operator Preview.
      */
     const cardCandidate = detectCardBounds(data, info.width, info.height, areaMm);
     return {
@@ -1129,155 +1124,15 @@ class Watcher extends EventEmitter {
     }
   }
 
-  /*
-   * ─────────────────────────────────────────────────────────────────────────────────────────────
-   * REMOVED 2026-08-17: `applyPositioningPreview` — "SAVE PLACEMENT ZONE".
-   *
-   * It persisted the station's capture origin from `derivePlacementProposal`, i.e. from wherever a
-   * card happened to be lying when someone pressed Preview during setup. That is how this station
-   * came to be calibrated to (0, 0): not a decision anybody made, but a consequence of one card's
-   * position on one afternoon — and (0, 0) is the platen origin, exactly where the LiDE's bezel band
-   * sits.
-   *
-   * `saveCaptureWindowOrigin` replaces it. The operator drags the window to where cards will be
-   * placed and saves that deliberately. A card can no longer calibrate a station by lying somewhere.
-   * ─────────────────────────────────────────────────────────────────────────────────────────────
-   */
-
   /**
-   * MOVE THE CAPTURE WINDOW — the one-time station setup action.
-   *
-   * WHY THIS REPLACES AUTO-DERIVATION. The deleted `applyPositioningPreview` inferred the window
-   * origin from wherever a card happened to be lying during setup. That is how the live station came
-   * to be calibrated to (0, 0): the platen ORIGIN, which is exactly where the LiDE's bezel band sits,
-   * and which left the card corner-registered with 3 mm of background on two edges and 33 mm wasted
-   * on the other two. The operator now places the window deliberately instead of a card placing it
-   * for them. This is the ONLY writer of a station's capture origin.
-   *
-   * PERSISTED IN BOTH AUTHORITIES. Locally, so the bridge can request the rectangle; and in the
-   * station calibration record, which is what the server will validate captures against. A local-only
-   * save is how a station and a server come to disagree about which rectangle was scanned.
+   * Retained as an explicit refusal so stale callers fail closed while old packaged builds are
+   * replaced. The Scanner no longer permits any local or server geometry write.
    */
-  async saveCaptureWindowOrigin(originMm) {
-    if (this.targetCaptureInFlight || this.previewActionInFlight || this.positioningPreviewInFlight || this.placementPreviewInFlight) {
-      return { ok: false, error: "The capture window cannot be moved while scanner work is in progress" };
-    }
-    /*
-     * REFUSED WHILE A CARD IS OPEN. Moving the window mid-card would mean the FRONT already captured
-     * and the BACK about to be captured came from two different physical rectangles.
-     *
-     * `openCardJob` AS WELL AS `activeTargetEntry`, because `activeCapture` is deliberately null in
-     * the gap between an accepted FRONT and an armed BACK, and after a failed arm. Those are exactly
-     * the moments a card is half-captured, so checking only the live session left the window movable
-     * in the one window where moving it does the damage this guard describes.
-     */
-    if (this.activeTargetEntry() || stateMod.get().openCardJob) {
-      return { ok: false, error: "Finish or release the current card before moving the capture window" };
-    }
-    let bounded;
-    try {
-      bounded = captureProfile.clampCaptureOriginMm(originMm);
-    } catch (error) {
-      return { ok: false, error: error?.message || "Capture window origin is invalid" };
-    }
-    if (bounded.clamped) {
-      return {
-        ok: false,
-        error:
-          `The capture window must stay on the platen (X ${bounded.boundsMm.minX}–${bounded.boundsMm.maxX} mm, ` +
-          `Y ${bounded.boundsMm.minY}–${bounded.boundsMm.maxY} mm)`,
-      };
-    }
-    const profile = captureProfile.STANDARD_TCG;
-    const rect = captureProfile.captureWindowRectMm(bounded.originMm);
-    const boundary = captureProfile.placementBoundaryRectMm(profile);
-    const previewFloorMm = captureProfile.previewGreenMinMarginMm(profile);
-    /*
-     * THE SERVER GOES FIRST, AND ITS REFUSAL IS FINAL.
-     *
-     * This used to persist the local origin and then tell the server. Any failure of the second half
-     * — a 403 because the operator lacks `partner.stations.calibrate`, a network drop, a refusal
-     * because a card is open — left the Mac scanning at the NEW rectangle while the server authority
-     * still described the OLD one. Every subsequent capture is then acquired at one rectangle and
-     * validated against another, and the operator's only clue is a banner they have already scrolled
-     * past. Asking the authority first means a refused move changes nothing at all.
-     */
-    let calibration = { saved: false, error: null };
-    try {
-      const health = stateMod.get().scannerHealth || {};
-      const response = await stationClient.saveCalibration({
-        scannerHardware: {
-          manufacturer: "Canon",
-          model: health.model || "Canon LiDE 400",
-          serial: health.serial || null,
-          deviceId: lide400.deviceId(),
-        },
-        scannerProfileVersion: lide400.PROFILE_VERSION,
-        acquisitionRegion: rect,
-        /*
-         * The PREVIEW boundary — the capture area inset by the derived preview threshold. This was
-         * `safeWindowMm`/`operatorInsetMm`, which were deleted with the 10 mm gate, and referencing
-         * them here threw a TypeError on EVERY save: the local origin had already been written and
-         * the server was never told, which is precisely the divergence this function exists to
-         * prevent. Both fields are optional server-side; they are derived, never restated.
-         */
-        workingRegion: {
-          x: rect.x + boundary.x,
-          y: rect.y + boundary.y,
-          width: boundary.width,
-          height: boundary.height,
-        },
-        placementToleranceMm: {
-          left: previewFloorMm,
-          top: previewFloorMm,
-          right: previewFloorMm,
-          bottom: previewFloorMm,
-        },
-        calibrationVersion: profile.version,
-      });
-      if (response?.ok) calibration = { saved: true, error: null };
-      else calibration = { saved: false, error: response?.body?.error || `Calibration was not recorded — HTTP ${response?.status}` };
-    } catch (error) {
-      calibration = { saved: false, error: error?.message || "Calibration could not be recorded" };
-    }
-    if (!calibration.saved) {
-      // Nothing has been written locally, so there is nothing to roll back and the station keeps
-      // scanning the rectangle the server still describes.
-      stateMod.set({ lastError: calibration.error });
-      this.emitState();
-      return { ok: false, error: calibration.error };
-    }
-
-    let persisted;
-    try {
-      persisted = lide400.persistJigOrigin(bounded.originMm);
-    } catch (error) {
-      return {
-        ok: false,
-        error:
-          `${error?.message || "Capture window could not be saved on this Mac"} — the server now records the NEW ` +
-          `window, so this station must be repaired before it scans again.`,
-      };
-    }
-    // Any standing approval was measured against the OLD window and is now meaningless.
-    this.clearPlacementApproval("capture window moved");
-
-    stateMod.set({
-      positioningPreview: null,
-      lastError: calibration.saved ? null : calibration.error,
-    });
-    this.emitState();
-    this.log(
-      `capture-window ${JSON.stringify({
-        stage: "saved",
-        originMm: bounded.originMm,
-        areaMm: profile.outerWindowMm,
-        placementBoundaryMm: captureProfile.placementBoundaryRectMm(profile),
-        profileVersion: profile.version,
-        calibrationRecorded: calibration.saved,
-      })}`
-    );
-    return { ok: true, persisted, rectMm: rect, calibration };
+  async saveCaptureWindowOrigin() {
+    return {
+      ok: false,
+      error: "MintVault uses the automatic fixed Scanner profile; capture geometry cannot be changed here",
+    };
   }
 
   previewData(previewId) {

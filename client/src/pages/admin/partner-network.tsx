@@ -1,8 +1,8 @@
 /**
  * G4 Super-Admin Partner Connector Operations console.
  *
- * Lives inside the existing admin app (AdminShell + admin primitives). Self-auth-gates via
- * /api/admin/session, then renders: an overview (operational health + queue counts), a filtered
+ * Lives inside the existing admin app (AdminShell + admin primitives), dominated by the shared
+ * AdminSessionProvider, then renders: an overview (operational health + queue counts), a filtered
  * records table, and a record-detail drawer whose safe operator actions (revalidate / reconcile /
  * retry / release-expired-claim / mark- and resolve-manual-review / ack-permanent-failure) each open a
  * required-reason modal and POST to the G4 API. No connector logic here — the server delegates to the
@@ -129,8 +129,7 @@ const RECOVER_CREDIT_HOLD_ACTION: ActionSpec = {
 };
 
 export default function PartnerNetworkOpsPage() {
-  const [pathname, navigate] = useLocation();
-  const [authed, setAuthed] = useState<boolean | null>(null);
+  const [, navigate] = useLocation();
   const [filter, setFilter] = useState<Filter>({ page: 1 });
   const [selected, setSelected] = useState<string | null>(null);
   const [modal, setModal] = useState<{ action: ActionSpec; rec: RecordRow } | null>(null);
@@ -154,38 +153,18 @@ export default function PartnerNetworkOpsPage() {
     return () => window.removeEventListener("keydown", onKey);
   }, [modal]);
 
-  useEffect(() => {
-    let live = true;
-    fetch("/api/admin/session", { credentials: "include" })
-      .then((r) => (r.ok ? r.json() : null))
-      .then((d) => live && setAuthed(!!d?.authenticated))
-      .catch(() => live && setAuthed(false));
-    return () => {
-      live = false;
-    };
-  }, []);
-  useEffect(() => {
-    if (authed === false)
-      navigate(
-        `/admin/login?next=${encodeURIComponent(`${pathname}${window.location.search}${window.location.hash}`)}`,
-        { replace: true }
-      );
-  }, [authed, navigate, pathname]);
-
   const health = useQuery({
     queryKey: opsKeys.workerStatus(),
     queryFn: () => apiRequest("GET", `${BASE}/worker/status`).then((r) => r.json()),
-    enabled: authed === true,
   });
   const records = useQuery({
     queryKey: opsKeys.records(filter as Record<string, unknown>),
     queryFn: () => apiRequest("GET", `${BASE}/records${recordsQueryString(filter)}`).then((r) => r.json()),
-    enabled: authed === true,
   });
   const detail = useQuery({
     queryKey: selected ? opsKeys.record(selected) : ["none"],
     queryFn: () => apiRequest("GET", `${BASE}/records/${selected}`).then((r) => r.json()),
-    enabled: authed === true && !!selected,
+    enabled: !!selected,
   });
 
   const mutation = useMutation({
@@ -209,25 +188,12 @@ export default function PartnerNetworkOpsPage() {
   const rows: RecordRow[] = records.data?.records ?? [];
   const selectedRec = useMemo(() => rows.find((r) => r.id === selected) ?? null, [rows, selected]);
 
-  if (authed === null) {
-    return (
-      <div
-        className="admin-root"
-        style={{ display: "grid", placeItems: "center", minHeight: "60vh" }}
-        data-testid="pn-loading"
-      >
-        <span style={{ color: "var(--admin-gold, #D4AF37)" }}>Loading…</span>
-      </div>
-    );
-  }
-
   const h = health.data ?? {};
 
   return (
     <AdminShell
       activeTab="dashboard"
       onTabChange={() => navigate("/admin")}
-      onLogout={() => navigate("/admin")}
       title="Partner Connectors"
       crumb="Operations"
     >

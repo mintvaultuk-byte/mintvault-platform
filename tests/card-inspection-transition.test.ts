@@ -11,6 +11,7 @@ import {
 const read = (path: string) => readFileSync(join(process.cwd(), path), "utf8");
 const VIEWER = read("client/src/components/grading/image-viewer.tsx");
 const PANEL = read("client/src/components/grading/grading-panel.tsx");
+const WORKSTATION = read("client/src/components/grading-workflow/GradingWorkstation.tsx");
 
 describe("cross-stage inspection transition", () => {
   it("round-trips the Grade viewer's percent focus without viewport pixels", () => {
@@ -29,14 +30,24 @@ describe("cross-stage inspection transition", () => {
     expect(state.views.front).toEqual({ zoom: 2, focusX: 0.25, focusY: 0.4 });
     expect(state.views.back).toEqual({ zoom: 4, focusX: 0.75, focusY: 0.6 });
   });
+
+  it("resets both sides to FIT when the workstation opens a different card", () => {
+    expect(WORKSTATION).toMatch(
+      /useEffect\(\(\) => \{[\s\S]*?setInspectionState\(createCardInspectionState\(\)\);[\s\S]*?\}, \[certId, mode\]\);/
+    );
+  });
 });
 
 describe("grading-coordinate isolation", () => {
-  it("never publishes mark-mode zoom/pan into presentation state", () => {
-    expect(VIEWER).toMatch(/if \(!inspectionState \|\| !onInspectionStateChange \|\| markMode\) return/);
-    expect(VIEWER).toContain("Mark mode: no CSS transform on the zoom-pan div");
+  it("shares presentation zoom/pan with MARK without changing stored evidence coordinates", () => {
+    expect(VIEWER).toMatch(
+      /if \(!inspectionState \|\| !onInspectionStateChange \|\| \(side !== "front" && side !== "back"\)\) return/
+    );
+    expect(VIEWER).toContain("updateCardInspectionView(");
+    expect(VIEWER).toContain('data-testid="grading-coordinate-plane"');
     expect(VIEWER).toContain("const imgRect = imgElRef.current.getBoundingClientRect()");
     expect(VIEWER).toContain("const r = el.getBoundingClientRect()");
+    expect(VIEWER).not.toMatch(/transform:\s*`scale\(/);
   });
 
   it("gates mutation surfaces by active Grade stage while leaving inspection state wired", () => {

@@ -380,6 +380,53 @@ describe("P12 Card Job reconciliation: QA split-transaction drift (real PostgreS
     }
   });
 
+  it("R0: accepted scanner evidence converges NEEDS_SCAN to CAPTURING and both sides to READY_TO_GRADE", async () => {
+    opSeq += 1;
+    const started = await authority.startNewCardJobAtStation({
+      tenantId: shop.tenantId,
+      locationId: shop.locationA,
+      stationId: shop.stationA,
+      clientOpId: `capture-redrive-${opSeq}-${RUN_SALT}`,
+      actorUserId: shop.graderOne,
+      actorEmail: "operator@shop.test",
+      cardName: "Capture convergence",
+    });
+
+    await captureSide(shop, started.certificateId, "front");
+    expect(await jobStatus(started.cardJobId)).toBe("NEEDS_SCAN");
+    const firstScan = await reconciliation.detectCaptureCardJobDrift();
+    expect(firstScan.items).toContainEqual(
+      expect.objectContaining({ cardJobId: started.cardJobId, status: "NEEDS_SCAN", acceptedSides: 1 })
+    );
+
+    const firstTick = await reconciliationJob.runPartnerCardJobReconciliation();
+    expect(firstTick.captureDrift.results).toContainEqual(
+      expect.objectContaining({ cardJobId: started.cardJobId, outcome: "repaired", status: "CAPTURING" })
+    );
+    expect(await jobStatus(started.cardJobId)).toBe("CAPTURING");
+    // One accepted side is the legitimate CAPTURING state, not drift.
+    expect((await reconciliation.detectCaptureCardJobDrift()).items.map((item) => item.cardJobId)).not.toContain(
+      started.cardJobId
+    );
+
+    await captureSide(shop, started.certificateId, "back");
+    const secondScan = await reconciliation.detectCaptureCardJobDrift();
+    expect(secondScan.items).toContainEqual(
+      expect.objectContaining({ cardJobId: started.cardJobId, status: "CAPTURING", acceptedSides: 2 })
+    );
+    const secondTick = await reconciliationJob.runPartnerCardJobReconciliation();
+    expect(secondTick.captureDrift.results).toContainEqual(
+      expect.objectContaining({ cardJobId: started.cardJobId, outcome: "repaired", status: "READY_TO_GRADE" })
+    );
+    expect(await jobStatus(started.cardJobId)).toBe("READY_TO_GRADE");
+
+    const thirdTick = await reconciliationJob.runPartnerCardJobReconciliation();
+    expect(thirdTick.captureDrift.results.map((result) => result.cardJobId)).not.toContain(started.cardJobId);
+    const actions = await auditActions(started.cardJobId);
+    expect(actions).toContain("partner_card_job_capturing_redrive");
+    expect(actions).toContain("partner_card_job_ready_to_grade_redrive");
+  });
+
   it("R1: a failure between certificate approval and the Card Job transition leaves output BLOCKED", async () => {
     const card = await cardInQaReview(shop);
     await approveButDropCardJobTransition(card);

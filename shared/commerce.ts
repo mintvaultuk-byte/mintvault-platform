@@ -31,6 +31,35 @@ export interface PricingTier {
   serviceType?: string;
 }
 
+export function formatTierPrice(pricePerCard: number): string {
+  const pounds = pricePerCard / 100;
+  return `£${pricePerCard % 100 === 0 ? pounds : pounds.toFixed(2)} per card`;
+}
+
+/** Camel-case Admin wire fields; timestamps are intentionally not client inputs. */
+export interface ServiceTierAdminRow {
+  id: number;
+  serviceType: string;
+  tierId: string;
+  name: string;
+  pricePerCard: number;
+  turnaroundDays: number;
+  turnaroundLabel: string | null;
+  maxValueGbp: number;
+  features: string[] | null;
+  isActive: boolean | null;
+  sortOrder: number | null;
+}
+
+/** Live public projection, not a quote or authority to choose a charge amount. */
+export interface LivePricingTier extends PricingTier {
+  serviceType: string;
+  turnaroundDays: number;
+  capacityStatus: string;
+  capacityPausedUntil: string | null;
+  capacityMessage: string | null;
+}
+
 export interface PublicCertificate {
   certId: string;
   status: string;

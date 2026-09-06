@@ -2,7 +2,6 @@ import React, { useCallback, useEffect, useMemo, useRef, useState, type ReactNod
 import GradingPanel from "@/components/grading/grading-panel";
 import { WorkstationHeaderStrip } from "@/components/grading-workflow/WorkstationHeaderStrip";
 import { WorkstationPreviewAside } from "@/components/grading-workflow/WorkstationPreviewAside";
-import { RailWidthProvider } from "@/components/grading-workflow/rail-width-context";
 import {
   CertificatePreviewPanel,
   type CertificatePreviewFields,
@@ -302,10 +301,6 @@ export function GradingWorkstation({
       : undefined;
 
   return (
-    /* One provider per workstation: the portalled card viewer publishes the rail
-       requirement it predicted, the rail applies it. Scoped here so two mounted
-       workstations (the dev harness stacks five) never share a width. */
-    <RailWidthProvider>
       <div
         className="flex min-h-0 min-w-0 flex-1 flex-col"
         data-testid="grading-workstation"
@@ -413,8 +408,7 @@ export function GradingWorkstation({
             )}
           </div>
         </CanonicalGradingWorkstationShell>
-      </div>
-    </RailWidthProvider>
+    </div>
   );
 }
 

@@ -14,7 +14,7 @@ import { PARTNER_PERMISSIONS, ROLE_PERMISSIONS, ROLE_LABELS } from "../server/pa
 describe("Partner admin capability probe", () => {
   it("accepts only BYPASSRLS for the Partner Super Admin pool", async () => {
     const ok = await probePartnerAdminCapabilityForTest(async () => ({
-      rows: [{ has_role: true, rolbypassrls: true }],
+      rows: [{ has_role: true, rolsuper: false, rolbypassrls: true }],
       rowCount: 1,
       command: "SELECT",
       oid: 0,
@@ -23,7 +23,7 @@ describe("Partner admin capability probe", () => {
     expect(ok.ok).toBe(true);
 
     const blocked = await probePartnerAdminCapabilityForTest(async () => ({
-      rows: [{ has_role: true, rolbypassrls: false }],
+      rows: [{ has_role: true, rolsuper: false, rolbypassrls: false }],
       rowCount: 1,
       command: "SELECT",
       oid: 0,
@@ -32,9 +32,9 @@ describe("Partner admin capability probe", () => {
     expect(blocked).toMatchObject({ ok: false, code: "PARTNER_ADMIN_BYPASSRLS_REQUIRED" });
   });
 
-  it("requires the Partner runtime pool to remain non-BYPASSRLS", async () => {
+  it("requires the Partner runtime pool to remain NOSUPERUSER and NOBYPASSRLS", async () => {
     const ok = await probePartnerRuntimeCapabilityForTest(async () => ({
-      rows: [{ has_role: true, rolbypassrls: false }],
+      rows: [{ has_role: true, rolsuper: false, rolbypassrls: false }],
       rowCount: 1,
       command: "SELECT",
       oid: 0,
@@ -43,13 +43,22 @@ describe("Partner admin capability probe", () => {
     expect(ok.ok).toBe(true);
 
     const blocked = await probePartnerRuntimeCapabilityForTest(async () => ({
-      rows: [{ has_role: true, rolbypassrls: true }],
+      rows: [{ has_role: true, rolsuper: false, rolbypassrls: true }],
       rowCount: 1,
       command: "SELECT",
       oid: 0,
       fields: [],
     }));
     expect(blocked).toMatchObject({ ok: false, code: "PARTNER_RUNTIME_BYPASSRLS_FORBIDDEN" });
+
+    const superuser = await probePartnerRuntimeCapabilityForTest(async () => ({
+      rows: [{ has_role: true, rolsuper: true, rolbypassrls: true }],
+      rowCount: 1,
+      command: "SELECT",
+      oid: 0,
+      fields: [],
+    }));
+    expect(superuser).toMatchObject({ ok: false, code: "PARTNER_RUNTIME_SUPERUSER_FORBIDDEN" });
   });
 
   it("fails closed for empty lookup, unavailable DB and timeout", async () => {

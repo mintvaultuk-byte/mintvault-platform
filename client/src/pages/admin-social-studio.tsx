@@ -1,3 +1,4 @@
+import { adminFetch } from "@/lib/queryClient";
 import { useEffect, useMemo, useState } from "react";
 import { useQuery } from "@tanstack/react-query";
 import { Check, Copy, Download, Image, Loader2, RefreshCw, Search, Sparkles } from "lucide-react";
@@ -61,7 +62,7 @@ async function fetchSocialStudioImage(
   format: SocialStudioFormat,
   background: SocialStudioBackgroundId
 ): Promise<Blob> {
-  const res = await fetch("/api/admin/social-studio/render", {
+  const res = await adminFetch("/api/admin/social-studio/render", {
     method: "POST",
     credentials: "include",
     headers: { "Content-Type": "application/json" },
@@ -148,7 +149,7 @@ export default function AdminSocialStudioPage() {
     queryKey: ["/api/admin/social-studio/certificates", search],
     queryFn: async () => {
       const qs = search.trim() ? `?q=${encodeURIComponent(search.trim())}` : "";
-      const res = await fetch(`/api/admin/social-studio/certificates${qs}`, { credentials: "include" });
+      const res = await adminFetch(`/api/admin/social-studio/certificates${qs}`, { credentials: "include" });
       if (!res.ok) throw new Error("Unable to load Social Studio cards");
       return res.json();
     },
@@ -157,7 +158,7 @@ export default function AdminSocialStudioPage() {
   const backgroundsQ = useQuery<BackgroundResponse>({
     queryKey: ["/api/admin/social-studio/backgrounds"],
     queryFn: async () => {
-      const res = await fetch("/api/admin/social-studio/backgrounds", { credentials: "include" });
+      const res = await adminFetch("/api/admin/social-studio/backgrounds", { credentials: "include" });
       if (!res.ok) throw new Error("Unable to load Social Studio backgrounds");
       return res.json();
     },

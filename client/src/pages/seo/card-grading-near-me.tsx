@@ -26,7 +26,7 @@ const postalFaqs = [
   },
   {
     question: "How long does card grading take by post?",
-    answer: "MintVault offers three service tiers. Vault Queue is 40 working days, Standard is 15 working days, and Express is 5 working days — measured from when your cards arrive at our facility. You'll receive confirmation when your cards are received and when grading is complete.",
+    answer: "See the current pricing page for available grading services, prices and turnaround. Your submission quote confirms applicable discounts, insurance, return shipping and the total before payment.",
   },
   {
     question: "Can I track my card grading submission?",
@@ -68,7 +68,7 @@ export default function CardGradingNearMe() {
     <div className="max-w-5xl mx-auto px-4 py-10 no-text-shadow">
       <SeoHead
         title="Card Grading Near Me | UK Card Grading by Post | MintVault"
-        description="Find UK card grading by post and, where available, approved local MintVault Partner shops. Professional grading from £19."
+        description="Find UK card grading by post and, where available, approved local MintVault Partner shops. Compare current grading prices online."
         canonical="https://mintvaultuk.com/card-grading-near-me"
         ogImage="https://mintvaultuk.com/images/collector-lifestyle.webp"
         schema={schema}
@@ -141,20 +141,12 @@ export default function CardGradingNearMe() {
         <section className="mb-10" data-testid="section-nearme-tiers">
           <h2 className="text-2xl font-bold text-[#D4AF37] tracking-wide mb-4">Service Tiers & Pricing</h2>
           <div className="space-y-3">
-            {[
-              { tier: "Vault Queue", days: "40 working days", price: "£19/card" },
-              { tier: "Standard", days: "15 working days", price: "£25/card" },
-              { tier: "Express", days: "5 working days", price: "£45/card" },
-            ].map((t) => (
-              <div key={t.tier} className="flex items-center justify-between border border-[#D4AF37]/20 bg-[#0a0e1a]/85 backdrop-blur-sm rounded-lg px-4 py-3">
-                <span className="text-white text-sm font-medium">{t.tier}</span>
-                <span className="text-[#d4d4d4] text-sm">{t.days}</span>
-                <span className="text-[#D4AF37] font-bold text-sm">{t.price}</span>
-              </div>
-            ))}
+            <Link href="/pricing" className="block px-4 py-3 text-[#D4AF37] hover:underline">
+              View current grading prices and turnaround →
+            </Link>
           </div>
           <p className="text-[#d4d4d4] text-sm mt-3">
-            All tiers include fully insured return shipping. <Link href="/pricing" className="text-[#D4AF37] hover:underline">View full pricing</Link>.
+            Your quote confirms insurance and return shipping before payment. <Link href="/pricing" className="text-[#D4AF37] hover:underline">View full pricing</Link>.
           </p>
         </section>
 

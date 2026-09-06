@@ -1,0 +1,9 @@
+{
+  "extends": "./tsconfig.json",
+  "include": ["client/src/**/*.ts", "client/src/**/*.tsx", "server/**/*.ts", "shared/**/*.ts"],
+  "exclude": ["node_modules", "build", "dist", "**/*.test.ts"],
+  "compilerOptions": {
+    "incremental": false,
+    "allowUnreachableCode": false
+  }
+}

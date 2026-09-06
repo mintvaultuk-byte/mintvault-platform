@@ -2,145 +2,141 @@ const assert = require("node:assert/strict");
 const fs = require("node:fs");
 const path = require("node:path");
 const test = require("node:test");
+const { Window } = require("happy-dom");
 
 const APP = path.resolve(__dirname, "..");
 const html = fs.readFileSync(path.join(APP, "renderer", "index.html"), "utf8");
 const renderer = fs.readFileSync(path.join(APP, "renderer", "app.js"), "utf8");
-const css = fs.readFileSync(path.join(APP, "renderer", "styles.css"), "utf8");
 const main = fs.readFileSync(path.join(APP, "main.js"), "utf8");
+const preload = fs.readFileSync(path.join(APP, "preload.js"), "utf8");
+const packager = fs.readFileSync(path.join(APP, "scripts", "package-macos.js"), "utf8");
+const SCANNER_VERSION = require("../package.json").version;
 
-test("station UI keeps final Scan visible but target-gated", () => {
-  assert.match(html, /id="scanCardBtn" disabled>SCAN CARD/);
-  assert.match(html, /id="positioningPreviewBtn">PREVIEW/);
-  assert.doesNotMatch(html, /id="scanCardBtn" hidden/);
-  assert.match(renderer, /const scanLabel = hasTarget \? `SCAN \$\{side\}` : "SCAN CARD"/);
-  assert.match(renderer, /setActionButton\(els\.scanCardBtn, scanLabel, true, !scanEnabled\)/);
-  assert.match(renderer, /Open or arm a card in MintVault to enable final scanning\./);
-  assert.match(html, /id="workflowGuide"/);
-  assert.match(renderer, /STEP 1 — PLACE CARD/);
-  assert.match(renderer, /STEP 2 — FLIP THE CARD/);
+async function renderSetup(setup, state = {}, scannerOverrides = {}) {
+  const window = new Window({ url: "http://mintvault-scanner.test" });
+  window.document.write(html);
+  window.document.close();
+  window.alert = () => {};
+  window.confirm = () => false;
+  window.setInterval = () => 0;
+  window.clearInterval = () => {};
+  window.setTimeout = () => 0;
+  window.clearTimeout = () => {};
+  window.scanner = {
+    onStateUpdate: () => () => {},
+    getState: () => Promise.resolve({ state: "idle", availableCredits: 5, ...state }),
+    getStationSetup: () => Promise.resolve(setup),
+    getVersion: () => Promise.resolve({ ok: true, version: SCANNER_VERSION }),
+    getPlacementPreview: () => Promise.resolve({ ok: false }),
+    runPlacementPreview: () => Promise.resolve({ ok: true }),
+    ...scannerOverrides,
+  };
+  window.eval(renderer);
+  await new Promise((resolve) => setImmediate(resolve));
+  await new Promise((resolve) => setImmediate(resolve));
+  return window.document;
+}
+
+test("normal Scanner workflow has no movable area, reset, save, or operator calibration surface", () => {
+  for (const forbidden of [
+    "captureWindowSetup",
+    "captureWindowSaveBtn",
+    "captureWindowResetBtn",
+    "calibrationSetupRow",
+    "calibrationPreviewBtn",
+    "platenWindow",
+    "SAVE CALIBRATION",
+    "RESET TO DEFAULT",
+  ]) {
+    assert.doesNotMatch(html, new RegExp(forbidden));
+  }
+  assert.doesNotMatch(renderer, /saveCaptureWindow|captureWindowMovable|enableCaptureWindowDrag|DEFAULT_ORIGIN_MM/);
+  assert.doesNotMatch(preload, /saveCaptureWindow|save-capture-window/);
+  assert.doesNotMatch(main, /save-capture-window|saveCaptureWindowOrigin|run-positioning-preview|get-positioning-preview/);
+  assert.match(packager, /basename === "calibrate-lide\.js"/);
+  assert.match(html, /id="positioningPreviewBtn" hidden>PREVIEW FRONT/);
+  assert.match(renderer, /`PREVIEW \$\{side\.toUpperCase\(\)\}`/);
 });
 
-test("post-scan Accept/Reject is removed — Scan approval immediately becomes upload", () => {
-  const preload = fs.readFileSync(path.join(APP, "preload.js"), "utf8");
-  assert.doesNotMatch(html, /id="acceptPreviewBtn"/);
-  assert.doesNotMatch(html, /id="rescanPreviewBtn"/);
-  assert.match(html, /SCAN ACCEPTED FROM GREEN PREVIEW — UPLOADING THIS TIFF/);
-  assert.doesNotMatch(renderer, /acceptPreviewBtn|rescanPreviewBtn|acceptCapturePreview/);
-  assert.doesNotMatch(preload, /acceptCapturePreview|accept-capture-preview/);
-  assert.doesNotMatch(main, /accept-capture-preview/);
-  assert.match(renderer, /scanEstimate/);
-  assert.match(renderer, /uploadProgressText/);
+test("About UI displays the Scanner package version", async () => {
+  assert.equal(SCANNER_VERSION, "1.6.2");
+  const document = await renderSetup({ stage: "active", calibrationStatus: "VALID", summary: { availableCredits: 5 } });
+  assert.equal(document.getElementById("appVersion").textContent, `v${SCANNER_VERSION}`);
 });
 
-test("normal placement Preview is a card-centred display crop while full platen and calibration stay secondary", () => {
-  assert.match(html, /id="positioningCardPreviewViewport"/);
-  assert.match(html, /id="positioningFullPreview"/);
-  assert.match(html, /<details class="row settings secondary" id="diagnosticsRow">/);
-  /*
-   * SAVE PLACEMENT ZONE is gone. It persisted a station's capture origin derived from wherever a
-   * card happened to be lying, which is how this station came to be calibrated to the platen corner.
-   * The only writer of a capture origin is now the deliberate drag in "Capture window position".
-   */
-  assert.doesNotMatch(html, /id="savePlacementBtn"/);
-  assert.match(html, /id="captureWindowSaveBtn"/);
-  assert.match(html, /id="signOutBtn" hidden>SIGN OUT \/ SWITCH USER/);
-  assert.match(renderer, /function renderPositioningCardCrop\(/);
-  assert.match(renderer, /const marginMm = 8/);
-  assert.match(renderer, /No pixels are written, uploaded, or reused as evidence/);
-  assert.match(css, /\.positioning-card-preview-viewport \{[^}]*height: 270px/s);
-  assert.match(main, /width: 660,[\s\S]*height: 760/);
-  assert.doesNotMatch(main, /popover\.on\("blur"/);
+test("a non-ACTIVE station exposes no card or billing workflow before authority is known", async () => {
+  const document = await renderSetup({ stage: "pending", summary: { availableCredits: 5 } });
+  assert.equal(document.getElementById("operationalWorkflow").hidden, true);
+  assert.equal(document.getElementById("stationSetupModal").classList.contains("visible"), true);
+  assert.equal(document.getElementById("billingLockModal").classList.contains("visible"), false);
+  assert.match(document.getElementById("stationSetupTitle").textContent, /Waiting for MintVault approval/);
 });
 
-test("operator sign-out clears only the human session and keeps the Mac station identity", () => {
-  const identity = fs.readFileSync(path.join(APP, "lib", "station-identity.js"), "utf8");
-  const preload = fs.readFileSync(path.join(APP, "preload.js"), "utf8");
-  assert.match(identity, /function clearOperatorSession\(\)/);
-  assert.match(identity, /clearOperatorSession,/);
-  assert.match(preload, /stationSignOut: \(\) => ipcRenderer\.invoke\("station-sign-out"\)/);
-  assert.match(main, /Finish or safely retry the current card before switching operator/);
-  assert.match(main, /stationIdentity\.clearOperatorSession\(\)/);
+test("an approved station automatically prepares its fixed profile without a user-facing calibration stage", async () => {
+  const document = await renderSetup(
+    { stage: "active", calibrationStatus: "UNPROVISIONED", summary: { availableCredits: 5 } },
+    { scannerHealth: { status: "profile_unprovisioned" } }
+  );
+  assert.equal(document.getElementById("operationalWorkflow").hidden, true);
+  assert.equal(document.getElementById("stationSetupModal").classList.contains("visible"), true);
+  assert.equal(document.getElementById("positioningPreviewBtn").hidden, true);
+  assert.match(document.getElementById("stationSetupTitle").textContent, /Preparing Scanner/);
+  assert.match(document.getElementById("stationSetupText").textContent, /automatically applying/i);
+  assert.doesNotMatch(document.body.textContent, /save calibration|reset to default|drag/i);
 });
 
-test("Fix missing images is target-bound recovery only and cannot delete a certificate", () => {
-  const preload = fs.readFileSync(path.join(APP, "preload.js"), "utf8");
-  assert.match(html, /Recovery only\./);
-  /*
-   * P7 replaced "open the card in MintVault" with an in-app, server-derived FIX: the operator never
-   * types a card number, so this asserts the CURRENT affordance. The old assertion still named a
-   * `recover` button that P7 deleted, and had been failing ever since.
-   */
+test("an ACTIVE fixed-profile station preserves the guarded zero-credit workflow", async () => {
+  const document = await renderSetup(
+    { stage: "active", calibrationStatus: "VALID", summary: { availableCredits: 0 } },
+    { availableCredits: 0 }
+  );
+  assert.equal(document.getElementById("operationalWorkflow").hidden, false);
+  assert.equal(document.getElementById("stationSetupModal").classList.contains("visible"), false);
+  assert.equal(document.getElementById("newCardBtn").disabled, true);
+  assert.equal(document.getElementById("creditEmptyPanel").hidden, false);
+  assert.equal(document.getElementById("billingLockModal").classList.contains("visible"), true);
+});
+
+test("the armed side alone gets Preview and Scan, with front/back labels bound to the server target", async () => {
+  const front = {
+    id: "session-front",
+    certId: "MV901",
+    side: "front",
+    stage: "awaiting_scan",
+  };
+  const frontDocument = await renderSetup(
+    { stage: "active", calibrationStatus: "VALID", summary: { availableCredits: 5 } },
+    {
+      scannerHealth: { status: "ready" },
+      activeCapture: front,
+      placementApproval: { state: "GREEN", sessionId: front.id, certId: front.certId, side: front.side },
+    }
+  );
+  assert.equal(frontDocument.getElementById("positioningPreviewBtn").hidden, false);
+  assert.equal(frontDocument.getElementById("positioningPreviewBtn").textContent, "PREVIEW FRONT");
+  assert.equal(frontDocument.getElementById("scanCardBtn").textContent, "SCAN FRONT");
+  assert.equal(frontDocument.getElementById("scanCardBtn").disabled, false);
+  assert.match(frontDocument.getElementById("workflowGuideStep").textContent, /STEP 1/);
+
+  const back = { ...front, id: "session-back", side: "back" };
+  const backDocument = await renderSetup(
+    { stage: "active", calibrationStatus: "VALID", summary: { availableCredits: 5 } },
+    {
+      scannerHealth: { status: "ready" },
+      activeCapture: back,
+      placementApproval: { state: "GREEN", sessionId: back.id, certId: back.certId, side: back.side },
+    }
+  );
+  assert.equal(backDocument.getElementById("positioningPreviewBtn").textContent, "PREVIEW BACK");
+  assert.equal(backDocument.getElementById("scanCardBtn").textContent, "SCAN BACK");
+  assert.match(backDocument.getElementById("workflowGuideStep").textContent, /STEP 2 — FLIP/);
+});
+
+test("Fix missing images remains server-derived, target-bound recovery with no destructive card action", () => {
+  assert.match(html, /FIX THIS CARD arms the missing side on this station straight away/);
   assert.match(renderer, /fixBtn\.textContent = "FIX THIS CARD"/);
   assert.match(renderer, /cardJobId: item\.cardJobId/);
-  assert.doesNotMatch(renderer, /prompt\(|Enter an MV/);
-  assert.doesNotMatch(html, /Soft-delete|deleteModal/);
-  assert.doesNotMatch(renderer, /deleteCert|delete-cert|Soft-delete/);
+  assert.doesNotMatch(renderer, /prompt\(|Enter an MV|deleteCert|delete-cert/);
   assert.doesNotMatch(preload, /deleteCert|delete-cert/);
   assert.doesNotMatch(main, /ipcMain\.handle\("delete-cert"/);
-});
-
-test("the capture area is fixed for normal staff — no drag, no save, and no stale geometry", () => {
-  /*
-   * OWNER DECISION 2026-08-17. The 100 x 130 mm capture area sits in a proven physical position on
-   * the scanner bed. Normal shop work is place-card / PREVIEW / SCAN; nobody on the floor moves it,
-   * and somebody moving it by accident is expensive in a way that is invisible at the time — every
-   * card afterwards is framed differently from every card before.
-   */
-
-  // The overlay STAYS. Staff must still see where to put the card.
-  assert.match(html, /id="platenWindow"/);
-  assert.match(html, /<span>CAPTURE AREA<\/span>/);
-
-  // The retired inner box is gone from markup, drawing code and styles alike.
-  assert.doesNotMatch(html, /id="platenSafe"/);
-  assert.doesNotMatch(renderer, /platenSafe/);
-  assert.doesNotMatch(renderer, /SAFE_INSET_MM/);
-
-  // Maintenance controls exist but start hidden, and are no longer worded as a normal action.
-  assert.match(html, /id="captureWindowMaintenance" hidden/);
-  assert.doesNotMatch(html, /SAVE CAPTURE WINDOW/);
-  assert.match(html, /MAINTENANCE ONLY/);
-
-  // Authority drives visibility AND the pointer, so an operator who cannot save also cannot drag a
-  // box whose read-out would then describe somewhere the hardware does not scan.
-  assert.match(renderer, /captureWindowMovable = stationSetup\?\.summary\?\.canCalibrate === true/);
-  assert.match(renderer, /if \(!captureWindowMovable\) return;/);
-
-  /*
-   * The renderer duplicates the platen bound as a plain number because it is sandboxed. It must
-   * match the shared profile's MIN_PLATEN_INSET_MM — the two both reading 5 is what locked every
-   * station out of arming a capture.
-   */
-  const profile = require("../../../shared/lide400-capture-profile.cjs");
-  const numeric = (pattern, label) => {
-    const found = pattern.exec(renderer);
-    assert.ok(found, `the renderer must declare ${label} explicitly`);
-    return Number(found[1]);
-  };
-  assert.strictEqual(
-    numeric(/const MIN_INSET_MM = (\d+(?:\.\d+)?);/, "its platen inset"),
-    profile.MIN_PLATEN_INSET_MM,
-    "renderer platen inset has drifted from the shared capture profile"
-  );
-  /*
-   * The platen and window sizes are duplicated too, and nothing pinned them. A drift there would
-   * mis-draw the capture area against the scanner bed with no error anywhere — the operator would be
-   * told the window is somewhere it is not.
-   */
-  assert.strictEqual(
-    numeric(/const PLATEN = \{ width: (\d+(?:\.\d+)?),/, "the platen width"),
-    profile.PLATEN_MM.width,
-    "renderer platen width has drifted from the shared capture profile"
-  );
-  assert.strictEqual(
-    numeric(/const PLATEN = \{ width: \d+(?:\.\d+)?, height: (\d+(?:\.\d+)?) \}/, "the platen height"),
-    profile.PLATEN_MM.height,
-    "renderer platen height has drifted from the shared capture profile"
-  );
-  assert.strictEqual(
-    numeric(/const WINDOW_MM = \{ width: (\d+(?:\.\d+)?),/, "the capture window width"),
-    profile.STANDARD_TCG.outerWindowMm.width,
-    "renderer capture window width has drifted from the shared capture profile"
-  );
 });

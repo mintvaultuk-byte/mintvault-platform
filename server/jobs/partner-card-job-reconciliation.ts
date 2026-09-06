@@ -24,7 +24,9 @@
 import {
   detectStaleLeases,
   detectStuckCardJobs,
+  redriveCaptureCardJobDrift,
   redriveQaCardJobDrift,
+  type CaptureRedriveSummary,
   type RedriveSummary,
 } from "../partner/card-job-reconciliation";
 
@@ -33,6 +35,8 @@ export interface CardJobReconciliationOutcome {
   ran: boolean;
   /** QA/Card Job split-transaction drift: detected, and how each item resolved. */
   drift: RedriveSummary;
+  /** Accepted scanner evidence whose Card Job lifecycle transition did not land. */
+  captureDrift: CaptureRedriveSummary;
   /** Report-only counts. */
   stuckCardJobs: number;
   staleLeases: number;
@@ -45,11 +49,13 @@ export interface CardJobReconciliationOutcome {
 const SAMPLE_LIMIT = 10;
 
 export async function runPartnerCardJobReconciliation(): Promise<CardJobReconciliationOutcome> {
+  const captureDrift = await redriveCaptureCardJobDrift();
   const drift = await redriveQaCardJobDrift();
   if (!drift.ran) {
     return {
       ran: false,
       drift,
+      captureDrift,
       stuckCardJobs: 0,
       staleLeases: 0,
       sample: [],
@@ -58,6 +64,14 @@ export async function runPartnerCardJobReconciliation(): Promise<CardJobReconcil
   }
 
   const sample: string[] = [];
+  for (const result of captureDrift.results) {
+    if (sample.length >= SAMPLE_LIMIT) break;
+    sample.push(
+      result.outcome === "refused"
+        ? `CAPTURE REFUSED ${result.cardJobId}: ${result.reason ?? "unknown"}`
+        : `CAPTURE ${result.outcome} ${result.cardJobId} ${result.status ?? "unknown"}`
+    );
+  }
   for (const result of drift.results) {
     if (sample.length >= SAMPLE_LIMIT) break;
     // A REFUSED item is the one an operator must see: the repair's premise did not hold, so the card
@@ -79,6 +93,7 @@ export async function runPartnerCardJobReconciliation(): Promise<CardJobReconcil
   return {
     ran: true,
     drift,
+    captureDrift,
     stuckCardJobs: stuck.items.length,
     staleLeases: stale.items.length,
     sample,

@@ -1,3 +1,4 @@
+import { adminFetch } from "@/lib/queryClient";
 import { useState } from "react";
 import { useQuery } from "@tanstack/react-query";
 import { ScanLine, Clock, CheckCircle, Loader2, ChevronLeft, ChevronRight } from "lucide-react";
@@ -55,7 +56,7 @@ export default function AdminScanHistory() {
     queryFn: async () => {
       const params = new URLSearchParams({ page: String(page) });
       if (statusFilter !== "all") params.set("status", statusFilter);
-      const res = await fetch(`/api/admin/scan-history?${params}`, { credentials: "include" });
+      const res = await adminFetch(`/api/admin/scan-history?${params}`, { credentials: "include" });
       if (!res.ok) throw new Error("Failed to load");
       return res.json();
     },

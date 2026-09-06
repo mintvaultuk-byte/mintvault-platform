@@ -9,8 +9,17 @@ import {
   assertDisposableRuntimeAdminDatabaseUrl,
   assertDisposableRuntimeDatabaseUrl,
   requireRuntimeCredential,
+  runtimeProcessEnvironment,
+  runtimeRequestSignal,
 } from "../scripts/command-centre-runtime-harness";
 import { startPostgres17, type DisposablePostgres17 } from "./helpers/postgres17-cluster";
+import { randomUUID } from "node:crypto";
+import { PARTNER_PERMISSIONS, ROLE_LABELS, ROLE_PERMISSIONS } from "../server/partner/permissions";
+import {
+  PARTNER_BROWSER_DB_PREFIX,
+  assertPartnerBrowserDatabase,
+  seedPartnerBrowserDatabase,
+} from "../scripts/ci/partner-browser-fixture";
 
 let runtimeAdminDatabaseUrl = "";
 let localPostgres: DisposablePostgres17 | undefined;
@@ -30,6 +39,97 @@ afterAll(async () => {
 });
 
 describe("Command Centre rendered-runtime harness safety", () => {
+  it.each([false, true])("bootstraps a separate empty Partner fixture with migrated roles and restricted runtime identity (supply contracts=%s)", async (supplyContracts) => {
+    const database = `${PARTNER_BROWSER_DB_PREFIX}${process.pid}_${randomUUID().slice(0, 8)}`;
+    const url = new URL(runtimeAdminDatabaseUrl);
+    url.pathname = `/${database}`;
+    assertPartnerBrowserDatabase(url.toString());
+    const admin = new Client({ connectionString: runtimeAdminDatabaseUrl });
+    await admin.connect();
+    await admin.query(`CREATE DATABASE "${database}"`);
+    try {
+      const fixture = await seedPartnerBrowserDatabase(url.toString(), "synthetic-browser-password-123", supplyContracts);
+      expect(fixture.identities.map((identity) => identity.role)).toEqual([
+        "PARTNER_OWNER",
+        "PARTNER_MANAGER",
+        "PARTNER_FINANCE_VIEWER",
+      ]);
+      expect(new URL(fixture.runtimeUrl).pathname).toBe(url.pathname);
+      expect(new URL(fixture.runtimeUrl).username).not.toBe(url.username);
+      const runtime = new Client({ connectionString: fixture.runtimeUrl });
+      await runtime.connect();
+      try {
+        const roles = await runtime.query("SELECT code,label FROM partner_roles ORDER BY code");
+        expect(roles.rows).toEqual(
+          Object.entries(ROLE_LABELS)
+            .sort(([a], [b]) => a.localeCompare(b))
+            .map(([code, label]) => ({ code, label }))
+        );
+        const permissions = await runtime.query("SELECT code FROM partner_permissions ORDER BY code");
+        expect(permissions.rows.map((row) => row.code)).toEqual([...PARTNER_PERMISSIONS].sort());
+        const mappings = await runtime.query(
+          "SELECT r.code role,p.code permission FROM partner_role_permissions rp JOIN partner_roles r ON r.id=rp.role_id JOIN partner_permissions p ON p.id=rp.permission_id"
+        );
+        expect(mappings.rows.map((row) => `${row.role}:${row.permission}`).sort()).toEqual(
+          Object.entries(ROLE_PERMISSIONS)
+            .flatMap(([role, permissions]) => permissions.map((permission) => `${role}:${permission}`))
+            .sort()
+        );
+        if (supplyContracts) {
+          expect((await runtime.query("SELECT count(*)::int n FROM partner_supply_orders")).rows[0].n).toBe(0);
+          await runtime.query("BEGIN");
+          await runtime.query("SELECT set_config('app.tenant_id',$1,true)", [fixture.tenantId]);
+          expect((await runtime.query("SELECT status,gross_total_pence FROM partner_supply_orders")).rows).toEqual([{ status: "PAID", gross_total_pence: 7500 }]);
+          expect((await runtime.query("SELECT public_ref FROM partner_supplies_orders")).rows).toEqual([{ public_ref: "SUP-BROWSER-LEGACY" }]);
+          await runtime.query("ROLLBACK");
+        }
+      } finally {
+        await runtime.end();
+      }
+      await expect(seedPartnerBrowserDatabase(url.toString(), "synthetic-browser-password-123")).rejects.toThrow(
+        "non-empty"
+      );
+    } finally {
+      await admin.query(`DROP DATABASE "${database}" WITH (FORCE)`);
+      await admin.end();
+    }
+  }, 120_000);
+  it.each([
+    "postgresql://remote.invalid:5432/mintvault_partner_browser_runtime_safe",
+    "postgresql://127.0.0.1:5432/postgres",
+    "postgresql://127.0.0.1/mintvault_partner_browser_runtime_safe",
+    "postgresql://127.0.0.1:61234/mintvault_partner_browser_runtime_safe?host=remote.invalid",
+    "postgresql://127.0.0.1:61234/mintvault_partner_browser_runtime_safe#ignored",
+  ])("refuses a foreign Partner fixture database %s", (url) => {
+    expect(() => assertPartnerBrowserDatabase(url)).toThrow();
+  });
+  it("bounds requests and propagates cancellation", () => {
+    const parent = new AbortController();
+    const signal = runtimeRequestSignal(parent.signal);
+    expect(signal.aborted).toBe(false);
+    parent.abort();
+    expect(signal.aborted).toBe(true);
+  });
+  it("does not inherit provider, database, preload or legacy flag configuration into its real app child", () => {
+    const env = runtimeProcessEnvironment(
+      {
+        PATH: "/bin",
+        NODE_OPTIONS: "--require unwanted",
+        ANTHROPIC_API_KEY: "not-a-secret",
+        MINTVAULT_DATABASE_URL: "postgresql://remote.invalid/live",
+        R2_ENDPOINT: "https://remote.invalid",
+        SUPER_ADMIN_COMMAND_CENTRE_ENABLED: "true",
+      },
+      { MINTVAULT_DATABASE_URL: "postgresql://127.0.0.1:61234/owned" }
+    );
+    expect(env).toEqual({
+      PATH: "/bin",
+      LANG: "C",
+      LC_ALL: "C",
+      NODE_ENV: "test",
+      MINTVAULT_DATABASE_URL: "postgresql://127.0.0.1:61234/owned",
+    });
+  });
   it("accepts only a loopback URL with the dedicated disposable database prefix", () => {
     const url = assertDisposableRuntimeDatabaseUrl(
       `postgresql://tester@127.0.0.1:61234/${COMMAND_CENTRE_RUNTIME_DB_PREFIX}safe`
@@ -57,13 +157,17 @@ describe("Command Centre rendered-runtime harness safety", () => {
     "postgresql://tester@ep-remote.neon.tech:55433/postgres",
     "postgresql://tester@127.0.0.1:55433/mintvault_vq_phase10_local",
     "postgresql://tester@127.0.0.1/postgres",
+    "postgresql://tester@127.0.0.1:61234/postgres?host=remote.invalid&port=5432",
+    "postgresql://tester@127.0.0.1:61234/postgres?database=unowned",
+    "postgresql://tester@127.0.0.1:61234/postgres#ignored",
   ])("fails closed for unsafe maintenance authority %s", (unsafeUrl) => {
     expect(() => assertDisposableRuntimeAdminDatabaseUrl(unsafeUrl)).toThrow();
   });
 
   it("keeps the loopback session transport exception test-only", () => {
     const server = readFileSync("server/index.ts", "utf8");
-    expect(server).toContain('ssl: process.env.NODE_ENV === "test" ? false : { rejectUnauthorized: false }');
+    expect(server).toContain('securePostgresPoolConnection(getDatabaseUrl(), "MINTVAULT_DATABASE_URL")');
+    expect(server).not.toContain("rejectUnauthorized: false");
   });
 
   it("uses the existing server kill switch for the optional flag-off audit", () => {
@@ -71,9 +175,7 @@ describe("Command Centre rendered-runtime harness safety", () => {
     expect(harness).toContain('const commandCentreEnabled = !process.argv.includes("--feature-off")');
     expect(harness).toContain("CREATE TABLE IF NOT EXISTS partner_feature_flags");
     expect(harness).toContain("COMMAND_CENTRE_PILOT_FLAG, commandCentreEnabled");
-    expect(harness).toContain(
-      "await verifyCommandCentreRuntime(port, commandCentreEnabled, runtimeAdminPassword, runtimeAdminPin)"
-    );
+    expect(harness).toContain("await verifyCommandCentreRuntime(");
     expect(harness).toContain("requireRuntimeAdminDatabaseUrl()");
     expect(harness).not.toContain("127.0.0.1:5432");
     expect(harness).not.toContain('SUPER_ADMIN_COMMAND_CENTRE_ENABLED: commandCentreEnabled ? "true" : "false"');

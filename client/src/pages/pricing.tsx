@@ -9,11 +9,12 @@ import FooterV2 from "@/components/v2/footer-v2";
 import SectionEyebrow from "@/components/v2/section-eyebrow";
 import AmbientLayer from "@/components/v2/ambient-layer";
 import DarkSectionGlow from "@/components/v2/dark-section-glow";
-import { pricingTiers, insuranceTiers, insuranceSurchargeBands, bulkDiscountTiers } from "@shared/commerce";
+import { insuranceTiers, insuranceSurchargeBands, bulkDiscountTiers } from "@shared/commerce";
+import { usePricingProjection } from "@/lib/pricing-projection";
 import { ADDON_PRICES, ADDON_ORDER } from "@shared/addons";
 import { cn } from "@/lib/utils";
 import { useActivePromo } from "@/hooks/use-active-promo";
-import { PromoBanner, TierPriceWithPromo } from "@/components/v2/promo-display";
+import { PromoBanner, TierPriceWithPromo, BulkDiscountGuide } from "@/components/v2/promo-display";
 
 const SILVER = {
   label: "Silver Vault",
@@ -25,7 +26,7 @@ const SILVER = {
 const TIER_DISPLAY: Record<string, { shortName: string; blurb: string; featured: boolean; icon: React.ReactNode }> = {
   standard: {
     shortName: "Vault Queue",
-    blurb: "No rush. Full grade, NFC chip, registry listing — at the best price per card.",
+    blurb: "Full grade, NFC chip and registry listing. Current turnaround shown below.",
     featured: false,
     icon: <Shield size={20} />,
   },
@@ -37,7 +38,7 @@ const TIER_DISPLAY: Record<string, { shortName: string; blurb: string; featured:
   },
   express: {
     shortName: "Express",
-    blurb: "Back in under a week. For grails, auction deadlines, and holiday hand-offs.",
+    blurb: "For time-sensitive submissions. Check the current turnaround before booking.",
     featured: false,
     icon: <Zap size={20} />,
   },
@@ -57,6 +58,7 @@ const revealVariants = {
 };
 
 export default function PricingV2() {
+  const pricing = usePricingProjection();
   const pricingRef = useRef<HTMLDivElement>(null);
 
   // Active promotion — shared source used by every pricing surface.
@@ -105,8 +107,8 @@ export default function PricingV2() {
             className="font-body text-base md:text-lg leading-relaxed max-w-xl mx-auto mb-8"
             style={{ color: "var(--v2-ink-soft)" }}
           >
-            Three tiers, 5 to 40 working day turnaround, same four-point inspection on every card. Pristine 10P upgrade
-            when your card earns it &mdash; free, never sold.
+            Current tiers and turnaround below, same four-point inspection on every card. Pristine 10P upgrade when your
+            card earns it &mdash; free, never sold.
           </p>
           <div className="flex flex-wrap items-center justify-center gap-3 mb-5">
             <Link href="/submit" className="no-underline">
@@ -124,7 +126,7 @@ export default function PricingV2() {
             className="font-mono-v2 text-xs md:text-sm uppercase tracking-wider"
             style={{ color: "var(--v2-ink-mute)" }}
           >
-            From &pound;19 &middot; 3 tiers &middot; Free Pristine 10P upgrade
+            Current grading tiers &middot; Free Pristine 10P upgrade
           </p>
         </div>
       </section>
@@ -139,15 +141,15 @@ export default function PricingV2() {
               className="font-display italic font-medium text-3xl md:text-5xl leading-tight"
               style={{ color: "#FFFFFF" }}
             >
-              Three tiers.
+              Service tiers.
               <br />
               <span className="font-display italic font-normal" style={{ color: "var(--v2-gold)" }}>
                 One standard.
               </span>
             </h2>
             <p className="font-body text-sm md:text-base leading-relaxed self-end" style={{ color: "#ffffff" }}>
-              Every card passes the same four-point inspection: centering, corners, edges, surface. Tier only changes
-              how quickly the work comes back.{" "}
+              Every card passes the same four-point inspection: centering, corners, edges, surface. Compare current
+              service features and turnaround below.{" "}
               <Link
                 href="/standard"
                 className="underline underline-offset-2"
@@ -163,7 +165,15 @@ export default function PricingV2() {
 
           <div className="flex justify-center">
             <div className="grid grid-cols-1 md:grid-cols-3 gap-5 md:gap-6 w-full" style={{ maxWidth: "1080px" }}>
-              {pricingTiers.map((tier, index) => {
+              {pricing.tiers.length === 0 && (
+                <p role="status" className="text-white">
+                  {pricing.isPending ? "Loading current pricing…" : "Current pricing is unavailable."}
+                  <button onClick={() => void pricing.refetch()} className="underline ml-2">
+                    Retry
+                  </button>
+                </p>
+              )}
+              {pricing.tiers.map((tier, index) => {
                 const d = TIER_DISPLAY[tier.id] ?? {
                   shortName: tier.name,
                   blurb: "",
@@ -171,7 +181,6 @@ export default function PricingV2() {
                   icon: <Shield size={20} />,
                 };
                 const price = tier.pricePerCard / 100;
-                const days = tier.turnaroundDays ?? 0;
 
                 return (
                   <TimelineContent
@@ -199,11 +208,11 @@ export default function PricingV2() {
                           <div className="w-10 h-10 rounded-xl bg-[#1a1400] border border-[#D4AF37]/20 flex items-center justify-center text-[#D4AF37]">
                             {d.icon}
                           </div>
-                          <h3 className="xl:text-3xl md:text-2xl text-3xl font-semibold text-white">{d.shortName}</h3>
+                          <h3 className="xl:text-3xl md:text-2xl text-3xl font-semibold text-white">{tier.name}</h3>
                         </div>
                         <p className="xl:text-sm md:text-xs text-sm text-[#888] mb-4">{d.blurb}</p>
                         <TierPriceWithPromo tierId={tier.id} fullPricePounds={price} promo={promo} />
-                        <p className="text-xs text-[#666] mt-1">{days} working day turnaround</p>
+                        <p className="text-xs text-[#666] mt-1">{tier.turnaround}</p>
                       </CardHeader>
 
                       <CardContent className="pt-0 flex flex-col flex-1">
@@ -223,11 +232,20 @@ export default function PricingV2() {
                           </ul>
                         </div>
 
-                        <Link href="/submit" className="no-underline block">
-                          <GradientButton height="52px" className="w-full">
-                            Start a submission <ArrowRight size={14} />
-                          </GradientButton>
-                        </Link>
+                        {tier.capacityStatus !== "open" ? (
+                          <p role="status" className="text-white">
+                            {tier.capacityMessage || "This tier is currently unavailable."}
+                          </p>
+                        ) : (
+                          <Link
+                            href={`/submit?type=grading&tier=${encodeURIComponent(tier.id)}`}
+                            className="no-underline block"
+                          >
+                            <GradientButton height="52px" className="w-full">
+                              Start a submission <ArrowRight size={14} />
+                            </GradientButton>
+                          </Link>
+                        )}
                       </CardContent>
                     </Card>
                   </TimelineContent>
@@ -239,55 +257,7 @@ export default function PricingV2() {
           {/* Bulk-discount tiers table — full-width row beneath the cards.
               Lives outside the flex/grid wrapper so it doesn't sit next to
               the Express card. */}
-          <div className="mt-12 max-w-3xl mx-auto">
-            <p
-              className="font-mono-v2 text-[10px] md:text-xs uppercase tracking-[0.3em] no-text-shadow mb-3 text-center"
-              style={{ color: "#D4AF37" }}
-            >
-              Bulk discount tiers
-            </p>
-            <div className="overflow-x-auto rounded-xl border border-[#333] bg-[#0f0e0b]">
-              <table className="w-full text-sm">
-                <thead>
-                  <tr className="border-b border-[#333]">
-                    <th className="text-left py-3 px-4 text-[10px] uppercase tracking-widest font-bold text-[#D4AF37]">
-                      Cards
-                    </th>
-                    <th className="text-right py-3 px-4 text-[10px] uppercase tracking-widest font-bold text-[#D4AF37]">
-                      Vault Queue
-                    </th>
-                    <th className="text-right py-3 px-4 text-[10px] uppercase tracking-widest font-bold text-[#D4AF37]">
-                      Standard
-                    </th>
-                    <th className="text-right py-3 px-4 text-[10px] uppercase tracking-widest font-bold text-[#D4AF37]">
-                      Express
-                    </th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {[
-                    { qty: "10+", off: "5% off", vq: "£18.05", st: "£23.75", ex: "£42.75" },
-                    { qty: "25+", off: "7.5% off", vq: "£17.58", st: "£23.13", ex: "£41.63" },
-                    { qty: "50+", off: "10% off", vq: "£17.10", st: "£22.50", ex: "£40.50" },
-                  ].map((row) => (
-                    <tr key={row.qty} className="border-b border-[#222] last:border-b-0">
-                      <td className="py-3 px-4">
-                        <div className="text-white font-semibold">{row.qty}</div>
-                        <div className="text-[#666] text-[10px] uppercase tracking-wider">{row.off}</div>
-                      </td>
-                      <td className="py-3 px-4 text-right font-mono text-[#ccc]">{row.vq}</td>
-                      <td className="py-3 px-4 text-right font-mono text-[#ccc]">{row.st}</td>
-                      <td className="py-3 px-4 text-right font-mono text-[#ccc]">{row.ex}</td>
-                    </tr>
-                  ))}
-                </tbody>
-              </table>
-            </div>
-            <p className="font-body text-xs md:text-sm text-center mt-3" style={{ color: "var(--v2-ink-mute)" }}>
-              Vault Club and bulk discounts are mutually exclusive — the higher discount applies. Pristine 10P upgrade
-              is excluded from bulk pricing.
-            </p>
-          </div>
+          <BulkDiscountGuide />
 
           <div className="mt-16 max-w-3xl mx-auto text-center">
             <p
@@ -373,7 +343,7 @@ export default function PricingV2() {
                         ? "Mid-value cards"
                         : i === 2
                           ? "High-value grails"
-                          : "Cap — contact us above £7.5k";
+                          : "Contact us above the highest listed declared value";
                   return (
                     <tr
                       key={band.maxValue}
@@ -425,8 +395,8 @@ export default function PricingV2() {
               className="font-body text-sm md:text-base leading-relaxed self-end"
               style={{ color: "var(--v2-ink-soft)" }}
             >
-              Three services you can stack onto a submission. Add only what you need &mdash; nothing hidden, nothing
-              default-on.
+              Choose a service to check its current prices and availability. Each service is selected separately in the
+              submission flow.
             </p>
           </div>
 
@@ -445,9 +415,13 @@ export default function PricingV2() {
                     >
                       {addon.name}
                     </h3>
-                    <span className="font-mono-v2 text-lg font-semibold" style={{ color: "var(--v2-gold)" }}>
-                      {addon.display}
-                    </span>
+                    <Link
+                      href={`/submit?type=${id}`}
+                      className="font-mono-v2 text-sm font-semibold underline"
+                      style={{ color: "var(--v2-gold)" }}
+                    >
+                      Current prices and availability →
+                    </Link>
                   </div>
                   <p className="font-body text-sm leading-relaxed" style={{ color: "var(--v2-ink-soft)" }}>
                     {addon.description}
@@ -518,8 +492,8 @@ export default function PricingV2() {
           </div>
 
           <p className="font-body text-xs mt-6" style={{ color: "var(--v2-ink-mute)" }}>
-            Fully insured Royal Mail return. UK addresses only. Above £7,500 declared value, please contact us for
-            bespoke carriage.
+            Fully insured Royal Mail return. UK addresses only. Above the highest listed declared value, please
+            contact us for bespoke carriage.
           </p>
         </div>
       </section>
@@ -539,8 +513,8 @@ export default function PricingV2() {
               className="font-body text-sm md:text-base leading-relaxed self-end"
               style={{ color: "var(--v2-ink-soft)" }}
             >
-              A perks-and-credits membership for collectors who submit regularly. No percentage discount &mdash;
-              tangible perks that cover real costs.
+              A perks-and-credits membership for collectors who submit regularly. Compare current membership
+              benefits with your expected use on the Vault Club page.
             </p>
           </div>
 
@@ -598,7 +572,7 @@ export default function PricingV2() {
                 </GradientButton>
               </Link>
               <p className="font-mono-v2 text-[10px] uppercase tracking-wider" style={{ color: "var(--v2-ink-mute)" }}>
-                Subscriptions temporarily paused &mdash; relaunching with full perks system.
+                See Vault Club for current subscription availability and benefits.
               </p>
             </div>
           </div>
@@ -659,8 +633,8 @@ export default function PricingV2() {
           <div className="space-y-10">
             {[
               {
-                q: "Why only three tiers? What happened to Gold?",
-                a: "We launched with Vault Queue, Standard, and Express because those cover the three real jobs: cheap-and-patient, balanced, and fast. Demand for a higher-price tier will be re-evaluated post-launch based on submission data rather than guesswork.",
+                q: "Which grading tiers are currently available?",
+                a: "The live tier cards above show the current services, prices, turnaround and availability. Every service receives the same grading inspection; choose the available option that suits your timing.",
               },
               {
                 q: "Is Pristine 10P a paid upgrade?",
@@ -709,7 +683,7 @@ export default function PricingV2() {
             Ready when you are.
           </h2>
           <p className="font-body text-sm md:text-base mb-10" style={{ color: "#ffffff" }}>
-            From &pound;19. UK-based. Insured in transit.
+            View current grading tiers above. UK-based. Insured in transit.
           </p>
           <div className="flex flex-wrap items-center justify-center gap-3 mb-6">
             <Link href="/submit" className="no-underline">

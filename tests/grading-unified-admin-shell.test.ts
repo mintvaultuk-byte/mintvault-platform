@@ -103,11 +103,11 @@ describe("3. all three grading stages use the SAME WorkstationHeaderStrip compon
   });
 });
 
-describe("4. all three stages use the same desktop breakpoint (md) for the two-column shell", () => {
-  it("the outer workspace row and the preview aside share the SAME md: breakpoint", () => {
+describe("4. all three stages use the same 540px floor for the two-column shell", () => {
+  it("the outer workspace row and preview aside share the SAME breakpoint", () => {
     expect(WORKSTATION).toContain("<CanonicalGradingWorkstationShell");
-    expect(SHELL).toContain("flex min-h-0 flex-1 flex-col gap-2 md:flex-row");
-    expect(ASIDE).toContain("md:w-[45%] md:shrink-0");
+    expect(SHELL).toContain('WORKSTATION_TWO_PANE_CLASS = "min-[540px]:flex-row"');
+    expect(ASIDE).toContain("min-[540px]:w-[45%] min-[540px]:shrink-0");
     // no competing/second breakpoint (e.g. lg:, 2xl:) governs the aside's own width.
     expect(ASIDE).not.toMatch(/lg:w-\[|2xl:w-\[|xl:w-\[/);
   });
@@ -207,9 +207,11 @@ describe("10. session statistics use the slim shared row", () => {
 
 describe("11. no horizontal overflow risk at 1440x900 (structural check)", () => {
   it("the preview aside and control panel are both flex items with min-w-0/shrink control (no fixed oversized widths)", () => {
-    expect(ASIDE).toContain("md:shrink-0"); // aside has an explicit, bounded share
+    expect(ASIDE).toContain("min-[540px]:shrink-0"); // aside has an explicit, bounded share
     // The control-panel column (min-w-0 flex item) is owned by the canonical shell.
-    expect(SHELL).toContain('className="flex min-h-0 min-w-0 flex-1 flex-col" data-testid="grading-control-panel"');
+    expect(SHELL).toContain(
+      'className="flex min-h-0 min-w-0 flex-1 flex-col max-[539px]:h-[100dvh] max-[539px]:flex-none"'
+    );
   });
   it("the workflow bar can shrink/scroll instead of forcing overflow", () => {
     expect(BAR).toContain("min-w-0");

@@ -1,3 +1,4 @@
+import { adminFetch } from "@/lib/queryClient";
 import { useState, useRef, useEffect, useMemo, useCallback } from "react";
 import { classifyLookupError } from "@/lib/lookup-errors";
 import { displayCollectorNumber } from "@shared/collector-number-format";
@@ -326,7 +327,7 @@ export default function CertificateForm({
   const [rarityRecent, setRarityRecent] = useState<string[] | undefined>(undefined);
   useEffect(() => {
     let active = true;
-    fetch("/api/admin/rarity-preferences", { credentials: "include" })
+    adminFetch("/api/admin/rarity-preferences", { credentials: "include" })
       .then((r) => (r.ok ? r.json() : { favourites: [], recent: [] }))
       .then((p) => {
         if (!active) return;
@@ -344,7 +345,7 @@ export default function CertificateForm({
     };
   }, []);
   const persistPrefs = useCallback((favourites: string[], recent: string[]) => {
-    void fetch("/api/admin/rarity-preferences", {
+    void adminFetch("/api/admin/rarity-preferences", {
       method: "PUT",
       credentials: "include",
       headers: { "Content-Type": "application/json" },
@@ -422,6 +423,7 @@ export default function CertificateForm({
   // the auto-saving path for an unapproved cert, or the explicit form submit
   // (published cert / create flow) — which is the path that bypassed the warning.
   const formElRef = useRef<HTMLFormElement | null>(null);
+  const createImageAttempt = useRef<{ fingerprint: string; key: string } | null>(null);
 
   // Label-freshness signal for the Review certificate preview. Compares ONLY the
   // fields that affect the printed label against the last SAVED snapshot (server
@@ -555,7 +557,7 @@ export default function CertificateForm({
   const { data: aiFlags } = useQuery<{ flags: Array<{ name: string; enabled: boolean }> }>({
     queryKey: ["/api/admin/ai-feature-flags"],
     queryFn: async () => {
-      const r = await fetch("/api/admin/ai-feature-flags", { credentials: "include" });
+      const r = await adminFetch("/api/admin/ai-feature-flags", { credentials: "include" });
       if (!r.ok) return { flags: [] };
       return r.json();
     },
@@ -649,7 +651,7 @@ export default function CertificateForm({
           .replace(/[^a-z0-9]/g, "");
         const fetchUrl = `/api/admin/card-lookup?game=${encodeURIComponent(gameSlug)}&query=${encodeURIComponent(query.trim())}&mode=wildcard`;
         console.log("[tcg-search] fetching:", fetchUrl);
-        res = await fetch(fetchUrl, { credentials: "include" });
+        res = await adminFetch(fetchUrl, { credentials: "include" });
       } catch (netErr) {
         setTcgResults([]);
         setTcgError(classifyLookupError({ thrown: netErr }).message);
@@ -738,11 +740,11 @@ export default function CertificateForm({
     if (!isEdit || !certificate?.id) return;
     setIdentifyLoading(true);
     setIdentifyConfidence(null);
-    // Transport layer: fetch() throws only when the request never reaches the
-    // server (down/offline) — surface an actionable message, not "Failed to fetch".
+    // Transport layer: adminFetch() throws for a network failure and, while an
+    // Admin principal is active, for a typed 401 that starts session revalidation.
     let res: Response;
     try {
-      res = await fetch(`/api/admin/certificates/${certificate.id}/identify`, {
+      res = await adminFetch(`/api/admin/certificates/${certificate.id}/identify`, {
         method: "POST",
         credentials: "include",
         headers: { "Content-Type": "application/json" },
@@ -864,7 +866,7 @@ export default function CertificateForm({
   async function runTcgdexPrefill(setCode: string, cardNumber: string, language: string, certDbId?: number) {
     const lang = tcgdexLanguageCode(language) || "en";
     try {
-      const r = await fetch(
+      const r = await adminFetch(
         `/api/admin/tcgdex-lookup?code=${encodeURIComponent(setCode)}&number=${encodeURIComponent(cardNumber)}&lang=${encodeURIComponent(lang)}${certDbId ? `&certId=${certDbId}` : ""}`,
         { credentials: "include" }
       );
@@ -935,7 +937,7 @@ export default function CertificateForm({
   async function runTcgdexPrefillByName(name: string, cardNumber: string, language: string) {
     if (language && language.toLowerCase() !== "english") return; // English only this phase
     try {
-      const r = await fetch(
+      const r = await adminFetch(
         `/api/admin/tcgdex-resolve-set?name=${encodeURIComponent(name)}&number=${encodeURIComponent(cardNumber)}`,
         { credentials: "include" }
       );
@@ -976,7 +978,7 @@ export default function CertificateForm({
     if (!isEdit || !certificate?.id) return;
     setGradeLoading(true);
     try {
-      const res = await fetch(`/api/admin/certificates/${certificate.id}/grade`, {
+      const res = await adminFetch(`/api/admin/certificates/${certificate.id}/grade`, {
         method: "POST",
         credentials: "include",
         headers: { "Content-Type": "application/json" },
@@ -1087,7 +1089,7 @@ export default function CertificateForm({
       if (gradingImages.back) fd.append("back", gradingImages.back);
       if (gradingImages.angled) fd.append("angled", gradingImages.angled);
       if (gradingImages.closeup) fd.append("closeup", gradingImages.closeup);
-      const res = await fetch(`/api/admin/certificates/${certificate.id}/upload-images`, {
+      const res = await adminFetch(`/api/admin/certificates/${certificate.id}/upload-images`, {
         method: "POST",
         credentials: "include",
         body: fd,
@@ -1111,7 +1113,7 @@ export default function CertificateForm({
     setCardLookupResults([]);
     try {
       const params = new URLSearchParams({ game: cardLookupGame, query: cardLookupQuery });
-      const res = await fetch(`/api/admin/card-lookup?${params}`, { credentials: "include" });
+      const res = await adminFetch(`/api/admin/card-lookup?${params}`, { credentials: "include" });
       const data = await res.json();
       if (!res.ok) throw new Error(data.error || "Lookup failed");
       setCardLookupResults(Array.isArray(data) ? data : []);
@@ -1141,7 +1143,7 @@ export default function CertificateForm({
     setAiError("");
     setAiAnalysis(null);
     try {
-      const res = await fetch(`/api/admin/certificates/${certificate.id}/analyze`, {
+      const res = await adminFetch(`/api/admin/certificates/${certificate.id}/analyze`, {
         method: "POST",
         credentials: "include",
       });
@@ -1252,11 +1254,27 @@ export default function CertificateForm({
       const formData = buildCertFormData(isEdit && !!certificate?.gradeApprovedAt);
       const url = isEdit ? `/api/admin/certificates/${certificate.id}` : "/api/admin/certificates";
       const method = isEdit ? "PUT" : "POST";
+      let headers: Record<string, string> | undefined;
+      if (!isEdit && (frontImage || backImage)) {
+        const fingerprint = JSON.stringify(
+          [...formData.entries()].map(([key, value]) => [
+            key,
+            value instanceof File
+              ? { name: value.name, size: value.size, type: value.type, lastModified: value.lastModified }
+              : value,
+          ])
+        );
+        if (!createImageAttempt.current || createImageAttempt.current.fingerprint !== fingerprint) {
+          createImageAttempt.current = { fingerprint, key: crypto.randomUUID() };
+        }
+        headers = { "Idempotency-Key": createImageAttempt.current.key };
+      }
 
-      const res = await fetch(url, {
+      const res = await adminFetch(url, {
         method,
         body: formData,
         credentials: "include",
+        headers,
       });
 
       if (!res.ok) {
@@ -1276,6 +1294,7 @@ export default function CertificateForm({
       // re-submits/re-uploads the same File object once it's already persisted.
       setFrontImage(null);
       setBackImage(null);
+      createImageAttempt.current = null;
       setRarityOverrideTransition(null);
       // Session/feedback UI (display only — save behaviour is unchanged above).
       setSavedToast(true);
@@ -1456,7 +1475,7 @@ export default function CertificateForm({
       // the server-side approval lock (added 2026-07-01) rejects the write
       // with a 409 rather than silently overwriting a live/published cert.
       const formData = buildCertFormData();
-      const res = await fetch(`/api/admin/certificates/${certificate.id}`, {
+      const res = await adminFetch(`/api/admin/certificates/${certificate.id}`, {
         method: "PUT",
         body: formData,
         credentials: "include",
@@ -3218,13 +3237,13 @@ export default function CertificateForm({
                           Standard (default)
                         </option>
                         <option value="vault-queue" className="bg-[var(--admin-panel)]">
-                          Vault Queue — £19
+                          Vault Queue
                         </option>
                         <option value="standard" className="bg-[var(--admin-panel)]">
-                          Standard — £25
+                          Standard
                         </option>
                         <option value="express" className="bg-[var(--admin-panel)]">
-                          Express — £45
+                          Express
                         </option>
                       </select>
                     </div>
@@ -3789,7 +3808,7 @@ function SubmissionItemLink({ value, onChange }: { value: string; onChange: (id:
   const { data: items, isLoading } = useQuery<any[]>({
     queryKey: ["/api/admin/submission-items/unlinked"],
     queryFn: async () => {
-      const res = await fetch("/api/admin/submission-items/unlinked", { credentials: "include" });
+      const res = await adminFetch("/api/admin/submission-items/unlinked", { credentials: "include" });
       if (!res.ok) return [];
       return res.json();
     },
@@ -3939,7 +3958,7 @@ export function PokemonSetPicker({
   }, [value]);
 
   function fetchSets() {
-    fetch("/api/pokemon-sets")
+    adminFetch("/api/pokemon-sets")
       .then((r) => r.json())
       .then((d) => {
         if (Array.isArray(d)) setSets(d);
@@ -3953,7 +3972,7 @@ export function PokemonSetPicker({
   useEffect(() => {
     if (!allowEditSet) return;
     const sessionEndpoint = createEndpoint.startsWith("/api/staff") ? "/api/staff/session" : "/api/admin/session";
-    fetch(sessionEndpoint, { credentials: "include" })
+    adminFetch(sessionEndpoint, { credentials: "include" })
       .then(async (response) => {
         const session = await response.json();
         return createEndpoint.startsWith("/api/staff")
@@ -4011,7 +4030,7 @@ export function PokemonSetPicker({
 
   async function openEditSet(set: PokemonSet) {
     try {
-      const response = await fetch(`${setLibraryBase}?pageSize=100&q=${encodeURIComponent(set.id)}`, {
+      const response = await adminFetch(`${setLibraryBase}?pageSize=100&q=${encodeURIComponent(set.id)}`, {
         credentials: "include",
       });
       const data = await response.json();
@@ -4061,7 +4080,7 @@ export function PokemonSetPicker({
     setAddSaving(true);
     try {
       const normId = addForm.setId.replace(/\s+/g, "").toLowerCase();
-      const r = await fetch(createEndpoint, {
+      const r = await adminFetch(createEndpoint, {
         method: "POST",
         credentials: "include",
         headers: { "Content-Type": "application/json" },
@@ -4120,7 +4139,7 @@ export function PokemonSetPicker({
     setEditSaving(true);
     try {
       const source = editingSet.source || "custom";
-      const r = await fetch(`${setLibraryBase}/${encodeURIComponent(source)}/${encodeURIComponent(editingSet.id)}`, {
+      const r = await adminFetch(`${setLibraryBase}/${encodeURIComponent(source)}/${encodeURIComponent(editingSet.id)}`, {
         method: "PATCH",
         credentials: "include",
         headers: { "Content-Type": "application/json" },

@@ -1,6 +1,6 @@
 import { useState, useEffect, useRef } from "react";
 import { useQuery, useMutation } from "@tanstack/react-query";
-import { apiRequest, queryClient } from "@/lib/queryClient";
+import { adminFetch, apiRequest, queryClient } from "@/lib/queryClient";
 import type { CertificateRecord } from "@shared/schema";
 import { gradeLabelFull, isNonNumericGrade } from "@shared/grade-presentation";
 import { getVariantDisplayLabel } from "@/lib/variantOptions";
@@ -115,9 +115,9 @@ import {
 } from "@/components/admin/admin-focus-surface";
 import { GradingWorkstation } from "@/components/grading-workflow/GradingWorkstation";
 import { useToast } from "@/hooks/use-toast";
+import { useAdminSession } from "@/lib/admin-session";
 
 interface Props {
-  onLogout: () => void;
   /** Tab to open on first render (e.g. when deep-linked via /admin/promotions). */
   initialTab?: AdminTab;
 }
@@ -132,8 +132,9 @@ interface DashboardStats {
   recentCerts: CertificateRecord[];
 }
 
-export default function AdminDashboard({ onLogout, initialTab }: Props) {
+export default function AdminDashboard({ initialTab }: Props) {
   const { toast } = useToast();
+  const { principal } = useAdminSession();
   const [activeTab, setActiveTab] = useState<AdminTab>(initialTab ?? "dashboard");
   const [filterPreset, setFilterPreset] = useState<CertsFilter>({});
   const [showForm, setShowForm] = useState(false);
@@ -170,10 +171,6 @@ export default function AdminDashboard({ onLogout, initialTab }: Props) {
     queryKey: ["/api/admin/stats"],
   });
 
-  const { data: adminSession } = useQuery<{ authenticated: boolean; isSuperAdmin?: boolean }>({
-    queryKey: ["/api/admin/session"],
-  });
-
   const [voidTarget, setVoidTarget] = useState<CertificateRecord | null>(null);
 
   const voidMutation = useMutation({
@@ -190,11 +187,6 @@ export default function AdminDashboard({ onLogout, initialTab }: Props) {
       setVoidTarget(null);
     },
   });
-
-  const handleLogout = async () => {
-    await apiRequest("POST", "/api/admin/logout");
-    onLogout();
-  };
 
   // Next Card queue: an ordered snapshot of the not-yet-approved certs captured
   // when a card is opened, plus the current position. Advancing steps through
@@ -299,7 +291,7 @@ export default function AdminDashboard({ onLogout, initialTab }: Props) {
   };
 
   const refetchEditingCert = async (id: number) => {
-    const r = await fetch(`/api/admin/certificates?includeId=${id}`, { credentials: "include" });
+    const r = await adminFetch(`/api/admin/certificates?includeId=${id}`, { credentials: "include" });
     if (!r.ok) throw new Error(`Unable to refresh certificate (${r.status})`);
     const list = await r.json();
     const updated = (Array.isArray(list) ? list : []).find((c: any) => c.id === id);
@@ -315,7 +307,7 @@ export default function AdminDashboard({ onLogout, initialTab }: Props) {
       formData.append("expectedVersion", correctionVersionRef.current || correctionVersionFor(editingCert));
       formData.append("certId", editingCert.certId);
       formData.append("gradingPayload", JSON.stringify(correctionGradingRef.current()));
-      const res = await fetch(`/api/admin/certificates/${editingCert.id}/correction`, {
+      const res = await adminFetch(`/api/admin/certificates/${editingCert.id}/correction`, {
         method: "PUT",
         credentials: "include",
         body: formData,
@@ -407,7 +399,7 @@ export default function AdminDashboard({ onLogout, initialTab }: Props) {
 
   if (showForm) {
     return (
-      <AdminShell activeTab={activeTab} onTabChange={setActiveTab} onLogout={handleLogout} focus>
+      <AdminShell activeTab={activeTab} onTabChange={setActiveTab} focus>
         <div className={ADMIN_FOCUS_SURFACE_CLASS} data-testid="admin-focus-surface">
           {/* Compact grading header — the SHARED AdminHeaderRow primitive (same
               breadcrumb-left/actions-right row every admin surface uses).
@@ -452,7 +444,7 @@ export default function AdminDashboard({ onLogout, initialTab }: Props) {
                   >
                     {metadataEditorOpen ? "Close Metadata" : "Card Metadata"}
                   </button>
-                  {editingCert.gradeApprovedAt && adminSession?.isSuperAdmin && (
+                  {editingCert.gradeApprovedAt && principal?.isSuperAdmin && (
                     <>
                       <button
                         type="button"
@@ -576,7 +568,7 @@ export default function AdminDashboard({ onLogout, initialTab }: Props) {
                 onCertUpdated={async () => {
                   if (!editingCert?.id) return;
                   try {
-                    const r = await fetch(`/api/admin/certificates?includeId=${editingCert.id}`, {
+                    const r = await adminFetch(`/api/admin/certificates?includeId=${editingCert.id}`, {
                       credentials: "include",
                     });
                     const rows = await r.json();
@@ -652,7 +644,6 @@ export default function AdminDashboard({ onLogout, initialTab }: Props) {
     <AdminShell
       activeTab={activeTab}
       onTabChange={setActiveTab}
-      onLogout={handleLogout}
       search={{ value: searchQuery, onChange: setSearchQuery }}
     >
       {isStagingHost && <StagingHarnessPanel />}
@@ -1713,7 +1704,7 @@ function CertRow({
     setReembedBusy(true);
     setReembedMsg(null);
     try {
-      const res = await fetch(`/api/admin/embed-corpus/cert/${encodeURIComponent(cert.certId)}`, {
+      const res = await adminFetch(`/api/admin/embed-corpus/cert/${encodeURIComponent(cert.certId)}`, {
         method: "POST",
         credentials: "include",
       });

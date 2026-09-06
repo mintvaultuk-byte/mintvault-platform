@@ -18,7 +18,8 @@ const apiRequest = vi.fn();
 const invalidateQueries = vi.fn();
 const navigate = vi.fn();
 
-vi.mock("@/lib/queryClient", () => ({
+vi.mock("@/lib/queryClient", async (importOriginal) => ({
+  ...(await importOriginal<typeof import("@/lib/queryClient")>()),
   apiRequest: (...args: unknown[]) => apiRequest(...args),
   queryClient: { invalidateQueries },
 }));
@@ -94,7 +95,7 @@ async function waitForTestId(id: string): Promise<HTMLElement> {
   throw new Error(`Timed out waiting for ${id}`);
 }
 
-async function mount(flags: FlagRow[] | "flag-read-fails" = flagRows()) {
+async function mount(flags: FlagRow[] | "flag-read-fails" = flagRows(), authenticated = true) {
   apiRequest.mockImplementation((method: string, url: string) => {
     if (method === "GET" && url === "/api/super-admin/partner-flags") {
       if (flags === "flag-read-fails") return fail(503, "flags unavailable");
@@ -108,7 +109,10 @@ async function mount(flags: FlagRow[] | "flag-read-fails" = flagRows()) {
     }
     return ok({});
   });
-  (globalThis as { fetch?: unknown }).fetch = vi.fn(() => ok({ authenticated: true, isSuperAdmin: true }));
+  (globalThis as { fetch?: unknown }).fetch = vi.fn(() =>
+    ok({ authenticated, email: "admin@mintvault.test", isSuperAdmin: true })
+  );
+  const { AdminSessionProvider } = await import("../client/src/lib/admin-session");
   const { default: Page } = await import("../client/src/pages/admin/partner-management");
   const qc = new QueryClient({
     defaultOptions: {
@@ -120,7 +124,13 @@ async function mount(flags: FlagRow[] | "flag-read-fails" = flagRows()) {
     },
   });
   await act(async () => {
-    root.render(createElement(QueryClientProvider, { client: qc }, createElement(Page)));
+    root.render(
+      createElement(
+        QueryClientProvider,
+        { client: qc },
+        createElement(AdminSessionProvider, { children: createElement(Page) })
+      )
+    );
   });
   return qc;
 }
@@ -149,6 +159,17 @@ afterEach(async () => {
 });
 
 describe("Partner pilot flag controls", () => {
+  it("does not read or mutate Partner controls when the real session authority rejects access", async () => {
+    await mount(flagRows(), false);
+    await waitForTestId("admin-session-checking");
+    expect(navigate).toHaveBeenCalledWith(
+      expect.stringContaining("/admin/login?next=%2Fadmin%2Fpartner-network%2Fpartners"),
+      { replace: true }
+    );
+    expect(apiRequest).not.toHaveBeenCalled();
+    expect(container.querySelector('[data-testid^="partner-flag-"]')).toBeNull();
+  });
+
   it("loads current state through the canonical API and keeps the portal flag read-only", async () => {
     await mount(flagRows({ partner_onboarding_enabled: true, partner_login_enabled: false }));
     await waitForTestId("pm-pilot-flag-status-partner_portal_enabled");
@@ -242,7 +263,10 @@ describe("Partner pilot flag controls", () => {
       }
       return ok({});
     });
-    (globalThis as { fetch?: unknown }).fetch = vi.fn(() => ok({ authenticated: true, isSuperAdmin: true }));
+    (globalThis as { fetch?: unknown }).fetch = vi.fn(() =>
+      ok({ authenticated: true, email: "admin@mintvault.test", isSuperAdmin: true })
+    );
+    const { AdminSessionProvider } = await import("../client/src/lib/admin-session");
     const { default: Page } = await import("../client/src/pages/admin/partner-management");
     const qc = new QueryClient({
       defaultOptions: {
@@ -254,7 +278,13 @@ describe("Partner pilot flag controls", () => {
       },
     });
     await act(async () => {
-      root.render(createElement(QueryClientProvider, { client: qc }, createElement(Page)));
+      root.render(
+        createElement(
+          QueryClientProvider,
+          { client: qc },
+          createElement(AdminSessionProvider, { children: createElement(Page) })
+        )
+      );
     });
     const button = await waitForTestId("pm-pilot-flag-toggle-partner_login_enabled");
 

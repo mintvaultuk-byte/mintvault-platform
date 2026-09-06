@@ -1,3 +1,4 @@
+import { adminFetch } from "@/lib/queryClient";
 import { Fragment, useEffect, useState, useCallback, useRef } from "react";
 import { useLocation } from "wouter";
 import { Pencil, Trash2 } from "lucide-react";
@@ -98,7 +99,6 @@ export default function AdminStaffPage() {
     : null;
   const invalidRequestedCertId = certIdRaw !== null && requestedCertId === null;
   const openedDeepLink = useRef<number | null>(null);
-  const [authed, setAuthed] = useState<boolean | null>(null);
   const [staff, setStaff] = useState<Staff[]>([]);
   // Rate is a STRING buffer so decimals type cleanly. A controlled type=number
   // bound to Number() strips the "0." intermediate (spec returns "" for it), which
@@ -108,25 +108,10 @@ export default function AdminStaffPage() {
   const [msg, setMsg] = useState<string | null>(null);
   const [err, setErr] = useState<string | null>(null);
 
-  useEffect(() => {
-    (async () => {
-      try {
-        const res = await fetch("/api/admin/session", { credentials: "include" });
-        const d = await res.json();
-        setAuthed(res.ok && d.authenticated === true);
-      } catch {
-        setAuthed(false);
-      }
-    })();
-  }, []);
-  useEffect(() => {
-    if (authed === false) navigate("/admin/login?next=/admin/staff", { replace: true });
-  }, [authed, navigate]);
-
   const load = useCallback(async () => {
     const [s, r] = await Promise.all([
-      fetch("/api/admin/staff", { credentials: "include" }),
-      fetch("/api/admin/grader-rate", { credentials: "include" }),
+      adminFetch("/api/admin/staff", { credentials: "include" }),
+      adminFetch("/api/admin/grader-rate", { credentials: "include" }),
     ]);
     if (s.ok) setStaff((await s.json()).staff || []);
     if (r.ok) {
@@ -136,13 +121,13 @@ export default function AdminStaffPage() {
     }
   }, []);
   useEffect(() => {
-    if (authed) load();
-  }, [authed, load]);
+    void load();
+  }, [load]);
   useEffect(() => {
-    if (authed && invalidRequestedCertId) {
+    if (invalidRequestedCertId) {
       setMsg("The requested certificate id is invalid. The normal Staff queue is shown instead.");
     }
-  }, [authed, invalidRequestedCertId]);
+  }, [invalidRequestedCertId]);
 
   // create staff
   const [nEmail, setNEmail] = useState("");
@@ -153,7 +138,7 @@ export default function AdminStaffPage() {
     e.preventDefault();
     setMsg(null);
     setErr(null);
-    const res = await fetch("/api/admin/staff", {
+    const res = await adminFetch("/api/admin/staff", {
       method: "POST",
       credentials: "include",
       headers: { "Content-Type": "application/json" },
@@ -187,7 +172,7 @@ export default function AdminStaffPage() {
     setMsg(null);
     setErr(null);
     if (!window.confirm(`Delete ${s.email}? This cannot be undone.`)) return;
-    const res = await fetch(`/api/admin/staff/${s.id}`, { method: "DELETE", credentials: "include" });
+    const res = await adminFetch(`/api/admin/staff/${s.id}`, { method: "DELETE", credentials: "include" });
     if (!res.ok) {
       const d = await res.json().catch(() => ({}));
       return setErr(adminBlockedMsg(res.status, d.error) || d.error || "Failed to delete staff");
@@ -221,7 +206,7 @@ export default function AdminStaffPage() {
     const email = editEmail.trim();
     if (!email) return setErr("Enter an email address.");
     if (email.toLowerCase() === s.email.toLowerCase()) return setErr("That's already their email — nothing changed.");
-    const res = await fetch(`/api/admin/staff/${s.id}/email`, {
+    const res = await adminFetch(`/api/admin/staff/${s.id}/email`, {
       method: "PATCH",
       credentials: "include",
       headers: { "Content-Type": "application/json" },
@@ -238,7 +223,7 @@ export default function AdminStaffPage() {
     setMsg(null);
     setErr(null);
     if (!editPw.trim()) return setErr("Enter a new password first — nothing was changed.");
-    const res = await fetch(`/api/admin/staff/${s.id}/password`, {
+    const res = await adminFetch(`/api/admin/staff/${s.id}/password`, {
       method: "PATCH",
       credentials: "include",
       headers: { "Content-Type": "application/json" },
@@ -255,7 +240,7 @@ export default function AdminStaffPage() {
     setMsg(null);
     setErr(null);
     if (!window.confirm(`Sign out active sessions for ${s.email}?`)) return;
-    const res = await fetch(`/api/admin/staff/${s.id}/revoke-sessions`, {
+    const res = await adminFetch(`/api/admin/staff/${s.id}/revoke-sessions`, {
       method: "POST",
       credentials: "include",
     });
@@ -272,7 +257,7 @@ export default function AdminStaffPage() {
     body[
       cap === "grade" ? "can_grade" : cap === "scan" ? "can_scan" : cap === "print" ? "can_print" : "can_edit_sets"
     ] = value;
-    const res = await fetch(`/api/admin/staff/${id}/capabilities`, {
+    const res = await adminFetch(`/api/admin/staff/${id}/capabilities`, {
       method: "POST",
       credentials: "include",
       headers: { "Content-Type": "application/json" },
@@ -293,7 +278,7 @@ export default function AdminStaffPage() {
     if (rate === s.reviewRate) return; // no change
     setMsg(null);
     setErr(null);
-    const res = await fetch(`/api/admin/staff/${s.id}/review-rate`, {
+    const res = await adminFetch(`/api/admin/staff/${s.id}/review-rate`, {
       method: "POST",
       credentials: "include",
       headers: { "Content-Type": "application/json" },
@@ -313,7 +298,7 @@ export default function AdminStaffPage() {
     setErr(null);
     const rateNum = Number(rate);
     if (!Number.isFinite(rateNum) || rateNum < 0) return setErr("Enter a valid rate, e.g. 0.80");
-    const res = await fetch("/api/admin/grader-rate", {
+    const res = await adminFetch("/api/admin/grader-rate", {
       method: "POST",
       credentials: "include",
       headers: { "Content-Type": "application/json" },
@@ -344,7 +329,7 @@ export default function AdminStaffPage() {
     try {
       const params = new URLSearchParams({ status: filter });
       if (requestedCertId) params.set("certId", String(requestedCertId));
-      const res = await fetch(`/api/admin/grading-queue?${params}`, {
+      const res = await adminFetch(`/api/admin/grading-queue?${params}`, {
         credentials: "include",
       });
       const d = await res.json().catch(() => ({}));
@@ -371,8 +356,8 @@ export default function AdminStaffPage() {
     }
   }, [requestedCertId]);
   useEffect(() => {
-    if (authed) loadQueue(qFilter);
-  }, [authed, qFilter, loadQueue]);
+    void loadQueue(qFilter);
+  }, [qFilter, loadQueue]);
 
   async function assignGrade(action: "assign" | "reassign" | "unassign") {
     setMsg(null);
@@ -390,7 +375,7 @@ export default function AdminStaffPage() {
     }
     const verb = action === "assign" ? "Assigned" : action === "reassign" ? "Reassigned" : "Unassigned";
     try {
-      const res = await fetch(`/api/admin/graders/${action}`, {
+      const res = await adminFetch(`/api/admin/graders/${action}`, {
         method: "POST",
         credentials: "include",
         headers: { "Content-Type": "application/json" },
@@ -453,7 +438,7 @@ export default function AdminStaffPage() {
     setRejectNote("");
     setPartnerReviewContext(null);
     setReviewCert(q);
-    void fetch(`/api/admin/grade-review/certificates/${q.certId}/partner-context`, { credentials: "include" })
+    void adminFetch(`/api/admin/grade-review/certificates/${q.certId}/partner-context`, { credentials: "include" })
       .then(async (res) => ({ ok: res.ok, data: await res.json().catch(() => ({})) }))
       .then(({ ok, data }) => {
         if (ok && data?.partner) setPartnerReviewContext(data.partner as PartnerReviewContext);
@@ -473,7 +458,7 @@ export default function AdminStaffPage() {
     setErr(null);
     setReviewBusy(true);
     try {
-      const res = await fetch(`/api/admin/certificates/${reviewCert.certId}/reject-grade`, {
+      const res = await adminFetch(`/api/admin/certificates/${reviewCert.certId}/reject-grade`, {
         method: "POST",
         credentials: "include",
         headers: { "Content-Type": "application/json" },
@@ -520,7 +505,7 @@ export default function AdminStaffPage() {
     setErr(null);
     setIdoRerunBusy(true);
     try {
-      const res = await fetch(`/api/admin/certificates/${reviewCert.certId}/identify`, {
+      const res = await adminFetch(`/api/admin/certificates/${reviewCert.certId}/identify`, {
         method: "POST",
         credentials: "include",
       });
@@ -558,7 +543,7 @@ export default function AdminStaffPage() {
     setErr(null);
     setIdoBusy(true);
     try {
-      const res = await fetch(`/api/admin/certificates/${reviewCert.certId}/identity-override`, {
+      const res = await adminFetch(`/api/admin/certificates/${reviewCert.certId}/identity-override`, {
         method: "POST",
         credentials: "include",
         headers: { "Content-Type": "application/json" },
@@ -602,7 +587,7 @@ export default function AdminStaffPage() {
       .filter((n) => Number.isInteger(n) && n > 0);
     if (!submission_ids.length) return setErr("Enter submission IDs");
     if (action === "assign" && !sStaff) return setErr("Pick a scanner");
-    const res = await fetch(`/api/admin/staff/scan/${action}`, {
+    const res = await adminFetch(`/api/admin/staff/scan/${action}`, {
       method: "POST",
       credentials: "include",
       headers: { "Content-Type": "application/json" },
@@ -630,14 +615,6 @@ export default function AdminStaffPage() {
       else ids.forEach((id) => n.add(id));
       return n;
     });
-  }
-
-  if (authed !== true) {
-    return (
-      <div className="min-h-screen bg-black flex items-center justify-center">
-        <div className="animate-pulse h-8 w-32 bg-[#D4AF37]/10 rounded" />
-      </div>
-    );
   }
 
   const graders = staff.filter((s) => s.caps.grade);

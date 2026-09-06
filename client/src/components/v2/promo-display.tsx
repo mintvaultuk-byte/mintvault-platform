@@ -1,6 +1,7 @@
 import NumberFlow from "@number-flow/react";
 import { cn } from "@/lib/utils";
 import { getTierPromo, type ActivePromo } from "@/hooks/use-active-promo";
+import { bulkDiscountTiers } from "@shared/commerce";
 
 const poundsFromPence = (p: number) => `£${(p / 100).toFixed(p % 100 === 0 ? 0 : 2)}`;
 
@@ -56,7 +57,7 @@ export function TierPriceWithPromo({
   fullPricePounds: number;
   promo: ActivePromo | null;
 }) {
-  const tierPromo = getTierPromo(promo, tierId);
+  const tierPromo = getTierPromo(promo, tierId, Math.round(fullPricePounds * 100));
   return (
     <>
       <div className="flex items-baseline gap-2 flex-wrap">
@@ -83,5 +84,38 @@ export function TierPriceWithPromo({
       </div>
       {tierPromo && <PromoBadge pct={tierPromo.pct} className="mt-2" />}
     </>
+  );
+}
+
+/** Shared policy bands, without stale per-card money derived from seed tier prices. */
+export function BulkDiscountGuide() {
+  return (
+    <div className="mt-12 max-w-3xl mx-auto text-center text-white">
+      <h3 className="text-sm font-bold uppercase tracking-wider text-[#D4AF37] mb-3">Bulk discount tiers</h3>
+      <div className="overflow-x-auto rounded-xl border border-[#333] bg-[#0f0e0b]">
+        <table className="w-full text-sm">
+          <thead>
+            <tr>
+              <th className="p-3">Cards</th>
+              <th className="p-3">Bulk discount</th>
+            </tr>
+          </thead>
+          <tbody>
+            {bulkDiscountTiers
+              .filter((band) => band.percent > 0)
+              .map((band) => (
+                <tr key={band.minQty} className="border-t border-[#333]">
+                  <td className="p-3">{band.label}</td>
+                  <td className="p-3">{band.percent}%</td>
+                </tr>
+              ))}
+          </tbody>
+        </table>
+      </div>
+      <p className="text-xs mt-3">
+        Applied to current grading fees at checkout. Your server-calculated quote includes eligible discounts. Vault
+        Club and bulk discounts are mutually exclusive — the higher discount applies.
+      </p>
+    </div>
   );
 }

@@ -1,0 +1,3342 @@
+{
+  "schema_version": "1.0",
+  "program_id": "mintvault-repository-architecture-recovery-20260904",
+  "repository": "/Users/cornelius/mintvault-platform",
+  "baseline_sha": "09beacaa5bc03f8e80e4c7e59232df6fc466b7cb",
+  "candidate_sha": null,
+  "subgraphs": [
+    {
+      "id": "white-ace-release-integrity",
+      "path": "../white-ace-assurance-repository-20260904/repair-graph.json",
+      "required": true
+    }
+  ],
+  "owner_target": "Contain every accepted repository-wide HIGH defect, recover enforceable bounded-context architecture, and prove one immutable repository candidate without deploying it.",
+  "release_gate": "Every architecture and nested White Ace veto is independently PROVEN on one clean candidate SHA; required external evidence is observed on that SHA; production release remains a separate owner action.",
+  "protected_actions": [
+    "change authentication, session, tenant, or protected client-cache behavior",
+    "change pricing, payment, entitlement, Partner order, role, or print behavior",
+    "change grading, MVGS, AI-provider, certificate, object-storage, or evidence behavior",
+    "author or apply migrations or change Vault Quest schema/readiness requirements",
+    "delete public surfaces, durable objects, schema, Scanner software, or operational executables",
+    "change secrets, provider configuration, GitHub settings, or managed Engineering OS workflow files",
+    "mutate staging or production or deploy, publish, push, or release"
+  ],
+  "phases": [
+    {
+      "id": 0,
+      "name": "authority-baseline",
+      "exit_gate": "The corrected repository-wide scope, exact baseline, preserved WIP, and protected boundaries are authoritative."
+    },
+    {
+      "id": 1,
+      "name": "findings-and-owner-gates",
+      "exit_gate": "Every accepted HIGH is reproduced and every protected repair packet has explicit owner authority."
+    },
+    {
+      "id": 2,
+      "name": "truthful-contract-foundations",
+      "exit_gate": "Executable authority, route, role, writer, migration, job, and CI topology can fail closed on drift."
+    },
+    {
+      "id": 3,
+      "name": "immediate-containment",
+      "exit_gate": "Reachable session, route, Partner, pricing, and legacy-AI HIGH defects are contained."
+    },
+    {
+      "id": 4,
+      "name": "server-data-runtime-strangler",
+      "exit_gate": "Schema, runtime jobs, server boundaries, cycles, and object lifecycles are recoverable and enforceable."
+    },
+    {
+      "id": 5,
+      "name": "client-and-operational-convergence",
+      "exit_gate": "Client surfaces converge and Scanner/legacy retirement follows proven replacement authority."
+    },
+    {
+      "id": 6,
+      "name": "independent-proof-rollback-integration",
+      "exit_gate": "Independent hostile proof and rollback pass on one clean immutable candidate."
+    },
+    {
+      "id": 7,
+      "name": "external-evidence-and-release-boundary",
+      "exit_gate": "Exact-candidate external evidence is observed and the owner separately decides release."
+    }
+  ],
+  "nodes": [
+    {
+      "id": "AUTH-BASELINE",
+      "phase": 0,
+      "kind": "OWNER_GATE",
+      "title": "Bind corrected architecture scope and immutable baseline",
+      "severity": "NONE",
+      "status": "PROVEN",
+      "agent_mode": "LEAD",
+      "agent_id": "codex-lead",
+      "workspace": "shared",
+      "depends_on": [],
+      "addresses": [],
+      "write_scope": [],
+      "proof_required": [
+        "Exact branch, baseline SHA, dirty paths and ownership, correction note, governance inputs, protected actions, and absence of product-source changes"
+      ],
+      "evidence": [
+        {
+          "ref": "baseline-dirty-state.md exact modified/untracked ownership snapshot; task-ledger.md Baseline; architecture-damage-assessment.md Correction",
+          "sha": "09beacaa5bc03f8e80e4c7e59232df6fc466b7cb",
+          "observer": "codex-lead"
+        }
+      ],
+      "invalidated_by": [
+        "Baseline SHA change",
+        "dirty path-set or ownership change",
+        "unreconciled overlapping diff change",
+        "unreconciled worktree change",
+        "owner scope change",
+        "governance drift"
+      ],
+      "vetoes_release": true
+    },
+
+    {
+      "id": "OWNER-IDENTITY-SESSION",
+      "phase": 1,
+      "kind": "OWNER_GATE",
+      "title": "Authorise Admin session, unauthorized, and protected-cache behavior",
+      "severity": "NONE",
+      "status": "PROVEN",
+      "agent_mode": "EXTERNAL_OWNER",
+      "agent_id": "repository-owner",
+      "workspace": "external",
+      "depends_on": ["AUTH-BASELINE"],
+      "addresses": [],
+      "write_scope": [],
+      "proof_required": [
+        "Explicit approval for session destruction, unauthorized semantics, cache partitioning/purge, and principal transition behavior"
+      ],
+      "evidence": [
+        {
+          "ref": "Repository owner instruction in the current Codex task: Proceed, approving the stated POST-only logout, typed unauthenticated handling, principal-partitioned protected caches, and purge-on-logout/principal-transition contract",
+          "sha": "2913bcb1092ea8f43ee1294b711a8df653a06a3d",
+          "observer": "repository-owner"
+        }
+      ],
+      "invalidated_by": ["Identity/session contract change", "owner decision change"],
+      "vetoes_release": true
+    },
+    {
+      "id": "OWNER-PRINT-REPRINT",
+      "phase": 1,
+      "kind": "OWNER_GATE",
+      "title": "Authorise canonical Admin reprint behavior",
+      "severity": "NONE",
+      "status": "PROVEN",
+      "agent_mode": "EXTERNAL_OWNER",
+      "agent_id": "repository-owner",
+      "workspace": "external",
+      "depends_on": ["AUTH-BASELINE"],
+      "addresses": [],
+      "write_scope": [],
+      "proof_required": [
+        "Explicit retain-and-rewire or remove decision for Reprint PDF, including reason and idempotency contract"
+      ],
+      "evidence": [
+        {
+          "ref": "owner-approval-record.md blanket authorisation; safest behavior-preserving choice recorded in admin-print-recovery.md: retain and rewire the Certificate Browser affordance to the audited/idempotent direct-artifact contract without restoring the removed endpoint",
+          "sha": "2913bcb1092ea8f43ee1294b711a8df653a06a3d",
+          "observer": "repository-owner"
+        }
+      ],
+      "invalidated_by": ["Print/evidence contract change", "owner decision change"],
+      "vetoes_release": true
+    },
+    {
+      "id": "OWNER-PARTNER-ORDERS",
+      "phase": 1,
+      "kind": "OWNER_GATE",
+      "title": "Decide Partner paid orders versus legacy supply requests",
+      "severity": "NONE",
+      "status": "PROVEN",
+      "agent_mode": "EXTERNAL_OWNER",
+      "agent_id": "repository-owner",
+      "workspace": "external",
+      "depends_on": ["AUTH-BASELINE"],
+      "addresses": [],
+      "write_scope": [],
+      "proof_required": [
+        "Explicit retain-migrate-retire decision for both historical tables, distinct routes, permissions, rollback, and Stripe order authority"
+      ],
+      "evidence": [
+        {
+          "ref": "owner-approval-record.md; partner-contract-recovery.md: retained histories, route rollback, existing roles; local CI independently verified 64/64; hosted/security vetoes open",
+          "sha": "0494d5fbed5cb30f8379bb507d28c9b2a0a09c0b",
+          "observer": "repository-owner"
+        }
+      ],
+      "invalidated_by": ["Partner order/request contract change", "owner decision change"],
+      "vetoes_release": true
+    },
+    {
+      "id": "OWNER-PARTNER-RBAC",
+      "phase": 1,
+      "kind": "OWNER_GATE",
+      "title": "Authorise shared Partner role contract implementation",
+      "severity": "NONE",
+      "status": "PROVEN",
+      "agent_mode": "EXTERNAL_OWNER",
+      "agent_id": "repository-owner",
+      "workspace": "external",
+      "depends_on": ["AUTH-BASELINE"],
+      "addresses": [],
+      "write_scope": [],
+      "proof_required": [
+        "Confirm settled Scanner Operator product intent and approve shared/generated client transport changes without expanding server permissions"
+      ],
+      "evidence": [
+        {
+          "ref": "owner-approval-record.md; partner-contract-recovery.md: retained histories, route rollback, existing roles; local CI independently verified 64/64; hosted/security vetoes open",
+          "sha": "0494d5fbed5cb30f8379bb507d28c9b2a0a09c0b",
+          "observer": "repository-owner"
+        }
+      ],
+      "invalidated_by": ["Partner role or permission contract change", "owner decision change"],
+      "vetoes_release": true
+    },
+    {
+      "id": "OWNER-PRICING",
+      "phase": 1,
+      "kind": "OWNER_GATE",
+      "title": "Authorise one commercial pricing projection",
+      "severity": "NONE",
+      "status": "PROVEN",
+      "agent_mode": "EXTERNAL_OWNER",
+      "agent_id": "repository-owner",
+      "workspace": "external",
+      "depends_on": ["AUTH-BASELINE"],
+      "addresses": [],
+      "write_scope": [],
+      "proof_required": [
+        "Explicit authority for grading price, turnaround, active-state, promotion, metadata, quote, charge, and receipt parity"
+      ],
+      "evidence": [
+        {
+          "ref": "owner-approval-record.md; pricing-recovery.md: existing DB price authority, no price-value change, no deployment or shared migration",
+          "sha": "c228af1998fb770e12c93758d3737fc92c5a9009",
+          "observer": "repository-owner"
+        }
+      ],
+      "invalidated_by": ["Pricing/payment contract change", "owner decision change"],
+      "vetoes_release": true
+    },
+    {
+      "id": "OWNER-GRADING-LEGACY",
+      "phase": 1,
+      "kind": "OWNER_GATE",
+      "title": "Decide legacy AI grading route retirement or enrollment",
+      "severity": "NONE",
+      "status": "PROVEN",
+      "agent_mode": "EXTERNAL_OWNER",
+      "agent_id": "repository-owner",
+      "workspace": "external",
+      "depends_on": ["AUTH-BASELINE"],
+      "addresses": [],
+      "write_scope": [],
+      "proof_required": [
+        "Separate disposition for analyze-v1-legacy and grade-with-ai, including provider/object/evidence effects"
+      ],
+      "evidence": [
+        {
+          "ref": "owner-approval-record.md blanket authorisation; safest behavior-preserving choice recorded in grading-legacy-recovery.md: retire analyze-v1-legacy and grade-with-ai separately as authenticated unconditional typed 410 tombstones with zero provider, object, grading, or evidence effects",
+          "sha": "c3534c856be747e7e66459559d875e3ff3d6f109",
+          "observer": "repository-owner"
+        }
+      ],
+      "invalidated_by": ["Grading, feature flag, provider, or owner decision change"],
+      "vetoes_release": true
+    },
+    {
+      "id": "OWNER-VQ-SCHEMA",
+      "phase": 1,
+      "kind": "OWNER_GATE",
+      "title": "Decide Vault Quest required/optional schema and migration authority",
+      "severity": "NONE",
+      "status": "PROVEN",
+      "agent_mode": "EXTERNAL_OWNER",
+      "agent_id": "repository-owner",
+      "workspace": "external",
+      "depends_on": ["AUTH-BASELINE"],
+      "addresses": [],
+      "write_scope": [],
+      "proof_required": [
+        "VQ required-or-optional decision and approval for exact migration runner, component mount/readiness, schema convergence, and fallback retirement"
+      ],
+      "evidence": [
+        {
+          "ref": "owner-approval-record.md; vq-schema-recovery.md: required/enabled preserves currently mounted VQ",
+          "sha": "c712e4647bf8cd01732370e10e0282e8e454ded1",
+          "observer": "repository-owner"
+        }
+      ],
+      "invalidated_by": ["VQ product status", "schema estate", "owner decision change"],
+      "vetoes_release": true
+    },
+    {
+      "id": "OWNER-OBJECT-LIFECYCLE",
+      "phase": 1,
+      "kind": "OWNER_GATE",
+      "title": "Authorise complete object lifecycle and readiness repair",
+      "severity": "NONE",
+      "status": "OWNER_DECISION",
+      "agent_mode": "EXTERNAL_OWNER",
+      "agent_id": "repository-owner",
+      "workspace": "external",
+      "depends_on": ["AUTH-BASELINE"],
+      "addresses": [],
+      "write_scope": [],
+      "proof_required": [
+        "Approve named writer classes and retention/rebuild/reconciliation behavior; deletion targets and retention rules require separate exact approval"
+      ],
+      "evidence": [],
+      "invalidated_by": ["Writer inventory", "retention policy", "owner decision change"],
+      "vetoes_release": true
+    },
+    {
+      "id": "OWNER-SOCIAL-PUBLICATION",
+      "phase": 1,
+      "kind": "OWNER_GATE",
+      "title": "Authorise durable external-publication state and migration",
+      "severity": "NONE",
+      "status": "OWNER_DECISION",
+      "agent_mode": "EXTERNAL_OWNER",
+      "agent_id": "repository-owner",
+      "workspace": "external",
+      "depends_on": ["AUTH-BASELINE"],
+      "addresses": [],
+      "write_scope": [],
+      "proof_required": [
+        "Approve exact social state machine, provider idempotency/reconciliation, timeout policy, and numbered migration authoring without applying it externally"
+      ],
+      "evidence": [],
+      "invalidated_by": ["Social/provider contract", "migration number", "owner decision change"],
+      "vetoes_release": true
+    },
+    {
+      "id": "OWNER-PARTNER-POOL",
+      "phase": 1,
+      "kind": "OWNER_GATE",
+      "title": "Authorise Partner pool acquisition and timeout contract",
+      "severity": "NONE",
+      "status": "OWNER_DECISION",
+      "agent_mode": "EXTERNAL_OWNER",
+      "agent_id": "repository-owner",
+      "workspace": "external",
+      "depends_on": ["AUTH-BASELINE"],
+      "addresses": [],
+      "write_scope": [],
+      "proof_required": [
+        "Approve runtime/admin/connector acquisition, statement, lock, and aggregate connection budgets against the actual provider ceiling"
+      ],
+      "evidence": [],
+      "invalidated_by": ["Pool topology", "provider ceiling", "machine count", "owner decision change"],
+      "vetoes_release": true
+    },
+    {
+      "id": "OWNER-VQ-EXPORT",
+      "phase": 1,
+      "kind": "OWNER_GATE",
+      "title": "Authorise Vault Quest export retention and reclaim behavior",
+      "severity": "NONE",
+      "status": "OWNER_DECISION",
+      "agent_mode": "EXTERNAL_OWNER",
+      "agent_id": "repository-owner",
+      "workspace": "external",
+      "depends_on": ["AUTH-BASELINE"],
+      "addresses": [],
+      "write_scope": [],
+      "proof_required": [
+        "Approve stuck-processing reclaim and exact export retention; object deletion remains separately named and owner-approved after report-only sizing"
+      ],
+      "evidence": [],
+      "invalidated_by": ["Export state machine", "retention policy", "object volume", "owner decision change"],
+      "vetoes_release": true
+    },
+    {
+      "id": "OWNER-SERVER-BOUNDARIES",
+      "phase": 1,
+      "kind": "OWNER_GATE",
+      "title": "Authorise behavior-preserving extraction across protected server boundaries",
+      "severity": "NONE",
+      "status": "PROVEN",
+      "agent_mode": "EXTERNAL_OWNER",
+      "agent_id": "repository-owner",
+      "workspace": "external",
+      "depends_on": ["AUTH-BASELINE"],
+      "addresses": [],
+      "write_scope": [],
+      "proof_required": [
+        "Approve exact bounded-context extraction manifest covering protected route/storage/auth-adjacent files with no contract change"
+      ],
+      "evidence": [
+        {
+          "ref": "owner-approval-record.md blanket approval; phased-repair-plan.md J1 exact unused foundation manifest; no protected business behavior/external action authorised beyond that record.",
+          "sha": "607c3518d36ca234ad83edfb914204136ad9cebd",
+          "observer": "repository-owner; codex-lead adjudication"
+        }
+      ],
+      "invalidated_by": ["Extraction manifest", "protected boundary", "owner decision change"],
+      "vetoes_release": true
+    },
+    {
+      "id": "OWNER-CLIENT-SURFACES",
+      "phase": 1,
+      "kind": "OWNER_GATE",
+      "title": "Decide canonical client variants, tabs, and public surfaces",
+      "severity": "NONE",
+      "status": "OWNER_DECISION",
+      "agent_mode": "EXTERNAL_OWNER",
+      "agent_id": "repository-owner",
+      "workspace": "external",
+      "depends_on": ["AUTH-BASELINE"],
+      "addresses": [],
+      "write_scope": [],
+      "proof_required": [
+        "Exact retain-gate-redirect-retire disposition for home/pricing variants, dead tabs/pages, SEO and analytics behavior"
+      ],
+      "evidence": [],
+      "invalidated_by": ["Product surface", "route inventory", "owner decision change"],
+      "vetoes_release": true
+    },
+    {
+      "id": "OWNER-SCANNER-OPS",
+      "phase": 1,
+      "kind": "OWNER_GATE",
+      "title": "Authorise Scanner distribution and exact legacy operational retirement",
+      "severity": "NONE",
+      "status": "OWNER_DECISION",
+      "agent_mode": "EXTERNAL_OWNER",
+      "agent_id": "repository-owner",
+      "workspace": "external",
+      "depends_on": ["AUTH-BASELINE"],
+      "addresses": [],
+      "write_scope": [],
+      "proof_required": [
+        "Signed-package channel decision and named watcher/runbook/dead-body/incident-executable disposition; no blanket deletion authority"
+      ],
+      "evidence": [],
+      "invalidated_by": ["Scanner package", "legacy target list", "owner decision change"],
+      "vetoes_release": true
+    },
+    {
+      "id": "OWNER-WAA-EXACT",
+      "phase": 1,
+      "kind": "OWNER_GATE",
+      "title": "Record each exact nested White Ace owner decision",
+      "severity": "NONE",
+      "status": "OWNER_DECISION",
+      "agent_mode": "EXTERNAL_OWNER",
+      "agent_id": "repository-owner",
+      "workspace": "external",
+      "depends_on": ["AUTH-BASELINE"],
+      "addresses": [],
+      "write_scope": [],
+      "proof_required": [
+        "Separately satisfy the nested secret, credit, image/storage, token/auth, and migration-authoring owner gates; no umbrella approval"
+      ],
+      "evidence": [],
+      "invalidated_by": ["Nested graph", "nested owner decision", "protected contract"],
+      "vetoes_release": true
+    },
+
+    {
+      "id": "ARCH-AUTHORITY-001",
+      "phase": 1,
+      "kind": "FINDING",
+      "title": "Declared architecture contradicts executable route, data, and schema topology",
+      "severity": "HIGH",
+      "status": "OPEN",
+      "agent_mode": "READ_ONLY",
+      "agent_id": "architecture-authority-observer",
+      "workspace": "read_only",
+      "depends_on": ["AUTH-BASELINE"],
+      "addresses": [],
+      "write_scope": [],
+      "proof_required": [
+        "Source-bound route, database identity, table owner, object writer, provider, job, and migration authority census"
+      ],
+      "evidence": [
+        {
+          "ref": "architecture-damage-assessment.md Confirmed root-cause cluster 1; CLAUDE.md:203-223,282-293; server/routes.ts; server/storage.ts",
+          "sha": "09beacaa5bc03f8e80e4c7e59232df6fc466b7cb",
+          "observer": "server-architecture-observer"
+        }
+      ],
+      "invalidated_by": [
+        "Governance",
+        "route composition",
+        "database identity",
+        "schema registry",
+        "writer inventory",
+        "migration inventory"
+      ],
+      "vetoes_release": true
+    },
+    {
+      "id": "ARCH-ROUTE-001",
+      "phase": 1,
+      "kind": "FINDING",
+      "title": "Reachable Admin reprint action calls a removed server endpoint",
+      "severity": "HIGH",
+      "status": "OPEN",
+      "agent_mode": "READ_ONLY",
+      "agent_id": "client-server-contract-observer",
+      "workspace": "read_only",
+      "depends_on": ["AUTH-BASELINE"],
+      "addresses": [],
+      "write_scope": [],
+      "proof_required": ["Mounted client action and server route/unmatched-API reproduction"],
+      "evidence": [
+        {
+          "ref": "client/src/pages/admin-cert-browser.tsx:783; client/src/pages/admin-printing.tsx:869-900; server/routes.ts:5565-5569; server/index.ts:855-861",
+          "sha": "09beacaa5bc03f8e80e4c7e59232df6fc466b7cb",
+          "observer": "server-architecture-observer"
+        }
+      ],
+      "invalidated_by": ["Admin print client", "route manifest", "print command", "unmatched API behavior"],
+      "vetoes_release": true
+    },
+    {
+      "id": "ARCH-PRINT-EVIDENCE-001",
+      "phase": 1,
+      "kind": "FINDING",
+      "title": "Direct reprint response claims per-certificate audit rows that are never written",
+      "severity": "HIGH",
+      "status": "OPEN",
+      "agent_mode": "READ_ONLY",
+      "agent_id": "server-architecture-observer",
+      "workspace": "read_only",
+      "depends_on": ["AUTH-BASELINE"],
+      "addresses": [],
+      "write_scope": [],
+      "proof_required": [
+        "Direct-route control-flow proof, durable reason-bearing evidence inventory, and response/documentation parity"
+      ],
+      "evidence": [
+        {
+          "ref": "server/routes.ts:4961-5041 returns synthetic auditRows before unreachable per-cert audit_log writes at 5161-5187; server/lib/print-artifact-persistence.ts:181-401 shows actual typed evidence",
+          "sha": "09beacaa5bc03f8e80e4c7e59232df6fc466b7cb",
+          "observer": "server-architecture-observer"
+        },
+        {
+          "ref": "docs/print-workflow/AUTHORITY.md makes certificates/print_batches/print_events authoritative and label_prints/reprint_log/audit_log projections; direct reprint persists out-of-vocabulary legacy_unspecified in the batch while its event normalizes category to null",
+          "sha": "09beacaa5bc03f8e80e4c7e59232df6fc466b7cb",
+          "observer": "data-runtime-observer"
+        }
+      ],
+      "invalidated_by": [
+        "Direct reprint response",
+        "print evidence schema",
+        "artifact finalizer",
+        "audit documentation"
+      ],
+      "vetoes_release": true
+    },
+    {
+      "id": "ARCH-PRINT-IDEMPOTENCY-001",
+      "phase": 1,
+      "kind": "FINDING",
+      "title": "Print Queue reprint retries duplicate durable state-transition evidence",
+      "severity": "HIGH",
+      "status": "OPEN",
+      "agent_mode": "READ_ONLY",
+      "agent_id": "server-architecture-observer",
+      "workspace": "read_only",
+      "depends_on": ["AUTH-BASELINE"],
+      "addresses": [],
+      "write_scope": [],
+      "proof_required": [
+        "Mounted Print Queue command, same-state retry reproduction, and duplicate print_events/reprint_log proof"
+      ],
+      "evidence": [
+        {
+          "ref": "client/src/pages/admin-print-queue.tsx:290-319; server/routes/print-workflow.ts:134-151 accepts no key; shared/print-lifecycle.ts:234-242 permits same-state reprint; server/print-workflow.ts:1285-1338 rewrites evidence on retry",
+          "sha": "09beacaa5bc03f8e80e4c7e59232df6fc466b7cb",
+          "observer": "server-architecture-observer"
+        },
+        {
+          "ref": "server/print-workflow.ts existing PRINT_ARTIFACT intent validation omits actorRole, top-level reason/category, and notes; route conflict handling converts changed-payload idempotency conflicts to generic 500",
+          "sha": "09beacaa5bc03f8e80e4c7e59232df6fc466b7cb",
+          "observer": "data-runtime-observer"
+        }
+      ],
+      "invalidated_by": ["Workflow reprint route", "print state machine", "print evidence", "idempotency storage"],
+      "vetoes_release": true
+    },
+    {
+      "id": "ARCH-PRINT-READINESS-001",
+      "phase": 1,
+      "kind": "FINDING",
+      "title": "Required print workflow schema is absent from release readiness",
+      "severity": "HIGH",
+      "status": "OPEN",
+      "agent_mode": "READ_ONLY",
+      "agent_id": "data-runtime-observer",
+      "workspace": "read_only",
+      "depends_on": ["AUTH-BASELINE"],
+      "addresses": [],
+      "write_scope": [],
+      "proof_required": [
+        "Executable component-readiness proof for migration 0022, print relations, runtime-consumed columns/defaults, generated IDs, primary-key/owned-sequence authority, exact runtime ACLs, indexes, print_state, and batch identity uniqueness"
+      ],
+      "evidence": [
+        {
+          "ref": "config/components/index.ts and core-runtime.ts omit migration 0022 plus public.print_batches/public.print_events while server/print-workflow.ts declares that migration as the only schema authority",
+          "sha": "09beacaa5bc03f8e80e4c7e59232df6fc466b7cb",
+          "observer": "data-runtime-observer"
+        }
+      ],
+      "invalidated_by": ["Component manifest", "release readiness", "print migration", "print schema contract"],
+      "vetoes_release": true
+    },
+    {
+      "id": "ARCH-PRINT-REPLAY-001",
+      "phase": 1,
+      "kind": "FINDING",
+      "title": "Committed print artifact replay is incorrectly gated by mutable current state",
+      "severity": "HIGH",
+      "status": "OPEN",
+      "agent_mode": "READ_ONLY",
+      "agent_id": "data-runtime-observer",
+      "workspace": "read_only",
+      "depends_on": ["AUTH-BASELINE"],
+      "addresses": [],
+      "write_scope": [],
+      "proof_required": [
+        "Committed-result replay after certificate or Partner eligibility drift with no duplicate effects, plus current-download eligibility from authoritative immutable batch membership"
+      ],
+      "evidence": [
+        {
+          "ref": "server/print-workflow.ts reads certificate existence and Partner eligibility before returning an already-COMMITTED object-write result, contradicting durable retry semantics",
+          "sha": "09beacaa5bc03f8e80e4c7e59232df6fc466b7cb",
+          "observer": "data-runtime-observer"
+        }
+      ],
+      "invalidated_by": [
+        "Print artifact replay",
+        "Partner print eligibility",
+        "certificate lifecycle",
+        "object-write result"
+      ],
+      "vetoes_release": true
+    },
+    {
+      "id": "ARCH-SESSION-001",
+      "phase": 1,
+      "kind": "FINDING",
+      "title": "Admin logout, unauthorized semantics, and protected cache lifetime have no single authority",
+      "severity": "HIGH",
+      "status": "OPEN",
+      "agent_mode": "READ_ONLY",
+      "agent_id": "client-architecture-observer",
+      "workspace": "read_only",
+      "depends_on": ["AUTH-BASELINE"],
+      "addresses": [],
+      "write_scope": [],
+      "proof_required": [
+        "Every AdminShell consumer, POST-only logout, 401-null array crash, and cross-principal cache reproduction"
+      ],
+      "evidence": [
+        {
+          "ref": "client/src/components/admin/admin-shell.tsx:391-401,490-498; client/src/lib/queryClient.ts:32-62; client/src/pages/admin-dashboard.tsx:165-214; server/routes/auth.ts:297-306",
+          "sha": "09beacaa5bc03f8e80e4c7e59232df6fc466b7cb",
+          "observer": "client-architecture-observer"
+        }
+      ],
+      "invalidated_by": [
+        "Admin route",
+        "session endpoint",
+        "QueryClient defaults",
+        "logout consumer",
+        "principal transition"
+      ],
+      "vetoes_release": true
+    },
+    {
+      "id": "ARCH-SUPPLY-001",
+      "phase": 1,
+      "kind": "FINDING",
+      "title": "Duplicate Partner supply order routes split paid checkout from order history",
+      "severity": "HIGH",
+      "status": "FIXED",
+      "agent_mode": "READ_ONLY",
+      "agent_id": "client-architecture-observer",
+      "workspace": "read_only",
+      "depends_on": ["AUTH-BASELINE"],
+      "addresses": [],
+      "write_scope": [],
+      "proof_required": [
+        "Mounted method/path collision, separate table models, active checkout, active My Orders, and permission/shell wiring reproduction"
+      ],
+      "evidence": [
+        {
+          "ref": "server/partner/mount.ts:218-221; server/partner/supplies-routes.ts:50-56; server/partner/supply-routes.ts:32-47; client/src/pages/partner/supplies.tsx:133-192",
+          "sha": "09beacaa5bc03f8e80e4c7e59232df6fc466b7cb",
+          "observer": "client-architecture-observer"
+        }
+      ],
+      "invalidated_by": ["Partner mount order", "supply routes", "order tables", "permissions", "Partner client"],
+      "vetoes_release": true
+    },
+    {
+      "id": "ARCH-PRICING-001",
+      "phase": 1,
+      "kind": "FINDING",
+      "title": "Admin, public, submission, and payment pricing contracts have competing authorities",
+      "severity": "HIGH",
+      "status": "OPEN",
+      "agent_mode": "READ_ONLY",
+      "agent_id": "client-architecture-observer",
+      "workspace": "read_only",
+      "depends_on": ["AUTH-BASELINE"],
+      "addresses": [],
+      "write_scope": [],
+      "proof_required": ["Admin shape mismatch plus static-public versus database-backed selection/quote evidence"],
+      "evidence": [
+        {
+          "ref": "client/src/pages/admin-pricing.tsx:7-53,115-128; server/routes/admin-config.ts:194-197; shared/schema.ts:1933-1949; client/src/pages/home.tsx:473-503; client/src/pages/pricing.tsx:166-281; client/src/pages/submit.tsx:1846-1857",
+          "sha": "09beacaa5bc03f8e80e4c7e59232df6fc466b7cb",
+          "observer": "client-architecture-observer"
+        }
+      ],
+      "invalidated_by": [
+        "Service tier schema",
+        "admin pricing contract",
+        "public pricing projection",
+        "quote authority"
+      ],
+      "vetoes_release": true
+    },
+    {
+      "id": "ARCH-ROLE-001",
+      "phase": 1,
+      "kind": "FINDING",
+      "title": "Least-privilege Scanner Operator role is absent from active Partner client management",
+      "severity": "HIGH",
+      "status": "FIXED",
+      "agent_mode": "READ_ONLY",
+      "agent_id": "client-architecture-observer",
+      "workspace": "read_only",
+      "depends_on": ["AUTH-BASELINE"],
+      "addresses": [],
+      "write_scope": [],
+      "proof_required": ["Server accepted-role map versus active client type, invitation, and edit-role parity"],
+      "evidence": [
+        {
+          "ref": "server/partner/team-service.ts:9-61; client/src/lib/partner-api.ts:369-386; client/src/pages/partner/users.tsx:23-56,171-190,325-338",
+          "sha": "09beacaa5bc03f8e80e4c7e59232df6fc466b7cb",
+          "observer": "client-architecture-observer"
+        }
+      ],
+      "invalidated_by": ["Partner role map", "team API schema", "user-management UI", "permission matrix"],
+      "vetoes_release": true
+    },
+    {
+      "id": "ARCH-LEGACY-AI-001",
+      "phase": 1,
+      "kind": "FINDING",
+      "title": "Obsolete AI grading routes bypass canonical command, object, and evidence authority",
+      "severity": "HIGH",
+      "status": "OPEN",
+      "agent_mode": "READ_ONLY",
+      "agent_id": "server-architecture-observer",
+      "workspace": "read_only",
+      "depends_on": ["AUTH-BASELINE"],
+      "addresses": [],
+      "write_scope": [],
+      "proof_required": [
+        "Authenticated reachability of analyze-v1-legacy with feature flag enabled and grade-with-ai without a route-level flag, including direct R2, provider, and grading-write effects"
+      ],
+      "evidence": [
+        {
+          "ref": "server/routes.ts:2982-3119; server/config/feature-flags.ts:11-14,59,83",
+          "sha": "09beacaa5bc03f8e80e4c7e59232df6fc466b7cb",
+          "observer": "server-architecture-observer"
+        },
+        {
+          "ref": "grading-legacy-recovery.md independent source recovery: analyze-v1-legacy conditionally reads certificate/object state, calls a provider, and writes grading fields; grade-with-ai admits multipart data then crops, publishes objects, calls identification/grading providers, signs URLs, and may write the certificate without canonical command, object, revision, or evidence control",
+          "sha": "c3534c856be747e7e66459559d875e3ff3d6f109",
+          "observer": "codex-lead"
+        }
+      ],
+      "invalidated_by": ["Legacy route", "feature flag", "AI provider", "grading workflow", "object writer"],
+      "vetoes_release": true
+    },
+    {
+      "id": "ARCH-SCHEMA-001",
+      "phase": 1,
+      "kind": "FINDING",
+      "title": "Vault Quest runtime, shipped migrations, journal, and readiness do not describe one estate",
+      "severity": "HIGH",
+      "status": "OPEN",
+      "agent_mode": "READ_ONLY",
+      "agent_id": "data-runtime-observer",
+      "workspace": "read_only",
+      "depends_on": ["AUTH-BASELINE"],
+      "addresses": [],
+      "write_scope": [],
+      "proof_required": [
+        "Main/VQ migration inventory, shipped image, CI application, route mounting, readiness, and missing-schema fallback evidence"
+      ],
+      "evidence": [
+        {
+          "ref": "drizzle-vq.config.ts:12-19; migrations-vq/meta/_journal.json; Dockerfile:104-114; .github/workflows/ci.yml:422-430,923-995; server/routes.ts:2140-2145; server/vault-quest/lib/export-job-store.ts:4-55",
+          "sha": "09beacaa5bc03f8e80e4c7e59232df6fc466b7cb",
+          "observer": "data-runtime-observer"
+        }
+      ],
+      "invalidated_by": [
+        "Migration inventory",
+        "VQ product status",
+        "Docker image",
+        "CI runner",
+        "readiness",
+        "fallback behavior"
+      ],
+      "vetoes_release": true
+    },
+    {
+      "id": "ARCH-CI-001",
+      "phase": 1,
+      "kind": "FINDING",
+      "title": "Hosted CI omits authoritative Partner, Scanner, and tooling proof topology",
+      "severity": "HIGH",
+      "status": "OPEN",
+      "agent_mode": "READ_ONLY",
+      "agent_id": "data-runtime-observer",
+      "workspace": "read_only",
+      "depends_on": ["AUTH-BASELINE"],
+      "addresses": [],
+      "write_scope": [],
+      "proof_required": [
+        "Compare fail-closed isolated Partner runner, Scanner package gates, typecheck scope, migration tests, and hosted workflow invocation"
+      ],
+      "evidence": [
+        {
+          "ref": "scripts/ci/partner-suite-env-matrix.mjs:1-29; scripts/ci/run-partner-suite.mjs:35-216; .github/workflows/ci.yml:614-653; tsconfig.json:2-3; vitest.config.ts:12-15; scripts/scanner-app/package.json:7-15",
+          "sha": "09beacaa5bc03f8e80e4c7e59232df6fc466b7cb",
+          "observer": "data-runtime-observer"
+        }
+      ],
+      "invalidated_by": [
+        "CI workflow",
+        "test inventory",
+        "Partner runner",
+        "Scanner package",
+        "TypeScript configs",
+        "migration release path"
+      ],
+      "vetoes_release": true
+    },
+    {
+      "id": "ARCH-SOCIAL-001",
+      "phase": 1,
+      "kind": "FINDING",
+      "title": "External-publication jobs lack durable completion and crash reconciliation",
+      "severity": "HIGH",
+      "status": "OPEN",
+      "agent_mode": "READ_ONLY",
+      "agent_id": "data-runtime-observer",
+      "workspace": "read_only",
+      "depends_on": ["AUTH-BASELINE"],
+      "addresses": [],
+      "write_scope": [],
+      "proof_required": [
+        "Completion-marker ordering, advisory-lock lifetime, provider/persistence ambiguity, lifecycle drain, timeout, and idempotency evidence"
+      ],
+      "evidence": [
+        {
+          "ref": "server/jobs/weekly-reel.ts:88-517; server/jobs/ig-daily-post.ts:166-290; server/lib/advisory-lock.ts:41-72; server/lib/lifecycle.ts:61-142",
+          "sha": "09beacaa5bc03f8e80e4c7e59232df6fc466b7cb",
+          "observer": "data-runtime-observer"
+        }
+      ],
+      "invalidated_by": [
+        "Job schedule",
+        "claim/lock",
+        "provider workflow",
+        "completion marker",
+        "lifecycle drain",
+        "timeout"
+      ],
+      "vetoes_release": true
+    },
+    {
+      "id": "ARCH-WAA-SUBGRAPH-001",
+      "phase": 1,
+      "kind": "FINDING",
+      "title": "Nested White Ace release-integrity HIGH defects remain unresolved",
+      "severity": "HIGH",
+      "status": "OPEN",
+      "agent_mode": "READ_ONLY",
+      "agent_id": "white-ace-observer",
+      "workspace": "read_only",
+      "depends_on": ["AUTH-BASELINE"],
+      "addresses": [],
+      "write_scope": [],
+      "proof_required": [
+        "Validated nested graph showing all accepted protected and external vetoes remain connected to the same candidate"
+      ],
+      "evidence": [
+        {
+          "ref": "../white-ace-assurance-repository-20260904/repair-graph.json and engineering/ISSUE_REGISTER.md 2026-09-04 White Ace assurance delta",
+          "sha": "09beacaa5bc03f8e80e4c7e59232df6fc466b7cb",
+          "observer": "codex-lead"
+        }
+      ],
+      "invalidated_by": ["Nested graph", "accepted White Ace issue", "candidate SHA", "owner gate", "external gate"],
+      "vetoes_release": true
+    },
+    {
+      "id": "ARCH-COMP-001",
+      "phase": 1,
+      "kind": "FINDING",
+      "title": "Server composition, persistence, cycles, and dead implementations amplify change risk",
+      "severity": "MEDIUM",
+      "status": "OPEN",
+      "agent_mode": "READ_ONLY",
+      "agent_id": "server-architecture-observer",
+      "workspace": "read_only",
+      "depends_on": ["AUTH-BASELINE"],
+      "addresses": [],
+      "write_scope": [],
+      "proof_required": [
+        "Root/leaf cycles, route/storage/index responsibilities, direct writer counts, and unreachable print bodies"
+      ],
+      "evidence": [
+        {
+          "ref": "architecture-damage-assessment.md clusters 1 and 3; server/routes.ts; server/index.ts; server/storage.ts",
+          "sha": "09beacaa5bc03f8e80e4c7e59232df6fc466b7cb",
+          "observer": "server-architecture-observer"
+        }
+      ],
+      "invalidated_by": ["Composition root", "import graph", "route registrar", "storage facade", "dead code"],
+      "vetoes_release": true
+    },
+    {
+      "id": "ARCH-CYCLE-001",
+      "phase": 1,
+      "kind": "FINDING",
+      "title": "Runtime import cycles invert root-router and VQ provider boundaries",
+      "severity": "MEDIUM",
+      "status": "OPEN",
+      "agent_mode": "READ_ONLY",
+      "agent_id": "server-architecture-observer",
+      "workspace": "read_only",
+      "depends_on": ["AUTH-BASELINE"],
+      "addresses": [],
+      "write_scope": [],
+      "proof_required": [
+        "Runtime-only root registrar to leaf-router back-imports and VQ provider state-to-transport cycle"
+      ],
+      "evidence": [
+        {
+          "ref": "server/routes.ts:85,89,2134-2135; server/routes/pre-grade.ts:10; server/routes/stolen.ts:16; server/vault-quest/lib/vq-provider-connection.ts:4; server/vault-quest/ai/higgsfield.ts:7-11",
+          "sha": "09beacaa5bc03f8e80e4c7e59232df6fc466b7cb",
+          "observer": "server-architecture-observer"
+        }
+      ],
+      "invalidated_by": ["Runtime import graph", "route helper", "provider port", "composition root"],
+      "vetoes_release": true
+    },
+    {
+      "id": "ARCH-DEAD-001",
+      "phase": 1,
+      "kind": "FINDING",
+      "title": "Unreachable print and Scanner implementations remain inside live modules",
+      "severity": "MEDIUM",
+      "status": "OPEN",
+      "agent_mode": "READ_ONLY",
+      "agent_id": "server-architecture-observer",
+      "workspace": "read_only",
+      "depends_on": ["AUTH-BASELINE"],
+      "addresses": [],
+      "write_scope": [],
+      "proof_required": [
+        "Unconditional return boundaries and unreachable handler bodies with delegated live behavior characterized"
+      ],
+      "evidence": [
+        {
+          "ref": "server/routes.ts:4585-5242; scripts/scanner-app/lib/watcher.js:2141-2719",
+          "sha": "09beacaa5bc03f8e80e4c7e59232df6fc466b7cb",
+          "observer": "server-architecture-observer"
+        }
+      ],
+      "invalidated_by": ["Print adapter", "Scanner watcher", "unreachable-code gate", "delegated behavior"],
+      "vetoes_release": true
+    },
+    {
+      "id": "ARCH-PROXY-001",
+      "phase": 1,
+      "kind": "FINDING",
+      "title": "Staff and grader authorization adapters recursively redispatch mutated requests",
+      "severity": "MEDIUM",
+      "status": "OPEN",
+      "agent_mode": "READ_ONLY",
+      "agent_id": "server-architecture-observer",
+      "workspace": "read_only",
+      "depends_on": ["AUTH-BASELINE"],
+      "addresses": [],
+      "write_scope": [],
+      "proof_required": [
+        "Current whitelist containment plus request mutation, auth bypass flag, and route-order dependency"
+      ],
+      "evidence": [
+        {
+          "ref": "server/routes/staff.ts:367-425; server/auth.ts:217-224; server/routes/grader.ts:713-731,1215-1233",
+          "sha": "09beacaa5bc03f8e80e4c7e59232df6fc466b7cb",
+          "observer": "server-architecture-observer"
+        }
+      ],
+      "invalidated_by": ["Staff route", "grader route", "auth middleware", "capability context", "route order"],
+      "vetoes_release": true
+    },
+    {
+      "id": "ARCH-MEDIA-001",
+      "phase": 1,
+      "kind": "FINDING",
+      "title": "Object lifecycle readiness is not derived from the complete writer inventory",
+      "severity": "MEDIUM",
+      "status": "OPEN",
+      "agent_mode": "READ_ONLY",
+      "agent_id": "server-architecture-observer",
+      "workspace": "read_only",
+      "depends_on": ["AUTH-BASELINE"],
+      "addresses": [],
+      "write_scope": [],
+      "proof_required": [
+        "Complete authoritative/derived/ephemeral writer inventory and readiness-coverage parity; adjudicate uncovered writer failures separately"
+      ],
+      "evidence": [
+        {
+          "ref": "server/lib/object-write-finalizer-registry.ts:8-16; server/readiness.ts:246-255; server/community.ts:49-135",
+          "sha": "09beacaa5bc03f8e80e4c7e59232df6fc466b7cb",
+          "observer": "server-architecture-observer"
+        }
+      ],
+      "invalidated_by": ["Object writer", "finalizer registry", "readiness", "reconciler", "retention policy"],
+      "vetoes_release": true
+    },
+    {
+      "id": "ARCH-COMMUNITY-MEDIA-CANDIDATE-001",
+      "phase": 1,
+      "kind": "EXTERNAL",
+      "title": "Independently reproduce or falsify the candidate community-publication ordering defect",
+      "severity": "HIGH",
+      "status": "OPEN",
+      "agent_mode": "READ_ONLY",
+      "agent_id": "community-media-investigator",
+      "workspace": "read_only",
+      "depends_on": ["AUTH-BASELINE"],
+      "addresses": [],
+      "write_scope": [],
+      "proof_required": [
+        "Fault-inject DB commit, R2 upload, pointer update, and audit insertion boundaries; bind accepted or rejected hypothesis evidence to the exact baseline/candidate without changing community behavior"
+      ],
+      "evidence": [],
+      "invalidated_by": [
+        "Community publication transaction",
+        "R2 writer",
+        "pointer update",
+        "audit event",
+        "candidate SHA"
+      ],
+      "vetoes_release": true
+    },
+    {
+      "id": "ADJUDICATE-COMMUNITY-MEDIA",
+      "phase": 1,
+      "kind": "OWNER_GATE",
+      "title": "Lead-adjudicate the candidate community-publication defect from independent fault evidence",
+      "severity": "NONE",
+      "status": "OPEN",
+      "agent_mode": "LEAD",
+      "agent_id": "codex-lead",
+      "workspace": "shared",
+      "depends_on": ["ARCH-COMMUNITY-MEDIA-CANDIDATE-001"],
+      "addresses": [],
+      "write_scope": [],
+      "proof_required": [
+        "Record REJECTED with falsifying evidence, or accept a stable BLOCKER/HIGH finding and add its exact repair, owner/recovery, proof, rollback, and release-veto edges before this gate can close"
+      ],
+      "evidence": [],
+      "invalidated_by": [
+        "Fault-injection evidence",
+        "candidate disposition",
+        "accepted finding graph",
+        "candidate SHA"
+      ],
+      "vetoes_release": true
+    },
+    {
+      "id": "ARCH-CLIENT-001",
+      "phase": 1,
+      "kind": "FINDING",
+      "title": "Client route, transport, session, and variant surfaces lack enforceable ownership",
+      "severity": "MEDIUM",
+      "status": "OPEN",
+      "agent_mode": "READ_ONLY",
+      "agent_id": "client-architecture-observer",
+      "workspace": "read_only",
+      "depends_on": ["AUTH-BASELINE"],
+      "addresses": [],
+      "write_scope": [],
+      "proof_required": [
+        "Route/import reachability, production mockups, dead tabs/imports, raw transport/session copies, and giant-page ownership census"
+      ],
+      "evidence": [
+        {
+          "ref": "client/src/App.tsx:42-186,459-479,668-673; client/src/pages/admin.tsx:6-81; client/src/pages/admin-dashboard.tsx:660-693",
+          "sha": "09beacaa5bc03f8e80e4c7e59232df6fc466b7cb",
+          "observer": "client-architecture-observer"
+        }
+      ],
+      "invalidated_by": [
+        "Client route registry",
+        "page import graph",
+        "transport layer",
+        "session provider",
+        "production exposure"
+      ],
+      "vetoes_release": true
+    },
+    {
+      "id": "ARCH-ADMIN-TAB-001",
+      "phase": 1,
+      "kind": "FINDING",
+      "title": "Admin Sets deep-link allowlist has no dashboard render branch",
+      "severity": "MEDIUM",
+      "status": "OPEN",
+      "agent_mode": "READ_ONLY",
+      "agent_id": "client-architecture-observer",
+      "workspace": "read_only",
+      "depends_on": ["AUTH-BASELINE"],
+      "addresses": [],
+      "write_scope": [],
+      "proof_required": ["Allowlisted tab, absent dashboard branch, and separate canonical /admin/sets route"],
+      "evidence": [
+        {
+          "ref": "client/src/pages/admin.tsx:6-10; client/src/pages/admin-dashboard.tsx:660-693; client/src/App.tsx:479",
+          "sha": "09beacaa5bc03f8e80e4c7e59232df6fc466b7cb",
+          "observer": "client-architecture-observer"
+        }
+      ],
+      "invalidated_by": ["Admin tab allowlist", "dashboard branch", "route registry", "navigation"],
+      "vetoes_release": true
+    },
+    {
+      "id": "ARCH-POOL-001",
+      "phase": 1,
+      "kind": "FINDING",
+      "title": "Partner pools lack bounded acquisition and aggregate provider budget",
+      "severity": "MEDIUM",
+      "status": "OPEN",
+      "agent_mode": "READ_ONLY",
+      "agent_id": "data-runtime-observer",
+      "workspace": "read_only",
+      "depends_on": ["AUTH-BASELINE"],
+      "addresses": [],
+      "write_scope": [],
+      "proof_required": [
+        "Runtime/admin/connector acquisition, statement, lock, pool-size, process-count, and provider-ceiling inventory"
+      ],
+      "evidence": [
+        {
+          "ref": "server/partner/db.ts:91-104,188-200,306-317; server/partner/connector-db.ts:33-58; server/db.ts:9-20; server/index.ts:246-258",
+          "sha": "09beacaa5bc03f8e80e4c7e59232df6fc466b7cb",
+          "observer": "data-runtime-observer"
+        }
+      ],
+      "invalidated_by": ["Pool config", "timeout", "machine count", "provider ceiling", "query path"],
+      "vetoes_release": true
+    },
+    {
+      "id": "ARCH-VQ-EXPORT-001",
+      "phase": 1,
+      "kind": "FINDING",
+      "title": "Vault Quest export expiry and stuck-processing recovery are not scheduled",
+      "severity": "MEDIUM",
+      "status": "OPEN",
+      "agent_mode": "READ_ONLY",
+      "agent_id": "data-runtime-observer",
+      "workspace": "read_only",
+      "depends_on": ["AUTH-BASELINE"],
+      "addresses": [],
+      "write_scope": [],
+      "proof_required": [
+        "Expired row/object sizing, processing lease/reclaim state, missing-schema fallback, and scheduler inventory"
+      ],
+      "evidence": [
+        {
+          "ref": "server/vault-quest/lib/export-job-store.ts:4-81; .claude/controlled-code-lead/tasks/vault-quest-phase-10/issue-register.md P10-R1-F4",
+          "sha": "09beacaa5bc03f8e80e4c7e59232df6fc466b7cb",
+          "observer": "data-runtime-observer"
+        }
+      ],
+      "invalidated_by": ["Export schema", "retention", "object store", "lease/reclaim", "scheduler", "VQ readiness"],
+      "vetoes_release": true
+    },
+    {
+      "id": "SFAP-002",
+      "phase": 1,
+      "kind": "FINDING",
+      "title": "Partner Scanner signed-package and clean-Mac distribution proof remains open",
+      "severity": "BLOCKER",
+      "status": "OPEN",
+      "agent_mode": "READ_ONLY",
+      "agent_id": "data-runtime-observer",
+      "workspace": "read_only",
+      "depends_on": ["AUTH-BASELINE"],
+      "addresses": [],
+      "write_scope": [],
+      "proof_required": [
+        "Developer ID, hardened runtime, notarization, stapling, signed update/rollback, clean-Mac install and physical scan"
+      ],
+      "evidence": [
+        {
+          "ref": "docs/scanner/SCANNER_BLOCKER_REGISTER_20260818.md SFAP-002 current PACKAGE-BUILT / SIGNING-PENDING state",
+          "sha": "09beacaa5bc03f8e80e4c7e59232df6fc466b7cb",
+          "observer": "data-runtime-observer"
+        }
+      ],
+      "invalidated_by": [
+        "Scanner source SHA",
+        "package manifest",
+        "bridge digest",
+        "signing",
+        "notary",
+        "clean Mac",
+        "device"
+      ],
+      "vetoes_release": true
+    },
+    {
+      "id": "SFAP-007",
+      "phase": 1,
+      "kind": "FINDING",
+      "title": "Partner Scanner release provenance remains externally incomplete",
+      "severity": "HIGH",
+      "status": "OPEN",
+      "agent_mode": "READ_ONLY",
+      "agent_id": "data-runtime-observer",
+      "workspace": "read_only",
+      "depends_on": ["AUTH-BASELINE"],
+      "addresses": [],
+      "write_scope": [],
+      "proof_required": [
+        "Exact source commit, clean build, bridge/app hashes, signing/notary tickets, channel, install verification, and rollback"
+      ],
+      "evidence": [
+        {
+          "ref": "docs/scanner/SCANNER_BLOCKER_REGISTER_20260818.md SFAP-007 current LOCAL MANIFEST READY state",
+          "sha": "09beacaa5bc03f8e80e4c7e59232df6fc466b7cb",
+          "observer": "data-runtime-observer"
+        },
+        {
+          "ref": "scripts/scanner-app/scripts/package-macos.js:63-80,254-257; scripts/scanner-app/scripts/verify-package.js:69-82; at checkpoint 2913bcb1 the existing copy step includes dev-only node_modules and package verifier does not reject happy-dom",
+          "sha": "2913bcb1092ea8f43ee1294b711a8df653a06a3d",
+          "observer": "data-runtime-observer"
+        }
+      ],
+      "invalidated_by": [
+        "Scanner source SHA",
+        "manifest",
+        "artifact",
+        "signature",
+        "notary",
+        "release channel",
+        "production dependency boundary"
+      ],
+      "vetoes_release": true
+    },
+    {
+      "id": "SFAP-009",
+      "phase": 1,
+      "kind": "FINDING",
+      "title": "Historical watched-folder Scanner fallback must remain quarantined unless rebuilt safely",
+      "severity": "MEDIUM",
+      "status": "OPEN",
+      "agent_mode": "READ_ONLY",
+      "agent_id": "data-runtime-observer",
+      "workspace": "read_only",
+      "depends_on": ["AUTH-BASELINE"],
+      "addresses": [],
+      "write_scope": [],
+      "proof_required": [
+        "Prove the watched fallback is disabled and non-installable; if ever revived, require private per-operation folders plus hash, side, station, tenant, replay, and cross-target authority"
+      ],
+      "evidence": [
+        {
+          "ref": "docs/scanner/SCANNER_BLOCKER_REGISTER_20260818.md SFAP-009 open/contingency-only quarantine disposition",
+          "sha": "09beacaa5bc03f8e80e4c7e59232df6fc466b7cb",
+          "observer": "data-runtime-observer"
+        }
+      ],
+      "invalidated_by": [
+        "Legacy watcher",
+        "adapter route",
+        "installer",
+        "runbook",
+        "build image",
+        "contingency decision"
+      ],
+      "vetoes_release": true
+    },
+    {
+      "id": "ARCH-LEGACY-OPS-001",
+      "phase": 1,
+      "kind": "FINDING",
+      "title": "Retired Scanner and incident systems remain contradictory operational surfaces",
+      "severity": "MEDIUM",
+      "status": "OPEN",
+      "agent_mode": "READ_ONLY",
+      "agent_id": "data-runtime-observer",
+      "workspace": "read_only",
+      "depends_on": ["AUTH-BASELINE"],
+      "addresses": [],
+      "write_scope": [],
+      "proof_required": [
+        "Deprecated watcher, install/runbook authority, unreachable-body, and shipped incident executable inventory; cross-map SFAP-002, SFAP-007, and SFAP-009 without downclassification"
+      ],
+      "evidence": [
+        {
+          "ref": "scripts/scanner-app/lib/watcher.js:2141-2719; docs/scanner-watcher-runbook.md:1-120; scripts/scanner-app/main.js:1773-1783; script/build.ts:86-137; docs/scanner/SCANNER_BLOCKER_REGISTER_20260818.md",
+          "sha": "09beacaa5bc03f8e80e4c7e59232df6fc466b7cb",
+          "observer": "data-runtime-observer"
+        }
+      ],
+      "invalidated_by": [
+        "Scanner source",
+        "runbook",
+        "installer",
+        "package release",
+        "build entrypoint",
+        "production image"
+      ],
+      "vetoes_release": true
+    },
+
+    {
+      "id": "REPAIR-AUTHORITY-CONTROLS",
+      "phase": 2,
+      "kind": "REPAIR",
+      "title": "Create executable bounded-context authority and topology registries",
+      "severity": "HIGH",
+      "status": "FIXED",
+      "agent_mode": "LEAD",
+      "agent_id": "codex-lead",
+      "workspace": "shared",
+      "depends_on": ["ARCH-AUTHORITY-001"],
+      "addresses": ["ARCH-AUTHORITY-001"],
+      "write_scope": [
+        "docs/engineering/ARCHITECTURE_AUTHORITY.md",
+        "scripts/architecture",
+        "config/components",
+        "server/lib/component-readiness-registry.ts",
+        "server/readiness.ts",
+        "tests/architecture-authority.test.ts",
+        "engineering/INDEX.md",
+        "README.md",
+        ".claude/controlled-code-lead/INDEX.md",
+        "CLAUDE.md"
+      ],
+      "proof_required": [
+        "Generated route/table/writer/provider/job/migration/component owner registries, behavior-preserving readiness derivation from component manifests, and layer-drift failures"
+      ],
+      "evidence": [],
+      "invalidated_by": [
+        "Authority document",
+        "registry generator",
+        "source topology",
+        "component manifest",
+        "readiness derivation",
+        "layer rule",
+        "bounded-context ownership"
+      ],
+      "vetoes_release": false
+    },
+    {
+      "id": "REPAIR-CI-TOPOLOGY",
+      "phase": 2,
+      "kind": "REPAIR",
+      "title": "Wire authoritative Partner, Scanner, script, migration, and unreachable-code proof into CI",
+      "severity": "HIGH",
+      "status": "FIXED",
+      "agent_mode": "LEAD",
+      "agent_id": "codex-lead",
+      "workspace": "shared",
+      "depends_on": ["ARCH-CI-001", "REPAIR-AUTHORITY-CONTROLS"],
+      "addresses": ["ARCH-CI-001"],
+      "write_scope": [
+        ".github/workflows/ci.yml",
+        "package.json",
+        "package-lock.json",
+        "tests/production-dependency-boundary.test.ts",
+        "tests/disposable-integration-runner.test.ts",
+        "scripts/command-centre-runtime-harness.ts",
+        "scripts/command-centre-mobile-layout-check.mjs",
+        "tests/command-centre-runtime-harness.test.ts",
+        "tsconfig.tests.json",
+        "tsconfig.scripts.json",
+        "tsconfig.architecture.json",
+        "scripts/ci",
+        "scripts/scanner-app/package.json",
+        "scripts/scanner-app/package-lock.json",
+        "tests/ci-proof-topology.test.ts"
+      ],
+      "proof_required": [
+        "Isolated Partner runner, Scanner test gates (signed package proof remains Phase 5 REPAIR-SCANNER-PACKAGE), script/test typechecks, ratcheted unreachable-code proof, shipped-migration labels, non-vacuity and injected-failure proof",
+        "hygiene-repair-manifest.md H1a: pinned omit-dev dependency tree excludes build-only toolchain while retaining native runtime modules; builder CSS and complete production image proof remain required",
+        "hygiene-repair-manifest.md H1b: owned CI-pinned PG16/vector and PG17, process-only preparation exports, per-suite topology, non-vacuous real Partner runner and independently verified failure/cancellation cleanup; hygiene-wave-proof.md retains local results, not release closure",
+        "hygiene-repair-manifest.md H1c: exclusive owned pinned MinIO with synthetic process-only configuration, exact-identity eleven-check report, real adapter transport/integrity/conditional/replay proof, independent bounded child-close/cleanup verification and failure-blocking hosted wiring; exact-candidate hosted proof remains required",
+        "hygiene-repair-manifest.md H1h: finite owned Admin browser seven-check flow, synthetic env, verified close/cancellation/retention, strict report and hosted after-Build/preNode22 command. Final exact-SHA gates remain open.",
+        "hygiene-repair-manifest.md H1i: separate owned Partner database, non-superuser real cumulative migrations and exact catalogue parity, restricted runtime, real three-role eighteen-check browser report, inherited-stderr closure/refusal controls and mandatory hosted wiring; no whole-application/release claim"
+      ],
+      "evidence": [
+        {
+          "ref": "checkpoint 2913bcb1 plus local executable/dependency diff 776721dfcd7cca0196bea0b1e5eedaa98d53efa44a76ebec622ea06c45e9c8f6; scripts/scanner-app/package.json:21-25; lock direct happy-dom edge and node_modules/happy-dom; Scanner 14 files/175 assertions; ci:topology; CI topology 12/12",
+          "sha": "2913bcb1092ea8f43ee1294b711a8df653a06a3d",
+          "observer": "data-runtime-observer"
+        },
+        {
+          "ref": "hygiene-wave-proof.md H1d/e/f/g: clean tracked inventory parity; clean exact-lock Admin126/126 and operational6/6; PDF old/new declaration red-green; a6670fc4 hosted architecture/lint/type gates pass, test5 failures and image vulnerability veto remain; H1c subsequent WIP hashes and independent local11-check proof recorded separately, not candidate closure",
+          "sha": "a6670fc4456e6b4185d3a735b189ef9f86f667b2",
+          "observer": "codex-lead with independent scoped Luna/Terra/Sol observations"
+        },
+        {
+          "ref": "hygiene-wave-proof.md H1i: independent Sol and clean exact-lock real18/18, Admin7/7 regression, clean controls117/117, catalogue ordering and owned-stderr closure red-green, exact eight source hashes; no hosted/security/release closure",
+          "sha": "c35e0d2839b067bfda94b7d1453ebd116d31b60b",
+          "observer": "Sol h1c_lifecycle independent, codex-lead integration"
+        },
+        {
+          "ref": "hygiene-wave-proof.md H1h: root/independent Sol/clean exact-lock real7/7, clean controls101/101, cancellation run d23aaab2 closed both PIDs/container cleanup0, delayed-close defect repaired; exact seven file hashes retained, no hosted/release closure",
+          "sha": "bc8bc3c6118f079d7843f3733bbf1a380b0a1f08",
+          "observer": "Sol h1c_lifecycle independent, codex-lead integration"
+        }
+      ],
+      "invalidated_by": [
+        "Workflow",
+        "package scripts",
+        "test inventory",
+        "typecheck config",
+        "runtime version",
+        "migration inventory",
+        "unreachable-code baseline",
+        "Scanner package manifest or lockfile"
+      ],
+      "vetoes_release": false
+    },
+    {
+      "id": "RECOVERY-ADMIN",
+      "phase": 2,
+      "kind": "OWNER_GATE",
+      "title": "Approve pre-wave Admin identity/session recovery packet",
+      "severity": "NONE",
+      "status": "PROVEN",
+      "agent_mode": "LEAD",
+      "agent_id": "codex-lead",
+      "workspace": "shared",
+      "depends_on": ["OWNER-IDENTITY-SESSION"],
+      "addresses": [],
+      "write_scope": [],
+      "proof_required": [
+        "Pre-wave SHA, old/new session compatibility, cache purge recovery, POST-only logout, principal-transition isolation, and failed-cut recovery"
+      ],
+      "evidence": [
+        {
+          "ref": "admin-session-recovery.md; owner-authorized identity/session contract; pre-wave checkpoint 2913bcb1 and dirty-diff SHA-256 e612faf38358956b1a0b485d365f545293359cbd440c9c631a28a7d7cc613633",
+          "sha": "2913bcb1092ea8f43ee1294b711a8df653a06a3d",
+          "observer": "codex-lead"
+        }
+      ],
+      "invalidated_by": ["Session contract", "cache contract", "candidate base", "recovery procedure"],
+      "vetoes_release": true
+    },
+    {
+      "id": "RECOVERY-ADMIN-PRINT",
+      "phase": 2,
+      "kind": "OWNER_GATE",
+      "title": "Approve pre-wave Admin print/reprint recovery packet",
+      "severity": "NONE",
+      "status": "PROVEN",
+      "agent_mode": "LEAD",
+      "agent_id": "codex-lead",
+      "workspace": "shared",
+      "depends_on": ["OWNER-PRINT-REPRINT"],
+      "addresses": [],
+      "write_scope": [
+        ".claude/controlled-code-lead/tasks/repository-architecture-recovery-20260904/admin-print-recovery.md"
+      ],
+      "proof_required": [
+        "Pre-wave SHA, canonical route decision, retained evidence compatibility, idempotency, failed-cut recovery, and route rollback"
+      ],
+      "evidence": [
+        {
+          "ref": "admin-print-recovery.md; owner-authorized retain-and-rewire contract; pre-wave checkpoint 2913bcb1, tracked dirty-diff SHA-256 12dda2cf31173444a33347dcf5a763788084e530381e11dfe042e5c2ee45c04c, and untracked path/content aggregate 6a4c86f18e3e23551d6ba6c65b728349ccd7de9b84de74cf4db11972d4d869e2",
+          "sha": "2913bcb1092ea8f43ee1294b711a8df653a06a3d",
+          "observer": "codex-lead"
+        }
+      ],
+      "invalidated_by": ["Print contract", "route contract", "candidate base", "recovery procedure"],
+      "vetoes_release": true
+    },
+    {
+      "id": "RECOVERY-PARTNER",
+      "phase": 2,
+      "kind": "OWNER_GATE",
+      "title": "Approve pre-wave Partner order and RBAC recovery packet",
+      "severity": "NONE",
+      "status": "PROVEN",
+      "agent_mode": "LEAD",
+      "agent_id": "codex-lead",
+      "workspace": "shared",
+      "depends_on": ["OWNER-PARTNER-ORDERS", "OWNER-PARTNER-RBAC"],
+      "addresses": [],
+      "write_scope": [],
+      "proof_required": [
+        "Both historical tables preserved or explicitly migrated, route/permission rollback, Stripe replay safety, and role compatibility"
+      ],
+      "evidence": [
+        {
+          "ref": "owner-approval-record.md; partner-contract-recovery.md: retained histories, route rollback, existing roles; local CI independently verified 64/64; hosted/security vetoes open",
+          "sha": "0494d5fbed5cb30f8379bb507d28c9b2a0a09c0b",
+          "observer": "codex-lead"
+        }
+      ],
+      "invalidated_by": ["Partner data", "route", "permission", "Stripe", "recovery procedure"],
+      "vetoes_release": true
+    },
+    {
+      "id": "RECOVERY-PRICING",
+      "phase": 2,
+      "kind": "OWNER_GATE",
+      "title": "Approve pre-wave commercial pricing recovery packet",
+      "severity": "NONE",
+      "status": "PROVEN",
+      "agent_mode": "LEAD",
+      "agent_id": "codex-lead",
+      "workspace": "shared",
+      "depends_on": ["OWNER-PRICING"],
+      "addresses": [],
+      "write_scope": [],
+      "proof_required": [
+        "Old/new projection compatibility, cache rollback, in-flight quote/payment preservation, and immutable price receipt authority"
+      ],
+      "evidence": [
+        {
+          "ref": "pricing-recovery.md: P1/P2/P3 exact manifest, compatible projection/cache rollback, immutable in-flight and paid history; recovery depends on owner authority, repair retains finding dependency",
+          "sha": "c228af1998fb770e12c93758d3737fc92c5a9009",
+          "observer": "codex-lead"
+        }
+      ],
+      "invalidated_by": ["Pricing contract", "cache", "quote", "payment", "recovery procedure"],
+      "vetoes_release": true
+    },
+    {
+      "id": "RECOVERY-GRADING",
+      "phase": 2,
+      "kind": "OWNER_GATE",
+      "title": "Approve pre-wave legacy AI recovery packet",
+      "severity": "NONE",
+      "status": "PROVEN",
+      "agent_mode": "LEAD",
+      "agent_id": "codex-lead",
+      "workspace": "shared",
+      "depends_on": ["OWNER-GRADING-LEGACY"],
+      "addresses": [],
+      "write_scope": [
+        ".claude/controlled-code-lead/tasks/repository-architecture-recovery-20260904/grading-legacy-recovery.md"
+      ],
+      "proof_required": [
+        "Exact route disposition, zero-effect tombstone rollback or supported-command compatibility, provider and grading evidence recovery"
+      ],
+      "evidence": [
+        {
+          "ref": "grading-legacy-recovery.md; separately retires both legacy route identities, preserves the supported grading route, defines zero-effect middleware ordering and fail-closed recovery, and binds the clean pre-wave checkpoint c3534c856be747e7e66459559d875e3ff3d6f109",
+          "sha": "c3534c856be747e7e66459559d875e3ff3d6f109",
+          "observer": "codex-lead"
+        }
+      ],
+      "invalidated_by": ["Grading route", "provider", "feature flag", "recovery procedure"],
+      "vetoes_release": true
+    },
+    {
+      "id": "RECOVERY-VQ-SCHEMA",
+      "phase": 2,
+      "kind": "OWNER_GATE",
+      "title": "Approve pre-wave VQ schema and readiness recovery packet",
+      "severity": "NONE",
+      "status": "PROVEN",
+      "agent_mode": "LEAD",
+      "agent_id": "codex-lead",
+      "workspace": "shared",
+      "depends_on": ["OWNER-VQ-SCHEMA"],
+      "addresses": [],
+      "write_scope": [],
+      "proof_required": [
+        "Fresh/historical forward convergence, mixed-version compatibility, component disable/restore, and immutable migration rollback target"
+      ],
+      "evidence": [
+        {
+          "ref": "vq-schema-recovery.md: S1 only; S2/S3 require extension. Recovery depends on owner authority; repair retains finding dependency.",
+          "sha": "c712e4647bf8cd01732370e10e0282e8e454ded1",
+          "observer": "codex-lead"
+        },
+        {
+          "ref": "vq-schema-recovery.md: S3a exact closed-estate foundation manifest, unchanged main behavior and no DB/image activation; S3b separately extends shipping scope.",
+          "sha": "ecdac32562fa81c3d1cc6f3e633adb403aea169a",
+          "observer": "codex-lead"
+        }
+      ],
+      "invalidated_by": ["VQ estate", "migration plan", "readiness", "recovery procedure"],
+      "vetoes_release": true
+    },
+    {
+      "id": "RECOVERY-SOCIAL",
+      "phase": 2,
+      "kind": "OWNER_GATE",
+      "title": "Approve pre-wave provider publication recovery packet",
+      "severity": "NONE",
+      "status": "OPEN",
+      "agent_mode": "LEAD",
+      "agent_id": "codex-lead",
+      "workspace": "shared",
+      "depends_on": ["ARCH-SOCIAL-001"],
+      "addresses": [],
+      "write_scope": [],
+      "proof_required": [
+        "Provider-accepted/persistence-unknown reconciliation, old/new worker compatibility, outbox migration recovery, duplicate-publication prevention"
+      ],
+      "evidence": [],
+      "invalidated_by": ["Provider contract", "job schema", "worker version", "recovery procedure"],
+      "vetoes_release": true
+    },
+    {
+      "id": "RECOVERY-SERVER",
+      "phase": 2,
+      "kind": "OWNER_GATE",
+      "title": "Approve pre-wave server strangler recovery packet",
+      "severity": "NONE",
+      "status": "OPEN",
+      "agent_mode": "LEAD",
+      "agent_id": "codex-lead",
+      "workspace": "shared",
+      "depends_on": ["ARCH-COMP-001", "ARCH-CYCLE-001", "ARCH-DEAD-001", "ARCH-PROXY-001"],
+      "addresses": [],
+      "write_scope": [],
+      "proof_required": [
+        "Per-context characterization, route-order rollback, import-cycle cut rollback, dead-code provenance, and actor/capability compatibility"
+      ],
+      "evidence": [],
+      "invalidated_by": ["Extraction slice", "route order", "capability contract", "recovery procedure"],
+      "vetoes_release": true
+    },
+    {
+      "id": "RECOVERY-MEDIA",
+      "phase": 2,
+      "kind": "OWNER_GATE",
+      "title": "Approve pre-wave object lifecycle recovery packet",
+      "severity": "NONE",
+      "status": "OPEN",
+      "agent_mode": "LEAD",
+      "agent_id": "codex-lead",
+      "workspace": "shared",
+      "depends_on": ["ARCH-MEDIA-001"],
+      "addresses": [],
+      "write_scope": [],
+      "proof_required": [
+        "Writer-by-writer forward recovery, pointer/audit reconciliation, retention/rebuild/TTL rollback, and deletion exclusion until exact approval"
+      ],
+      "evidence": [],
+      "invalidated_by": ["Writer inventory", "object policy", "recovery procedure"],
+      "vetoes_release": true
+    },
+    {
+      "id": "RECOVERY-POOL",
+      "phase": 2,
+      "kind": "OWNER_GATE",
+      "title": "Approve pre-wave database pool budget recovery packet",
+      "severity": "NONE",
+      "status": "OPEN",
+      "agent_mode": "LEAD",
+      "agent_id": "codex-lead",
+      "workspace": "shared",
+      "depends_on": ["ARCH-POOL-001"],
+      "addresses": [],
+      "write_scope": [],
+      "proof_required": [
+        "Old/new timeout compatibility, overload fallback, aggregate capacity budget, and timeout rollback"
+      ],
+      "evidence": [],
+      "invalidated_by": ["Pool topology", "provider ceiling", "timeout plan", "recovery procedure"],
+      "vetoes_release": true
+    },
+    {
+      "id": "RECOVERY-VQ-EXPORT",
+      "phase": 2,
+      "kind": "OWNER_GATE",
+      "title": "Approve pre-wave VQ export recovery and retention packet",
+      "severity": "NONE",
+      "status": "OPEN",
+      "agent_mode": "LEAD",
+      "agent_id": "codex-lead",
+      "workspace": "shared",
+      "depends_on": ["ARCH-VQ-EXPORT-001"],
+      "addresses": [],
+      "write_scope": [],
+      "proof_required": [
+        "Report-only sizing, stuck-job reclaim, retention cutover, object restoration, and deletion-disabled rollback"
+      ],
+      "evidence": [],
+      "invalidated_by": ["Export volume", "job schema", "retention", "recovery procedure"],
+      "vetoes_release": true
+    },
+    {
+      "id": "RECOVERY-CLIENT",
+      "phase": 2,
+      "kind": "OWNER_GATE",
+      "title": "Approve pre-wave client route and transport recovery packet",
+      "severity": "NONE",
+      "status": "OPEN",
+      "agent_mode": "LEAD",
+      "agent_id": "codex-lead",
+      "workspace": "shared",
+      "depends_on": ["ARCH-CLIENT-001", "ARCH-ADMIN-TAB-001"],
+      "addresses": [],
+      "write_scope": [],
+      "proof_required": [
+        "Route redirects, chunk rollback, session/transport compatibility, SEO/analytics preservation, and dead-surface restoration"
+      ],
+      "evidence": [],
+      "invalidated_by": ["Client route", "bundle", "transport", "surface decision", "recovery procedure"],
+      "vetoes_release": true
+    },
+    {
+      "id": "RECOVERY-SCANNER",
+      "phase": 2,
+      "kind": "OWNER_GATE",
+      "title": "Approve pre-wave Scanner package and legacy retirement recovery packet",
+      "severity": "NONE",
+      "status": "OPEN",
+      "agent_mode": "LEAD",
+      "agent_id": "codex-lead",
+      "workspace": "shared",
+      "depends_on": ["SFAP-002", "SFAP-007", "SFAP-009", "ARCH-LEGACY-OPS-001"],
+      "addresses": [],
+      "write_scope": [],
+      "proof_required": [
+        "Previous signed package, exact manifest, watched-fallback quarantine, old-agent recovery, offline rollback, and target-by-target retirement restore"
+      ],
+      "evidence": [],
+      "invalidated_by": [
+        "Scanner SHA",
+        "package",
+        "legacy target",
+        "watcher quarantine",
+        "device",
+        "recovery procedure"
+      ],
+      "vetoes_release": true
+    },
+    {
+      "id": "RECOVERY-WAA",
+      "phase": 2,
+      "kind": "OWNER_GATE",
+      "title": "Approve pre-wave recovery packets required by the nested White Ace graph",
+      "severity": "NONE",
+      "status": "OPEN",
+      "agent_mode": "LEAD",
+      "agent_id": "codex-lead",
+      "workspace": "shared",
+      "depends_on": ["ARCH-WAA-SUBGRAPH-001"],
+      "addresses": [],
+      "write_scope": [],
+      "proof_required": [
+        "Nested credit, image/object, token/migration, secret-mode, integration, and external rollback packets are complete"
+      ],
+      "evidence": [],
+      "invalidated_by": ["Nested graph", "nested repair", "nested recovery procedure"],
+      "vetoes_release": true
+    },
+
+    {
+      "id": "REPAIR-ADMIN-CONTRACTS",
+      "phase": 3,
+      "kind": "REPAIR",
+      "title": "Converge Admin identity, logout, unauthorized, navigation, and cache contracts",
+      "severity": "HIGH",
+      "status": "FIXED",
+      "agent_mode": "LEAD",
+      "agent_id": "codex-lead",
+      "workspace": "shared",
+      "depends_on": ["ARCH-SESSION-001", "OWNER-IDENTITY-SESSION", "RECOVERY-ADMIN", "REPAIR-CI-TOPOLOGY"],
+      "addresses": ["ARCH-SESSION-001"],
+      "write_scope": [
+        "config/components/core-runtime.ts",
+        "config/components/identity-session.ts",
+        ".claude/controlled-code-lead/tasks/repository-architecture-recovery-20260904/admin-session-change-manifest.md",
+        ".claude/controlled-code-lead/tasks/repository-architecture-recovery-20260904/admin-session-file-manifest.md",
+        ".claude/controlled-code-lead/tasks/repository-architecture-recovery-20260904/admin-session-recovery.md",
+        ".claude/controlled-code-lead/tasks/repository-architecture-recovery-20260904/architecture-damage-assessment.md",
+        ".claude/controlled-code-lead/tasks/repository-architecture-recovery-20260904/change-manifest.md",
+        ".claude/controlled-code-lead/tasks/repository-architecture-recovery-20260904/issue-register.md",
+        ".claude/controlled-code-lead/tasks/repository-architecture-recovery-20260904/phase-2-file-manifest.md",
+        ".claude/controlled-code-lead/tasks/repository-architecture-recovery-20260904/reviewer-status.md",
+        ".claude/controlled-code-lead/tasks/repository-architecture-recovery-20260904/rollback.md",
+        ".claude/controlled-code-lead/tasks/repository-architecture-recovery-20260904/task-ledger.md",
+        "client/src/App.tsx",
+        "client/src/components/card-identification/CardIdentifyPanel.tsx",
+        "client/src/components/admin/admin-step-up.tsx",
+        "client/src/components/admin/admin-shell.tsx",
+        "client/src/components/certificate-form.tsx",
+        "client/src/components/grading",
+        "client/src/components/grading-workflow/CertificatePreviewPanel.tsx",
+        "client/src/components/identity-tools.tsx",
+        "client/src/components/ownership-section.tsx",
+        "client/src/components/vault-quest/workflow.tsx",
+        "client/src/lib/queryClient.ts",
+        "client/src/lib/admin-session.tsx",
+        "client/src/pages/admin",
+        "client/src/pages/admin.tsx",
+        "client/src/pages/admin-claim-register.tsx",
+        "client/src/pages/admin-command-centre.tsx",
+        "client/src/pages/admin-dashboard.tsx",
+        "client/src/pages/admin-capture-health.tsx",
+        "client/src/pages/admin-catalogue.tsx",
+        "client/src/pages/admin-cert-browser.tsx",
+        "client/src/pages/admin-divergence.tsx",
+        "client/src/pages/admin-graders.tsx",
+        "client/src/pages/admin-instagram.tsx",
+        "client/src/pages/admin-learning.tsx",
+        "client/src/pages/admin-legacy-review.tsx",
+        "client/src/pages/admin-login.tsx",
+        "client/src/pages/admin-operator-stats.tsx",
+        "client/src/pages/admin-pokemon-knowledge.tsx",
+        "client/src/pages/admin-printing.tsx",
+        "client/src/pages/admin-scan-history.tsx",
+        "client/src/pages/admin-security.tsx",
+        "client/src/pages/admin-sets.tsx",
+        "client/src/pages/admin-social-studio.tsx",
+        "client/src/pages/admin-staff.tsx",
+        "client/src/pages/admin-submissions.tsx",
+        "client/src/pages/admin-vault-quest-card-factory.tsx",
+        "client/src/pages/admin-vault-quest.tsx",
+        "client/src/pages/admin-weekly-reel.tsx",
+        "client/src/pages/dev-canonical-workstation-harness.tsx",
+        "client/src/pages/dev-admin-shell-geometry-harness.tsx",
+        "client/src/pages/dev-growth-command-visual-harness.tsx",
+        "client/src/pages/logbook.tsx",
+        "docs/engineering/ARCHITECTURE_AUTHORITY.md",
+        "engineering/ISSUE_REGISTER.md",
+        "engineering/PROOF_LEDGER.md",
+        "server/routes/auth.ts",
+        "scripts/architecture/check-architecture.mjs",
+        "scripts/architecture/authority-policy.json",
+        "scripts/architecture/generated/architecture-authority.json",
+        "scripts/architecture/legacy-authority.json",
+        "scripts/ci/typecheck-baselines/architecture.json",
+        "scripts/ci/typecheck-baselines/tests.json",
+        "tests/admin-session-contracts.test.ts",
+        "tests/admin-auth-reliability.test.ts",
+        "tests/admin-station-approval-step-up-ui.test.ts",
+        "tests/admin-staff-legacy-shell-guard.test.ts",
+        "tests/architecture-authority.test.ts",
+        "tests/command-centre-ui-runtime.test.ts",
+        "tests/partner-dashboard-admin-ui.test.ts",
+        "tests/partner-management-admin-ui.test.ts",
+        "tests/partner-network-admin-ui.test.ts"
+      ],
+      "proof_required": [
+        "Every AdminShell consumer, one POST logout, destination navigation, typed expiry/revalidation, no-store identity response, full protected-cache purge, cancelled in-flight work, and cross-principal behavior"
+      ],
+      "evidence": [
+        {
+          "ref": "Local WIP Admin identity/session repair; 84-file path/digest aggregate 8d984be5b749eebde98fa5ebdef1b638306c5e866ecd37a7a110c3fddf3f3e35; focused client/server/architecture proof; independent server/client/data-runtime hostile reviews; immutable candidate proof remains open",
+          "sha": "2913bcb1092ea8f43ee1294b711a8df653a06a3d",
+          "observer": "codex-lead"
+        }
+      ],
+      "invalidated_by": ["Admin route", "session contract", "cache key", "logout", "navigation", "identity response"],
+      "vetoes_release": false
+    },
+    {
+      "id": "REPAIR-ADMIN-PRINT",
+      "phase": 3,
+      "kind": "REPAIR",
+      "title": "Converge the Admin print/reprint route and idempotency contract",
+      "severity": "HIGH",
+      "status": "FIXED",
+      "agent_mode": "LEAD",
+      "agent_id": "codex-lead",
+      "workspace": "shared",
+      "depends_on": [
+        "ARCH-ROUTE-001",
+        "ARCH-PRINT-EVIDENCE-001",
+        "ARCH-PRINT-IDEMPOTENCY-001",
+        "ARCH-PRINT-READINESS-001",
+        "ARCH-PRINT-REPLAY-001",
+        "OWNER-PRINT-REPRINT",
+        "RECOVERY-ADMIN-PRINT",
+        "REPAIR-CI-TOPOLOGY",
+        "REPAIR-ADMIN-CONTRACTS"
+      ],
+      "addresses": [
+        "ARCH-ROUTE-001",
+        "ARCH-PRINT-EVIDENCE-001",
+        "ARCH-PRINT-IDEMPOTENCY-001",
+        "ARCH-PRINT-READINESS-001",
+        "ARCH-PRINT-REPLAY-001"
+      ],
+      "write_scope": [
+        "client/src/pages/admin-cert-browser.tsx",
+        "client/src/pages/admin-printing.tsx",
+        "client/src/pages/admin-print-queue.tsx",
+        "config/components/index.ts",
+        "config/components/print-workflow.ts",
+        ".claude/controlled-code-lead/tasks/repository-architecture-recovery-20260904/admin-print-change-manifest.md",
+        ".claude/controlled-code-lead/tasks/repository-architecture-recovery-20260904/admin-print-file-manifest.md",
+        "docs/print-workflow/AUTHORITY.md",
+        "server/readiness.ts",
+        "server/routes.ts",
+        "server/routes/print-workflow.ts",
+        "server/print-workflow.ts",
+        "server/lib/print-artifact-persistence.ts",
+        "server/lib/print-output-eligibility.ts",
+        "tests/admin-print-contracts.test.ts",
+        "tests/architecture-authority.test.ts",
+        "tests/main-runtime-role-readiness.test.ts",
+        "tests/print-approval-gate.test.ts",
+        "tests/printable-grade-safety.test.ts",
+        "tests/print-workflow-readiness.test.ts",
+        "tests/print-workflow-routes.test.ts",
+        "tests/print-workflow-service.test.ts",
+        "tests/partner-card-job-output.test.ts"
+      ],
+      "proof_required": [
+        "Owner-selected canonical reprint behavior, reachable route parity, produced-state gating, explicit reason, per-intent retry idempotency, immutable committed replay with authoritative-membership current download eligibility, truthful typed evidence, fail-closed schema/default/PK/sequence/runtime-role readiness, response compatibility, and unmatched-route rejection"
+      ],
+      "evidence": [
+        {
+          "ref": "admin-print-change-manifest.md and admin-print-file-manifest.md bind the repaired client/server/readiness/authority/test surface; final unified local matrix passed 9 files / 155 assertions with 2 intentional skips; architecture has 8627 records and 25/25 hostile tests",
+          "sha": "87d755e7563bff6a68a1f9eb2dc3dd628ade070666d24b63f77efc313138535c",
+          "observer": "codex-lead"
+        }
+      ],
+      "invalidated_by": ["Admin print route", "print command", "evidence contract", "idempotency", "owner decision"],
+      "vetoes_release": false
+    },
+    {
+      "id": "REPAIR-PARTNER-CONTRACTS",
+      "phase": 3,
+      "kind": "REPAIR",
+      "title": "Separate Partner paid orders and legacy requests; converge permissions, shell, and roles",
+      "severity": "HIGH",
+      "status": "FIXED",
+      "agent_mode": "LEAD",
+      "agent_id": "codex-lead",
+      "workspace": "shared",
+      "depends_on": [
+        "ARCH-SUPPLY-001",
+        "ARCH-ROLE-001",
+        "OWNER-PARTNER-ORDERS",
+        "OWNER-PARTNER-RBAC",
+        "RECOVERY-PARTNER",
+        "REPAIR-CI-TOPOLOGY",
+        "REPAIR-ADMIN-CONTRACTS"
+      ],
+      "addresses": ["ARCH-SUPPLY-001", "ARCH-ROLE-001"],
+      "write_scope": [
+        "shared/partner-team-roles.ts",
+        "server/partner/mount.ts",
+        "server/partner/permissions.ts",
+        "server/partner/supplies-routes.ts",
+        "server/partner/supply-routes.ts",
+        "server/partner/supplies-service.ts",
+        "server/partner/supply-service.ts",
+        "server/partner/supplies-admin-routes.ts",
+        "server/partner/supply-admin-routes.ts",
+        "server/partner/team-service.ts",
+        "server/webhookHandlers.ts",
+        "migrations/0104_partner_supplies_orders.sql",
+        "migrations/0112_partner_supply_commerce.sql",
+        "client/src/components/partner/partner-shell.tsx",
+        "client/src/lib/partner-api.ts",
+        "client/src/pages/partner/supplies.tsx",
+        "client/src/pages/partner/supplies-orders.tsx",
+        "client/src/pages/partner/users.tsx",
+        "client/src/App.tsx",
+        "tests/partner-contracts.test.ts",
+        "tests/partner-contracts-ui.test.ts",
+        "tests/partner-supply-access.test.ts",
+        "scripts/ci/partner-browser-fixture.ts",
+        "scripts/ci/run-disposable-integration.mjs",
+        "scripts/command-centre-runtime-harness.ts",
+        "scripts/command-centre-mobile-layout-check.mjs",
+        "tests/disposable-integration-runner.test.ts",
+        "tests/command-centre-runtime-harness.test.ts",
+        "scripts/architecture/authority-policy.json",
+        "scripts/architecture/legacy-authority.json",
+        "scripts/architecture/generated/architecture-authority.json",
+        "scripts/ci/typecheck-baselines/architecture.json",
+        "scripts/ci/typecheck-baselines/tests.json"
+      ],
+      "proof_required": [
+        "Explicit retain/migrate/retire decision, distinct routes/permissions, both historical tables and fixtures preserved or migrated without loss, paid webhook order in My Orders, legacy request visibility, migration/rollback evidence, one shell, capability controls, and Scanner Operator least privilege"
+      ],
+      "evidence": [
+        {
+          "ref": "owner-approval-record.md; partner-contract-recovery.md: retained histories, route rollback, existing roles; local CI independently verified 64/64; hosted/security vetoes open",
+          "sha": "0494d5fbed5cb30f8379bb507d28c9b2a0a09c0b",
+          "observer": "codex-lead"
+        },
+        {
+          "ref": "partner-contract-recovery.md: exact hashes; independent Sol HTTP7/React9/runtime47/final-owner2/commerce+scanner33; actual Chrome22/0/0 root+independent+clean; clean exact-lock178; no hosted/final release closure",
+          "sha": "0494d5fbed5cb30f8379bb507d28c9b2a0a09c0b",
+          "observer": "Sol h1c_lifecycle independent"
+        }
+      ],
+      "invalidated_by": [
+        "Partner router",
+        "order/request aggregate",
+        "historical table",
+        "migration",
+        "Stripe webhook",
+        "permission",
+        "role",
+        "client route"
+      ],
+      "vetoes_release": false
+    },
+    {
+      "id": "REPAIR-PRICING-AUTHORITY",
+      "phase": 3,
+      "kind": "REPAIR",
+      "title": "Establish one typed commercial pricing projection across every price-bearing surface",
+      "severity": "HIGH",
+      "status": "IN_PROGRESS",
+      "agent_mode": "LEAD",
+      "agent_id": "codex-lead",
+      "workspace": "shared",
+      "depends_on": [
+        "ARCH-PRICING-001",
+        "OWNER-PRICING",
+        "RECOVERY-PRICING",
+        "REPAIR-CI-TOPOLOGY",
+        "REPAIR-ADMIN-CONTRACTS",
+        "REPAIR-PARTNER-CONTRACTS"
+      ],
+      "addresses": ["ARCH-PRICING-001"],
+      "write_scope": [
+        "shared/commerce.ts",
+        "shared/schema.ts",
+        "server/routes/admin-config.ts",
+        "server/routes/public.ts",
+        "server/routes/submissions.ts",
+        "server/storage.ts",
+        "server/seo-config.ts",
+        "client/src/lib/pricing-projection.ts",
+        "client/src/hooks/use-active-promo.ts",
+        "client/src/components/v2/promo-display.tsx",
+        "client/src/data/guides.ts",
+        "client/src/components/ui/pricing-animated.tsx",
+        "client/src/components/certificate-form.tsx",
+        "client/src/pages/admin-pricing.tsx",
+        "client/src/pages/home.tsx",
+        "client/src/pages/home-v2-integrated.tsx",
+        "client/src/pages/home-v3.tsx",
+        "client/src/pages/home-v4.tsx",
+        "client/src/pages/how-it-works-v2.tsx",
+        "client/src/pages/pricing.tsx",
+        "client/src/pages/pricing-v2.tsx",
+        "client/src/pages/pricing-demo.tsx",
+        "client/src/pages/pre-grade.tsx",
+        "client/src/pages/submit.tsx",
+        "client/src/pages/vault-club.tsx",
+        "client/src/pages/help/faq.tsx",
+        "client/src/pages/seo",
+        "tests/pricing-authority.test.ts",
+        "tests/pricing-postgres.test.ts",
+        "tests/pricing-consumers.test.ts",
+        "scripts/architecture/authority-policy.json",
+        "scripts/architecture/legacy-authority.json",
+        "scripts/architecture/generated/architecture-authority.json",
+        "scripts/ci/typecheck-baselines/architecture.json",
+        "scripts/ci/typecheck-baselines/tests.json"
+      ],
+      "proof_required": [
+        "Price-bearing source inventory including journal guides, pricing animation, and certificate form; admin update propagates with promo present/absent, inactive tier, cache freshness, metadata/structured answers, public variants, submission, quote, charge, and named receipt parity"
+      ],
+      "evidence": [],
+      "invalidated_by": [
+        "Price-bearing inventory",
+        "tier schema",
+        "public projection",
+        "cache",
+        "metadata",
+        "promotion",
+        "quote",
+        "payment receipt"
+      ],
+      "vetoes_release": false
+    },
+    {
+      "id": "REPAIR-LEGACY-AI",
+      "phase": 3,
+      "kind": "REPAIR",
+      "title": "Retire or formally enroll legacy AI grading HTTP surfaces",
+      "severity": "HIGH",
+      "status": "IN_PROGRESS",
+      "agent_mode": "LEAD",
+      "agent_id": "codex-lead",
+      "workspace": "shared",
+      "depends_on": [
+        "ARCH-LEGACY-AI-001",
+        "OWNER-GRADING-LEGACY",
+        "RECOVERY-GRADING",
+        "REPAIR-CI-TOPOLOGY",
+        "REPAIR-ADMIN-PRINT",
+        "REPAIR-PARTNER-CONTRACTS",
+        "REPAIR-PRICING-AUTHORITY"
+      ],
+      "addresses": ["ARCH-LEGACY-AI-001"],
+      "write_scope": [
+        ".claude/controlled-code-lead/tasks/repository-architecture-recovery-20260904/grading-legacy-change-manifest.md",
+        ".claude/controlled-code-lead/tasks/repository-architecture-recovery-20260904/grading-legacy-file-manifest.md",
+        "docs/ai-audit.md",
+        "docs/scanner-watcher-todo.md",
+        "scripts/architecture/generated/architecture-authority.json",
+        "scripts/ci/typecheck-baselines/architecture.json",
+        "scripts/ci/typecheck-baselines/tests.json",
+        "server/config/feature-flags.ts",
+        "server/lib/retired-ai-grading.ts",
+        "server/routes.ts",
+        "tests/architecture-authority.test.ts",
+        "tests/legacy-ai-route-tombstone.test.ts"
+      ],
+      "proof_required": [
+        "Owner-selected separate retirement of analyze-v1-legacy and grade-with-ai; both are authenticated unconditional typed 410 tombstones mounted before every legacy route-local feature/AI-rate/upload/body/grading-domain-DB/R2/provider/grading/prediction/evidence/audit effect, while bounded global middleware, authentication, and supported grading identities remain unchanged"
+      ],
+      "evidence": [
+        {
+          "ref": "grading-legacy-recovery.md: already implemented80a20611, independent Terra5/5 current unchanged source; exact hashes and synthetic-vs-full-mount limits retained, candidate/hostile gates OPEN",
+          "sha": "aa4ec14a273da779f550fd4bb777ca1616d5e518",
+          "observer": "Terra h1b_runner independent; root source verification"
+        }
+      ],
+      "invalidated_by": ["Legacy path", "feature flag", "provider", "grading command", "object lifecycle"],
+      "vetoes_release": false
+    },
+    {
+      "id": "REPAIR-WAA-SUBGRAPH",
+      "phase": 3,
+      "kind": "REPAIR",
+      "title": "Execute the exact nested White Ace release-integrity graph",
+      "severity": "HIGH",
+      "status": "OPEN",
+      "agent_mode": "LEAD",
+      "agent_id": "codex-lead",
+      "workspace": "shared",
+      "depends_on": [
+        "ARCH-WAA-SUBGRAPH-001",
+        "OWNER-WAA-EXACT",
+        "RECOVERY-WAA",
+        "REPAIR-CI-TOPOLOGY",
+        "REPAIR-ADMIN-CONTRACTS",
+        "REPAIR-ADMIN-PRINT",
+        "REPAIR-LEGACY-AI"
+      ],
+      "addresses": ["ARCH-WAA-SUBGRAPH-001"],
+      "write_scope": [
+        ".claude/controlled-code-lead/tasks/white-ace-assurance-repository-20260904/repair-graph.json",
+        "engineering/ISSUE_REGISTER.md",
+        "engineering/PROOF_LEDGER.md",
+        "server/estimate-credit-consumption.ts",
+        "server/routes.ts",
+        "server/scan-ingest-service.ts",
+        "server/lib/certificate-image-persistence.ts",
+        "server/lib/object-write-coordinator.ts",
+        "server/object-write-finalizers.ts",
+        "migrations/0123_bearer_token_digest_authority.sql",
+        "tests/estimate-credit-consumption-owner-binding.test.ts",
+        "tests/certificate-update-route.test.ts"
+      ],
+      "proof_required": [
+        "Run every nested finding/repair/proof/rollback/integration/external node under its own exact gate and bind candidate SHA equality through validate-program.py"
+      ],
+      "evidence": [],
+      "invalidated_by": ["Nested issue", "nested graph", "protected contract", "candidate SHA", "external gate"],
+      "vetoes_release": false
+    },
+
+    {
+      "id": "REPAIR-SCHEMA-AUTHORITY",
+      "phase": 4,
+      "kind": "REPAIR",
+      "title": "Unify shipped Vault Quest migration and component readiness authority",
+      "severity": "HIGH",
+      "status": "FIXED",
+      "agent_mode": "LEAD",
+      "agent_id": "codex-lead",
+      "workspace": "shared",
+      "depends_on": ["ARCH-SCHEMA-001", "OWNER-VQ-SCHEMA", "RECOVERY-VQ-SCHEMA", "REPAIR-CI-TOPOLOGY"],
+      "addresses": ["ARCH-SCHEMA-001"],
+      "write_scope": [
+        "server/vault-quest/export-jobs.ts",
+        "server/routes/vault-quest-admin.ts",
+        "tests/vq-export-facade.test.ts",
+        "tests/vq-ops-status.integration.test.ts",
+        "tests/vq-ops-route-spy.integration.test.ts",
+        "server/readiness.ts",
+        "config/components/index.ts",
+        "tests/release-readiness.test.ts",
+        "shared/schema.ts",
+        "tests/nfc-physical-lock-integrity.test.ts",
+        ".dockerignore",
+        "scripts/ci/check-migration-references.mjs",
+        "tests/dockerignore-build-context.test.ts",
+        "docs/runbooks/db-migration-safety.md",
+        ".claude/controlled-code-lead/protected-systems.md",
+        "docs/engineering/ARCHITECTURE_AUTHORITY.md",
+        "server/lib/component-readiness-registry.ts",
+        "scripts/architecture/check-architecture.mjs",
+        "tests/architecture-authority.test.ts",
+        "scripts/ci/script-syntax-baseline.json",
+        "scripts/ci/prepare-vq-test-db.mjs",
+        "scripts/ci/typecheck-baselines/scripts.json",
+        "server/lib/vq-schema-contract.ts",
+        "tests/vq-historical-baseline.test.ts",
+        "scripts/ci/typecheck-baselines/architecture.json",
+        "scripts/architecture/authority-policy.json",
+        "scripts/architecture/generated/architecture-authority.json",
+        "scripts/ci/typecheck-baselines/tests.json",
+        ".github/workflows/ci.yml",
+        "scripts/ci/prepare-engineering-governance-db.mjs",
+        "scripts/ci/verify-ci-topology.mjs",
+        "scripts/ci/migration-reference-policy.json",
+        "tests/ci-proof-topology.test.ts",
+        "migrations-vq",
+        "scripts/db",
+        "drizzle-vq.config.ts",
+        "Dockerfile",
+        "config/components/vault-quest.ts",
+        "server/routes/vault-quest-production.ts",
+        "server/vault-quest/lib/export-job-store.ts",
+        "tests/vq-migration-authority.test.ts"
+      ],
+      "proof_required": [
+        "Checksummed advisory-locked runner, shipped inventory, owner-selected required/optional component manifest consumed by readiness, fresh and historic convergence, no fleet-unsafe fallback"
+      ],
+      "evidence": [
+        {
+          "ref": "vq-schema-recovery.md: S3c2 exact hashes; Sol actual PG17 fresh/history and orchestration, clean79+60/build; grant-option/admin-option false greens repaired; fallback/final vetoes OPEN.",
+          "sha": "e77ede827d68a824db105943c4490fdf185684fa",
+          "observer": "sol-s3c2-independent"
+        },
+        {
+          "ref": "vq-schema-recovery.md S3c3 retained hashes: durable-only exports FIXED_WIP, independent Terra22 facade/10 actual PG17 router+ops, clean92/build; schema candidate/hostile/restricted proof remains OPEN.",
+          "sha": "49c10d2eb817d2382905e34492ead72f23d9a5fc",
+          "observer": "terra-s3c3-independent; codex-lead adjudication"
+        },
+        {
+          "ref": "vq-schema-recovery.md: S1 exact manifest; schema/readiness/fallback and final proof remain OPEN",
+          "sha": "c712e4647bf8cd01732370e10e0282e8e454ded1",
+          "observer": "codex-lead"
+        },
+        {
+          "ref": "vq-schema-recovery.md: S3a final hashes and independent Sol30/clean47 namespace foundation proof; image/runtime/fallback remain OPEN.",
+          "sha": "ecdac32562fa81c3d1cc6f3e633adb403aea169a",
+          "observer": "sol-s3a-independent"
+        },
+        {
+          "ref": "vq-schema-recovery.md: S3b source/image hashes; independent Terra real image main86/VQ17/replay0, clean50, topology held-out non-vacuity; architecture timeout and runtime/fallback/candidate vetoes retained.",
+          "sha": "a0e25b16d412de12fe65be0f4417641308eb831b",
+          "observer": "terra-s3b-independent"
+        },
+        {
+          "ref": "vq-schema-recovery.md: S3c1 unused pure evidence foundation final hashes, independentSol28 and17source hashes, clean52+58/build; no runtime activation or final release claim.",
+          "sha": "53e5088a7f1d9869dd8676feb2e15229a27c643f",
+          "observer": "sol-s3c1-independent"
+        }
+      ],
+      "invalidated_by": [
+        "VQ migration",
+        "journal",
+        "image",
+        "component manifest",
+        "readiness",
+        "route mount",
+        "fallback",
+        "schema registry"
+      ],
+      "vetoes_release": false
+    },
+    {
+      "id": "RECOVERY-JOB-FOUNDATION",
+      "phase": 2,
+      "kind": "OWNER_GATE",
+      "title": "Approve unused job registry foundation and code-only rollback",
+      "severity": "NONE",
+      "status": "PROVEN",
+      "agent_mode": "LEAD",
+      "agent_id": "codex-lead",
+      "workspace": "shared",
+      "depends_on": ["AUTH-BASELINE", "OWNER-SERVER-BOUNDARIES"],
+      "addresses": [],
+      "write_scope": [],
+      "proof_required": ["Unused helper only; no runtime caller, schedule, route or provider change; code-only rollback"],
+      "evidence": [{"ref": "phased-repair-plan.md active J1 exact manifest and recovery; independent Sol source/graph planning agrees unused foundation only, broader recovery remains OPEN", "sha": "607c3518d36ca234ad83edfb914204136ad9cebd", "observer": "sol-j1-planner; codex-lead adjudication"}],
+      "invalidated_by": ["Registry scope", "runtime caller", "recovery procedure"],
+      "vetoes_release": true
+    },
+    {
+      "id": "REPAIR-JOB-REGISTRY-FOUNDATION",
+      "phase": 4,
+      "kind": "REPAIR",
+      "title": "Add unused declarative job registry over existing process lifecycle",
+      "severity": "MEDIUM",
+      "status": "FIXED",
+      "agent_mode": "LEAD",
+      "agent_id": "codex-lead",
+      "workspace": "shared",
+      "depends_on": ["ARCH-COMP-001", "RECOVERY-JOB-FOUNDATION", "REPAIR-CI-TOPOLOGY", "REPAIR-SCHEMA-AUTHORITY"],
+      "addresses": ["ARCH-COMP-001"],
+      "write_scope": ["server/lib/job-registry.ts", "tests/job-composition.test.ts", "tests/architecture-authority.test.ts", "scripts/architecture/authority-policy.json", "scripts/architecture/generated/architecture-authority.json", "scripts/ci/typecheck-baselines/tests.json", "scripts/ci/typecheck-baselines/architecture.json"],
+      "proof_required": ["Whole-batch prevalidation, duplicate refusal, frozen timing, cadence/order/overlap parity, tracked drain, shutdown cancellation and error containment"],
+      "evidence": [{"ref": "phased-repair-plan.md J1 exact hashes: unused registry, independent Terra29 and held-out lifecycle, clean92/build/type/lint; shutdown-during-install red/green fixed; no caller or final proof", "sha": "607c3518d36ca234ad83edfb914204136ad9cebd", "observer": "terra-j1-independent; codex-lead"}],
+      "invalidated_by": ["Registry", "lifecycle", "runtime caller", "timing"],
+      "vetoes_release": false
+    },
+    {
+      "id": "PROOF-JOB-REGISTRY-FOUNDATION",
+      "phase": 6,
+      "kind": "PROOF",
+      "title": "Independently verify declarative job registry semantics",
+      "severity": "MEDIUM",
+      "status": "IN_PROGRESS",
+      "agent_mode": "READ_ONLY",
+      "agent_id": "job-registry-verifier",
+      "workspace": "read_only",
+      "depends_on": ["REPAIR-JOB-REGISTRY-FOUNDATION"],
+      "addresses": ["ARCH-COMP-001"],
+      "write_scope": [],
+      "proof_required": ["Actual existing lifecycle, fake-clock scheduling and held-out refusal/drain cases; unused-source and ownership proof"],
+      "evidence": [{"ref": "phased-repair-plan.md J1 exact source hashes and independent held-out lifecycle report; candidate-bound proof remains OPEN", "sha": "607c3518d36ca234ad83edfb914204136ad9cebd", "observer": "terra-j1-independent"}],
+      "invalidated_by": ["Candidate SHA", "registry", "lifecycle", "runtime caller"],
+      "vetoes_release": true
+    },
+    {
+      "id": "REPAIR-JOB-FOUNDATION",
+      "phase": 4,
+      "kind": "REPAIR",
+      "title": "Establish behavior-preserving declarative job composition and lifecycle tracking",
+      "severity": "MEDIUM",
+      "status": "OPEN",
+      "agent_mode": "LEAD",
+      "agent_id": "codex-lead",
+      "workspace": "shared",
+      "depends_on": ["ARCH-COMP-001", "OWNER-SERVER-BOUNDARIES", "RECOVERY-SERVER", "REPAIR-CI-TOPOLOGY", "REPAIR-JOB-REGISTRY-FOUNDATION"],
+      "addresses": ["ARCH-COMP-001"],
+      "write_scope": [
+        "server/index.ts",
+        "server/lib/job-registry.ts",
+        "server/routes.ts",
+        "tests/job-composition.test.ts",
+        "scripts/architecture/authority-policy.json",
+        "scripts/architecture/generated/architecture-authority.json"
+      ],
+      "proof_required": [
+        "Register existing jobs declaratively; move print reconciliation from route composition; lifecycle-track Scanner cleanup/capture expiry; preserve schedule/order/shutdown behavior"
+      ],
+      "evidence": [],
+      "invalidated_by": ["Job registry", "HTTP composition", "route boot mutation", "schedule", "shutdown"],
+      "vetoes_release": false
+    },
+    {
+      "id": "REPAIR-SOCIAL-JOBS",
+      "phase": 4,
+      "kind": "REPAIR",
+      "title": "Move external publication behind durable job lifecycle and reconciliation",
+      "severity": "HIGH",
+      "status": "OPEN",
+      "agent_mode": "LEAD",
+      "agent_id": "codex-lead",
+      "workspace": "shared",
+      "depends_on": ["ARCH-SOCIAL-001", "OWNER-SOCIAL-PUBLICATION", "RECOVERY-SOCIAL", "REPAIR-JOB-FOUNDATION", "REPAIR-SCHEMA-AUTHORITY"],
+      "addresses": ["ARCH-SOCIAL-001"],
+      "write_scope": [
+        "migrations/0124_social_publication_state.sql",
+        "shared/schema.ts",
+        "config/components/social-publication.json",
+        "server/jobs/weekly-reel.ts",
+        "server/jobs/ig-daily-post.ts",
+        "server/lib/advisory-lock.ts",
+        "server/lib/lifecycle.ts",
+        "tests/social-job-reconciliation.test.ts"
+      ],
+      "proof_required": [
+        "Durable states, provider idempotency, accepted/unknown reconciliation, required-schema readiness or explicit component-disabled rollout contract, bounded timeouts, short claims, SIGTERM and crash-boundary proof"
+      ],
+      "evidence": [],
+      "invalidated_by": [
+        "Migration",
+        "component manifest",
+        "readiness",
+        "job state",
+        "provider API",
+        "idempotency",
+        "lock",
+        "timeout",
+        "lifecycle",
+        "shutdown"
+      ],
+      "vetoes_release": false
+    },
+    {
+      "id": "REPAIR-RUNTIME-RESOURCES",
+      "phase": 4,
+      "kind": "REPAIR",
+      "title": "Bound Partner pool acquisition, query, lock, and aggregate connection budgets",
+      "severity": "MEDIUM",
+      "status": "OPEN",
+      "agent_mode": "LEAD",
+      "agent_id": "codex-lead",
+      "workspace": "shared",
+      "depends_on": ["ARCH-POOL-001", "OWNER-PARTNER-POOL", "RECOVERY-POOL", "REPAIR-CI-TOPOLOGY"],
+      "addresses": ["ARCH-POOL-001"],
+      "write_scope": ["server/partner/db.ts", "server/partner/connector-db.ts", "tests/partner-pool-budgets.test.ts"],
+      "proof_required": [
+        "Bounded runtime/admin/connector acquisition, statement and lock waits; total per-process/machine budget under measured provider ceiling; overload recovery"
+      ],
+      "evidence": [],
+      "invalidated_by": ["Pool config", "timeout", "machine count", "provider ceiling", "query path"],
+      "vetoes_release": false
+    },
+    {
+      "id": "REPAIR-VQ-EXPORT-LIFECYCLE",
+      "phase": 4,
+      "kind": "REPAIR",
+      "title": "Add Vault Quest export reclaim and owner-approved retention lifecycle",
+      "severity": "MEDIUM",
+      "status": "OPEN",
+      "agent_mode": "LEAD",
+      "agent_id": "codex-lead",
+      "workspace": "shared",
+      "depends_on": [
+        "ARCH-VQ-EXPORT-001",
+        "OWNER-VQ-EXPORT",
+        "RECOVERY-VQ-EXPORT",
+        "REPAIR-SCHEMA-AUTHORITY",
+        "REPAIR-JOB-FOUNDATION"
+      ],
+      "addresses": ["ARCH-VQ-EXPORT-001"],
+      "write_scope": [
+        "migrations-vq/0017_export_job_reclaim.sql",
+        "server/index.ts",
+        "server/vault-quest/lib/export-job-store.ts",
+        "server/vault-quest/jobs/export-maintenance.ts",
+        "tests/vq-export-lifecycle.test.ts"
+      ],
+      "proof_required": [
+        "Report-only size first; leased processing reclaim; lifecycle-registry scheduler registration; expiration state; owner-approved object cleanup only; retry, two-machine, shutdown, and restore proof"
+      ],
+      "evidence": [],
+      "invalidated_by": [
+        "Export schema",
+        "retention",
+        "object store",
+        "lease/reclaim",
+        "scheduler registration",
+        "shutdown",
+        "VQ readiness"
+      ],
+      "vetoes_release": false
+    },
+    {
+      "id": "REPAIR-SERVER-BOUNDARIES",
+      "phase": 4,
+      "kind": "REPAIR",
+      "title": "Strangle route and persistence roots by bounded context",
+      "severity": "MEDIUM",
+      "status": "OPEN",
+      "agent_mode": "LEAD",
+      "agent_id": "codex-lead",
+      "workspace": "shared",
+      "depends_on": [
+        "ARCH-COMP-001",
+        "ARCH-CYCLE-001",
+        "ARCH-DEAD-001",
+        "ARCH-PROXY-001",
+        "OWNER-SERVER-BOUNDARIES",
+        "RECOVERY-SERVER",
+        "REPAIR-JOB-FOUNDATION"
+      ],
+      "addresses": ["ARCH-COMP-001", "ARCH-CYCLE-001", "ARCH-DEAD-001", "ARCH-PROXY-001"],
+      "write_scope": [
+        "server/routes.ts",
+        "server/routes/transfers.ts",
+        "server/routes/stolen.ts",
+        "server/routes/embedding.ts",
+        "server/routes/pre-grade.ts",
+        "server/lib/route-identifiers.ts",
+        "server/storage.ts",
+        "server/commands",
+        "server/repositories",
+        "server/vault-quest/ai/higgsfield.ts",
+        "server/vault-quest/lib/vq-provider-connection.ts",
+        "server/vault-quest/ai/provider-observation-port.ts",
+        "tests/server-boundaries.test.ts"
+      ],
+      "proof_required": [
+        "Characterized route order; extract commands/repositories and root helpers; break confirmed root-leaf and VQ provider runtime cycles; remove dead print bodies; replace recursive proxying with typed actor commands; layer gate"
+      ],
+      "evidence": [],
+      "invalidated_by": [
+        "Route registrar",
+        "storage facade",
+        "command boundary",
+        "import graph",
+        "proxy capability",
+        "unreachable code"
+      ],
+      "vetoes_release": false
+    },
+
+    {
+      "id": "REPAIR-MEDIA-LIFECYCLE",
+      "phase": 5,
+      "kind": "REPAIR",
+      "title": "Derive object lifecycle and readiness from the full writer registry",
+      "severity": "MEDIUM",
+      "status": "OPEN",
+      "agent_mode": "LEAD",
+      "agent_id": "codex-lead",
+      "workspace": "shared",
+      "depends_on": ["ARCH-MEDIA-001", "OWNER-OBJECT-LIFECYCLE", "RECOVERY-MEDIA", "REPAIR-CI-TOPOLOGY"],
+      "addresses": ["ARCH-MEDIA-001"],
+      "write_scope": [
+        "server/lib/object-write-finalizer-registry.ts",
+        "server/lib/object-write-runtime-state.ts",
+        "server/jobs/object-write-reconciliation.ts",
+        "server/readiness.ts",
+        "tests/object-writer-inventory.test.ts"
+      ],
+      "proof_required": [
+        "Inventory/readiness parity; classify every writer authoritative/derived/ephemeral; separately adjudicate fault-reproduced writer findings before any writer behavior change; record TTL/rebuild/reconciliation policy"
+      ],
+      "evidence": [],
+      "invalidated_by": ["Writer inventory", "object class", "finalizer", "reconciler", "readiness", "retention"],
+      "vetoes_release": false
+    },
+    {
+      "id": "REPAIR-CLIENT-BOUNDARIES",
+      "phase": 5,
+      "kind": "REPAIR",
+      "title": "Converge client route, transport, session, and feature ownership",
+      "severity": "MEDIUM",
+      "status": "OPEN",
+      "agent_mode": "LEAD",
+      "agent_id": "codex-lead",
+      "workspace": "shared",
+      "depends_on": [
+        "ARCH-CLIENT-001",
+        "ARCH-ADMIN-TAB-001",
+        "OWNER-CLIENT-SURFACES",
+        "RECOVERY-CLIENT",
+        "REPAIR-ADMIN-CONTRACTS",
+        "REPAIR-ADMIN-PRINT",
+        "REPAIR-PARTNER-CONTRACTS",
+        "REPAIR-PRICING-AUTHORITY"
+      ],
+      "addresses": ["ARCH-CLIENT-001", "ARCH-ADMIN-TAB-001"],
+      "write_scope": [
+        "client/src/App.tsx",
+        "client/src/routes",
+        "client/src/lib",
+        "client/src/pages",
+        "client/src/components",
+        "tests/client-architecture.test.ts"
+      ],
+      "proof_required": [
+        "Define 173 Route-element versus 169 literal-path metric; surface registries; no orphan route/tab/import; production mockup exclusion; typed transport/session; principal isolation; bounded feature modules"
+      ],
+      "evidence": [],
+      "invalidated_by": [
+        "Client routes",
+        "page import graph",
+        "transport",
+        "session",
+        "feature ownership",
+        "production exposure"
+      ],
+      "vetoes_release": false
+    },
+    {
+      "id": "REPAIR-LEGACY-OPS-CONTAIN",
+      "phase": 5,
+      "kind": "REPAIR",
+      "title": "Contain contradictory Scanner authority before packaging",
+      "severity": "MEDIUM",
+      "status": "OPEN",
+      "agent_mode": "LEAD",
+      "agent_id": "codex-lead",
+      "workspace": "shared",
+      "depends_on": [
+        "ARCH-LEGACY-OPS-001",
+        "ARCH-DEAD-001",
+        "SFAP-009",
+        "OWNER-SCANNER-OPS",
+        "RECOVERY-SCANNER",
+        "REPAIR-CI-TOPOLOGY"
+      ],
+      "addresses": ["ARCH-LEGACY-OPS-001", "ARCH-DEAD-001", "SFAP-009"],
+      "write_scope": [
+        "scripts/scanner-app/lib/watcher.js",
+        "scripts/scanner-app/install.sh",
+        "scripts/scanner-app/README.md",
+        "scripts/scanner-watcher",
+        "docs/scanner-watcher-runbook.md",
+        "tests/scanner-operational-authority.test.ts"
+      ],
+      "proof_required": [
+        "Remove characterized unreachable watcher bodies; prove the historical watched fallback disabled and non-installable; fail closed on competing agents; make old runbook rollback-only; retain previous signed package recovery"
+      ],
+      "evidence": [],
+      "invalidated_by": ["Scanner watcher", "adapter route", "installer", "runbook", "package rollback"],
+      "vetoes_release": false
+    },
+    {
+      "id": "REPAIR-SCANNER-PACKAGE",
+      "phase": 5,
+      "kind": "REPAIR",
+      "title": "Produce exact-source signable Scanner release and rollback artifacts",
+      "severity": "BLOCKER",
+      "status": "OPEN",
+      "agent_mode": "LEAD",
+      "agent_id": "codex-lead",
+      "workspace": "shared",
+      "depends_on": ["SFAP-002", "SFAP-007", "OWNER-SCANNER-OPS", "RECOVERY-SCANNER", "REPAIR-LEGACY-OPS-CONTAIN"],
+      "addresses": ["SFAP-002", "SFAP-007"],
+      "write_scope": [
+        "scripts/scanner-app",
+        "docs/scanner/SCANNER_BLOCKER_REGISTER_20260818.md",
+        "tests/scanner-package-authority.test.ts"
+      ],
+      "proof_required": [
+        "Clean source-tree build, bridge/app hashes, hardened runtime config, previous-version rollback, signable manifest, and external ceremony packet"
+      ],
+      "evidence": [],
+      "invalidated_by": ["Scanner source-tree digest", "package config", "bridge", "manifest", "rollback artifact"],
+      "vetoes_release": false
+    },
+    {
+      "id": "EXTERNAL-SCANNER-REPLACEMENT",
+      "phase": 5,
+      "kind": "EXTERNAL",
+      "title": "Observe signed, notarized, stapled clean-Mac Scanner replacement acceptance",
+      "severity": "NONE",
+      "status": "EXTERNAL_BLOCKER",
+      "agent_mode": "EXTERNAL_OWNER",
+      "agent_id": "scanner-release-owner",
+      "workspace": "external",
+      "depends_on": ["REPAIR-SCANNER-PACKAGE"],
+      "addresses": [],
+      "write_scope": [],
+      "proof_required": [
+        "Developer ID signature, hardened runtime, notarization/stapling tickets, clean-Mac install, physical scan, signed update, offline rollback, and exact accepted Scanner source-tree digest"
+      ],
+      "evidence": [],
+      "invalidated_by": [
+        "Scanner source-tree digest",
+        "package",
+        "signature",
+        "notary",
+        "clean Mac",
+        "device",
+        "release channel"
+      ],
+      "vetoes_release": true
+    },
+    {
+      "id": "REPAIR-LEGACY-OPS",
+      "phase": 5,
+      "kind": "REPAIR",
+      "title": "Retire only non-packaged legacy and incident surfaces after replacement acceptance",
+      "severity": "MEDIUM",
+      "status": "OPEN",
+      "agent_mode": "LEAD",
+      "agent_id": "codex-lead",
+      "workspace": "shared",
+      "depends_on": ["ARCH-LEGACY-OPS-001", "OWNER-SCANNER-OPS", "RECOVERY-SCANNER", "EXTERNAL-SCANNER-REPLACEMENT"],
+      "addresses": ["ARCH-LEGACY-OPS-001"],
+      "write_scope": [
+        "scripts/scanner-watcher",
+        "script/build.ts",
+        ".dockerignore",
+        "Dockerfile",
+        "tests/scanner-operational-authority.test.ts"
+      ],
+      "proof_required": [
+        "Retire only the separately installable watcher and named incident executables after accepted Scanner replacement; no historical-data loss; exact target-by-target rollback; accepted Scanner source tree remains byte-identical"
+      ],
+      "evidence": [],
+      "invalidated_by": [
+        "Scanner source-tree digest",
+        "legacy watcher",
+        "build executable",
+        "image",
+        "owner disposition"
+      ],
+      "vetoes_release": false
+    },
+
+    {
+      "id": "PROOF-AUTHORITY",
+      "phase": 6,
+      "kind": "PROOF",
+      "title": "Independently prove executable architecture authority and drift gates",
+      "severity": "HIGH",
+      "status": "OPEN",
+      "agent_mode": "READ_ONLY",
+      "agent_id": "authority-verifier",
+      "workspace": "read_only",
+      "depends_on": ["REPAIR-AUTHORITY-CONTROLS"],
+      "addresses": ["ARCH-AUTHORITY-001"],
+      "write_scope": [],
+      "proof_required": [
+        "Regenerate topology; inject unowned route/table/writer/job and forbidden layer import; inject missing/malformed component manifest, absent required migration, and optional-disabled component; every invalid mutation fails and the disabled component remains unavailable"
+      ],
+      "evidence": [],
+      "invalidated_by": [
+        "Candidate SHA",
+        "authority registry",
+        "generator",
+        "source topology",
+        "component manifest",
+        "migration readiness",
+        "layer gate"
+      ],
+      "vetoes_release": true
+    },
+    {
+      "id": "PROOF-CI",
+      "phase": 6,
+      "kind": "PROOF",
+      "title": "Independently prove CI topology is complete and non-vacuous",
+      "severity": "HIGH",
+      "status": "IN_PROGRESS",
+      "agent_mode": "READ_ONLY",
+      "agent_id": "ci-topology-verifier",
+      "workspace": "read_only",
+      "depends_on": ["REPAIR-CI-TOPOLOGY"],
+      "addresses": ["ARCH-CI-001"],
+      "write_scope": [],
+      "proof_required": [
+        "Exact runtime invokes isolated Partner, Scanner, scripts/tests typechecks and shipped migration proof; skip and injected failure make gate red"
+      ],
+      "evidence": [
+        {
+          "ref": "hygiene-wave-proof.md H1i: independent Sol and clean exact-lock real18/18, Admin7/7 regression, clean controls117/117, catalogue ordering and owned-stderr closure red-green, exact eight source hashes; no hosted/security/release closure",
+          "sha": "c35e0d2839b067bfda94b7d1453ebd116d31b60b",
+          "observer": "Sol h1c_lifecycle independent, codex-lead integration"
+        },
+        {
+          "ref": "hygiene-wave-proof.md H1h: root/independent Sol/clean exact-lock real7/7, clean controls101/101, cancellation run d23aaab2 closed both PIDs/container cleanup0, delayed-close defect repaired; exact seven file hashes retained, no hosted/release closure",
+          "sha": "bc8bc3c6118f079d7843f3733bbf1a380b0a1f08",
+          "observer": "Sol h1c_lifecycle independent, codex-lead integration"
+        }
+      ],
+      "invalidated_by": ["Candidate SHA", "workflow", "runner", "test inventory", "runtime", "migration inventory"],
+      "vetoes_release": true
+    },
+    {
+      "id": "PROOF-ADMIN-CONTRACTS",
+      "phase": 6,
+      "kind": "PROOF",
+      "title": "Independently prove Admin identity, logout, navigation, expiry, and cache isolation",
+      "severity": "HIGH",
+      "status": "IN_PROGRESS",
+      "agent_mode": "READ_ONLY",
+      "agent_id": "admin-contract-verifier",
+      "workspace": "read_only",
+      "depends_on": ["REPAIR-ADMIN-CONTRACTS"],
+      "addresses": ["ARCH-SESSION-001"],
+      "write_scope": [],
+      "proof_required": [
+        "Every shell destination, one POST logout, non-crashing typed expiry, no-store identity, A-to-B protected-cache isolation including in-flight cancellation, hostile mutations"
+      ],
+      "evidence": [
+        {
+          "ref": "admin-session-file-manifest.md aggregate 8d984be5b749eebde98fa5ebdef1b638306c5e866ecd37a7a110c3fddf3f3e35; focused Admin client/architecture 56/56; final credential/expiry/race recheck CLEAN",
+          "sha": "2913bcb1092ea8f43ee1294b711a8df653a06a3d",
+          "observer": "client-architecture-wiring"
+        },
+        {
+          "ref": "Focused mocked Admin server-auth 18/18; logout/cache/credential/session-header hostile review CLEAN; pre-route allowlist 403 classified non-HIGH",
+          "sha": "2913bcb1092ea8f43ee1294b711a8df653a06a3d",
+          "observer": "server-architecture-wiring"
+        },
+        {
+          "ref": "Executable Admin cache classifier/hash authority and generated topology review CLEAN; architecture count 8608 and hostile mutations pass",
+          "sha": "2913bcb1092ea8f43ee1294b711a8df653a06a3d",
+          "observer": "data-runtime-architecture"
+        }
+      ],
+      "invalidated_by": ["Candidate SHA", "session", "cache", "navigation", "identity response"],
+      "vetoes_release": true
+    },
+    {
+      "id": "PROOF-ADMIN-PRINT",
+      "phase": 6,
+      "kind": "PROOF",
+      "title": "Independently prove the Admin print/reprint route and evidence contract",
+      "severity": "HIGH",
+      "status": "IN_PROGRESS",
+      "agent_mode": "READ_ONLY",
+      "agent_id": "admin-print-contract-verifier",
+      "workspace": "read_only",
+      "depends_on": ["REPAIR-ADMIN-PRINT"],
+      "addresses": [
+        "ARCH-ROUTE-001",
+        "ARCH-PRINT-EVIDENCE-001",
+        "ARCH-PRINT-IDEMPOTENCY-001",
+        "ARCH-PRINT-READINESS-001",
+        "ARCH-PRINT-REPLAY-001"
+      ],
+      "write_scope": [],
+      "proof_required": [
+        "Reachable client/server parity, produced-state gating, explicit reason, same-payload replay after mutable-state drift, changed-payload conflict, rolling legacy-intent compatibility, deterministic in-progress/terminal handling, transactional reason evidence, migration/relation/column/default/generated-ID/PK/sequence/index/runtime-role readiness, current artifact-download eligibility from authoritative membership, response compatibility, unmatched-route behavior, and hostile mutations"
+      ],
+      "evidence": [
+        {
+          "ref": "Independent client hostile recheck CLEAN: produced-state gating, canonical direct command, normalized body/key identity, interleaved attempts, terminal rotation, modal races, and all-rejected behavior",
+          "sha": "87d755e7563bff6a68a1f9eb2dc3dd628ade070666d24b63f77efc313138535c",
+          "observer": "client-architecture-observer"
+        },
+        {
+          "ref": "Independent server hostile recheck CLEAN after append-only receipt, typed coordinator, rolling sentinel, current-output, and legacy mutable-membership subset-bypass repairs",
+          "sha": "87d755e7563bff6a68a1f9eb2dc3dd628ade070666d24b63f77efc313138535c",
+          "observer": "server-architecture-observer"
+        },
+        {
+          "ref": "Independent data/runtime hostile recheck CLEAN after relation/column/index/ACL and generated-ID/default/PK/exact-owned-sequence readiness repairs",
+          "sha": "87d755e7563bff6a68a1f9eb2dc3dd628ade070666d24b63f77efc313138535c",
+          "observer": "data-runtime-observer"
+        }
+      ],
+      "invalidated_by": ["Candidate SHA", "route manifest", "print", "idempotency", "evidence contract"],
+      "vetoes_release": true
+    },
+    {
+      "id": "PROOF-PARTNER-CONTRACTS",
+      "phase": 6,
+      "kind": "PROOF",
+      "title": "Independently prove Partner paid orders and Scanner Operator parity",
+      "severity": "HIGH",
+      "status": "IN_PROGRESS",
+      "agent_mode": "READ_ONLY",
+      "agent_id": "partner-contract-verifier",
+      "workspace": "read_only",
+      "depends_on": ["REPAIR-PARTNER-CONTRACTS"],
+      "addresses": ["ARCH-SUPPLY-001", "ARCH-ROLE-001"],
+      "write_scope": [],
+      "proof_required": [
+        "No route collision; paid order visible after checkout; legacy request remains visible under the selected contract; fixtures for both historical tables; migration/no-loss and rollback evidence; one shell; capability matrix; invite/edit Scanner Operator; deny grading/purchase"
+      ],
+      "evidence": [
+        {
+          "ref": "partner-contract-recovery.md: exact hashes; independent Sol HTTP7/React9/runtime47/final-owner2/commerce+scanner33; actual Chrome22/0/0 root+independent+clean; clean exact-lock178; no hosted/final release closure",
+          "sha": "0494d5fbed5cb30f8379bb507d28c9b2a0a09c0b",
+          "observer": "Sol h1c_lifecycle independent"
+        }
+      ],
+      "invalidated_by": [
+        "Candidate SHA",
+        "Partner mount",
+        "both order schemas",
+        "data migration",
+        "rollback",
+        "Stripe contract",
+        "role",
+        "permission",
+        "client"
+      ],
+      "vetoes_release": true
+    },
+    {
+      "id": "PROOF-PRICING",
+      "phase": 6,
+      "kind": "PROOF",
+      "title": "Independently prove commercial pricing parity through receipt",
+      "severity": "HIGH",
+      "status": "IN_PROGRESS",
+      "agent_mode": "READ_ONLY",
+      "agent_id": "pricing-verifier",
+      "workspace": "read_only",
+      "depends_on": ["REPAIR-PRICING-AUTHORITY"],
+      "addresses": ["ARCH-PRICING-001"],
+      "write_scope": [],
+      "proof_required": [
+        "Real database admin mutation appears identically on public, submit, promotion, quote, charge, and receipt; static-value mutation fails"
+      ],
+      "evidence": [
+        {
+          "ref": "pricing-recovery.md: P1/P2a/P2b/P2c/P2d locally verified; P3 source-hash-bound independent18/18 and clean106/106 HTTP-to-receipt, baseline two turnaround failures plus held-out invalid snapshot fixed. Architecture8313. Exact candidate/hosted/full-browser/final hostile remain OPEN",
+          "sha": "43ca275757e93cc981e9d0091fc4d62c6003dc0d",
+          "observer": "Sol h1c_lifecycle independent; Terra h1b_runner topology"
+        }
+      ],
+      "invalidated_by": ["Candidate SHA", "tier data", "projection", "promotion", "quote", "payment", "receipt"],
+      "vetoes_release": true
+    },
+    {
+      "id": "PROOF-LEGACY-AI",
+      "phase": 6,
+      "kind": "PROOF",
+      "title": "Independently prove legacy AI disposition and effect boundary",
+      "severity": "HIGH",
+      "status": "IN_PROGRESS",
+      "agent_mode": "READ_ONLY",
+      "agent_id": "grading-provider-verifier",
+      "workspace": "read_only",
+      "depends_on": ["REPAIR-LEGACY-AI"],
+      "addresses": ["ARCH-LEGACY-AI-001"],
+      "write_scope": [],
+      "proof_required": [
+        "Feature-on and adversarial multipart requests prove both exact legacy identities are unconditional typed 410 tombstones after authentication and before every legacy route-local feature/AI-rate/upload/body/grading-domain-DB/R2/provider/grading/prediction/evidence/audit effect; bounded global middleware and supported grading identities remain reachable"
+      ],
+      "evidence": [
+        {
+          "ref": "grading-legacy-recovery.md: already implemented80a20611, independent Terra5/5 current unchanged source; exact hashes and synthetic-vs-full-mount limits retained, candidate/hostile gates OPEN",
+          "sha": "aa4ec14a273da779f550fd4bb777ca1616d5e518",
+          "observer": "Terra h1b_runner independent; root source verification"
+        }
+      ],
+      "invalidated_by": ["Candidate SHA", "feature flag", "route", "provider", "grading", "object"],
+      "vetoes_release": true
+    },
+    {
+      "id": "PROOF-SCHEMA",
+      "phase": 6,
+      "kind": "PROOF",
+      "title": "Independently prove one shipped schema/readiness estate",
+      "severity": "HIGH",
+      "status": "IN_PROGRESS",
+      "agent_mode": "READ_ONLY",
+      "agent_id": "schema-verifier",
+      "workspace": "read_only",
+      "depends_on": ["REPAIR-SCHEMA-AUTHORITY"],
+      "addresses": ["ARCH-SCHEMA-001"],
+      "write_scope": [],
+      "proof_required": [
+        "Fresh and each historical estate converge through shipped runner; concurrent lock/checksum; required/optional readiness; no memory fallback"
+      ],
+      "evidence": [
+        {
+          "ref": "vq-schema-recovery.md S2c: independentSol64 and held-outDDL/refusal races, Terra15 helper recheck, clean168/build; PG16/17 fresh17 vs historical1+16attested; shipping/readiness/fallback remain OPEN",
+          "sha": "97a8845069042a2ef47f1107f3103b5459ca2cc7",
+          "observer": "sol-vq-history-verifier; terra-ci-prerequisite-verifier"
+        },
+        {
+          "ref": "vq-schema-recovery.md metadata correction: independentSol30/30 plus held-out scoped-race red/green, clean127/127; current0121 compatibility; history/grants/readiness remain OPEN",
+          "sha": "5e8140bb441f5432a6592c07b6d5047a2e4c105a",
+          "observer": "sol-vq-namespace-verifier"
+        },
+        {
+          "ref": "vq-schema-recovery.md catalog foundation: independentTerra16/16, clean68/68; PG16.13/17.10 same26-relation fingerprint; historical writes/readiness remain OPEN",
+          "sha": "4d25602cc67d1dc87a00abf6f7b687dfe5413e27",
+          "observer": "terra-vq-catalog-verifier"
+        },
+        {
+          "ref": "vq-schema-recovery.md S2a: independent25/25, clean52/52; actualCLI fresh16/replay0, disposable CI wiring; history/image/readiness remain OPEN",
+          "sha": "d7e957de51ec9b5138fe3eb9b42883223db8bcc6",
+          "observer": "sol-vq-s2a-verifier"
+        },
+        {
+          "ref": "vq-schema-recovery.md: S1 independent Sol31/31, clean105/105, source hashes; full estate/readiness/fallback/image/candidate proof OPEN",
+          "sha": "c712e4647bf8cd01732370e10e0282e8e454ded1",
+          "observer": "sol-vq-s1-verifier"
+        }
+      ],
+      "invalidated_by": ["Candidate SHA", "migration", "journal", "image", "readiness", "fallback", "VQ status"],
+      "vetoes_release": true
+    },
+    {
+      "id": "PROOF-SOCIAL",
+      "phase": 6,
+      "kind": "PROOF",
+      "title": "Independently prove external-publication state and recovery",
+      "severity": "HIGH",
+      "status": "OPEN",
+      "agent_mode": "READ_ONLY",
+      "agent_id": "job-recovery-verifier",
+      "workspace": "read_only",
+      "depends_on": ["REPAIR-SOCIAL-JOBS"],
+      "addresses": ["ARCH-SOCIAL-001"],
+      "write_scope": [],
+      "proof_required": [
+        "Missing required 0124 makes the component not ready; explicit optional-disabled mode mounts no publisher and makes zero provider calls; crash before/after provider acceptance and persistence; replay/idempotency; bounded lock/provider calls; SIGTERM drain; two-machine proof"
+      ],
+      "evidence": [],
+      "invalidated_by": [
+        "Candidate SHA",
+        "0124 migration",
+        "component manifest",
+        "readiness",
+        "job state",
+        "provider",
+        "idempotency",
+        "timeout",
+        "lock",
+        "shutdown"
+      ],
+      "vetoes_release": true
+    },
+    {
+      "id": "PROOF-RUNTIME-RESOURCES",
+      "phase": 6,
+      "kind": "PROOF",
+      "title": "Independently prove database pool and timeout budgets",
+      "severity": "MEDIUM",
+      "status": "OPEN",
+      "agent_mode": "READ_ONLY",
+      "agent_id": "runtime-resource-verifier",
+      "workspace": "read_only",
+      "depends_on": ["REPAIR-RUNTIME-RESOURCES"],
+      "addresses": ["ARCH-POOL-001"],
+      "write_scope": [],
+      "proof_required": [
+        "Acquisition/statement/lock timeouts, overload recovery, aggregate process/machine connection budget, and provider-ceiling capacity evidence"
+      ],
+      "evidence": [],
+      "invalidated_by": ["Candidate SHA", "pool", "timeout", "machine count", "provider ceiling"],
+      "vetoes_release": true
+    },
+    {
+      "id": "PROOF-VQ-EXPORT",
+      "phase": 6,
+      "kind": "PROOF",
+      "title": "Independently prove Vault Quest export reclaim and retention",
+      "severity": "MEDIUM",
+      "status": "OPEN",
+      "agent_mode": "READ_ONLY",
+      "agent_id": "vq-export-verifier",
+      "workspace": "read_only",
+      "depends_on": ["REPAIR-VQ-EXPORT-LIFECYCLE"],
+      "addresses": ["ARCH-VQ-EXPORT-001"],
+      "write_scope": [],
+      "proof_required": [
+        "Lifecycle-registry registration invokes reclaim on schedule and drains on SIGTERM; report-only sizing; stuck-processing lease reclaim; expiration; object deletion only under exact approval; two-machine retry; restore"
+      ],
+      "evidence": [],
+      "invalidated_by": [
+        "Candidate SHA",
+        "export schema",
+        "scheduler registration",
+        "scheduled invocation",
+        "shutdown",
+        "retention",
+        "object store",
+        "restore"
+      ],
+      "vetoes_release": true
+    },
+    {
+      "id": "PROOF-SERVER-BOUNDARIES",
+      "phase": 6,
+      "kind": "PROOF",
+      "title": "Independently prove server strangler boundaries and behavior preservation",
+      "severity": "MEDIUM",
+      "status": "OPEN",
+      "agent_mode": "READ_ONLY",
+      "agent_id": "server-boundary-verifier",
+      "workspace": "read_only",
+      "depends_on": ["REPAIR-JOB-FOUNDATION", "REPAIR-SERVER-BOUNDARIES", "REPAIR-LEGACY-OPS-CONTAIN"],
+      "addresses": ["ARCH-COMP-001", "ARCH-CYCLE-001", "ARCH-DEAD-001", "ARCH-PROXY-001"],
+      "write_scope": [],
+      "proof_required": [
+        "Route parity/order, import DAG, context repository ownership, worker separation including print/scanner one-shots, no unreachable print/Scanner bodies, typed actor commands, and characterization mutations"
+      ],
+      "evidence": [],
+      "invalidated_by": [
+        "Candidate SHA",
+        "route",
+        "command",
+        "repository",
+        "worker bootstrap",
+        "import graph",
+        "proxy capability",
+        "Scanner watcher"
+      ],
+      "vetoes_release": true
+    },
+    {
+      "id": "PROOF-MEDIA",
+      "phase": 6,
+      "kind": "PROOF",
+      "title": "Independently prove complete object writer lifecycle coverage",
+      "severity": "MEDIUM",
+      "status": "OPEN",
+      "agent_mode": "READ_ONLY",
+      "agent_id": "media-lifecycle-verifier",
+      "workspace": "read_only",
+      "depends_on": ["REPAIR-MEDIA-LIFECYCLE", "ADJUDICATE-COMMUNITY-MEDIA"],
+      "addresses": ["ARCH-MEDIA-001"],
+      "write_scope": [],
+      "proof_required": [
+        "Writer inventory parity, retry/reconcile, derived rebuild, ephemeral cleanup, readiness mutation, and a mechanically closed community-media investigation/adjudication disposition"
+      ],
+      "evidence": [],
+      "invalidated_by": [
+        "Candidate SHA",
+        "writer inventory",
+        "object class",
+        "finalizer",
+        "reconciler",
+        "retention",
+        "readiness",
+        "community-media disposition"
+      ],
+      "vetoes_release": true
+    },
+    {
+      "id": "PROOF-CLIENT-BOUNDARIES",
+      "phase": 6,
+      "kind": "PROOF",
+      "title": "Independently prove client route, transport, and feature convergence",
+      "severity": "MEDIUM",
+      "status": "OPEN",
+      "agent_mode": "READ_ONLY",
+      "agent_id": "client-boundary-verifier",
+      "workspace": "read_only",
+      "depends_on": ["REPAIR-CLIENT-BOUNDARIES"],
+      "addresses": ["ARCH-CLIENT-001", "ARCH-ADMIN-TAB-001"],
+      "write_scope": [],
+      "proof_required": [
+        "No orphan route/tab/import, every allowlisted tab renders or redirects canonically, production variant exclusion, typed transport, session reuse, cache isolation, browser parity"
+      ],
+      "evidence": [],
+      "invalidated_by": ["Candidate SHA", "route registry", "bundle", "transport", "session", "feature module"],
+      "vetoes_release": true
+    },
+    {
+      "id": "PROOF-SCANNER-RELEASE",
+      "phase": 6,
+      "kind": "PROOF",
+      "title": "Independently prove signed Scanner release provenance and clean-Mac acceptance",
+      "severity": "BLOCKER",
+      "status": "OPEN",
+      "agent_mode": "EXTERNAL_OWNER",
+      "agent_id": "scanner-release-verifier",
+      "workspace": "external",
+      "depends_on": ["REPAIR-SCANNER-PACKAGE", "EXTERNAL-SCANNER-REPLACEMENT"],
+      "addresses": ["SFAP-002", "SFAP-007"],
+      "write_scope": [],
+      "proof_required": [
+        "Exact-SHA build provenance, bridge/app hashes, Developer ID, hardened runtime, notarization/stapling, clean-Mac physical scan, signed update, offline rollback"
+      ],
+      "evidence": [],
+      "invalidated_by": [
+        "Candidate SHA",
+        "package",
+        "manifest",
+        "signature",
+        "notary",
+        "clean Mac",
+        "device",
+        "channel"
+      ],
+      "vetoes_release": true
+    },
+    {
+      "id": "PROOF-LEGACY-OPS",
+      "phase": 6,
+      "kind": "PROOF",
+      "title": "Independently prove Scanner and incident operational convergence",
+      "severity": "MEDIUM",
+      "status": "OPEN",
+      "agent_mode": "READ_ONLY",
+      "agent_id": "scanner-operations-verifier",
+      "workspace": "read_only",
+      "depends_on": ["REPAIR-LEGACY-OPS-CONTAIN", "REPAIR-LEGACY-OPS"],
+      "addresses": ["ARCH-LEGACY-OPS-001", "SFAP-009"],
+      "write_scope": [],
+      "proof_required": [
+        "Accepted Scanner source tree unchanged after packaging; competing-agent refusal; historical watched fallback disabled and non-installable; one rollback-only old runbook; no retired body/watcher/incident executable; target-by-target rollback"
+      ],
+      "evidence": [],
+      "invalidated_by": [
+        "Candidate SHA",
+        "Scanner source-tree digest",
+        "watcher quarantine",
+        "installer",
+        "runbook",
+        "image",
+        "legacy target"
+      ],
+      "vetoes_release": true
+    },
+    {
+      "id": "PROOF-WAA-SUBGRAPH",
+      "phase": 6,
+      "kind": "PROOF",
+      "title": "Independently close the nested White Ace graph on the same candidate",
+      "severity": "HIGH",
+      "status": "OPEN",
+      "agent_mode": "READ_ONLY",
+      "agent_id": "white-ace-hostile-verifier",
+      "workspace": "read_only",
+      "depends_on": ["REPAIR-WAA-SUBGRAPH"],
+      "addresses": ["ARCH-WAA-SUBGRAPH-001"],
+      "write_scope": [],
+      "proof_required": [
+        "Nested validator ready, independent behavior/mutation evidence, no accepted BLOCKER/HIGH left outside either graph, candidate SHA equality"
+      ],
+      "evidence": [],
+      "invalidated_by": ["Candidate SHA", "nested graph", "nested finding", "proof", "owner gate", "external evidence"],
+      "vetoes_release": true
+    },
+    {
+      "id": "ROLLBACK-CANDIDATE",
+      "phase": 6,
+      "kind": "ROLLBACK",
+      "title": "Prove forward recovery and rollback for the integrated architecture waves",
+      "severity": "NONE",
+      "status": "OPEN",
+      "agent_mode": "READ_ONLY",
+      "agent_id": "recovery-verifier",
+      "workspace": "read_only",
+      "depends_on": [
+        "PROOF-AUTHORITY",
+        "PROOF-CI",
+        "PROOF-ADMIN-CONTRACTS",
+        "PROOF-ADMIN-PRINT",
+        "PROOF-PARTNER-CONTRACTS",
+        "PROOF-PRICING",
+        "PROOF-LEGACY-AI",
+        "PROOF-SCHEMA",
+        "PROOF-SOCIAL",
+        "PROOF-RUNTIME-RESOURCES",
+        "PROOF-VQ-EXPORT",
+        "PROOF-SERVER-BOUNDARIES",
+        "PROOF-MEDIA",
+        "PROOF-CLIENT-BOUNDARIES",
+        "PROOF-SCANNER-RELEASE",
+        "PROOF-LEGACY-OPS",
+        "PROOF-WAA-SUBGRAPH"
+      ],
+      "addresses": [],
+      "write_scope": [],
+      "proof_required": [
+        "Every pre-wave recovery gate was approved before its repair; immutable pre-wave and candidate SHAs; session, route, schema, object, provider, job, Scanner, and nested-graph recovery evidence"
+      ],
+      "evidence": [],
+      "invalidated_by": [
+        "Candidate SHA",
+        "baseline",
+        "schema",
+        "provider state",
+        "object state",
+        "session contract",
+        "recovery procedure"
+      ],
+      "vetoes_release": true
+    },
+    {
+      "id": "INTEGRATE-CANDIDATE",
+      "phase": 6,
+      "kind": "INTEGRATION",
+      "title": "Prove one clean exact-SHA architecture recovery candidate",
+      "severity": "NONE",
+      "status": "OPEN",
+      "agent_mode": "LEAD",
+      "agent_id": "codex-lead",
+      "workspace": "shared",
+      "depends_on": ["ROLLBACK-CANDIDATE", "PROOF-JOB-REGISTRY-FOUNDATION"],
+      "addresses": [],
+      "write_scope": [],
+      "proof_required": [
+        "MVGS freeze, Graphify freshness, architecture gates, check, lint ratchet, all tests, build, gitleaks, native runtime, postflight, independent hostile review on one SHA"
+      ],
+      "evidence": [],
+      "invalidated_by": [
+        "Candidate SHA",
+        "dirty tree",
+        "dependency",
+        "workflow",
+        "schema",
+        "test",
+        "governance",
+        "rollback",
+        "hostile finding"
+      ],
+      "vetoes_release": true
+    },
+
+    {
+      "id": "EXTERNAL-ACCEPTANCE",
+      "phase": 7,
+      "kind": "EXTERNAL",
+      "title": "Observe exact-candidate hosted, staging, provider, capacity, restore, and device evidence",
+      "severity": "NONE",
+      "status": "EXTERNAL_BLOCKER",
+      "agent_mode": "EXTERNAL_OWNER",
+      "agent_id": "environment-and-repository-owner",
+      "workspace": "external",
+      "depends_on": ["INTEGRATE-CANDIDATE"],
+      "addresses": [],
+      "write_scope": [],
+      "proof_required": [
+        "Hosted rulesets/CI, native image, real schema/readiness, DB connection budget, two-machine failures, provider idempotency, retention/restore, signed clean-Mac Scanner, authorised staging"
+      ],
+      "evidence": [],
+      "invalidated_by": [
+        "Candidate SHA",
+        "GitHub settings",
+        "environment identity",
+        "schema",
+        "provider",
+        "capacity",
+        "retention",
+        "device",
+        "staging"
+      ],
+      "vetoes_release": true
+    },
+    {
+      "id": "RELEASE-BOUNDARY",
+      "phase": 7,
+      "kind": "RELEASE",
+      "title": "Present exact candidate for separate owner release decision",
+      "severity": "NONE",
+      "status": "OPEN",
+      "agent_mode": "EXTERNAL_OWNER",
+      "agent_id": "repository-owner",
+      "workspace": "external",
+      "depends_on": ["EXTERNAL-ACCEPTANCE"],
+      "addresses": [],
+      "write_scope": [],
+      "proof_required": [
+        "Explicit owner release decision; post-release evidence only if deployment is separately placed in scope"
+      ],
+      "evidence": [],
+      "invalidated_by": [
+        "Candidate SHA",
+        "owner target",
+        "owner decision",
+        "external evidence",
+        "rollback",
+        "production change"
+      ],
+      "vetoes_release": false
+    }
+  ]
+}

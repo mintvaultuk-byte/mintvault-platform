@@ -2,6 +2,7 @@ import { sql } from "drizzle-orm";
 // Type-only: erased at compile time, so this adds no runtime import edge from the
 // schema barrel to the client-safe commerce leaf.
 import type { PricingTier } from "./commerce";
+import { formatTierPrice } from "./commerce";
 // Value import: this barrel USES the category list in a table definition below.
 import { CATALOGUE_CATEGORIES } from "./vocabulary";
 import {
@@ -270,6 +271,22 @@ export const submissions = pgTable("submissions", {
   shippingInsuranceTier: text("shipping_insurance_tier"),
   gradingCost: integer("grading_cost").default(0),
   notes: text("notes"),
+  onReceiptPhotoUrls: text("on_receipt_photo_urls"),
+  onReceiptPhotoObjects: jsonb("on_receipt_photo_objects")
+    .$type<
+      Array<{
+        operationId: string;
+        logicalSlot: string;
+        store: "R2";
+        key: string;
+        sha256: string;
+        byteLength: number;
+        contentType: string;
+      }>
+    >()
+    .notNull()
+    .default([]),
+  onReceiptPhotoRevision: bigint("on_receipt_photo_revision", { mode: "number" }).notNull().default(0),
   receivedAt: timestamp("received_at"),
   shippedAt: timestamp("shipped_at"),
   // Carrier-confirmed delivery time, distinct from `completedAt` (which is
@@ -471,6 +488,9 @@ export const cards = pgTable("cards", {
 
 export const certificates = pgTable("certificates", {
   id: serial("id").primaryKey(),
+  /** Permanent lineage link for the durable certificate-create image writer.
+   * Nullable for pre-0122 and image-less certificates; unique when present. */
+  objectWriteOperationId: uuid("object_write_operation_id"),
   cardId: integer("card_id"),
   submissionItemId: integer("submission_item_id"),
   nfcUid: text("nfc_uid"),
@@ -480,6 +500,13 @@ export const certificates = pgTable("certificates", {
   nfcLocked: boolean("nfc_locked").default(false),
   nfcWrittenAt: timestamp("nfc_written_at"),
   nfcLockedAt: timestamp("nfc_locked_at"),
+  // The raw lock-intent token is never stored. Its migration-owned SHA-256
+  // column is intentionally omitted so generic certificate reads cannot leak
+  // the confirmation capability; these non-secret fields expose pending state.
+  nfcLockPendingUid: text("nfc_lock_pending_uid"),
+  nfcLockPendingMethod: text("nfc_lock_pending_method"),
+  nfcLockPendingAt: timestamp("nfc_lock_pending_at", { withTimezone: true }),
+  nfcLockPendingBy: text("nfc_lock_pending_by"),
   nfcLastVerifiedAt: timestamp("nfc_last_verified_at"),
   nfcWrittenBy: text("nfc_written_by"),
   nfcScanCount: integer("nfc_scan_count").default(0),
@@ -1192,6 +1219,7 @@ export type WaitlistSignup = typeof waitlistSignups.$inferSelect;
 
 export const insertCertificateSchema = createInsertSchema(certificates).omit({
   id: true,
+  objectWriteOperationId: true,
   certId: true,
   cardId: true,
   voidedAt: true,
@@ -1210,6 +1238,10 @@ export const insertCertificateSchema = createInsertSchema(certificates).omit({
   nfcLocked: true,
   nfcWrittenAt: true,
   nfcLockedAt: true,
+  nfcLockPendingUid: true,
+  nfcLockPendingMethod: true,
+  nfcLockPendingAt: true,
+  nfcLockPendingBy: true,
   nfcLastVerifiedAt: true,
   nfcWrittenBy: true,
   nfcScanCount: true,
@@ -1918,11 +1950,10 @@ export const serviceTiers = pgTable("service_tiers", {
 export type ServiceTierRecord = typeof serviceTiers.$inferSelect;
 
 export function serviceTierToPricingTier(st: ServiceTierRecord): PricingTier {
-  const priceGbp = st.pricePerCard / 100;
   return {
     id: st.tierId,
     name: st.name,
-    price: `£${priceGbp % 1 === 0 ? priceGbp : priceGbp.toFixed(2)} per card`,
+    price: formatTierPrice(st.pricePerCard),
     pricePerCard: st.pricePerCard,
     recommendedCardValue: `Up to £${st.maxValueGbp.toLocaleString()}`,
     turnaround: st.turnaroundLabel || `${st.turnaroundDays} working days`,

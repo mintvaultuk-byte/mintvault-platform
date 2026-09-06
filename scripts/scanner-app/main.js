@@ -42,7 +42,199 @@ const lide400 = require("./lib/lide400-controller");
 // macOS: this is a menu-bar-only app, no Dock icon.
 if (process.platform === "darwin" && app.dock) app.dock.hide();
 
-// Prevent multiple instances stacking up if launchd misbehaves.
+/*
+ * AN ISOLATED INSTANCE OWNS ITS ELECTRON PROFILE TOO — and therefore its own lock.
+ *
+ * MINTVAULT_SCANS_DIR already isolates station identity and app state (lib/station-identity.js,
+ * lib/state.js), which is what lets a second shop enrol on a Mac that another shop already uses.
+ * The Electron profile was NOT isolated, and Electron keys its single-instance lock on the userData
+ * path — so an isolated instance asked for the SHARED lock, lost it to the running Scanner, and
+ * quit instantly while merely re-opening the other shop's window. The launch looked like it worked
+ * and nothing had happened.
+ *
+ * Deriving userData from the same variable fixes that at the source rather than in a launcher: an
+ * isolated instance is isolated in every dimension, by declaring one thing.
+ *
+ * PRODUCTION IS UNCHANGED. With MINTVAULT_SCANS_DIR unset — every real shop Mac — userData is
+ * Electron's default and the lock is exactly as global as it has always been. One Scanner per Mac.
+ */
+if (process.env.MINTVAULT_SCANS_DIR) {
+  const isolatedProfile = path.join(process.env.MINTVAULT_SCANS_DIR, "electron-profile");
+  try {
+    fs.mkdirSync(isolatedProfile, { recursive: true });
+    app.setPath("userData", isolatedProfile);
+    console.log(`[instance] isolated profile: ${isolatedProfile}`);
+  } catch (err) {
+    console.error(`[instance] could not create the isolated profile at ${isolatedProfile}: ${err.message}`);
+    app.exit(1);
+  }
+}
+
+/*
+ * THIS INSTANCE, DECLARED TO DISK — so a launcher can VERIFY rather than assume.
+ *
+ * macOS does not expose another process's environment (`ps eww` prints the command and nothing
+ * else on a modern system), so there is no way from outside to ask a running Scanner which profile
+ * it belongs to. That mattered: an isolated launch that silently forwarded to the shared instance
+ * was indistinguishable from one that worked, because "a window appeared" was the only available
+ * evidence.
+ *
+ * So the process states its own identity. Written once at startup and removed on a clean quit, it
+ * is the only claim about a running Scanner that comes from the Scanner itself.
+ *
+ * Contains no secret: a pid, paths already known to whoever can read this file, and a version.
+ */
+// The same per-instance support directory lib/state.js and lib/station-identity.js resolve, so all
+// three agree on where "this instance" keeps its things.
+const INSTANCE_SUPPORT_DIR = process.env.MINTVAULT_SCANS_DIR
+  ? path.join(process.env.MINTVAULT_SCANS_DIR, "app-state")
+  : path.join(os.homedir(), "Library", "Application Support", "MintVaultScanner");
+const RUNTIME_MANIFEST = path.join(INSTANCE_SUPPORT_DIR, "runtime.json");
+
+/**
+ * sha256 over the sources this process is executing — see the buildId note in the manifest.
+ *
+ * The same four files, in the same order, that the launcher concatenates and hashes, so the two
+ * answers are comparable without either side knowing how the other computed it.
+ */
+function buildFingerprint() {
+  try {
+    const hash = require("node:crypto").createHash("sha256");
+    for (const file of ["main.js", "preload.js", path.join("renderer", "app.js"), path.join("renderer", "index.html")]) {
+      hash.update(fs.readFileSync(path.join(__dirname, file)));
+    }
+    return hash.digest("hex").slice(0, 16);
+  } catch {
+    return "unknown";
+  }
+}
+
+function writeRuntimeManifest() {
+  let environmentLabel = "unconfigured";
+  let apiBase = null;
+  try {
+    const resolved = environment.resolveEnvironment();
+    environmentLabel = resolved.ok ? resolved.label : `${resolved.label || "unresolved"}-refusing`;
+    apiBase = resolved.ok ? resolved.apiBase : null;
+  } catch {
+    /* an unresolved environment is itself worth recording */
+  }
+  const manifest = {
+    pid: process.pid,
+    executable: process.execPath,
+    version: APP_VERSION,
+    /*
+     * WHICH BUILD, not merely which version.
+     *
+     * A version string is bumped by a person and therefore lags: two different builds carried 1.5.0
+     * within a minute of each other, and a launcher comparing versions alone concluded the running
+     * one was already correct and left the older code in place, reporting success. A hash over the
+     * files that actually execute cannot lag, because nothing has to remember to change it.
+     */
+    buildId: buildFingerprint(),
+    userDataPath: app.getPath("userData"),
+    scansDir: process.env.MINTVAULT_SCANS_DIR || null,
+    environment: environmentLabel,
+    apiBase,
+    startedAt: new Date().toISOString(),
+  };
+  try {
+    fs.mkdirSync(path.dirname(RUNTIME_MANIFEST), { recursive: true });
+    fs.writeFileSync(RUNTIME_MANIFEST, JSON.stringify(manifest, null, 2));
+    console.log(`[instance] runtime manifest: ${RUNTIME_MANIFEST}`);
+  } catch (err) {
+    console.error(`[instance] could not write the runtime manifest: ${err.message}`);
+  }
+}
+
+/*
+ * ONE VISIBLE SCANNER PER MAC — enforced by the app, not by whoever launched it.
+ *
+ * This Mac carries four separate MintVault Scanner.app bundles (four worktrees), and all four
+ * declare bundle id com.mintvault.scanner. So "MintVault Scanner" is ambiguous to LaunchServices:
+ * the Dock, Spotlight, `open -b` and AppleScript's `quit app "..."` each resolve it to whichever
+ * copy LaunchServices currently prefers, and that preference DRIFTS — it chose an old build twice,
+ * then a current one. Worse, a launch made that way carries no MINTVAULT_SCANS_DIR, so it lands on
+ * the shared profile: another shop's station identity, another shop's cards.
+ *
+ * That is how a correct, working shop games Scanner was replaced on screen by a stale Shop 0 one
+ * showing STATION UNAVAILABLE and a historical MV837 failure, with nothing in between to notice.
+ *
+ * THE CLAIM IS DELIBERATELY IN THE SHARED DIRECTORY, not the per-instance one — the whole point is
+ * that instances with DIFFERENT profiles must be able to see each other. First one to start owns
+ * the Mac; a second one with a different profile refuses and says why, rather than quietly taking
+ * over the screen. Same profile is a restart, which is allowed.
+ *
+ * This cannot bind a build that predates it. An older Scanner knows nothing of this file and will
+ * still take over, which is why an acceptance run must also make the older bundles unlaunchable.
+ */
+const SHARED_SUPPORT_DIR = path.join(os.homedir(), "Library", "Application Support", "MintVaultScanner");
+const ACTIVE_INSTANCE_CLAIM = path.join(SHARED_SUPPORT_DIR, "active-instance.json");
+
+function readActiveInstanceClaim() {
+  try {
+    const raw = JSON.parse(fs.readFileSync(ACTIVE_INSTANCE_CLAIM, "utf8"));
+    if (!raw || typeof raw.pid !== "number") return null;
+    // A claim naming a dead process is debris from a crash, not an owner.
+    try {
+      process.kill(raw.pid, 0);
+    } catch {
+      return null;
+    }
+    return raw;
+  } catch {
+    return null;
+  }
+}
+
+function claimThisMac() {
+  const ours = process.env.MINTVAULT_SCANS_DIR || null;
+  const existing = readActiveInstanceClaim();
+  if (existing && existing.pid !== process.pid && (existing.scansDir || null) !== ours) {
+    console.error(
+      `[instance] REFUSING TO START: MintVault Scanner is already running as pid ${existing.pid} ` +
+        `(${existing.version || "unknown version"}, profile ${existing.scansDir || "shared"}). ` +
+        `This one would be profile ${ours || "shared"}. Quit the running Scanner first — two Scanners ` +
+        "on one Mac is how one shop's screen gets replaced by another's."
+    );
+    return false;
+  }
+  try {
+    fs.mkdirSync(SHARED_SUPPORT_DIR, { recursive: true });
+    fs.writeFileSync(
+      ACTIVE_INSTANCE_CLAIM,
+      JSON.stringify(
+        { pid: process.pid, scansDir: ours, version: APP_VERSION, executable: process.execPath, startedAt: new Date().toISOString() },
+        null,
+        2
+      )
+    );
+  } catch (err) {
+    console.error(`[instance] could not record the active-instance claim: ${err.message}`);
+  }
+  return true;
+}
+
+function releaseThisMac() {
+  try {
+    const raw = JSON.parse(fs.readFileSync(ACTIVE_INSTANCE_CLAIM, "utf8"));
+    if (raw && raw.pid === process.pid) fs.unlinkSync(ACTIVE_INSTANCE_CLAIM);
+  } catch {
+    /* nothing to release */
+  }
+}
+
+function clearRuntimeManifest() {
+  try {
+    const raw = JSON.parse(fs.readFileSync(RUNTIME_MANIFEST, "utf8"));
+    // Only ever remove OUR OWN claim. A crashed predecessor's manifest is stale, not ours to erase.
+    if (raw && raw.pid === process.pid) fs.unlinkSync(RUNTIME_MANIFEST);
+  } catch {
+    /* nothing to clear */
+  }
+}
+
+// Prevent multiple instances stacking up if launchd misbehaves. Scoped to this profile — see above.
 const gotLock = app.requestSingleInstanceLock();
 if (!gotLock) {
   app.quit();
@@ -256,17 +448,103 @@ function refreshTray() {
 function buildTrayMenu() {
   if (!tray) return;
   const s = stateMod.get();
+  /*
+   * THE WAY OUT, always present.
+   *
+   * This menu had no Quit. The app is menu-bar-only and deliberately survives its window closing
+   * (see the window-all-closed handler), so with no Quit item there was NO way for a person to stop
+   * it — and every instruction to "quit the Scanner first" described a control that did not exist.
+   * An operator could be looking at a blocking modal with no exit from either the window or here.
+   *
+   * Environment is named for the same reason: a Mac pointed at STAGING that looks identical to one
+   * pointed at PRODUCTION is a trap of its own.
+   */
+  let environmentLabel = "Environment: unconfigured";
+  try {
+    const resolved = environment.resolveEnvironment();
+    environmentLabel = `Environment: ${resolved.ok ? resolved.label : `${resolved.label || "unresolved"} — refusing`}`;
+  } catch {
+    /* an unreadable environment must not stop the menu that lets you leave */
+  }
   const menu = Menu.buildFromTemplate([
     { label: `MintVault Scanner — ${s.state}`, enabled: false },
     { label: `Last: ${s.lastUploadedCert || "—"}`, enabled: false },
+    { label: environmentLabel, enabled: false },
     { type: "separator" },
     { label: "Show window", click: () => showPopover() },
+    { label: "Refresh status", click: () => void refreshStationSetupFromTray() },
+    { type: "separator" },
+    { label: "Sign out…", click: () => void signOutFromTray() },
+    { type: "separator" },
+    { label: "Show diagnostics", click: () => shell.openPath(SCANNER_LOG) },
     { label: "Show service logs", click: () => shell.openPath(SCANNER_LOG) },
     { label: "Restart scanner service", click: () => rebootScanner() },
     { type: "separator" },
     { label: "About", click: () => showPopover() },
+    { type: "separator" },
+    { label: "Quit MintVault Scanner", accelerator: "Command+Q", click: () => void quitScanner() },
   ]);
   tray.setContextMenu(menu);
+}
+
+/**
+ * Genuinely exit — the counterpart to a window-all-closed handler that deliberately does not.
+ *
+ * WHAT THIS DOES NOT DO, on purpose. It removes no station identity, no calibration, no logs and no
+ * scans, and it tells the server nothing: quitting an app is not a statement about whether a
+ * physical station is authorised. A Mac that is switched off overnight must come back as the same
+ * approved station in the morning, so `partner_stations` is left entirely alone.
+ *
+ * It DOES stop the file watcher this instance owns, because a watcher outliving the app that
+ * supervises it is how a "quit" Scanner goes on ingesting scans. The LiDE bridge needs no handling:
+ * lide400-controller spawns it per operation, awaits it, and SIGTERMs it on its own timeout, so
+ * there is no long-lived scanner-service child to stop and this does not pretend to stop one.
+ */
+async function quitScanner() {
+  isQuitting = true;
+  console.log("[quit] stopping this Scanner instance (station identity, calibration and logs are untouched)");
+  try {
+    if (watcher && typeof watcher.stop === "function") await watcher.stop();
+  } catch (err) {
+    console.error(`[quit] watcher stop failed: ${err && err.message}`);
+  }
+  app.quit();
+}
+
+/** Tray "Refresh status" — the same read the pending screen polls, on demand. */
+async function refreshStationSetupFromTray() {
+  try {
+    const setup = await stationSetupState();
+    popover?.webContents?.send?.("station-setup", setup);
+    refreshTray();
+  } catch (err) {
+    console.error(`[tray] refresh failed: ${err && err.message}`);
+  }
+}
+
+/**
+ * Tray "Sign out" — reachable even when the window is showing a modal the operator cannot dismiss.
+ *
+ * Refuses mid-card for the same reason the in-app control does: switching operator with a paid,
+ * half-captured card on the bench loses the thread. That refusal is surfaced, never silent.
+ */
+async function signOutFromTray() {
+  const s = stateMod.get();
+  if (s.activeCapture || s.openCardJob || watcher?.targetedPendingUploadCount()) {
+    showPopover();
+    popover?.webContents?.send?.(
+      "station-setup",
+      { ok: true, stage: "sign_in", error: "Finish or safely retry the current card before switching operator" }
+    );
+    return;
+  }
+  try {
+    stationIdentity.clearOperatorSession();
+  } catch (err) {
+    console.error(`[tray] sign out failed: ${err && err.message}`);
+  }
+  showPopover();
+  await refreshStationSetupFromTray();
 }
 
 function setupTray() {
@@ -390,18 +668,6 @@ function stationSummary(sessionBody, availableCredits) {
     // Number, or null. NEVER 0 as a stand-in for "not answered": an unasked question rendered as an
     // empty wallet would stop a station that can work perfectly well.
     availableCredits: typeof availableCredits === "number" ? availableCredits : null,
-    /*
-     * MAY THIS OPERATOR MOVE THE CAPTURE AREA? Display only — the server holds the real gate and
-     * refuses `POST /stations/calibrations` without `partner.stations.calibrate` regardless of what
-     * this says. It exists so a Scanner Operator is not shown a control that will refuse them, which
-     * is a worse experience than not seeing it at all.
-     *
-     * Defaults to FALSE on anything unexpected. The failure direction for "I could not establish
-     * whether you may move the scanner's physical capture area" is no.
-     */
-    canCalibrate: Array.isArray(sessionBody.permissions)
-      ? sessionBody.permissions.includes("partner.stations.calibrate")
-      : false,
     canPurchaseCredits: Array.isArray(sessionBody.permissions)
       ? sessionBody.permissions.includes("partner.credits.purchase")
       : false,
@@ -415,9 +681,9 @@ function stationSummary(sessionBody, availableCredits) {
  * balance on every NEW press and refuses independently, so a station that cannot read it must still
  * be able to work. Blocking setup on a credits fetch would turn a reporting hiccup into a dead shop.
  */
-async function availableCreditsOrNull() {
+async function availableCreditsOrNull(operatorScope = null) {
   try {
-    const result = await stationClient.creditSummary();
+    const result = operatorScope ? await operatorScope.creditSummary() : await stationClient.creditSummary();
     const value = result?.ok ? result.body?.summary?.availableCredits : null;
     return typeof value === "number" ? value : null;
   } catch {
@@ -444,8 +710,7 @@ async function availableCreditsOrNull() {
  * asks the server and shows the answer, so a failed fetch degrades to "not answered" rather than to
  * a plausible wrong number.
  */
-async function refreshAvailableCredits() {
-  const available = await availableCreditsOrNull();
+function commitAvailableCredits(available) {
   const prior = stateMod.get().availableCredits;
   /*
    * A failed read is not evidence that capacity changed. Do not replace a confirmed zero with
@@ -459,6 +724,11 @@ async function refreshAvailableCredits() {
   });
   pushStateToRenderer();
   return available;
+}
+
+async function refreshAvailableCredits() {
+  const available = await availableCreditsOrNull();
+  return commitAvailableCredits(available);
 }
 
 /**
@@ -530,15 +800,111 @@ async function armNextOutstandingSide(trigger) {
   }
 }
 
-/** Sanitised first-run state only — no cookie, private key, UUID or fingerprint crosses IPC. */
+/*
+ * FIRST-RUN ENROLMENT RUNS ITSELF, ONCE.
+ *
+ * stationSetupState() is called from the renderer's poll, from the tray, and after every sign-in
+ * step, so without this guard a first run would fire several concurrent enrolment requests at the
+ * same moment. The server now absorbs repeats within the tenant (requestStationEnrollment reuses a
+ * station with the same Mac key), but firing four requests to have three ignored is not a design —
+ * it is a defect the server happens to survive.
+ */
+let autoEnrolInFlight = false;
+
+/**
+ * Drop card state belonging to a different shop. No-op for the same shop, and for a first sign-in.
+ *
+ * Deliberately does NOT touch station identity: whether this Mac may act as a station is the
+ * server's decision, reached through enrolment, and clearing it here would silently re-home one
+ * shop's station into another. See the identity_mismatch stage, which explains rather than acts.
+ */
+function reconcileTenantScopedState(tenantId) {
+  const incoming = typeof tenantId === "string" && tenantId ? tenantId : null;
+  if (!incoming) return;
+  const current = stateMod.get();
+  const bound = typeof current.boundTenantId === "string" && current.boundTenantId ? current.boundTenantId : null;
+  if (bound === incoming) return;
+  if (!bound) {
+    stateMod.set({ boundTenantId: incoming });
+    return;
+  }
+  console.log(`[station] shop changed on this Mac — clearing the previous shop's card state`);
+  stateMod.set({
+    boundTenantId: incoming,
+    lastUploadedCert: null,
+    recent: [],
+    openCardJob: null,
+    activeCapture: null,
+    bufferedFront: null,
+    manualPending: null,
+    lastError: null,
+    calibrationRecovery: null,
+  });
+  pushStateToRenderer();
+}
+
+/**
+ * Stamp the environment onto every setup answer, whichever branch produced it.
+ *
+ * A wrapper rather than a field added to a dozen return sites: the label must be present on the
+ * error paths too — those are exactly the screens where "am I even pointed at the right MintVault?"
+ * is the question — and one of a dozen returns forgetting it is how that guarantee rots.
+ */
 async function stationSetupState() {
-  let session;
+  let setup;
   try {
-    session = await stationClient.stationSession();
+    setup = await stationSetupStateInner();
   } catch (error) {
-    return { ok: true, stage: "sign_in", error: error?.message || "Sign in to MintVault" };
+    if (error?.code !== "OPERATOR_SESSION_CHANGED") throw error;
+    /*
+     * The token setter already invalidated the old pairing. Do not clear the latch here: a newer
+     * setup may already have validated the replacement token while this stale request was in flight.
+     */
+    setup = {
+      ok: true,
+      stage: stationIdentity.currentStationCode() ? "session_expired" : "sign_in",
+    };
+  }
+  let environmentLabel = "UNCONFIGURED";
+  try {
+    const resolved = environment.resolveEnvironment();
+    environmentLabel = resolved.ok ? resolved.label : `${resolved.label || "UNRESOLVED"} — REFUSING`;
+  } catch {
+    /* an unreadable environment must not stop the screen that lets you leave */
+  }
+  return { ...setup, environmentLabel };
+}
+
+/** Sanitised first-run state only — no cookie, private key, UUID or fingerprint crosses IPC. */
+async function stationSetupStateInner() {
+  let session;
+  let operatorScope;
+  try {
+    operatorScope = stationClient.operatorSessionScope();
+    session = await operatorScope.stationSession();
+  } catch (error) {
+    if (error?.code === "OPERATOR_SESSION_CHANGED") throw error;
+    stationIdentity.invalidateOperatorScope();
+    /*
+     * No usable session at all — the stored one is gone, not merely stale. From the operator's side
+     * that is the same situation as an idle timeout and deserves the same reassurance: a Mac that
+     * already holds a station is not starting from scratch, whatever became of the session. Only a
+     * Mac with no station has genuinely never been set up.
+     */
+    let enrolled = false;
+    try {
+      enrolled = Boolean(stationIdentity.currentStationCode());
+    } catch {
+      /* fail closed to the plain sign-in screen */
+    }
+    return {
+      ok: true,
+      stage: enrolled ? "session_expired" : "sign_in",
+      error: enrolled ? "" : error?.message || "Sign in to MintVault",
+    };
   }
   if (!session.ok || !session.body?.mfaPassed) {
+    stationIdentity.invalidateOperatorScope();
     if (session.status === 503) {
       return {
         ok: true,
@@ -546,14 +912,46 @@ async function stationSetupState() {
         error: "MintVault station service is temporarily unavailable. Contact a MintVault Super Admin.",
       };
     }
-    return { ok: true, stage: session.body?.mfaRequired ? "mfa" : "sign_in" };
+    if (session.body?.mfaRequired) return { ok: true, stage: "mfa" };
+    /*
+     * AN EXPIRED SESSION IS NOT A MAC THAT WAS NEVER SET UP.
+     *
+     * MintVault ends an idle Partner session after thirty minutes, which is correct and stays. But
+     * a Mac that had been signed in and then idled came back looking identical to one that had
+     * never been used — same bare sign-in screen — while its station, its approval and its
+     * calibration were all still perfectly valid on the server. The two need different words,
+     * because they need different reassurance: one is "carry on", the other is "start here".
+     *
+     * The station identity is the tell: a Mac holding one has been through setup before. It is
+     * read, never cleared — signing in again must not cost a Mac its station.
+     */
+    let hadSession = false;
+    try {
+      hadSession = Boolean(stationIdentity.currentStationCode());
+    } catch {
+      /* fail closed to the plain sign-in screen */
+    }
+    return { ok: true, stage: hadSession ? "session_expired" : "sign_in" };
   }
-  // Committed to shared state as well as returned, so the identity row and the capture panel are
-  // reading ONE number rather than two that drift apart the moment a card is started.
-  const summary = stationSummary(session.body, await refreshAvailableCredits());
   const code = stationIdentity.currentStationCode();
   if (!code) {
-    const locations = await stationClient.enrolmentLocations();
+    /*
+     * ONE SHOP'S WORK MUST NOT SHOW UP ON ANOTHER SHOP'S SCREEN.
+     *
+     * With no station identity there is no second authority to compare. The authenticated Partner
+     * session may therefore establish the tenant for this fresh profile before enrolment. This is
+     * deliberately below the no-code branch: an existing station must pass enrolment-status first,
+     * or a wrong-shop login could rebind the previous shop's local card state before being refused.
+     *
+     * SCOPED, NOT PURGED. This clears operational card fields only; scans and forensic logs survive.
+     */
+    const availableCredits = await availableCreditsOrNull(operatorScope);
+    operatorScope.assertCurrent();
+    reconcileTenantScopedState(session.body?.tenantId);
+    // Committed to shared state as well as returned, so the identity row and capture panel read one
+    // server-reported number. It is display-only and cannot authorise a card.
+    const summary = stationSummary(session.body, commitAvailableCredits(availableCredits));
+    const locations = await operatorScope.enrolmentLocations();
     if (!locations.ok) {
       return {
         ok: true,
@@ -565,24 +963,154 @@ async function stationSetupState() {
             : "MintVault could not confirm this station’s authorised location.",
       };
     }
-    return {
-      ok: true,
-      stage: "register",
-      summary,
-      locations:
-        locations.ok && Array.isArray(locations.body?.locations)
-          ? locations.body.locations.map((location) => ({
-              id: String(location.id),
-              name: String(location.name),
-            }))
-          : [],
-    };
+    const eligible =
+      locations.ok && Array.isArray(locations.body?.locations)
+        ? locations.body.locations.map((location) => ({ id: String(location.id), name: String(location.name) }))
+        : [];
+    /*
+     * ONE ELIGIBLE LOCATION MEANS THERE IS NOTHING TO ASK.
+     *
+     * A shop MintVault has just created has exactly one ACTIVE location, and its Owner is eligible
+     * at all of them, so the "register" panel was showing a hidden dropdown, a single obvious
+     * choice already made, and a button whose only job was to say yes to it. That is not a decision;
+     * it is a dead click between the operator and a working Mac, and it is the reason a normal first
+     * run looked like something had gone wrong.
+     *
+     * WHAT IS AND IS NOT DECIDED HERE. The client decides only that it need not ASK. Every question
+     * that matters — which tenant, which location, whether this operator may enrol at all, whether
+     * this Mac is already known — is answered by /stations/enrol on the server, from the session,
+     * against the Mac's own key. The client sends no tenant, no station code and no authority; a
+     * refusal is still a refusal, and it fails closed to the panel below.
+     *
+     * TWO OR MORE LOCATIONS IS A REAL CHOICE and is never guessed: the panel renders, the dropdown
+     * is shown, and the operator picks. Zero eligible locations is an error state, handled below.
+     */
+    if (eligible.length === 1 && !autoEnrolInFlight) {
+      autoEnrolInFlight = true;
+      try {
+        const enrolled = await operatorScope.registerThisMac({ locationId: eligible[0].id, appVersion: APP_VERSION });
+        if (enrolled.ok && enrolled.body?.station?.stationCode) {
+          console.log(`[station] auto-enrolled this Mac as ${enrolled.body.station.stationCode} (awaiting approval)`);
+          return await stationSetupStateInner();
+        }
+        const failure = (enrolled.body && enrolled.body.error) || {};
+        return {
+          ok: true,
+          stage: "register",
+          summary,
+          locations: eligible,
+          error:
+            failure.message ||
+            "MintVault could not register this Mac automatically. Try Connect this station.",
+        };
+      } catch (error) {
+        return {
+          ok: true,
+          stage: "register",
+          summary,
+          locations: eligible,
+          error: error?.message || "MintVault could not be reached to register this Mac.",
+        };
+      } finally {
+        autoEnrolInFlight = false;
+      }
+    }
+    return { ok: true, stage: "register", summary, locations: eligible };
   }
-  const status = await stationClient.enrolmentStatus(code);
+
+  /*
+   * PROVE THE OPERATOR/STATION PAIR BEFORE USING EITHER AS RUNTIME AUTHORITY.
+   *
+   * The Partner cookie proves who signed in; the encrypted identity proves which station this
+   * profile holds. Neither proves they belong together. This tenant-scoped read is deliberately the
+   * first operation after session validation. Until it succeeds, do not reconcile local card state,
+   * fetch the new tenant's credits, adopt geometry or permit a signed station request.
+   */
+  const status = await operatorScope.enrolmentStatus(code);
   if (!status.ok || !status.body?.station) {
+    stationIdentity.invalidateOperatorScope();
+    const summary = stationSummary(session.body, null);
+    /*
+     * THIS MAC IS ENROLLED — TO SOMEBODY ELSE.
+     *
+     * The server answers a station code it will not honour for this session with a flat 403
+     * `forbidden`, and deliberately says no more: telling an unauthenticated-to-that-tenant caller
+     * "this belongs to another shop" would be a cross-tenant oracle. That opacity is right on the
+     * wire and wrong on this screen. The Scanner is not learning anything here — it is holding that
+     * station code on its own disk — so it can say what it already knows, and it must, because
+     * "Station unavailable / contact a Super Admin" sent an operator to MintVault for a Mac that was
+     * simply still registered to the previous shop.
+     *
+     * NOT SELF-HEALING, deliberately. Nothing here clears the local identity or re-enrols: that
+     * would silently migrate one shop's station — and its calibration history — into another. The
+     * remedy is a decision (a fresh Scanner instance, or a Super Admin releasing the old station),
+     * so this state explains and stops.
+     */
+    if (status.status === 403 || status.status === 404) {
+      return {
+        ok: true,
+        stage: "identity_mismatch",
+        summary,
+        stationCode: code,
+      };
+    }
     return { ok: true, stage: "station_unavailable", summary, stationCode: code };
   }
   const station = status.body.station;
+  if (String(station.stationCode || "") !== code) {
+    stationIdentity.invalidateOperatorScope();
+    return {
+      ok: true,
+      stage: "identity_mismatch",
+      summary: stationSummary(session.body, null),
+      stationCode: code,
+    };
+  }
+  try {
+    stationIdentity.setStationStatus(station.status);
+  } catch {
+    stationIdentity.invalidateOperatorScope();
+    return {
+      ok: true,
+      stage: "station_unavailable",
+      summary: stationSummary(session.body, null),
+      stationCode: code,
+      error: "This Scanner could not validate its local station identity.",
+    };
+  }
+
+  if (!versionSatisfies(APP_VERSION, station.minimumSupportedVersion)) {
+    stationIdentity.invalidateOperatorScope();
+    return {
+      ok: true,
+      stage: "update_required",
+      summary: stationSummary(session.body, null),
+      stationCode: code,
+      minimumSupportedVersion: station.minimumSupportedVersion,
+      error: "This Scanner version is no longer supported. Install the current signed MintVault Scanner release.",
+    };
+  }
+  try {
+    operatorScope.validateStationScope(code, station.status);
+  } catch {
+    stationIdentity.invalidateOperatorScope();
+    return {
+      ok: true,
+      stage: "station_unavailable",
+      summary: stationSummary(session.body, null),
+      stationCode: code,
+      error: "This Scanner could not validate its authenticated station scope.",
+    };
+  }
+
+  // Credits are read through the same immutable operator-session generation. Revalidate after that
+  // await and only then permit any tenant-scoped local state or geometry to move.
+  const availableCredits = await availableCreditsOrNull(operatorScope);
+  operatorScope.assertCurrent();
+  operatorScope.validateStationScope(code, station.status);
+  reconcileTenantScopedState(session.body?.tenantId);
+  const summary = stationSummary(session.body, commitAvailableCredits(availableCredits));
+
   /*
    * ADOPT THE SERVER'S CAPTURE RECTANGLE. A synchronisation, not a move.
    *
@@ -602,19 +1130,6 @@ async function stationSetupState() {
   } catch (error) {
     console.warn(`[station] could not adopt the server capture window: ${error?.message || error}`);
   }
-  if (!versionSatisfies(APP_VERSION, station.minimumSupportedVersion)) {
-    return {
-      ok: true,
-      stage: "update_required",
-      summary,
-      stationCode: code,
-      minimumSupportedVersion: station.minimumSupportedVersion,
-      error: "This Scanner version is no longer supported. Install the current signed MintVault Scanner release.",
-    };
-  }
-  try {
-    stationIdentity.setStationStatus(station.status);
-  } catch {}
   return {
     ok: true,
     stage: String(station.status || "PENDING").toLowerCase(),
@@ -642,6 +1157,71 @@ function heartbeatPayload() {
     captureState: String(state.activeCapture?.stage || state.state || "IDLE").slice(0, 64),
     ...(state.lastError ? { lastFailureCode: String(state.lastError).slice(0, 120) } : {}),
   };
+}
+
+// Lightweight current-state heartbeat. It is intentionally independent of
+// target polling and carries no TIFF/certificate payload. Server-side it
+// appends events only for meaningful connection/hardware transitions.
+//
+// This is module-scoped because startup, successful sign-in/MFA, and setup
+// recovery are all legitimate callers of the same heartbeat authority.
+let heartbeatInFlight = false;
+async function sendHeartbeat() {
+  if (heartbeatInFlight || !stationIdentity.hasActiveStationSession()) return;
+  heartbeatInFlight = true;
+  try {
+    /*
+     * Adopt the server's capture rectangle on the heartbeat, not only when the operator opens the
+     * window. `stationSetupState()` runs on demand from the renderer, so a tray-only Scanner that
+     * nobody has clicked sits at `profile_unprovisioned` — unable to Preview or scan — while the
+     * server has held a VALID calibration for it the whole time. The station should be ready
+     * because it is enrolled, not because somebody looked at it.
+     *
+     * Cheap and idempotent: it returns immediately once the local origin already agrees.
+     */
+    const originMissingBeforeHeartbeat = !lide400._private.jigOrigin();
+    if (originMissingBeforeHeartbeat) await stationSetupState();
+    const result = await stationClient.heartbeat(heartbeatPayload());
+    if (result.ok && (originMissingBeforeHeartbeat || result.body?.fixedProfileProvisioned === true)) {
+      /*
+       * A first connected heartbeat may have just created the server-owned fixed profile. Fetch it
+       * immediately and adopt its rectangle before the next operator action; no user-visible
+       * geometry action or restart is required.
+       */
+      await stationSetupState();
+      pushStateToRenderer();
+    } else if (!result.ok) {
+      console.warn(
+        `[station-heartbeat] rejected: ${result.body?.error?.code || result.body?.error || `HTTP ${result.status}`}`
+      );
+      if ([401, 403, 404, 426].includes(result.status) || result.body?.error?.code === "version_blocked")
+        await stationSetupState();
+    }
+  } catch (error) {
+    console.warn(`[station-heartbeat] failed: ${error?.message || error}`);
+  } finally {
+    heartbeatInFlight = false;
+  }
+}
+
+/**
+ * Complete the authenticated setup read before sending a signed heartbeat.
+ *
+ * A Partner session and a station identity are separate authorities.  The
+ * tenant-scoped enrolment-status read inside stationSetupState() is the first
+ * point at which the app proves they belong together.  Heartbeating first
+ * allowed a correctly rejected wrong-shop login to consume this station's
+ * signed nonce and attest its app version before the operator-scope refusal.
+ *
+ * Only an ACTIVE, same-tenant station reaches the heartbeat.  Every other
+ * stage (MFA, expired session, pending approval, identity mismatch, suspended
+ * station) returns the authoritative setup result without a signed mutation.
+ */
+async function refreshStationAfterAuthentication() {
+  const setup = await stationSetupState();
+  if (setup?.stage !== "active") return setup;
+  await sendHeartbeat();
+  return stationSetupState();
 }
 
 function setupIpc() {
@@ -1096,22 +1676,44 @@ function setupIpc() {
     return { ok: resolved.ok, environment: declared, error: resolved.ok ? null : resolved.message };
   });
 
-  ipcMain.handle("get-station-setup", () => stationSetupState());
+  ipcMain.handle("get-station-setup", async () => {
+    const setup = await stationSetupState();
+    /*
+     * The approval poll is the first moment a newly approved Mac learns it is ACTIVE. Provision
+     * its fixed profile in that same normal read, rather than making the operator wait for the
+     * background heartbeat cadence or discover a hidden setup task.
+     */
+    if (setup?.stage === "active" && String(setup.calibrationStatus || "").toUpperCase() !== "VALID") {
+      await sendHeartbeat();
+      return stationSetupState();
+    }
+    return setup;
+  });
+  /*
+   * QUIT, from the window as well as the tray.
+   *
+   * The blocking setup modal cannot be dismissed and the window has no close button, so without
+   * this an operator in an unresolvable station state had no exit inside the app at all.
+   */
+  ipcMain.handle("quit-scanner", () => {
+    void quitScanner();
+    return { ok: true };
+  });
   ipcMain.handle("station-sign-in", async (_event, payload) => {
     const email = typeof payload?.email === "string" ? payload.email.trim() : "";
     const password = typeof payload?.password === "string" ? payload.password : "";
     if (!email || !password) return { ok: false, error: "Email and password are required" };
     const result = await stationClient.signIn(email, password);
-    return result.ok ? stationSetupState() : { ok: false, error: result.body?.error || "MintVault sign-in failed" };
+    if (!result.ok) return { ok: false, error: result.body?.error || "MintVault sign-in failed" };
+    return refreshStationAfterAuthentication();
   });
   ipcMain.handle("station-complete-mfa", async (_event, payload) => {
     const code = typeof payload?.code === "string" ? payload.code.trim() : "";
     const recoveryCode = typeof payload?.recoveryCode === "string" ? payload.recoveryCode.trim() : "";
     if (!code && !recoveryCode) return { ok: false, error: "Authentication code or recovery code is required" };
     const result = await stationClient.completeMfa({ code, recoveryCode });
-    return result.ok
-      ? stationSetupState()
-      : { ok: false, error: result.body?.error || "Authentication code was not accepted" };
+    if (!result.ok) return { ok: false, error: result.body?.error || "Authentication code was not accepted" };
+    return refreshStationAfterAuthentication();
   });
   ipcMain.handle("register-station", async (_event, payload) => {
     const locationId = typeof payload?.locationId === "string" && payload.locationId ? payload.locationId : undefined;
@@ -1143,25 +1745,6 @@ function setupIpc() {
     return watcher.scanActiveTarget();
   });
 
-  // Setup Preview is intentionally not a target operation. The renderer can
-  // request the one fixed full-platen local JPEG scan, but supplies neither a
-  // file path nor any certificate/card/side identity.
-  ipcMain.handle("run-positioning-preview", async () => {
-    if (!watcher) return { ok: false, error: "Scanner service is starting" };
-    return watcher.runPositioningPreview();
-  });
-
-  ipcMain.handle("get-positioning-preview", (_event, previewId) => {
-    if (!watcher || typeof previewId !== "string") return { ok: false, error: "Positioning preview is unavailable" };
-    return watcher.positioningPreviewData(previewId);
-  });
-
-  /*
-   * "apply-positioning-preview" was removed on 2026-08-17 along with the card-chasing architecture.
-   * A station's capture origin is set only by "save-capture-window-origin", which the operator drives
-   * by dragging the window — never inferred from where a card was lying.
-   */
-
   /*
    * The per-side placement gate. Like the setup Preview it carries no path and no card identity —
    * the watcher binds the approval to the side that is actually awaiting Scan, so the renderer
@@ -1175,39 +1758,6 @@ function setupIpc() {
   ipcMain.handle("get-placement-preview", (_event, previewId) => {
     if (!watcher || typeof previewId !== "string") return { ok: false, error: "Placement preview is unavailable" };
     return watcher.placementPreviewData(previewId);
-  });
-
-  /*
-   * Move the capture window. An explicit RECALIBRATION action, not part of card capture: it is
-   * reachable only from Service & Diagnostics and it invalidates any standing placement approval,
-   * because an approval measured against the old window says nothing about the new one.
-   */
-  ipcMain.handle("save-capture-window", async (_event, originMm) => {
-    if (!watcher) return { ok: false, error: "Scanner service is starting" };
-    /*
-     * AUTHORITY IS CHECKED HERE, not only by hiding a button.
-     *
-     * The renderer hides the maintenance controls when the operator lacks
-     * `partner.stations.calibrate`, but this app runs from a plain repository checkout, the preload
-     * bridge exposes `saveCaptureWindow` to the page unconditionally, and the LOCAL half of a window
-     * move is what actually drives the hardware. So "the server refuses it anyway" was only ever
-     * true of the server's RECORD — the physical rectangle would still have moved.
-     *
-     * Re-asked from the session on every call rather than cached, so a sign-out or a switch of
-     * operator takes effect immediately. The server remains the authority on the record; this is the
-     * authority on the machine.
-     */
-    let allowed = false;
-    try {
-      const setup = await stationSetupState();
-      allowed = setup?.summary?.canCalibrate === true;
-    } catch {
-      allowed = false;
-    }
-    if (!allowed) {
-      return { ok: false, error: "Moving the capture area requires station maintenance authority" };
-    }
-    return watcher.saveCaptureWindowOrigin(originMm);
   });
 
   ipcMain.handle("get-capture-preview", (_event, previewId) => {
@@ -1424,38 +1974,6 @@ app.whenReady().then(async () => {
   void pollTargetedCapture();
   scheduleTargetPoll();
 
-  // Lightweight current-state heartbeat. It is intentionally independent of
-  // target polling and carries no TIFF/certificate payload. Server-side it
-  // appends events only for meaningful connection/hardware transitions.
-  let heartbeatInFlight = false;
-  const sendHeartbeat = async () => {
-    if (heartbeatInFlight || !stationIdentity.hasActiveStationSession()) return;
-    heartbeatInFlight = true;
-    try {
-      /*
-       * Adopt the server's capture rectangle on the heartbeat, not only when the operator opens the
-       * window. `stationSetupState()` runs on demand from the renderer, so a tray-only Scanner that
-       * nobody has clicked sits at `profile_unprovisioned` — unable to Preview or scan — while the
-       * server has held a VALID calibration for it the whole time. The station should be ready
-       * because it is enrolled, not because somebody looked at it.
-       *
-       * Cheap and idempotent: it returns immediately once the local origin already agrees.
-       */
-      if (!lide400._private.jigOrigin()) await stationSetupState();
-      const result = await stationClient.heartbeat(heartbeatPayload());
-      if (!result.ok) {
-        console.warn(
-          `[station-heartbeat] rejected: ${result.body?.error?.code || result.body?.error || `HTTP ${result.status}`}`
-        );
-        if ([401, 403, 404, 426].includes(result.status) || result.body?.error?.code === "version_blocked")
-          await stationSetupState();
-      }
-    } catch (error) {
-      console.warn(`[station-heartbeat] failed: ${error?.message || error}`);
-    } finally {
-      heartbeatInFlight = false;
-    }
-  };
   const scheduleHeartbeat = () => {
     const delay = 75_000 + Math.floor(Math.random() * 30_000); // 75–105 seconds, per-Mac jitter
     setTimeout(async () => {
@@ -1528,6 +2046,47 @@ app.whenReady().then(async () => {
   setInterval(() => watcher.drainInbox().catch(() => {}), 10 * 60 * 1000);
   refreshTray();
   surfacePriorResetStatus();
+  // Refuse to become a SECOND visible Scanner on this Mac — see claimThisMac.
+  if (!claimThisMac()) {
+    isQuitting = true;
+    app.exit(0);
+    return;
+  }
+  // Last, so the manifest only ever claims an instance that actually finished starting.
+  writeRuntimeManifest();
+
+  /*
+   * A SCANNER THAT CANNOT WORK YET MUST SAY SO ON SCREEN.
+   *
+   * This app hides its Dock icon and only ever showed its window when the tray icon was clicked, so
+   * the tray was the single way in. That held until macOS declined to give a second instance a
+   * usable menu-bar slot — the isolated shop games instance reported tray bounds of
+   * {x:0, y:956, width:32, height:0} — at which point the app was running, healthy, and completely
+   * unreachable. It sat at a sign-in screen nobody could open for seventeen minutes, and the only
+   * evidence anything was wrong was a server that never saw a login attempt.
+   *
+   * So: if the station is not operational, present the window. Every non-active stage — sign in,
+   * MFA, connecting, waiting for approval, another shop's Mac — is a stage where a person is
+   * expected to look at this, and none of them should depend on finding an icon.
+   *
+   * An ACTIVE station stays quiet, exactly as before: a working Scanner must not steal focus from
+   * whatever the shop is doing.
+   */
+  try {
+    const bounds = tray?.getBounds?.();
+    if (bounds && (bounds.height === 0 || bounds.width === 0)) {
+      console.warn(`[tray] menu-bar slot looks unusable (${JSON.stringify(bounds)}) — the window is the way in`);
+    }
+    const setup = await stationSetupState();
+    if (setup?.stage !== "active") {
+      console.log(`[startup] station is not operational (${setup?.stage || "unknown"}) — showing the window`);
+      showPopover();
+    }
+  } catch (err) {
+    // Failing to READ the state is itself a reason to show the window rather than hide silently.
+    console.error(`[startup] could not resolve station state: ${err && err.message} — showing the window`);
+    showPopover();
+  }
 });
 
 app.on("window-all-closed", (e) => {
@@ -1537,4 +2096,7 @@ app.on("window-all-closed", (e) => {
 
 app.on("before-quit", () => {
   isQuitting = true;
+  // Withdraw this instance's claims, so neither a launcher nor a sibling verifies against a corpse.
+  clearRuntimeManifest();
+  releaseThisMac();
 });

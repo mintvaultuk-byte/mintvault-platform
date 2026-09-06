@@ -1,6 +1,6 @@
-import { useState, useCallback, useEffect, useRef } from "react";
+import { useState, useEffect, useRef } from "react";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
-import { apiRequest } from "@/lib/queryClient";
+import { adminFetch, apiRequest } from "@/lib/queryClient";
 import type { CertificateRecord, LabelOverride } from "@shared/schema";
 import { useToast } from "@/hooks/use-toast";
 import { Badge } from "@/components/ui/badge";
@@ -26,8 +26,13 @@ import {
   Upload,
 } from "lucide-react";
 import { Textarea } from "@/components/ui/textarea";
+import { ALREADY_PRINTED_STATES, type PrintState } from "@shared/print-lifecycle";
 
-type BrowserCert = CertificateRecord & { isPrinted: boolean; reprintCount: number };
+type BrowserCert = Omit<CertificateRecord, "printState"> & {
+  printState: PrintState;
+  isPrinted: boolean;
+  reprintCount: number;
+};
 
 function gradeDisplay(cert: CertificateRecord): string {
   if (!cert.gradeOverall) return "—";
@@ -48,7 +53,7 @@ function EditModal({ cert, onClose }: { cert: BrowserCert; onClose: () => void }
   const { data: existingOverride } = useQuery<LabelOverride | null>({
     queryKey: ["/api/admin/printing/override", cert.certId],
     queryFn: async () => {
-      const res = await fetch(`/api/admin/printing/override/${cert.certId}`, { credentials: "include" });
+      const res = await adminFetch(`/api/admin/printing/override/${cert.certId}`, { credentials: "include" });
       if (!res.ok) return null;
       return res.json();
     },
@@ -196,7 +201,7 @@ function GradingReportModal({ cert, onClose }: { cert: BrowserCert; onClose: () 
   const { data: existing, isLoading } = useQuery<{ gradingReport?: Record<string, string> } | null>({
     queryKey: ["/api/admin/printing/browser/cert", cert.certId],
     queryFn: async () => {
-      const res = await fetch(`/api/cert/${cert.certId}`, { credentials: "include" });
+      const res = await adminFetch(`/api/cert/${cert.certId}`, { credentials: "include" });
       if (!res.ok) return null;
       return res.json();
     },
@@ -440,15 +445,19 @@ function BrowserRow({
       >
         <Eye className="h-4 w-4" />
       </button>
-      <button
-        onClick={onReprint}
-        disabled={reprintPending}
-        className="text-[var(--admin-ink-faint)] hover:text-[var(--admin-blue)] transition-colors p-1 rounded disabled:opacity-40"
-        title="Reprint label"
-        data-testid={`btn-reprint-${cert.certId}`}
-      >
-        {reprintPending ? <Loader2 className="h-4 w-4 animate-spin" /> : <Printer className="h-4 w-4" />}
-      </button>
+      {ALREADY_PRINTED_STATES.has(cert.printState) ? (
+        <button
+          onClick={onReprint}
+          disabled={reprintPending}
+          className="text-[var(--admin-ink-faint)] hover:text-[var(--admin-blue)] transition-colors p-1 rounded disabled:opacity-40"
+          title="Reprint produced label"
+          data-testid={`btn-reprint-${cert.certId}`}
+        >
+          {reprintPending ? <Loader2 className="h-4 w-4 animate-spin" /> : <Printer className="h-4 w-4" />}
+        </button>
+      ) : (
+        <span className="h-6 w-6" aria-hidden="true" />
+      )}
       <button
         onClick={onEdit}
         className="text-[var(--admin-ink-faint)] hover:text-[var(--admin-gold-hi)] transition-colors p-1 rounded"
@@ -621,7 +630,7 @@ function AttachImagesModal({ cert, onClose }: { cert: BrowserCert; onClose: () =
       const fd = new FormData();
       fd.append("front", front);
       if (back) fd.append("back", back);
-      const res = await fetch(`/api/admin/certificates/${certNumericId}/attach-images`, {
+      const res = await adminFetch(`/api/admin/certificates/${certNumericId}/attach-images`, {
         method: "PUT",
         credentials: "include",
         body: fd,
@@ -757,16 +766,19 @@ function AttachImagesModal({ cert, onClose }: { cert: BrowserCert; onClose: () =
 }
 
 // ── Main Export ───────────────────────────────────────────────────────────────
-export default function AdminCertBrowser() {
-  const { toast } = useToast();
-  const qc = useQueryClient();
+export default function AdminCertBrowser({
+  onReprint,
+  reprintingCertIds,
+}: {
+  onReprint: (certId: string) => void;
+  reprintingCertIds: ReadonlySet<string>;
+}) {
   const [search, setSearch] = useState("");
   const [previewCert, setPreviewCert] = useState<BrowserCert | null>(null);
   const [editCert, setEditCert] = useState<BrowserCert | null>(null);
   const [reportCert, setReportCert] = useState<BrowserCert | null>(null);
   const [igPostCert, setIgPostCert] = useState<BrowserCert | null>(null);
   const [attachCert, setAttachCert] = useState<BrowserCert | null>(null);
-  const [reprintingId, setReprintingId] = useState<string | null>(null);
 
   const {
     data: certs = [],
@@ -775,33 +787,6 @@ export default function AdminCertBrowser() {
   } = useQuery<BrowserCert[]>({
     queryKey: ["/api/admin/printing/browser"],
   });
-
-  const handleReprint = useCallback(
-    async (cert: BrowserCert) => {
-      setReprintingId(cert.certId);
-      try {
-        const res = await fetch(`/api/admin/printing/reprint/${cert.certId}?side=both`, {
-          method: "POST",
-          credentials: "include",
-        });
-        if (!res.ok) throw new Error("Reprint failed");
-        const blob = await res.blob();
-        const url = URL.createObjectURL(blob);
-        const a = document.createElement("a");
-        a.href = url;
-        a.download = `${cert.certId}-reprint.pdf`;
-        a.click();
-        URL.revokeObjectURL(url);
-        toast({ title: "Reprint generated", description: cert.certId });
-        qc.invalidateQueries({ queryKey: ["/api/admin/printing/browser"] });
-      } catch {
-        toast({ title: "Reprint failed", variant: "destructive" });
-      } finally {
-        setReprintingId(null);
-      }
-    },
-    [toast, qc]
-  );
 
   const filtered = certs.filter((c) => {
     if (!search) return true;
@@ -862,7 +847,7 @@ export default function AdminCertBrowser() {
             <Eye className="h-3 w-3" /> Preview
           </span>
           <span className="flex items-center gap-1">
-            <Printer className="h-3 w-3" /> Reprint PDF
+            <Printer className="h-3 w-3" /> Reprint produced label
           </span>
           <span className="flex items-center gap-1">
             <Pencil className="h-3 w-3" /> Edit display data
@@ -886,12 +871,12 @@ export default function AdminCertBrowser() {
               key={cert.certId}
               cert={cert}
               onPreview={() => setPreviewCert(cert)}
-              onReprint={() => handleReprint(cert)}
+              onReprint={() => onReprint(cert.certId)}
               onEdit={() => setEditCert(cert)}
               onReport={() => setReportCert(cert)}
               onIgPost={() => setIgPostCert(cert)}
               onAttachImages={() => setAttachCert(cert)}
-              reprintPending={reprintingId === cert.certId}
+              reprintPending={reprintingCertIds.has(cert.certId)}
             />
           ))}
         </div>

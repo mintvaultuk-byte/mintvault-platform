@@ -143,33 +143,13 @@ function ShopRow({ shop }: { shop: PartnerTableRow }) {
 }
 
 export default function PartnerNetworkShopsPage() {
-  const [pathname, navigate] = useLocation();
-  const [authed, setAuthed] = useState<boolean | null>(null);
+  const [, navigate] = useLocation();
   const [search, setSearch] = useState("");
   const [filter, setFilter] = useState<ShopFilter>("all");
-
-  useEffect(() => {
-    let live = true;
-    fetch("/api/admin/session", { credentials: "include" })
-      .then((r) => (r.ok ? r.json() : null))
-      .then((d) => live && setAuthed(d?.authenticated === true))
-      .catch(() => live && setAuthed(false));
-    return () => {
-      live = false;
-    };
-  }, []);
-  useEffect(() => {
-    if (authed === false)
-      navigate(
-        `/admin/login?next=${encodeURIComponent(`${pathname}${window.location.search}${window.location.hash}`)}`,
-        { replace: true }
-      );
-  }, [authed, navigate, pathname]);
 
   const network = useQuery<{ overview: PartnerNetworkOverview }>({
     queryKey: [BASE],
     queryFn: () => apiRequest("GET", BASE).then((r) => r.json()),
-    enabled: authed === true,
     refetchInterval: 60_000,
   });
   const overview = network.data?.overview;
@@ -186,14 +166,13 @@ export default function PartnerNetworkShopsPage() {
     });
   }, [overview, search, filter]);
 
-  if (authed === null || network.isLoading)
+  if (network.isLoading)
     return <div className="admin-root grid min-h-[60vh] place-items-center">Loading shops…</div>;
 
   return (
     <AdminShell
       activeTab="dashboard"
       onTabChange={() => navigate("/admin")}
-      onLogout={() => navigate("/admin")}
       title="Partner Network"
       crumb="Shops"
     >

@@ -1,23 +1,11 @@
 import { useState } from "react";
-import { useQuery, useMutation } from "@tanstack/react-query";
-import { apiRequest, queryClient } from "@/lib/queryClient";
-import { submissionTypes } from "@shared/commerce";
+import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
+import { apiRequest } from "@/lib/queryClient";
+import { submissionTypes, type ServiceTierAdminRow } from "@shared/commerce";
 import { Save, DollarSign, Clock, Shield, ToggleLeft, ToggleRight } from "lucide-react";
 
-interface ServiceTierRow {
-  id: number;
-  service_type: string;
-  name: string;
-  tier_id: string;
-  price_per_card: number;
-  turnaround_days: number;
-  max_value_gbp: number;
-  features: string[];
-  is_active: boolean;
-  sort_order: number;
-}
-
 export default function AdminPricing() {
+  const queryClient = useQueryClient();
   const [activeService, setActiveService] = useState("grading");
   const [editingId, setEditingId] = useState<number | null>(null);
   const [editForm, setEditForm] = useState<{
@@ -27,30 +15,41 @@ export default function AdminPricing() {
     isActive: boolean;
   }>({ pricePerCard: "", turnaroundDays: "", maxValueGbp: "", isActive: true });
 
-  const { data: allTiers = [], isLoading } = useQuery<ServiceTierRow[]>({
+  const {
+    data: allTiers = [],
+    isLoading,
+    isError,
+  } = useQuery<ServiceTierAdminRow[]>({
     queryKey: ["/api/admin/service-tiers"],
   });
 
   const updateMutation = useMutation({
-    mutationFn: async ({ id, data }: { id: number; data: any }) => {
+    mutationFn: async ({
+      id,
+      data,
+    }: {
+      id: number;
+      data: Pick<ServiceTierAdminRow, "pricePerCard" | "turnaroundDays" | "maxValueGbp" | "isActive">;
+    }) => {
       await apiRequest("PUT", `/api/admin/service-tiers/${id}`, data);
     },
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ["/api/admin/service-tiers"] });
       queryClient.invalidateQueries({ queryKey: ["/api/service-tiers"] });
+      queryClient.invalidateQueries({ queryKey: ["/api/promotions/active"] });
       setEditingId(null);
     },
   });
 
-  const tiers = allTiers.filter((t) => t.service_type === activeService);
+  const tiers = isError ? [] : allTiers.filter((t) => t.serviceType === activeService);
 
-  const startEdit = (tier: ServiceTierRow) => {
+  const startEdit = (tier: ServiceTierAdminRow) => {
     setEditingId(tier.id);
     setEditForm({
-      pricePerCard: String(tier.price_per_card),
-      turnaroundDays: String(tier.turnaround_days),
-      maxValueGbp: String(tier.max_value_gbp),
-      isActive: tier.is_active,
+      pricePerCard: String(tier.pricePerCard),
+      turnaroundDays: String(tier.turnaroundDays),
+      maxValueGbp: String(tier.maxValueGbp),
+      isActive: tier.isActive === true,
     });
   };
 
@@ -100,7 +99,9 @@ export default function AdminPricing() {
         ))}
       </div>
 
-      {isLoading ? (
+      {isError ? (
+        <p role="alert">Pricing is unavailable. Reload to try again.</p>
+      ) : isLoading ? (
         <div className="animate-pulse space-y-3">
           {[1, 2, 3].map((i) => (
             <div key={i} className="h-16 bg-[var(--admin-line-soft)] rounded" />
@@ -116,16 +117,16 @@ export default function AdminPricing() {
             <div
               key={tier.id}
               className={`border rounded-lg p-4 transition-colors ${
-                !tier.is_active ? "border-[var(--admin-line-soft)] opacity-60" : "border-[var(--admin-line)]"
+                !tier.isActive ? "border-[var(--admin-line-soft)] opacity-60" : "border-[var(--admin-line)]"
               }`}
-              data-testid={`pricing-tier-${tier.tier_id}`}
+              data-testid={`pricing-tier-${tier.tierId}`}
             >
               {editingId === tier.id ? (
                 <div className="space-y-3">
                   <div className="flex items-center justify-between">
                     <h3 className="text-[var(--admin-gold-hi)] font-bold text-lg tracking-wider">{tier.name}</h3>
                     <span className="text-[var(--admin-ink-faint)] text-xs" style={{ fontFamily: "var(--admin-mono)" }}>
-                      {tier.service_type} / {tier.tier_id}
+                      {tier.serviceType} / {tier.tierId}
                     </span>
                   </div>
 
@@ -207,27 +208,27 @@ export default function AdminPricing() {
                 <button
                   onClick={() => startEdit(tier)}
                   className="w-full text-left"
-                  data-testid={`button-edit-tier-${tier.tier_id}`}
+                  data-testid={`button-edit-tier-${tier.tierId}`}
                 >
                   <div className="flex justify-between items-start">
                     <div>
                       <div className="flex items-center gap-2">
                         <h3 className="text-[var(--admin-gold-hi)] font-bold text-lg tracking-wider">{tier.name}</h3>
-                        {!tier.is_active && (
+                        {!tier.isActive && (
                           <span className="text-xs px-1.5 py-0.5 rounded bg-[var(--admin-panel2)] text-[var(--admin-ink-faint)] border border-[var(--admin-line-soft)]">
                             Inactive
                           </span>
                         )}
                       </div>
                       <p className="text-[var(--admin-ink-dim)] text-sm mt-1">
-                        {tier.turnaround_days} working days · Max value: £{tier.max_value_gbp.toLocaleString()}
+                        {tier.turnaroundDays} working days · Max value: £{tier.maxValueGbp.toLocaleString()}
                       </p>
                     </div>
                     <span
                       className="text-[var(--admin-ink)] font-bold text-lg"
                       style={{ fontFamily: "var(--admin-mono)" }}
                     >
-                      £{(tier.price_per_card / 100).toFixed(tier.price_per_card % 100 === 0 ? 0 : 2)} per card
+                      £{(tier.pricePerCard / 100).toFixed(tier.pricePerCard % 100 === 0 ? 0 : 2)} per card
                     </span>
                   </div>
                 </button>
@@ -238,6 +239,7 @@ export default function AdminPricing() {
       )}
 
       <div className="mt-6 border border-[var(--admin-line-soft)] rounded-lg p-4">
+        {updateMutation.isError && <p role="alert">Pricing was not saved. Please retry.</p>}
         <p className="text-[var(--admin-ink-faint)] text-xs">
           Changes take effect immediately for new submissions. Existing submissions retain their original pricing.
           Editing one service type does not affect other service types.

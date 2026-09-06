@@ -7,6 +7,7 @@
  */
 import { Router } from "express";
 import { attachImagesUpload } from "../lib/multer-configs";
+import { uploadMemoryAdmission } from "../lib/upload-memory-admission";
 import { requirePartnerAuth, requirePartnerCapability, requireNotViewOnly, requireNotSensitiveFrozen } from "./session";
 import { partnerSubmissionMutationLimiter } from "./rate-limit";
 import {
@@ -40,12 +41,14 @@ function sendError(res: import("express").Response, err: unknown): void {
             err.code === "submission_intake_disabled"
             ? 503
             : err.code === "stale_version" ||
-              err.code === "idempotency_conflict" ||
-              err.code === "service_tier_unavailable" ||
-              err.code === "credit_unavailable" ||
-              err.code === "credit_settlement_required"
-            ? 409
-            : 400;
+                err.code === "idempotency_conflict" ||
+                err.code === "upload_in_progress" ||
+                err.code === "upload_terminal" ||
+                err.code === "service_tier_unavailable" ||
+                err.code === "credit_unavailable" ||
+                err.code === "credit_settlement_required"
+              ? 409
+              : 400;
     res.status(status).json({ error: { code: err.code, message: err.message } });
     return;
   }
@@ -408,6 +411,7 @@ export function partnerSubmissionRouter(): Router {
     requireNotViewOnly,
     requireNotSensitiveFrozen,
     partnerSubmissionMutationLimiter,
+    uploadMemoryAdmission("partner_card_image", 256),
     attachImagesUpload.single("image"),
     async (req, res) => {
       try {
@@ -420,7 +424,23 @@ export function partnerSubmissionRouter(): Router {
           res.status(400).json({ error: { code: "validation", message: "Choose an image to upload." } });
           return;
         }
-        res.json(await uploadCardImage(req.partner!, String(req.params.id), String(req.params.cardId), side, req.file));
+        const idempotencyKey = req.header("Idempotency-Key")?.trim() ?? "";
+        if (!idempotencyKey) {
+          res.status(400).json({
+            error: { code: "validation", message: "An Idempotency-Key header is required for image uploads." },
+          });
+          return;
+        }
+        res.json(
+          await uploadCardImage(
+            req.partner!,
+            String(req.params.id),
+            String(req.params.cardId),
+            side,
+            req.file,
+            idempotencyKey
+          )
+        );
       } catch (err) {
         sendError(res, err);
       }

@@ -34,18 +34,61 @@ import { toDirectEndpoint } from "./read-only-session";
 import { basename, dirname, join } from "node:path";
 import { createHash } from "node:crypto";
 import { lintSql, isApprovedDestructiveFinding, unapprovedBlockingFindings } from "./lint-destructive-sql";
+import { securePostgresPoolConnection } from "../../server/lib/postgres-transport-security";
+import type pg from "pg";
+import { assertFreshVq, attestedVqFiles, applyHistoricalVq } from "./vq-schema-recovery";
 
-function defaultMigrationsDir(): string {
+export type MigrationEstate = "main" | "vault-quest";
+
+export function migrationProfile(estate: MigrationEstate = "main") {
+  if (estate !== "main" && estate !== "vault-quest") {
+    throw new Error("Migration estate must be main or vault-quest.");
+  }
+  const directory = estate === "main" ? "migrations" : "migrations-vq";
   const entry = process.argv[1] ?? "";
-  return basename(entry) === "migrate.cjs"
-    ? join(dirname(entry), "..", "migrations")
-    : join(process.cwd(), "migrations");
+  return {
+    estate,
+    migrationsDir:
+      basename(entry) === "migrate.cjs" ? join(dirname(entry), "..", directory) : join(process.cwd(), directory),
+    journalTable: estate === "main" ? "schema_migrations" : "drizzle.vq_schema_migrations",
+    advisoryLockKey: estate === "main" ? 4_150_205 : 4_150_206,
+  } as const;
 }
 
-const MIGRATIONS_DIR = defaultMigrationsDir();
+/** Closed choice, validated before resolving credentials or opening a connection. */
+export function parseMigrationEstate(args: string[]): MigrationEstate {
+  const flags = args.filter((arg) => arg === "--estate" || arg.startsWith("--estate="));
+  if (flags.length === 0) return "main";
+  if (flags.length !== 1 || flags[0] !== "--estate") {
+    throw new Error("Specify --estate main or --estate vault-quest exactly once.");
+  }
+  const value = args[args.indexOf("--estate") + 1];
+  if (value !== "main" && value !== "vault-quest") {
+    throw new Error("Migration estate must be main or vault-quest.");
+  }
+  return value;
+}
+
+export function parseHistoricalBaseline(args: string[], estate: MigrationEstate): boolean {
+  const flags = args.filter((arg) => arg.startsWith("--historical-baseline"));
+  if (flags.length === 0) return false;
+  if (
+    flags.length !== 1 ||
+    flags[0] !== "--historical-baseline-v1" ||
+    estate !== "vault-quest" ||
+    args.length !== 4 ||
+    ["--estate", "vault-quest", "--historical-baseline-v1", "--apply"].some(
+      (token) => args.filter((arg) => arg === token).length !== 1
+    ) ||
+    args[args.indexOf("--estate") + 1] !== "vault-quest"
+  ) {
+    throw new Error("Historical baseline requires only --estate vault-quest --historical-baseline-v1 --apply.");
+  }
+  return true;
+}
+
+const MIGRATIONS_DIR = migrationProfile().migrationsDir;
 const FILE_RE = /^(\d{4,})_.+\.sql$/;
-// Fixed advisory-lock key for the migration runner (arbitrary constant, namespaced).
-const ADVISORY_LOCK_KEY = 4_150_205; // "P0.5" mnemonic; any stable int works.
 
 function approvedDestructiveSuffix(filename: string): string {
   if (filename === "0094_scanner_capture_physical_release.sql") return " (approved protected index replacement)";
@@ -157,10 +200,12 @@ export function assertNotSharedBackend(ownPid: number, probePid: number): void {
 export async function assertDedicatedBackend(
   connectionString: string,
   ownPid: number,
-  ssl: { rejectUnauthorized: boolean } | undefined
+  // Backwards-compatible test call shape only. Caller SSL is never authority;
+  // every probe re-derives strict transport from the canonical URL.
+  _ignoredLegacySsl?: unknown
 ): Promise<void> {
   const { Client } = await import("pg");
-  const probe = new Client({ connectionString, ssl, connectionTimeoutMillis: 20_000 });
+  const probe = new Client(migrationClientConfig(connectionString));
   probe.on("error", () => {
     /* a probe failure is reported by the awaited query below */
   });
@@ -181,7 +226,14 @@ export async function assertDedicatedBackend(
   }
 }
 
-interface MigrationFile {
+export function migrationClientConfig(connectionString: string): pg.ClientConfig {
+  return {
+    ...securePostgresPoolConnection(connectionString, "MINTVAULT_DATABASE_URL"),
+    connectionTimeoutMillis: 20_000,
+  };
+}
+
+export interface MigrationFile {
   number: string;
   filename: string;
   path: string;
@@ -309,8 +361,10 @@ export function listMigrationFiles(dir: string = MIGRATIONS_DIR): MigrationFile[
   return files;
 }
 
-const JOURNAL_DDL = `
-CREATE TABLE IF NOT EXISTS schema_migrations (
+function journalDdl(estate: MigrationEstate): string {
+  const { journalTable } = migrationProfile(estate);
+  return `${estate === "vault-quest" ? "CREATE SCHEMA IF NOT EXISTS drizzle;" : ""}
+CREATE TABLE IF NOT EXISTS ${journalTable} (
   id SERIAL PRIMARY KEY,
   filename TEXT NOT NULL UNIQUE,
   checksum TEXT NOT NULL,
@@ -319,25 +373,36 @@ CREATE TABLE IF NOT EXISTS schema_migrations (
   status TEXT NOT NULL DEFAULT 'applied',
   applied_by TEXT NOT NULL DEFAULT current_user
 );
-ALTER TABLE schema_migrations ADD COLUMN IF NOT EXISTS started_at TIMESTAMPTZ NOT NULL DEFAULT now();
-ALTER TABLE schema_migrations ADD COLUMN IF NOT EXISTS completed_at TIMESTAMPTZ;
-ALTER TABLE schema_migrations ADD COLUMN IF NOT EXISTS status TEXT NOT NULL DEFAULT 'applied';`;
+ALTER TABLE ${journalTable} ADD COLUMN IF NOT EXISTS started_at TIMESTAMPTZ NOT NULL DEFAULT now();
+ALTER TABLE ${journalTable} ADD COLUMN IF NOT EXISTS completed_at TIMESTAMPTZ;
+ALTER TABLE ${journalTable} ADD COLUMN IF NOT EXISTS status TEXT NOT NULL DEFAULT 'applied';`;
+}
 
-interface PgClientLike {
+export interface PgClientLike {
   query: (sql: string, args?: unknown[]) => Promise<{ rows: Array<Record<string, unknown>> }>;
 }
 
-async function ensureJournal(client: PgClientLike): Promise<void> {
-  await client.query(JOURNAL_DDL);
+async function ensureJournal(client: PgClientLike, estate: MigrationEstate): Promise<void> {
+  if (estate === "vault-quest") await journalExists(client, estate);
+  await client.query(journalDdl(estate));
 }
 
-interface JournalRow {
+export interface JournalRow {
   checksum: string;
   status: string;
 }
 
-async function journalExists(client: PgClientLike): Promise<boolean> {
-  const { rows } = await client.query("SELECT to_regclass('public.schema_migrations') AS reg");
+async function journalExists(client: PgClientLike, estate: MigrationEstate): Promise<boolean> {
+  const { journalTable } = migrationProfile(estate);
+  const relation = estate === "main" ? `public.${journalTable}` : journalTable;
+  const legacyCheck =
+    estate === "vault-quest"
+      ? ", COALESCE(to_regclass('public.vq_schema_migrations'), to_regclass('public.vq_schema_baselines'), to_regclass('public.vq_schema_migrations_id_seq')) AS legacy"
+      : "";
+  const { rows } = await client.query(`SELECT to_regclass('${relation}') AS reg${legacyCheck}`);
+  if (rows[0]?.legacy != null) {
+    throw new Error("Vault Quest refuses legacy public control state; do not copy or fabricate migration history.");
+  }
   return rows[0]?.reg != null;
 }
 
@@ -345,15 +410,22 @@ async function journalExists(client: PgClientLike): Promise<boolean> {
  * Read-only journal read. If the journal table does not exist yet, returns an empty map
  * WITHOUT creating it — so planMigrations (dry-run) never mutates the database.
  */
-async function journalMap(client: PgClientLike): Promise<Map<string, JournalRow>> {
+async function journalMap(client: PgClientLike, estate: MigrationEstate): Promise<Map<string, JournalRow>> {
+  const { journalTable } = migrationProfile(estate);
   const m = new Map<string, JournalRow>();
-  if (!(await journalExists(client))) return m;
-  const { rows } = await client.query("SELECT filename, checksum, status FROM schema_migrations");
+  if (!(await journalExists(client, estate))) {
+    if (estate === "vault-quest") await assertFreshVq(client);
+    return m;
+  }
+  const { rows } = await client.query(`SELECT filename, checksum, status FROM ${journalTable}`);
   for (const r of rows) m.set(String(r.filename), { checksum: String(r.checksum), status: String(r.status) });
+  if (estate === "vault-quest" && m.size === 0) await assertFreshVq(client);
   return m;
 }
 
 export interface MigratePlan {
+  /** Observed base schema, never represented as execution rows. */
+  attestedNotApplied?: string[];
   pending: string[];
   alreadyApplied: string[];
   checksumMismatches: { filename: string; storedChecksum: string; currentChecksum: string }[];
@@ -369,8 +441,13 @@ export interface MigratePlan {
 }
 
 /** Read-only planning: never mutates the database (does not create the journal table). */
-export async function planMigrations(client: PgClientLike, files: MigrationFile[]): Promise<MigratePlan> {
-  const journal = await journalMap(client);
+export async function planMigrations(
+  client: PgClientLike,
+  files: MigrationFile[],
+  estate: MigrationEstate = "main"
+): Promise<MigratePlan> {
+  const journal = await journalMap(client, estate);
+  const attested = estate === "vault-quest" ? await attestedVqFiles(client, files, journal) : [];
   const plan: MigratePlan = {
     pending: [],
     alreadyApplied: [],
@@ -379,7 +456,9 @@ export async function planMigrations(client: PgClientLike, files: MigrationFile[
     destructive: [],
     journalFilenames: [...journal.keys()],
   };
+  if (estate === "vault-quest") plan.attestedNotApplied = attested;
   for (const f of files) {
+    if (attested.includes(f.filename)) continue;
     const row = journal.get(f.filename);
     if (row === undefined) {
       plan.pending.push(f.filename);
@@ -511,8 +590,20 @@ export function partitionIdentityConflicts(
 export async function applyMigrations(
   client: PgClientLike,
   files: MigrationFile[],
-  opts: { allowDestructive?: boolean; exclusions?: LineageExclusion[] } = {}
+  opts: {
+    allowDestructive?: boolean;
+    exclusions?: LineageExclusion[];
+    estate?: MigrationEstate;
+    historicalBaseline?: boolean;
+  } = {}
 ): Promise<{ applied: string[] }> {
+  const { estate, journalTable, advisoryLockKey } = migrationProfile(opts.estate);
+  if (opts.historicalBaseline && (estate !== "vault-quest" || opts.allowDestructive || opts.exclusions?.length)) {
+    throw new Error("Historical baseline is an exact non-destructive Vault Quest operation.");
+  }
+  if (estate === "vault-quest" && opts.exclusions?.length) {
+    throw new Error("Vault Quest does not accept main-lineage exclusion declarations.");
+  }
   // Serialise concurrent runners: a second runner fails fast instead of double-applying.
   // Capture the backend identity FIRST, so lock ownership can be proven against a specific
   // server process rather than assumed from a boolean.
@@ -521,7 +612,7 @@ export async function applyMigrations(
   if (!Number.isFinite(ownerPid)) {
     throw new Error("Could not determine the migration runner's backend PID. Refusing to run.");
   }
-  const lockRes = await client.query("SELECT pg_try_advisory_lock($1) AS got", [ADVISORY_LOCK_KEY]);
+  const lockRes = await client.query("SELECT pg_try_advisory_lock($1) AS got", [advisoryLockKey]);
   if (lockRes.rows[0]?.got !== true) {
     throw new Error("Another migration runner holds the advisory lock. Refusing to run concurrently.");
   }
@@ -544,7 +635,7 @@ export async function applyMigrations(
           AND l.classid = 0 AND l.objid = $1 AND l.objsubid = 1
           AND l.database = (SELECT oid FROM pg_database WHERE datname = current_database())
           AND l.granted`,
-      [ADVISORY_LOCK_KEY]
+      [advisoryLockKey]
     );
     const rows = r.rows as unknown as { pid: number; current_pid: number }[];
     const currentPid = Number(rows[0]?.current_pid ?? NaN);
@@ -563,8 +654,18 @@ export async function applyMigrations(
   };
   await assertLockOwned("after acquire");
   try {
-    await ensureJournal(client); // create/upgrade the journal only on the apply path (never on dry-run)
-    const plan = await planMigrations(client, files);
+    if (opts.historicalBaseline)
+      return await applyHistoricalVq(client, files, {
+        assertLockOwned,
+        journalExists: () => journalExists(client, "vault-quest"),
+        ensureJournal: () => ensureJournal(client, "vault-quest"),
+      });
+    if (estate === "vault-quest") {
+      if (await journalExists(client, estate)) await planMigrations(client, files, estate);
+      else await assertFreshVq(client);
+    }
+    await ensureJournal(client, estate); // create/upgrade the journal only on the apply path (never on dry-run)
+    const plan = await planMigrations(client, files, estate);
     if (plan.inconsistent.length > 0) {
       throw new Error(
         `Journal inconsistent — rows not in 'applied' state (crashed run?): ${plan.inconsistent
@@ -652,16 +753,16 @@ export async function applyMigrations(
         // Non-transactional migration (e.g. CREATE INDEX CONCURRENTLY): cannot run in a txn.
         // Record intent, run, then mark complete. Must be individually idempotent.
         await client.query(
-          "INSERT INTO schema_migrations (filename, checksum, status) VALUES ($1,$2,'applying') ON CONFLICT (filename) DO UPDATE SET status='applying', started_at=now()",
+          `INSERT INTO ${journalTable} (filename, checksum, status) VALUES ($1,$2,'applying') ON CONFLICT (filename) DO UPDATE SET status='applying', started_at=now()`,
           [f.filename, f.checksum]
         );
         try {
           await applyNonTransactionalMigration(client, f);
-          await client.query("UPDATE schema_migrations SET status='applied', completed_at=now() WHERE filename=$1", [
+          await client.query(`UPDATE ${journalTable} SET status='applied', completed_at=now() WHERE filename=$1`, [
             f.filename,
           ]);
         } catch (e) {
-          await client.query("UPDATE schema_migrations SET status='failed' WHERE filename=$1", [f.filename]);
+          await client.query(`UPDATE ${journalTable} SET status='failed' WHERE filename=$1`, [f.filename]);
           throw new Error(`Non-transactional migration ${f.filename} failed: ${(e as Error).message}`);
         }
       } else {
@@ -669,7 +770,7 @@ export async function applyMigrations(
         try {
           await client.query(f.sql);
           await client.query(
-            "INSERT INTO schema_migrations (filename, checksum, status, completed_at) VALUES ($1,$2,'applied',now())",
+            `INSERT INTO ${journalTable} (filename, checksum, status, completed_at) VALUES ($1,$2,'applied',now())`,
             [f.filename, f.checksum]
           );
           await client.query("COMMIT");
@@ -682,7 +783,7 @@ export async function applyMigrations(
     }
     return { applied };
   } finally {
-    await client.query("SELECT pg_advisory_unlock($1)", [ADVISORY_LOCK_KEY]);
+    await client.query("SELECT pg_advisory_unlock($1)", [advisoryLockKey]);
   }
 }
 
@@ -733,11 +834,15 @@ export interface ScopedMigrationResult {
 }
 
 /** Stable fingerprint of the journal, used to detect a concurrent operator. */
-async function journalFingerprint(client: PgClientLike): Promise<{ count: number; fingerprint: string }> {
+async function journalFingerprint(
+  client: PgClientLike,
+  estate: MigrationEstate
+): Promise<{ count: number; fingerprint: string }> {
+  const { journalTable } = migrationProfile(estate);
   const { rows } = await client.query(
     `SELECT count(*)::int AS count,
             coalesce(md5(string_agg(filename || ':' || checksum, '|' ORDER BY filename)), 'empty') AS fingerprint
-       FROM schema_migrations`
+       FROM ${journalTable}`
   );
   const r = rows[0] as { count: number; fingerprint: string };
   return { count: Number(r.count), fingerprint: r.fingerprint };
@@ -746,10 +851,16 @@ async function journalFingerprint(client: PgClientLike): Promise<{ count: number
 export async function applyScopedMigration(
   client: PgClientLike,
   targetFilename: string,
-  opts: { files?: MigrationFile[]; allowDestructive?: boolean; log?: (m: string) => void } = {}
+  opts: {
+    files?: MigrationFile[];
+    allowDestructive?: boolean;
+    log?: (m: string) => void;
+    estate?: MigrationEstate;
+  } = {}
 ): Promise<ScopedMigrationResult> {
+  const { estate, journalTable, advisoryLockKey, migrationsDir } = migrationProfile(opts.estate);
   const log = opts.log ?? (() => {});
-  const files = opts.files ?? listMigrationFiles();
+  const files = opts.files ?? listMigrationFiles(migrationsDir);
 
   // (1) EXACT filename. No wildcard, no number-only, no prefix matching — an
   // ambiguous target is exactly how a convergence tool becomes a footgun.
@@ -761,15 +872,22 @@ export async function applyScopedMigration(
     throw new Error(`Scoped migration target '${targetFilename}' does not exist in the migrations directory.`);
   }
 
-  if (!(await journalExists(client))) {
+  if (
+    estate === "vault-quest" &&
+    (await planMigrations(client, files, estate)).attestedNotApplied?.includes(targetFilename)
+  ) {
+    throw new Error("Scoped Vault Quest cannot execute an attested historical migration.");
+  }
+
+  if (!(await journalExists(client, estate))) {
     throw new Error(
-      "Scoped migration refuses to run: this database has no schema_migrations journal. " +
+      `Scoped migration refuses to run: this database has no ${journalTable} journal. ` +
         "Scoped mode converges an EXISTING lineage; it is not a bootstrap path."
     );
   }
 
-  const before = await journalFingerprint(client);
-  const journal = await journalMap(client);
+  const before = await journalFingerprint(client, estate);
+  const journal = await journalMap(client, estate);
 
   // (3) Already applied under this exact identity → no-op, never a second execution.
   const existing = journal.get(target.filename);
@@ -835,7 +953,7 @@ export async function applyScopedMigration(
   // (7)/(8) Serialise against any other migration operator. Production's journal
   // moved twice in one day while another operator worked the backlog, so this is a
   // real condition, not a theoretical one.
-  const lock = await client.query("SELECT pg_try_advisory_lock($1) AS ok", [ADVISORY_LOCK_KEY]);
+  const lock = await client.query("SELECT pg_try_advisory_lock($1) AS ok", [advisoryLockKey]);
   if ((lock.rows[0] as { ok: boolean } | undefined)?.ok !== true) {
     throw new Error(
       "Scoped migration refuses to run: another migration runner holds the advisory lock. Do not race it."
@@ -846,7 +964,16 @@ export async function applyScopedMigration(
     // (9) THE RACE CHECK. Re-read the journal under the lock and require it to be
     // byte-identical to the pre-flight read. If another operator applied anything
     // between planning and execution, the plan is stale — abort rather than act on it.
-    const underLock = await journalFingerprint(client);
+    if (estate === "vault-quest" && !(await journalExists(client, estate))) {
+      throw new Error("Scoped Vault Quest journal disappeared after pre-flight. Refusing to run.");
+    }
+    if (
+      estate === "vault-quest" &&
+      (await planMigrations(client, files, estate)).attestedNotApplied?.includes(targetFilename)
+    ) {
+      throw new Error("Scoped Vault Quest cannot execute an attested historical migration.");
+    }
+    const underLock = await journalFingerprint(client, estate);
     if (underLock.fingerprint !== before.fingerprint || underLock.count !== before.count) {
       throw new Error(
         `Scoped migration refuses to run: the journal changed between pre-flight and execution ` +
@@ -860,7 +987,7 @@ export async function applyScopedMigration(
     try {
       await client.query(target.sql);
       await client.query(
-        "INSERT INTO schema_migrations (filename, checksum, completed_at, status) VALUES ($1,$2,now(),'applied')",
+        `INSERT INTO ${journalTable} (filename, checksum, completed_at, status) VALUES ($1,$2,now(),'applied')`,
         [target.filename, target.checksum]
       );
       await client.query("COMMIT");
@@ -869,7 +996,7 @@ export async function applyScopedMigration(
       throw new Error(`Scoped migration '${target.filename}' failed and was rolled back: ${(e as Error).message}`);
     }
 
-    const after = await journalFingerprint(client);
+    const after = await journalFingerprint(client, estate);
     log(`[scoped] journal ${before.count} -> ${after.count} entries`);
     return {
       applied: true,
@@ -879,15 +1006,46 @@ export async function applyScopedMigration(
       journalAfter: after.count,
     };
   } finally {
-    await client.query("SELECT pg_advisory_unlock($1)", [ADVISORY_LOCK_KEY]).catch(() => {});
+    await client.query("SELECT pg_advisory_unlock($1)", [advisoryLockKey]).catch(() => {});
   }
 }
 
+export function resolveMigrationDatabaseUrl(env: NodeJS.ProcessEnv = process.env): string {
+  if (env.MINTVAULT_MIGRATION_DATABASE_URL) return env.MINTVAULT_MIGRATION_DATABASE_URL;
+
+  const fallback = env.MINTVAULT_DATABASE_URL;
+  const mode = (env.NODE_ENV ?? "").trim().toLowerCase();
+  if (!fallback || (mode !== "test" && mode !== "development")) {
+    throw new Error(
+      "MINTVAULT_MIGRATION_DATABASE_URL is required; the production web runtime credential is never migration authority."
+    );
+  }
+  let parsed: URL;
+  try {
+    parsed = new URL(fallback);
+  } catch {
+    throw new Error("The local MINTVAULT_DATABASE_URL migration fallback must be a valid PostgreSQL URL.");
+  }
+  const loopback = parsed.hostname === "localhost" || parsed.hostname === "127.0.0.1" || parsed.hostname === "::1";
+  if (!/^postgres(?:ql)?:$/.test(parsed.protocol) || !loopback) {
+    throw new Error(
+      "MINTVAULT_DATABASE_URL may substitute for migration authority only in test/development on exact loopback."
+    );
+  }
+  return fallback;
+}
+
 async function main(): Promise<void> {
-  const url = process.env.MINTVAULT_DATABASE_URL;
-  if (!url) {
-    console.error("MINTVAULT_DATABASE_URL is required");
+  const estate = parseMigrationEstate(process.argv.slice(2));
+  const historicalBaseline = parseHistoricalBaseline(process.argv.slice(2), estate);
+  const { migrationsDir } = migrationProfile(estate);
+  let url: string;
+  try {
+    url = resolveMigrationDatabaseUrl();
+  } catch (error) {
+    console.error(`🚫 ${(error as Error).message}`);
     process.exit(2);
+    return;
   }
   const apply = process.argv.includes("--apply");
   const allowDestructive = process.argv.includes("--allow-destructive");
@@ -902,13 +1060,11 @@ async function main(): Promise<void> {
     process.exit(2);
     return;
   }
-  const client = new Client({
-    connectionString: endpoint.url,
-    ssl: endpoint.url.includes("127.0.0.1") ? undefined : { rejectUnauthorized: false },
-    connectionTimeoutMillis: 20_000,
-  });
+  const client = new Client(migrationClientConfig(endpoint.url));
   try {
     await client.connect();
+    const pid = Number((await client.query<{ pid: number }>("SELECT pg_backend_pid() AS pid")).rows[0]?.pid);
+    await assertDedicatedBackend(endpoint.url, pid);
   } catch (e) {
     // No silent pooled fallback: a migration that cannot prove single-runner exclusivity
     // must not run at all.
@@ -930,6 +1086,13 @@ async function main(): Promise<void> {
     console.log(`[migrate] lock-owning endpoint: ${h}`);
   }
   try {
+    if (historicalBaseline) {
+      const result = await applyMigrations(client, listMigrationFiles(migrationsDir), { estate, historicalBaseline });
+      console.log(
+        `Verified historical schema; executed only ${result.applied.join(", ")}. Old SQL is attested, not applied.`
+      );
+      return;
+    }
     // ── SCOPED CONVERGENCE MODE ────────────────────────────────────────────────
     // Deliberately verbose to invoke and impossible to reach by habit: it needs an
     // exact filename AND an explicit acknowledgement that this is a convergence /
@@ -971,20 +1134,21 @@ async function main(): Promise<void> {
       console.log(`[scoped] target database : ${dbFingerprint}`);
       console.log(`[scoped] target migration: ${targetFilename}`);
       if (!apply) {
-        const files = listMigrationFiles();
+        const files = listMigrationFiles(migrationsDir);
         const t = files.find((f) => f.filename === targetFilename);
         if (!t) {
           console.error(`🚫 '${targetFilename}' does not exist in the migrations directory.`);
           process.exit(2);
           return;
         }
-        const before = await journalFingerprint(client as unknown as PgClientLike);
+        const before = await journalFingerprint(client as unknown as PgClientLike, estate);
         console.log(`[scoped] checksum        : ${t.checksum}`);
         console.log(`[scoped] journal entries : ${before.count}`);
         console.log(`(dry-run) would apply ONLY ${targetFilename}. Re-run with --apply to execute.`);
         process.exit(0);
       }
       const result = await applyScopedMigration(client as unknown as PgClientLike, targetFilename, {
+        estate,
         allowDestructive,
         log: (m) => console.log(m),
       });
@@ -996,9 +1160,11 @@ async function main(): Promise<void> {
       process.exit(0);
     }
 
-    const files = listMigrationFiles();
-    const exclusions = loadLineageExclusions();
-    const plan = await planMigrations(client as unknown as PgClientLike, files);
+    const files = listMigrationFiles(migrationsDir);
+    const exclusions = estate === "main" ? loadLineageExclusions(migrationsDir) : [];
+    const plan = await planMigrations(client as unknown as PgClientLike, files, estate);
+    if (plan.attestedNotApplied?.length)
+      console.log(`[migrate] attested-not-applied: ${plan.attestedNotApplied.join(", ")}`);
     console.log(
       `Migrations: ${files.length} total, ${plan.alreadyApplied.length} applied, ${plan.pending.length} pending, ` +
         `${plan.inconsistent.length} inconsistent, ${plan.checksumMismatches.length} checksum-mismatch.`
@@ -1037,6 +1203,7 @@ async function main(): Promise<void> {
       process.exit(0);
     }
     const { applied } = await applyMigrations(client as unknown as PgClientLike, files, {
+      estate,
       allowDestructive,
       exclusions,
     });

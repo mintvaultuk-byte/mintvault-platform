@@ -11,9 +11,7 @@
  * keeps one card surface and preserves the grading tool's original React state
  * and handlers without creating a second role-specific shell.
  */
-import { useEffect, useState, type ReactNode, type Ref } from "react";
-import { RAIL_SAFE_MIN_WIDTH_PX } from "@shared/rail-width";
-import { useRailWidth } from "./rail-width-context";
+import type { ReactNode, Ref } from "react";
 import { CardPreviewPanel } from "./CardPreviewPanel";
 import type { CardInspectionState } from "./card-inspection-state";
 
@@ -37,8 +35,17 @@ import type { CardInspectionState } from "./card-inspection-state";
  * card becomes height-bound and the extra width only narrows the controls. Right pane at
  * the tightest tested viewport is 456.8px, with no content overflow and its own vertical
  * scroll intact.
+ *
+ * Below 540px the shell stacks and the admin focus surface deliberately returns
+ * to normal page flow. The rail therefore cannot use a percentage flex-basis:
+ * its parent has auto height in that mode, so browser zoom can leave only the
+ * utility/control rows' intrinsic height and collapse the actual card viewport
+ * to zero. A definite 100dvh rail gives the image a real box while preserving
+ * the mobile page-scroll fallback; `flex-none` prevents sibling content from
+ * shrinking that box.
  */
-export const WORKSTATION_PREVIEW_WIDTH_CLASS = "md:w-[45%] md:shrink-0";
+export const WORKSTATION_PREVIEW_WIDTH_CLASS =
+  "max-[539px]:h-[100dvh] max-[539px]:flex-none min-[540px]:w-[45%] min-[540px]:shrink-0";
 
 export function WorkstationPreviewAside({
   certificateId,
@@ -66,47 +73,6 @@ export function WorkstationPreviewAside({
   inspectionState: CardInspectionState;
   onInspectionStateChange: (state: CardInspectionState) => void;
 }) {
-  /**
-   * ADAPTIVE WIDTH. `WORKSTATION_PREVIEW_WIDTH_CLASS` stays the responsive
-   * DEFAULT and the safe MAXIMUM; the predicted requirement can only narrow the
-   * rail from there, never widen it past what the layout gives today.
-   *
-   * That asymmetry is what protects the accepted card at small viewports: at
-   * 845x685 the requirement (375.0px) already exceeds the current rail
-   * (371.3px), so the clamp returns the current width and the card is untouched.
-   * A complete card outranks recovered space.
-   *
-   * Desktop only — below `md` the rail is a stacked full-width block and a px
-   * width would fight the responsive column layout.
-   */
-  const requiredRailWidth = useRailWidth();
-  const [isDesktop, setIsDesktop] = useState(false);
-  useEffect(() => {
-    const mq = window.matchMedia("(min-width: 768px)");
-    const sync = () => setIsDesktop(mq.matches);
-    sync();
-    mq.addEventListener("change", sync);
-    return () => mq.removeEventListener("change", sync);
-  }, []);
-  /**
-   * Applied as `max-width`, NOT `width`, and that choice is load-bearing.
-   *
-   * `WORKSTATION_PREVIEW_WIDTH_CLASS` keeps supplying the 45% width, so the
-   * browser evaluates `min(45%, requirement)` itself. Nothing has to measure the
-   * rail to learn its own safe maximum — and measuring it is exactly the loop
-   * this design exists to avoid, because after the first adjustment the measured
-   * width would BE the adjusted width.
-   *
-   * `max-width` clamps a flex item's used main size, so `md:shrink-0` and the
-   * flex row are untouched. Below `md` no cap is applied at all: the rail is a
-   * stacked full-width block there and a px cap would fight the column layout.
-   */
-  const railMaxWidth =
-    isDesktop && requiredRailWidth != null && requiredRailWidth > 0
-      ? Math.max(requiredRailWidth, RAIL_SAFE_MIN_WIDTH_PX)
-      : null;
-  const railStyle = railMaxWidth != null ? { maxWidth: `${railMaxWidth}px` } : undefined;
-
   // ONE card-image render site (invariant enforced by the workstation-shell
   // tests). When a `below` panel is present the aside stacks; otherwise the
   // layout is byte-identical to before, so the Card stage is untouched.
@@ -130,9 +96,8 @@ export function WorkstationPreviewAside({
   if (!below) {
     return (
       <aside
-        className={`min-h-0 max-md:max-h-[55vh] ${WORKSTATION_PREVIEW_WIDTH_CLASS}`}
-        style={railStyle}
-        data-rail-max-width={railMaxWidth ?? ""}
+        className={`min-h-0 ${WORKSTATION_PREVIEW_WIDTH_CLASS}`}
+        data-layout-boundary="540"
         data-testid="grading-preview-panel"
       >
         {card}
@@ -141,9 +106,8 @@ export function WorkstationPreviewAside({
   }
   return (
     <aside
-      className={`flex min-h-0 flex-col gap-1 max-md:max-h-[55vh] ${WORKSTATION_PREVIEW_WIDTH_CLASS}`}
-      style={railStyle}
-      data-rail-max-width={railMaxWidth ?? ""}
+      className={`flex min-h-0 flex-col gap-1 ${WORKSTATION_PREVIEW_WIDTH_CLASS}`}
+      data-layout-boundary="540"
       data-testid="grading-preview-panel"
     >
       <div className="min-h-0 flex-1">{card}</div>

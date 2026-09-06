@@ -23,6 +23,69 @@ import { join } from "node:path";
 
 const ROOT = join(__dirname, "..");
 const DOCKERIGNORE = readFileSync(join(ROOT, ".dockerignore"), "utf8");
+const DOCKERFILE = readFileSync(join(ROOT, "Dockerfile"), "utf8");
+const BUILD_SCRIPT = readFileSync(join(ROOT, "script/build.ts"), "utf8");
+const CI_WORKFLOW = readFileSync(join(ROOT, ".github/workflows/ci.yml"), "utf8");
+
+const REQUIRED_PRIVACY_RULES = [
+  ".local",
+  "**/.local",
+  "mintvault-scans",
+  "**/mintvault-scans",
+  ".mintvault-scanner-tools",
+  "**/.mintvault-scanner-tools",
+  "scans",
+  "**/scans",
+  "scanner-data",
+  "**/scanner-data",
+  "scanner-output",
+  "**/scanner-output",
+  "scanner-runtime",
+  "**/scanner-runtime",
+  "evidence",
+  "**/evidence",
+  "runtime-evidence",
+  "**/runtime-evidence",
+  "backups",
+  "**/backups",
+  ".agents",
+  ".codex",
+  ".cursor",
+  ".gemini",
+  ".windsurf",
+  "*.tif",
+  "**/*.tif",
+  "*.tiff",
+  "**/*.tiff",
+  "*.raw",
+  "**/*.raw",
+  "*.dng",
+  "**/*.dng",
+  "*.heic",
+  "**/*.heic",
+  "*.heif",
+  "**/*.heif",
+] as const;
+
+const CI_PRIVACY_SENTINELS = [
+  ".local/canon-lide-physical-proof/DO_NOT_SHIP.tiff",
+  ".agents/DO_NOT_SHIP.txt",
+  ".codex/DO_NOT_SHIP.txt",
+  "mintvault-scans/DO_NOT_SHIP.tiff",
+  ".mintvault-scanner-tools/DO_NOT_SHIP.pem",
+  "evidence/masters/DO_NOT_SHIP.tiff",
+  "server/.local/DO_NOT_SHIP.tiff",
+  "server/DO_NOT_SHIP.tiff",
+  ".env.context-sentinel",
+] as const;
+
+function dockerignoreRules(): Set<string> {
+  return new Set(
+    DOCKERIGNORE.split("\n")
+      .map((line) => line.trim())
+      .filter((line) => line.length > 0 && !line.startsWith("#"))
+  );
+}
 
 /** Files under scripts/ explicitly re-admitted to the build context with a `!` entry. */
 function allowlistedScripts(): string[] {
@@ -86,9 +149,113 @@ describe("the Docker build context contains everything the build imports", () =>
     ).toEqual([]);
   });
 
+  it("re-admits every scripts entrypoint bundled by the build", () => {
+    const allow = new Set(allowlistedScripts());
+    const entrypoints = [...BUILD_SCRIPT.matchAll(/entryPoints:\s*\[\s*["'](scripts\/[^"']+\.ts)["']/g)].map(
+      (match) => match[1]
+    );
+
+    expect(entrypoints.length).toBeGreaterThan(0);
+    expect(
+      entrypoints.filter((entrypoint) => !allow.has(entrypoint)),
+      "script/build.ts bundles a scripts entrypoint that .dockerignore does not re-admit"
+    ).toEqual([]);
+  });
+
+  it("includes the schema-tool guarded db:push entrypoint and configuration imports", () => {
+    const allow = new Set(allowlistedScripts());
+    const pkg = JSON.parse(readFileSync(join(ROOT, "package.json"), "utf8"));
+    expect(pkg.scripts["db:push"]).toBe("tsx scripts/db/guard-db-push.ts");
+    expect(allow.has("scripts/db/guard-db-push.ts")).toBe(true);
+    for (const dependency of relativeDeps("drizzle.config.ts").filter((path) => path.startsWith("scripts/"))) {
+      expect(allow.has(dependency), `schema-tool config import excluded: ${dependency}`).toBe(true);
+    }
+  });
+
   it("specifically re-admits read-only-session.ts, which migrate.ts needs", () => {
     // The exact omission that broke the first staging deploy of this landing.
     expect(readFileSync(join(ROOT, "scripts/db/migrate.ts"), "utf8")).toContain('from "./read-only-session"');
     expect(allowlistedScripts()).toContain("scripts/db/read-only-session.ts");
+  });
+});
+
+describe("the Docker build context excludes local private and agent state", () => {
+  it("explicitly denies every protected local artefact class", () => {
+    const rules = dockerignoreRules();
+
+    expect(
+      REQUIRED_PRIVACY_RULES.filter((rule) => !rules.has(rule)),
+      "A privacy-critical Docker exclusion disappeared"
+    ).toEqual([]);
+  });
+
+  it("fails the real image build if a forbidden path survives COPY", () => {
+    const copyIndex = DOCKERFILE.indexOf("COPY . .");
+    const guardIndex = DOCKERFILE.indexOf("Forbidden Docker build-context path was copied");
+
+    expect(copyIndex).toBeGreaterThan(-1);
+    expect(guardIndex).toBeGreaterThan(copyIndex);
+    for (const path of [".local", ".agents", ".codex", "mintvault-scans", "evidence"]) {
+      expect(DOCKERFILE).toContain(path);
+    }
+    expect(DOCKERFILE).toContain("Forbidden nested Docker build-context artifact was copied");
+  });
+
+  it("plants content-free privacy sentinels before CI's real Docker build", () => {
+    const sentinelStepIndex = CI_WORKFLOW.indexOf("Plant forbidden build-context sentinels");
+    const dockerBuildIndex = CI_WORKFLOW.indexOf("docker build --build-arg GIT_SHA");
+
+    expect(sentinelStepIndex).toBeGreaterThan(-1);
+    expect(dockerBuildIndex).toBeGreaterThan(sentinelStepIndex);
+    for (const path of CI_PRIVACY_SENTINELS) {
+      expect(CI_WORKFLOW).toContain(path);
+    }
+  });
+
+  it("pins both image stages to the Node version exercised by release CI", () => {
+    const amd64Job = CI_WORKFLOW.slice(CI_WORKFLOW.indexOf("  amd64-release-proof:"));
+
+    expect(DOCKERFILE.match(/^FROM node:[^ ]+ AS \w+$/gm)).toEqual([
+      "FROM node:20.20.2-slim@sha256:2cf067cfed83d5ea958367df9f966191a942351a2df77d6f0193e162b5febfc0 AS builder",
+      "FROM node:20.20.2-slim@sha256:2cf067cfed83d5ea958367df9f966191a942351a2df77d6f0193e162b5febfc0 AS production",
+    ]);
+    expect(DOCKERFILE).toContain("RUN npm prune --omit=dev && npm cache clean --force");
+    expect(DOCKERFILE).toMatch(/^FROM builder AS schema-tool$/m);
+    expect(DOCKERFILE).toMatch(/^FROM builder AS production-dependencies$/m);
+    expect(DOCKERFILE).toMatch(/^USER node$/m);
+    expect(CI_WORKFLOW).toContain("production container runs as root");
+    expect(CI_WORKFLOW).toContain("test ! -w /app && test -w /tmp");
+    expect(CI_WORKFLOW).toContain('GIT_SHA="$(git rev-parse HEAD)"');
+    expect(CI_WORKFLOW).not.toContain("git rev-parse --short HEAD");
+    expect(CI_WORKFLOW).toContain("mintvault-${{ github.sha }}.cdx.json");
+    expect(CI_WORKFLOW).toContain("Block fixable HIGH or CRITICAL production-image vulnerabilities");
+    expect(amd64Job).toContain("timeout-minutes: 60");
+    expect(CI_WORKFLOW).toContain("Converge the disposable database through real schema and migration authority");
+    expect(CI_WORKFLOW).toContain("--target schema-tool");
+    expect(CI_WORKFLOW).toContain("run db:push -- --force");
+    expect(CI_WORKFLOW).toContain("/app/dist/migrate.cjs --apply --allow-destructive");
+    expect(DOCKERFILE).toContain(
+      "COPY --from=production-dependencies /app/migrations-vq/[0-9][0-9][0-9][0-9]*_*.sql ./migrations-vq/"
+    );
+    expect(CI_WORKFLOW).toContain('["/app/dist/migrate.cjs", "--estate", "vault-quest", "--apply"]');
+    expect(CI_WORKFLOW.indexOf("Prove production-image Vault Quest migrations and replay")).toBeGreaterThan(
+      CI_WORKFLOW.indexOf("/app/dist/migrate.cjs --apply --allow-destructive")
+    );
+    expect(CI_WORKFLOW.indexOf("Prove production-image Vault Quest migrations and replay")).toBeLessThan(
+      CI_WORKFLOW.indexOf("Readiness succeeds on the authoritative schema")
+    );
+    expect(amd64Job).not.toContain("CREATE TABLE IF NOT EXISTS certificates");
+    expect(amd64Job.match(/docker run -d --name mv-amd64-boot/g)?.length).toBe(2);
+    expect(amd64Job.match(/PARTNER_DATABASE_URL=/g)?.length).toBe(2);
+    expect(amd64Job.match(/PARTNER_MFA_ENC_KEY=/g)?.length).toBe(2);
+    expect(amd64Job).toContain(
+      "CREATE ROLE partner_ci_runtime LOGIN PASSWORD 'synthetic' INHERIT NOSUPERUSER NOBYPASSRLS NOCREATEDB NOCREATEROLE"
+    );
+    expect(amd64Job).toContain("GRANT partner_runtime TO partner_ci_runtime");
+    expect(amd64Job).not.toContain('PARTNER_DATABASE_URL="postgres://postgres:postgres@');
+    expect(amd64Job).toContain("Release order is migrate, then boot");
+    expect(CI_WORKFLOW).toContain(
+      "pgvector/pgvector:pg17@sha256:cf134a767f474095eeba57e0117be8e568e011a63f33fbf252f14c9b760f8e6f"
+    );
   });
 });

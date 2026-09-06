@@ -76,7 +76,6 @@ export default function ProjectControlScannerPage() {
     <AdminShell
       activeTab="dashboard"
       onTabChange={() => navigate("/admin")}
-      onLogout={() => navigate("/admin")}
       title="Scanner"
       crumb="Pipeline"
     >

@@ -7,11 +7,11 @@ function assertDisposableUrl(url: string): void {
   const parsed = new URL(url);
   if (
     !["127.0.0.1", "localhost"].includes(parsed.hostname) ||
-    !["5432", "55432"].includes(parsed.port) ||
-    !/^\/mintvault_dgn_[a-z0-9_]+$/i.test(parsed.pathname)
+    !["5432", process.env.MINTVAULT_TEST_PG16_PORT || "55432"].includes(parsed.port) ||
+    !/^\/mintvault_scanner_[a-z0-9_]+_test$/i.test(parsed.pathname)
   ) {
     throw new Error(
-      "SCANNER_STAGING_TEST_DATABASE_URL must name a local mintvault_dgn_* disposable database on port 5432 or 55432"
+      "SCANNER_STAGING_TEST_DATABASE_URL must name a local mintvault_scanner_*_test disposable database on port 5432 or 55432"
     );
   }
 }

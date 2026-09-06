@@ -1,0 +1,47 @@
+{
+  "schemaVersion": 1,
+  "legacyForwardFixtures": {
+    "add-auth-security-hardening-phase1.sql": "legacy SQL fixture executed by auth-security-migration.test.ts; not loaded by the numbered production runner",
+    "add-pokemon-knowledge.sql": "legacy SQL fixture executed by pokemon-knowledge-migration.test.ts; not loaded by the numbered production runner",
+    "add-structured-rarity-columns.sql": "legacy SQL fixture executed by rarity-structured-migration.test.ts; not loaded by the numbered production runner"
+  },
+  "legacyOperatorReferences": {
+    "add-mvgs-v2-columns-prod.sql": "legacy operator script input; not loaded by the numbered production runner"
+  },
+  "syntheticReferences": {
+    "0000_main.sql": "S1 synthetic main migration namespace fixture",
+    "0000_vq.sql": "S1 synthetic Vault Quest migration namespace fixture",
+    "0000_collision.sql": "S1 synthetic same-estate migration identity collision",
+    "0001_vq_forward.sql": "S1 synthetic Vault Quest scoped-forward fixture",
+    "0001_alpha.sql": "invalid-width and duplicate-number fixture",
+    "0001_x.sql": "synthetic migration planner and release-scope fixture",
+    "0001_core.sql": "synthetic architecture-authority golden workspace fixture",
+    "0017_test_dependency.sql": "synthetic journal dependency row",
+    "0018_test_failed_concurrent_index.sql": "synthetic failed-concurrent-index journal row",
+    "0042_later.sql": "synthetic later journal occupant",
+    "0045_some_other_staging_identity.sql": "synthetic lineage collision occupant",
+    "0046_some_other_identity.sql": "synthetic migration identity collision occupant",
+    "0073_someone_elses_migration.sql": "synthetic scoped-migration collision occupant",
+    "0095_other.sql": "synthetic destructive-SQL policy path",
+    "0097_other.sql": "synthetic destructive-SQL policy path",
+    "0099_not_here.sql": "synthetic missing scoped migration",
+    "9999_future.sql": "synthetic disabled-component readiness fixture",
+    "9999_missing.sql": "synthetic missing-required-migration mutation",
+    "00001_beta.sql": "synthetic invalid-width filename fixture"
+  },
+  "historicalUnshippedReferences": {
+    "0019_grading_optimistic_concurrency.sql": "historical collided identity retained only as parity evidence",
+    "0025_grading_optimistic_concurrency.sql": "historical claimed identity retained only as parity evidence",
+    "0039_project_control_live_evidence.sql": "historical schema provenance; absent from current numbered inventory",
+    "0040_project_control_seed_reconciliation.sql": "historical schema provenance; absent from current numbered inventory",
+    "0044_partner_submission_lifecycle_and_location_snapshot.sql": "historical authored identity later converged under the shipped lineage",
+    "0046_partner_mfa_pending_lifecycle.sql": "historical authored identity used by collision proof",
+    "0047_partner_label_preview_permission.sql": "historical authored identity used by collision proof",
+    "0047_partner_owner_invariant_tenants_rls.sql": "historical authored identity used by lineage proof",
+    "0048_partner_location_snapshot_search_path.sql": "historical authored identity referenced by migration commentary",
+    "0067_certificate_immutable_evidence_ledger.sql": "historical schema provenance; absent from current numbered inventory",
+    "0099_growth_commercial_attribution.sql": "explicit negative assertion that this unshipped identity is absent",
+    "0111_partner_supply_commerce.sql": "historical authored identity converged as shipped migration 0112"
+  },
+  "vqDirectoryDisposition": "unshipped-owner-decision-required"
+}

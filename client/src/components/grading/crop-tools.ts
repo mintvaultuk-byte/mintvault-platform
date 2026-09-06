@@ -1,3 +1,4 @@
+import { adminFetch } from "@/lib/queryClient";
 /**
  * Shared crop-tool helpers consumed by BOTH the perspective Manual Crop
  * (manual-crop.tsx) AND the 8-dot Card Tool (manual-card-tool.tsx). This is the
@@ -23,7 +24,7 @@ export async function detectCardBounds(
   side: "front" | "back",
   apiBase = "/api/admin"
 ): Promise<CropBox | null> {
-  const r = await fetch(`${apiBase}/certificates/${certId}/detect-card-bounds`, {
+  const r = await adminFetch(`${apiBase}/certificates/${certId}/detect-card-bounds`, {
     method: "POST",
     credentials: "include",
     headers: { "Content-Type": "application/json" },

@@ -1,3 +1,4 @@
+import { adminFetch, isProtectedAdminLocation } from "@/lib/queryClient";
 import { useParams, useLocation } from "wouter";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { useToast } from "@/hooks/use-toast";
@@ -337,7 +338,7 @@ function AdminReprocessButton({ certId }: { certId: string }) {
       onClick={async () => {
         setLoading(true);
         try {
-          const r = await fetch(`/api/admin/certs/${certId}/reprocess-images`, {
+          const r = await adminFetch(`/api/admin/certs/${certId}/reprocess-images`, {
             method: "POST",
             credentials: "include",
           });
@@ -378,9 +379,9 @@ function AdminReprocessButton({ certId }: { certId: string }) {
 
 // Admin-only population report panel — fetches /api/admin/certs/:certId/
 // pop-report (requireAdmin) and renders a Grade | Count | % table with
-// the current cert's grade row highlighted in gold. Only shown when the
-// route path starts with /admin/ (LogbookPage is also the public cert
-// view, and this data is admin-only).
+// the current cert's grade row highlighted in gold. It is mounted only under
+// a protected Admin location; the legacy /admin/cert/:id alias is explicitly
+// public and must never mount this query or other Admin-only controls.
 type PopReportResponse = {
   cert_id: string;
   card: { name: string | null; set: string | null; number: string | null };
@@ -394,7 +395,7 @@ function AdminPopReportPanel({ certId }: { certId: string }) {
   const { data, isLoading, error } = useQuery<PopReportResponse>({
     queryKey: ["/api/admin/certs", certId, "pop-report"],
     queryFn: async () => {
-      const res = await fetch(`/api/admin/certs/${certId}/pop-report`, { credentials: "include" });
+      const res = await adminFetch(`/api/admin/certs/${certId}/pop-report`, { credentials: "include" });
       if (!res.ok) throw new Error("pop-report fetch failed");
       return res.json();
     },
@@ -476,7 +477,7 @@ export default function LogbookPage() {
   const params = useParams<{ certId?: string; id?: string }>();
   const certId = params.certId || params.id || "";
   const [location] = useLocation();
-  const isAdminView = location.startsWith("/admin/");
+  const isAdminView = isProtectedAdminLocation(location);
   // Admin-only tab state — partitions the page into IMAGES / GRADING /
   // POPULATION / ACTIONS in admin view. Public /cert/:id ignores this
   // (no tab bar rendered, all sections stack vertically).
@@ -488,7 +489,7 @@ export default function LogbookPage() {
   const { data, isLoading, error } = useQuery<LogbookData>({
     queryKey: ["/api/logbook", certId],
     queryFn: async () => {
-      const res = await fetch(`/api/logbook/${certId}`);
+      const res = await adminFetch(`/api/logbook/${certId}`);
       if (!res.ok) throw new Error("Certificate not found");
       return res.json();
     },
@@ -500,7 +501,7 @@ export default function LogbookPage() {
     queryKey: ["/api/customer/me"],
     queryFn: async () => {
       try {
-        const res = await fetch("/api/customer/me", { credentials: "include" });
+        const res = await adminFetch("/api/customer/me", { credentials: "include" });
         if (!res.ok) return null;
         return res.json();
       } catch {
@@ -596,9 +597,9 @@ export default function LogbookPage() {
           </>
         )}
 
-        {/* Admin tab bar — only rendered on /admin/cert/:id. Full-width
-            stacked on mobile (flex-col), inline on desktop (sm:flex-row).
-            Active tab indicator: gold bottom border + gold text. */}
+        {/* Admin tab bar — only rendered if this shared page is mounted by a
+            protected Admin route. The public /admin/cert/:id compatibility
+            alias intentionally gets the same public-only view as /cert/:id. */}
         {isAdminView && (
           <nav className="border-b border-[#E8E4DC] bg-white">
             <div className="max-w-3xl mx-auto px-4 flex flex-col sm:flex-row">

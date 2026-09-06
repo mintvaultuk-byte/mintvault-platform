@@ -13,6 +13,7 @@ import { partnerRuntimeQuery } from "./db";
 import { resolveGlobalFlag } from "./flags";
 import { acceptPartnerInvitation, getPartnerInvitationPreview } from "./partner-management-service";
 import { resetDeliveryConfigured, deliverResetToken } from "./delivery";
+import { startSharedPartnerRateLimitStoreInstall } from "./rate-limit-store-pg";
 
 async function flagEnabled(flag: string): Promise<boolean> {
   return resolveGlobalFlag(flag);
@@ -20,6 +21,15 @@ async function flagEnabled(flag: string): Promise<boolean> {
 
 export function partnerPublicRouter(): Router {
   const r = Router();
+  const sharedRateLimitStoreReady = startSharedPartnerRateLimitStoreInstall();
+
+  // Do not let the first sensitive request race the asynchronous PostgreSQL-store boot probe.
+  // Failure remains fail-closed: the promise resolves false and the limiter's unavailable store
+  // returns 503 exactly as before. A healthy deployment now serves its first request reliably.
+  r.use(async (_req, _res, next) => {
+    await sharedRateLimitStoreReady;
+    next();
+  });
 
   // Portal-wide kill switch. The unmounted app factory (app.ts:89-103) checked partner_emergency_stop
   // alongside partner_portal_enabled; hosting these routes in the main app must not silently drop it,

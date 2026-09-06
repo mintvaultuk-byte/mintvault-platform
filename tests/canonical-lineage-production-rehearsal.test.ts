@@ -130,6 +130,24 @@ const CANONICAL_PENDING = [
   "0099_partner_credit_checkout_operation_idempotency.sql",
 ] as const;
 
+// This suite rehearses the historical Partner/Scanner production journal with
+// its deliberately narrow synthetic core. The later remediation migrations
+// have dedicated full-core PostgreSQL suites and must not be falsely journalled
+// here against a fixture that does not model their runtime-schema authority.
+const REMEDIATION_MIGRATIONS = [
+  "0114_certificate_identity_authority.sql",
+  "0115_runtime_schema_convergence.sql",
+  "0116_nfc_physical_lock_integrity.sql",
+  "0117_grading_payment_fulfilment_outbox.sql",
+  "0118_nfc_lock_intent_reconciliation.sql",
+  "0119_session_store_authority.sql",
+  "0120_customer_notification_outbox.sql",
+  "0121_main_runtime_role_authority.sql",
+  "0122_object_write_intent_reconciliation.sql",
+] as const;
+const isRemediationMigration = (filename: string): boolean =>
+  (REMEDIATION_MIGRATIONS as readonly string[]).includes(filename);
+
 const sha256 = (sql: string): string => createHash("sha256").update(sql).digest("hex");
 
 function sql(name: string): string {
@@ -235,7 +253,11 @@ describe("canonical Partner/Scanner production-journal rehearsal", () => {
       );
     }
 
-    const files = listMigrationFiles();
+    const discovered = listMigrationFiles();
+    expect(discovered.filter((file) => isRemediationMigration(file.filename)).map((file) => file.filename)).toEqual([
+      ...REMEDIATION_MIGRATIONS,
+    ]);
+    const files = discovered.filter((file) => !isRemediationMigration(file.filename));
     const preGrowthFiles = files.filter(
       (file) =>
         file.filename !== ATTRIBUTION_MIGRATION &&
@@ -427,7 +449,12 @@ describe("canonical Partner/Scanner production-journal rehearsal", () => {
       AUDIT_IDEMPOTENCY_SCOPE_MIGRATION,
     ]);
     expect(mvgsRulesVersionApplied).toEqual([MVGS_RULES_VERSION_MIGRATION]);
-    const after = await planMigrations(migrator as never, listMigrationFiles());
+    const completeInventoryAfter = await planMigrations(migrator as never, listMigrationFiles());
+    expect(completeInventoryAfter.pending).toEqual([...REMEDIATION_MIGRATIONS]);
+    const after = await planMigrations(
+      migrator as never,
+      listMigrationFiles().filter((file) => !isRemediationMigration(file.filename))
+    );
     expect(after.pending).toEqual([]);
     expect(after.inconsistent).toEqual([]);
     expect(after.checksumMismatches).toEqual([]);

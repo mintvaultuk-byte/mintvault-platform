@@ -1,6 +1,10 @@
 {
-  "name": "rest-express",
+  "name": "mintvault-platform",
   "version": "1.0.0",
+  "private": true,
+  "engines": {
+    "node": "20.20.2"
+  },
   "type": "module",
   "license": "MIT",
   "scripts": {
@@ -8,6 +12,16 @@
     "build": "tsx script/build.ts",
     "start": "NODE_ENV=production node dist/index.cjs",
     "check": "tsc",
+    "check:tests": "node scripts/ci/run-typecheck-ratchet.mjs tests",
+    "check:scripts": "node scripts/ci/run-typecheck-ratchet.mjs scripts",
+    "check:unreachable": "node scripts/ci/run-typecheck-ratchet.mjs architecture",
+    "check:script-syntax": "node scripts/ci/check-script-syntax.mjs",
+    "architecture:check": "node scripts/architecture/check-architecture.mjs",
+    "architecture:update": "node scripts/architecture/check-architecture.mjs --write",
+    "migration:references:check": "node scripts/ci/check-migration-references.mjs",
+    "test:partner:critical": "node scripts/ci/run-partner-suite.mjs --all",
+    "test:scanner:critical": "node scripts/ci/run-scanner-suite.mjs",
+    "ci:topology": "node scripts/ci/verify-ci-topology.mjs",
     "lint": "eslint .",
     "lint:fix": "eslint . --fix",
     "format": "prettier --write .",
@@ -20,6 +34,7 @@
     "command-centre:runtime": "node --import tsx scripts/command-centre-runtime-harness.ts",
     "test:command-centre-mobile-layout": "node scripts/command-centre-mobile-layout-check.mjs",
     "test": "vitest run",
+    "test:engineering": "vitest run --pool=forks --maxWorkers=1 --no-file-parallelism",
     "test:watch": "vitest",
     "graph:build": "PYTHONHASHSEED=0 GRAPHIFY_QUERY_LOG_DISABLE=1 graphify extract . --code-only",
     "graph:check": "PYTHONHASHSEED=0 GRAPHIFY_QUERY_LOG_DISABLE=1 graphify check-update .",
@@ -119,10 +134,9 @@
     "react-resizable-panels": "^2.1.7",
     "recharts": "^2.15.2",
     "resend": "^6.9.3",
-    "sharp": "^0.34.5",
+    "sharp": "0.35.4",
     "stripe": "^20.0.0",
     "tailwind-merge": "^2.6.0",
-    "tailwindcss-animate": "^1.0.7",
     "three": "^0.184.0",
     "tw-animate-css": "^1.2.5",
     "vaul": "^1.1.2",
@@ -157,6 +171,7 @@
     "postcss": "^8.4.47",
     "prettier": "^3.8.3",
     "tailwindcss": "^3.4.17",
+    "tailwindcss-animate": "^1.0.7",
     "tsx": "^4.20.5",
     "typescript": "5.6.3",
     "typescript-eslint": "^8.59.4",
@@ -164,6 +179,7 @@
     "vitest": "^4.1.7"
   },
   "overrides": {
+    "ip-address": "10.3.1",
     "drizzle-kit": {
       "@esbuild-kit/esm-loader": "npm:tsx@^4.20.4"
     }

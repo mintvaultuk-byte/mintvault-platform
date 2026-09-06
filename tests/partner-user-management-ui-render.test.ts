@@ -18,13 +18,16 @@ import { createRoot, type Root } from "react-dom/client";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 
 const apiRequest = vi.fn();
-vi.mock("@/lib/queryClient", () => ({
+const navigate = vi.fn();
+(globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
+vi.mock("@/lib/queryClient", async (importOriginal) => ({
+  ...(await importOriginal<typeof import("@/lib/queryClient")>()),
   apiRequest: (...args: unknown[]) => apiRequest(...args),
   queryClient: { invalidateQueries: vi.fn() },
 }));
 vi.mock("wouter", () => ({
   Link: ({ href, children, ...props }: any) => createElement("a", { href, ...props }, children),
-  useLocation: () => ["/admin/partners/11111111-1111-4111-8111-111111111111/staff", vi.fn()],
+  useLocation: () => ["/admin/partners/11111111-1111-4111-8111-111111111111/staff", navigate],
   useRoute: () => [true, { partnerId: "11111111-1111-4111-8111-111111111111", workspaceTab: "staff" }],
 }));
 
@@ -103,7 +106,10 @@ async function mount(users: Row[]) {
       return res({ organisation: { id: "p1", legal_name: "P", status: "ACTIVE" }, profile: { version: 1 } });
     return res({ ok: true });
   });
-  (globalThis as { fetch?: unknown }).fetch = vi.fn(() => res({ authenticated: true }));
+  (globalThis as { fetch?: unknown }).fetch = vi.fn(() =>
+    res({ authenticated: true, email: "admin@mintvault.test", isSuperAdmin: true })
+  );
+  const { AdminSessionProvider } = await import("../client/src/lib/admin-session");
   const { default: Page } = await import("../client/src/pages/admin/partner-management-detail");
   const qc = new QueryClient({
     defaultOptions: {
@@ -114,7 +120,13 @@ async function mount(users: Row[]) {
     },
   });
   await act(async () => {
-    root.render(createElement(QueryClientProvider, { client: qc }, createElement(Page)));
+    root.render(
+      createElement(
+        QueryClientProvider,
+        { client: qc },
+        createElement(AdminSessionProvider, { children: createElement(Page) })
+      )
+    );
   });
   const usersTab = await waitForTestId("pm-workspace-tab-staff");
   await act(async () => {

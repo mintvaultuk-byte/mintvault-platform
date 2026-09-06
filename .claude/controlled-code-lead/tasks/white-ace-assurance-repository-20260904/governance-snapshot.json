@@ -1,0 +1,18 @@
+{
+  "captured_at": "2026-09-04",
+  "governance_version": "1.2",
+  "input_hash": "6982453027781d27438d578c7d6ca22016fd9c8f4a076db26c920d78fe7ed22e",
+  "input_files": [
+    ".engineering/project.yaml",
+    "AGENTS.md",
+    "CLAUDE.md",
+    "docs/NO_BULLSHIT_COMPLETION_CONTROLLER.md",
+    "docs/GRAPH_OF_LOOPS_BUILD_CONTROLLER.md",
+    ".claude/skills/controlled-code-lead/SKILL.md",
+    ".claude/governance-version.md",
+    ".claude/controlled-code-lead/protected-systems.md"
+  ],
+  "baseline_sha": "09beacaa5bc03f8e80e4c7e59232df6fc466b7cb",
+  "task": "white-ace-assurance-repository-20260904",
+  "external_mutations_authorised": false
+}

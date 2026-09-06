@@ -2,7 +2,7 @@
  * G5 Super-Admin Partner Management — partners list.
  *
  * Internal (requireAdmin) admin page inside the existing admin app (AdminShell + admin primitives).
- * Self-auth-gates via /api/admin/session, lists partner organisations with search + status/kind filters
+ * The shared AdminSessionProvider gates the route; this page lists organisations with search/status filters
  * + pagination, and opens a partner's detail page. A "Create partner" action opens a reason-modal.
  * The only wallet control here is the one-off audited WALLET-BACKFILL1 button for staging wallet
  * provisioning. Credit adjustments remain in the Partner Master Dashboard wallet tab.
@@ -140,7 +140,6 @@ export default function PartnerManagementPage() {
   // Directory owns organisations/create and Settings owns programme controls/backfill.
   const showSettingsControls = showLegacyFleetControls || isCanonicalSettings;
   const showDirectory = showLegacyFleetControls || !isCanonicalSettings;
-  const [authed, setAuthed] = useState<boolean | null>(null);
   const [filter, setFilter] = useState<Filter>({ page: 1 });
   const [searchInput, setSearchInput] = useState("");
   const [createOpen, setCreateOpen] = useState(false);
@@ -212,28 +211,10 @@ export default function PartnerManagementPage() {
     }
   }
 
-  useEffect(() => {
-    let live = true;
-    fetch("/api/admin/session", { credentials: "include" })
-      .then((r) => (r.ok ? r.json() : null))
-      .then((d) => live && setAuthed(!!d?.authenticated))
-      .catch(() => live && setAuthed(false));
-    return () => {
-      live = false;
-    };
-  }, []);
-  useEffect(() => {
-    if (authed === false)
-      navigate(
-        `/admin/login?next=${encodeURIComponent(`${pathname}${window.location.search}${window.location.hash}`)}`,
-        { replace: true }
-      );
-  }, [authed, navigate, pathname]);
-
   const partners = useQuery<PartnerListResponse>({
     queryKey: pmKeys.partners(filter as Record<string, unknown>),
     queryFn: () => apiRequest("GET", `${BASE}/partners${partnersQueryString(filter)}`).then((r) => r.json()),
-    enabled: authed === true && showDirectory,
+    enabled: showDirectory,
   });
 
   const activePartnersForWallets = useQuery<PartnerListResponse>({
@@ -242,13 +223,13 @@ export default function PartnerManagementPage() {
       apiRequest("GET", `${BASE}/partners${partnersQueryString({ status: "ACTIVE", pageSize: 100 })}`).then((r) =>
         r.json()
       ),
-    enabled: authed === true && showSettingsControls,
+    enabled: showSettingsControls,
   });
 
   const pilotFlags = useQuery<PartnerPilotFlagState>({
     queryKey: pmKeys.pilotFlags(),
     queryFn: () => apiRequest("GET", PARTNER_PILOT_FLAG_BASE).then((r) => r.json()),
-    enabled: authed === true && showSettingsControls,
+    enabled: showSettingsControls,
   });
 
   const fleet = useQuery<FleetStationsResponse>({
@@ -258,7 +239,7 @@ export default function PartnerManagementPage() {
       if (fleetStatus !== "ALL") search.set("status", fleetStatus);
       return apiRequest("GET", `${FLEET_BASE}/stations?${search.toString()}`).then((r) => r.json());
     },
-    enabled: authed === true && showLegacyFleetControls,
+    enabled: showLegacyFleetControls,
   });
 
   const fleetMutation = useMutation({
@@ -410,25 +391,12 @@ export default function PartnerManagementPage() {
     },
   });
 
-  if (authed === null) {
-    return (
-      <div
-        className="admin-root"
-        style={{ display: "grid", placeItems: "center", minHeight: "60vh" }}
-        data-testid="pm-loading"
-      >
-        <span style={{ color: "var(--admin-gold, #D4AF37)" }}>Loading…</span>
-      </div>
-    );
-  }
-
   const rows: PartnerRow[] = partners.data?.partners ?? [];
 
   return (
     <AdminShell
       activeTab="dashboard"
       onTabChange={() => navigate("/admin")}
-      onLogout={() => navigate("/admin")}
       title="Partner Management"
       crumb="Partner Network"
     >

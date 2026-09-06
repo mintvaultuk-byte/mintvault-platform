@@ -10,13 +10,16 @@ import { defineConfig } from "drizzle-kit";
  * changes. This file, and `drizzle.config.ts`, must never be merged.
  *
  * ⚠️ DO NOT run `drizzle-kit push` or `generate` against VQ. Vault Quest tables are
- * managed EXCLUSIVELY by hand-applied raw SQL in `migrations-vq/*.sql` (apply in order;
- * the drizzle journal is intentionally frozen at 0002). This config exists so an
- * introspection/diff is *scoped* to vq_* if ever needed for inspection — NOT as an apply
- * path. `shared/vq-schema.ts` now re-exports every operational + production table so that
- * even if `push` is run by mistake it is NON-destructive (Reviewer 3 F-1, Phase 10A);
- * previously it would have proposed DROPPING all 13. To apply a migration:
- *     psql "$VQ_DB_URL" -v ON_ERROR_STOP=1 -f migrations-vq/00NN_name.sql   (staging first)
+ * managed exclusively by immutable numbered SQL and the canonical migration runner:
+ *     npm run db:migrate -- --estate vault-quest               (read-only plan)
+ *     npm run db:migrate -- --estate vault-quest --apply        (owner-approved apply)
+ * The runner uses its separate migration credential and drizzle.vq_schema_migrations;
+ * the ORM journal is not execution authority. Never apply files individually with psql.
+ * Unjournalled historical estates require the separately reviewed historical-baseline-v1
+ * admission procedure, never replaying old SQL. See docs/runbooks/db-migration-safety.md.
+ * This config is only for scoped introspection/diff, not an application path or a
+ * guarantee that an accidental push is safe. Shared/staging/production execution
+ * always needs explicit target-specific owner approval.
  */
 if (!process.env.MINTVAULT_DATABASE_URL) {
   throw new Error("MINTVAULT_DATABASE_URL is not set");

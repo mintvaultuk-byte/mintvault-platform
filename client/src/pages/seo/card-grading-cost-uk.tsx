@@ -13,7 +13,7 @@ const breadcrumbs = [
 const faqs = [
   {
     question: "How much does card grading cost in the UK?",
-    answer: "MintVault UK grading starts from £19 per card on the Vault Queue tier (40 working day turnaround). Standard is £25 (15 working days) and Express is £45 (5 working days). All prices include fully insured return shipping.",
+    answer: "See the current pricing page for available grading services, prices and turnaround. Your submission quote confirms applicable discounts, insurance, return shipping and the total before payment.",
   },
   {
     question: "Are there bulk discounts for card grading?",
@@ -22,15 +22,15 @@ const faqs = [
   },
   {
     question: "What is included in the grading cost?",
-    answer: "Every MintVault grading fee includes the professional grade assessment, a tamper-evident precision slab with an NFC chip, a unique online-verifiable certificate, and fully insured return shipping based on declared card value. There are no hidden fees.",
+    answer: "Compare current service features on the pricing page. Your submission quote separately confirms grading, applicable discounts, insurance, return shipping and the total before payment.",
   },
   {
     question: "Is UK card grading cheaper than PSA or BGS?",
-    answer: "For UK collectors, MintVault is significantly more cost-effective than PSA or BGS when you factor in international tracked shipping (£20–£40 each way), customs duties (typically 5–12% on declared value), and import VAT on return. MintVault's all-inclusive UK pricing makes the true cost far lower.",
+    answer: "Compare complete current quotes, including grading, shipping, insurance, currency conversion and any applicable import charges. Overseas examples are illustrative rather than current provider prices or tax advice.",
   },
   {
     question: "What is the minimum value card worth grading?",
-    answer: "As a general rule, a card should have a raw market value at least 3–4× the grading cost to make financial sense. At £19 on the Vault Queue tier, cards worth £60+ in near-mint condition are typically good candidates. High-grade results can multiply value significantly beyond this threshold.",
+    answer: "Compare the current submission quote with your card’s realistic market value and your reasons for grading. A grade or resale gain is not guaranteed. See the current pricing page for fees and available services.",
   },
 ];
 
@@ -41,7 +41,7 @@ const schema = [
     "@type": "Service",
     name: "Card Grading Cost UK",
     provider: { "@type": "Organization", name: "MintVault UK", url: "https://mintvaultuk.com" },
-    description: "Transparent card grading pricing in the UK. MintVault UK grading from £19 per card, all-inclusive with insured return shipping.",
+    description: "Compare current MintVault UK grading prices and service options. Your quote confirms grading, discounts, insurance and shipping before payment.",
     areaServed: "United Kingdom",
     serviceType: "Trading Card Grading",
   },
@@ -53,7 +53,7 @@ export default function CardGradingCostUk() {
     <div className="max-w-5xl mx-auto px-4 py-10 no-text-shadow">
       <SeoHead
         title="Card Grading Cost UK | How Much Does Card Grading Cost? | MintVault"
-        description="How much does card grading cost in the UK? MintVault offers transparent all-inclusive pricing from £19 per card with insured return shipping."
+        description="How much does card grading cost in the UK? Compare current MintVault services, prices, discounts, insurance and return shipping."
         canonical="https://mintvaultuk.com/card-grading-cost-uk"
         ogImage="https://mintvaultuk.com/images/collector-lifestyle.webp"
         schema={schema}
@@ -67,7 +67,7 @@ export default function CardGradingCostUk() {
         </h1>
 
         <p className="text-[#d4d4d4] text-base leading-relaxed mb-4">
-          MintVault UK offers transparent, all-inclusive card grading pricing with no hidden fees. Every tier includes the professional grade assessment, tamper-evident precision slab with NFC chip, and fully insured return shipping. Choose the turnaround speed that suits your needs.
+          Compare current MintVault grading services and their features. Your submission quote confirms the grading fee, applicable discounts, insurance, return shipping and total before payment.
         </p>
 
         <p className="text-[#d4d4d4] text-sm leading-relaxed mb-8">
@@ -77,37 +77,24 @@ export default function CardGradingCostUk() {
         <section className="mb-10" data-testid="section-cost-tiers">
           <h2 className="text-2xl font-bold text-[#D4AF37] tracking-wide mb-4">Grading Tiers & Pricing</h2>
           <div className="space-y-3">
-            {[
-              { tier: "Vault Queue", days: "40 working days", price: "£19/card", desc: "Best for bulk collections and patient submissions." },
-              { tier: "Standard", days: "15 working days", price: "£25/card", desc: "A balanced turnaround for most submissions." },
-              { tier: "Express", days: "5 working days", price: "£45/card", desc: "Priority processing for urgent or high-value cards." },
-            ].map((t) => (
-              <div key={t.tier} className="border border-[#D4AF37]/20 bg-[#0a0e1a]/85 backdrop-blur-sm rounded-lg px-4 py-3">
-                <div className="flex items-center justify-between mb-1">
-                  <span className="text-white text-sm font-medium">{t.tier}</span>
-                  <span className="text-[#D4AF37] font-bold text-sm">{t.price}</span>
-                </div>
-                <div className="flex items-center justify-between">
-                  <span className="text-[#999999] text-xs">{t.desc}</span>
-                  <span className="text-[#d4d4d4] text-xs">{t.days}</span>
-                </div>
-              </div>
-            ))}
+            <Link href="/pricing" className="block px-4 py-3 text-[#D4AF37] hover:underline">
+              View current grading prices and turnaround →
+            </Link>
           </div>
           <p className="text-[#d4d4d4] text-sm mt-3">
-            All tiers include fully insured return shipping. <Link href="/pricing" className="text-[#D4AF37] hover:underline">View full pricing & bulk discounts</Link>.
+            Your quote confirms insurance and return shipping before payment. <Link href="/pricing" className="text-[#D4AF37] hover:underline">View full pricing & bulk discounts</Link>.
           </p>
         </section>
 
         <section className="mb-10" data-testid="section-cost-included">
-          <h2 className="text-2xl font-bold text-[#D4AF37] tracking-wide mb-4">What's Included in Every Grading Fee</h2>
+          <h2 className="text-2xl font-bold text-[#D4AF37] tracking-wide mb-4">Grading and Return Service</h2>
           <div className="space-y-2">
             {[
               "Professional grade assessment on a 1–10 scale",
               "Tamper-evident precision slab with embedded NFC chip",
               "Unique certificate number, verifiable online at any time",
               "Claim code to register verified ownership in the MintVault registry",
-              "Fully insured return shipping based on declared card value",
+              "Return shipping and insurance based on declared value, separately confirmed in your quote",
             ].map((item) => (
               <div key={item} className="flex items-start gap-2 text-[#d4d4d4] text-sm">
                 <span className="text-[#D4AF37] mt-0.5 shrink-0">✓</span>
@@ -120,15 +107,15 @@ export default function CardGradingCostUk() {
         <section className="mb-10" data-testid="section-cost-vs-overseas">
           <h2 className="text-2xl font-bold text-[#D4AF37] tracking-wide mb-4">True Cost: UK vs Overseas Grading</h2>
           <p className="text-[#d4d4d4] text-sm leading-relaxed mb-4">
-            When UK collectors send cards to overseas graders, the advertised grade fee is only part of the cost. Here's a realistic cost breakdown for sending 10 cards to a US grader:
+            When UK collectors send cards to overseas graders, the advertised grade fee is only part of the cost. This is an illustrative budgeting example for 10 cards, not current provider prices or tax advice. Check current quotes and applicable import requirements.
           </p>
           <div className="border border-[#D4AF37]/20 bg-[#0a0e1a]/85 backdrop-blur-sm rounded-lg p-4 space-y-2 text-sm mb-4">
             {[
               ["Grading fee (10 cards @ ~$25)", "~£200"],
               ["International tracked shipping (outbound)", "~£30"],
               ["Return shipping from US", "~£35"],
-              ["UK customs duty (5% on declared value)", "~£15"],
-              ["Import VAT (20% on value + duty)", "~£45"],
+              ["Illustrative customs-charge allowance (if applicable)", "~£15"],
+              ["Illustrative import-tax allowance (if applicable)", "~£45"],
               ["Total estimated cost", "~£325"],
             ].map(([label, value], i) => (
               <div key={label} className={`flex justify-between ${i === 5 ? "pt-2 border-t border-[#D4AF37]/20 font-semibold text-white" : "text-[#d4d4d4]"}`}>
@@ -138,14 +125,14 @@ export default function CardGradingCostUk() {
             ))}
           </div>
           <p className="text-[#d4d4d4] text-sm leading-relaxed">
-            The same 10 cards on the MintVault Vault Queue tier: <strong className="text-white">about £186 all-inclusive</strong> (£190 grading, minus 5% bulk discount, plus insured return shipping). No customs. No import VAT. No surprises.
+            For MintVault, use the <Link href="/pricing" className="text-[#D4AF37] hover:underline">current pricing page</Link> and your submission quote to compare grading, eligible discounts, insurance and return shipping. Add your outbound postage to compare the complete cost.
           </p>
         </section>
 
         <FaqSection faqs={faqs} title="Card Grading Cost — FAQs" />
 
         <div className="mt-10">
-          <CtaSection title="Transparent Pricing, No Hidden Fees" subtitle="Grade your cards with MintVault — all-inclusive UK pricing from £19 per card." />
+          <CtaSection title="Compare Current Grading Prices" subtitle="Your submission quote confirms the service, discounts, insurance and shipping before payment." />
         </div>
 
         <section className="mt-10">

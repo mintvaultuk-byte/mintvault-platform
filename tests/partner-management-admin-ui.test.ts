@@ -92,10 +92,13 @@ describe("G5 UI pure helpers", () => {
 
 describe("G5 list page source assertions", () => {
   const src = readFileSync(join(process.cwd(), "client/src/pages/admin/partner-management.tsx"), "utf8");
-  it("uses the admin shell + admin session gate", () => {
+  const app = readFileSync(join(process.cwd(), "client/src/App.tsx"), "utf8");
+  const session = readFileSync(join(process.cwd(), "client/src/lib/admin-session.tsx"), "utf8");
+  it("uses the admin shell under the shared Admin session gate", () => {
     expect(src).toContain("AdminShell");
-    expect(src).toContain("/api/admin/session");
-    expect(src).toContain("encodeURIComponent(`${pathname}${window.location.search}${window.location.hash}`)");
+    expect(app).toContain("<AdminSessionProvider>");
+    expect(session).toContain('fetch("/api/admin/session"');
+    expect(src).not.toContain('fetch("/api/admin/session"');
   });
   it("carries required data-testids (list, filters, table, create modal)", () => {
     for (const id of [
@@ -159,6 +162,7 @@ describe("shared admin API client source assertions", () => {
 
 describe("G5 detail page source assertions", () => {
   const src = readFileSync(join(process.cwd(), "client/src/pages/admin/partner-management-detail.tsx"), "utf8");
+  const app = readFileSync(join(process.cwd(), "client/src/App.tsx"), "utf8");
   it("has the canonical Partner workspace navigation + admin session gate", () => {
     expect(src).toContain("pm-workspace-tab-");
     for (const key of [
@@ -189,7 +193,7 @@ describe("G5 detail page source assertions", () => {
     ]) {
       expect(src).toContain(label);
     }
-    expect(src).toContain("/api/admin/session");
+    expect(app).toContain("<AdminSessionProvider>");
   });
   it("adds partner user management UI without password display or retrieval", () => {
     for (const id of [

@@ -32,7 +32,7 @@ vi.mock("../server/db", () => {
   const u = new URL(url);
   const ok =
     (u.hostname === "127.0.0.1" || u.hostname === "localhost") &&
-    u.port === "55432" &&
+    u.port === (process.env.MINTVAULT_TEST_PG16_PORT || "55432") &&
     u.pathname === "/mintvault_vq_phase10_local";
   if (!ok)
     throw new Error(

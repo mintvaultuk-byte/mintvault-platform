@@ -6,17 +6,8 @@ import { G5RequestError } from "./partner-management-errors";
 import type { PartnerPrincipal } from "./session";
 import { withTenant } from "./db";
 
-export const PORTAL_ROLE_TO_PARTNER_ROLE = {
-  OWNER: "PARTNER_OWNER",
-  ADMIN: "PARTNER_MANAGER",
-  GRADER: "MVGS_ASSESSMENT_TECHNICIAN",
-  STAFF: "PARTNER_RECEPTION",
-  // AG-2 — the least-privilege shop-floor role. An owner can now hire someone to run the scanner
-  // without also handing them grading authority, station enrolment and the wallet.
-  SCANNER_OPERATOR: "SCANNER_OPERATOR",
-} as const;
-
-export type PortalTeamRole = keyof typeof PORTAL_ROLE_TO_PARTNER_ROLE;
+import { PORTAL_ROLE_TO_PARTNER_ROLE, isPortalTeamRole, type PortalTeamRole } from "../../shared/partner-team-roles";
+export { PORTAL_ROLE_TO_PARTNER_ROLE, type PortalTeamRole } from "../../shared/partner-team-roles";
 
 const PARTNER_ROLE_TO_PORTAL_ROLE: Record<string, PortalTeamRole> = {
   PARTNER_OWNER: "OWNER",
@@ -55,10 +46,10 @@ function normaliseEmail(raw: string): string {
 }
 
 export function requirePortalTeamRole(raw: unknown): PortalTeamRole {
-  if (typeof raw !== "string" || !Object.prototype.hasOwnProperty.call(PORTAL_ROLE_TO_PARTNER_ROLE, raw)) {
+  if (!isPortalTeamRole(raw)) {
     throw new G5RequestError("VALIDATION_ERROR", "Unknown team role.");
   }
-  return raw as PortalTeamRole;
+  return raw;
 }
 
 function displayPortalRole(roleCodes: string[]): string {

@@ -1,6 +1,6 @@
 {
   "name": "mintvault-scanner-app",
-  "version": "1.2.1",
+  "version": "1.6.2",
   "description": "MintVault scanner menu-bar app — single-process replacement for watcher.mjs + guide-window + swiftbar.",
   "main": "main.js",
   "private": true,
@@ -21,6 +21,7 @@
     "sharp": "^0.33.5"
   },
   "devDependencies": {
-    "electron": "^42.2.0"
+    "electron": "^42.2.0",
+    "happy-dom": "^20.11.1"
   }
 }

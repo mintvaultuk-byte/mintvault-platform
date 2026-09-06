@@ -18,11 +18,25 @@
  * No other transition is permitted. Every transition writes a partner_submission_events row.
  */
 import type { PoolClient } from "pg";
+import { randomUUID } from "node:crypto";
 import { fileTypeFromBuffer } from "file-type";
 import { withPartnerAdminTenantTransaction, withTenant } from "./db";
 import { writePartnerAudit } from "./audit";
 import type { PartnerPrincipal } from "./session";
-import { uploadToR2, getR2SignedUrl } from "../r2";
+import { getR2SignedUrl } from "../r2";
+import {
+  ObjectWriteCoordinator,
+  ObjectWriteAbandonError,
+  ObjectWriteConflictError,
+  ObjectWriteInProgressError,
+  ObjectWriteTerminalError,
+  readObjectWriteSnapshot,
+  sha256Hex,
+  type ObjectWriteFinalizeContext,
+  type ObjectWriteSnapshot,
+  type ObjectWriteTransactionRunner,
+} from "../lib/object-write-coordinator";
+import { objectWriteStore } from "../lib/object-write-store";
 import { CreditReservationError, reserveCreditInTransaction } from "./partner-credit-reservation-service";
 import { resolveFlag } from "./flags";
 import {
@@ -376,7 +390,7 @@ async function recomputeSubmissionTotals(c: PoolClient, tenantId: string, submis
 
 async function writeEvent(
   c: PoolClient,
-  principal: PartnerPrincipal,
+  principal: Pick<PartnerPrincipal, "tenantId" | "userId">,
   submissionId: string,
   eventType: string,
   fromStatus: string | null,
@@ -574,8 +588,215 @@ const ALLOWED_CARD_IMAGE_MIMES = new Map([
   ["image/tiff", "tiff"],
 ]);
 
-function cardImageKey(tenantId: string, submissionId: string, cardId: string, side: "front" | "back", ext: string) {
-  return `partner-submissions/${tenantId}/${submissionId}/${cardId}/${side}-${Date.now()}.${ext}`;
+function cardImageKey(
+  tenantId: string,
+  submissionId: string,
+  cardId: string,
+  side: "front" | "back",
+  revision: string,
+  ext: string
+) {
+  return `partner-submissions/${tenantId}/${submissionId}/${cardId}/revisions/${revision}/${side}.${ext}`;
+}
+
+interface PartnerCardImageIntent {
+  tenantId: string;
+  submissionId: string;
+  cardId: string;
+  side: "front" | "back";
+  beforeKey: string | null;
+  locationId: string;
+  actorUserId: string;
+  sessionId: string;
+  mime: string;
+  size: number;
+}
+
+interface PartnerCardImageDescriptor extends Record<string, unknown> {
+  operationId: string;
+  submissionId: string;
+  cardId: string;
+  side: "front" | "back";
+  logicalSlot: string;
+  key: string;
+  sha256: string;
+  byteLength: number;
+  contentType: string;
+}
+
+function partnerObjectWriteError(error: unknown): never {
+  if (error instanceof ObjectWriteConflictError) {
+    throw new SubmissionError(
+      "idempotency_conflict",
+      "This upload key is already bound to a different image. Choose the image again to start a new upload."
+    );
+  }
+  if (error instanceof ObjectWriteInProgressError) {
+    throw new SubmissionError("upload_in_progress", "This image upload is still being verified. Retry shortly.");
+  }
+  if (error instanceof ObjectWriteTerminalError) {
+    throw new SubmissionError("upload_terminal", "This image upload cannot be resumed. Choose the image again.");
+  }
+  throw error;
+}
+
+function assertPartnerCardImageReplay(
+  snapshot: ObjectWriteSnapshot,
+  principal: PartnerPrincipal,
+  submissionId: string,
+  cardId: string,
+  side: "front" | "back"
+): void {
+  const payload = snapshot.intentPayload;
+  if (
+    snapshot.tenantId !== principal.tenantId ||
+    snapshot.operationKind !== "PARTNER_CARD_IMAGE" ||
+    snapshot.aggregateType !== "partner_submission_card" ||
+    snapshot.aggregateId !== cardId ||
+    snapshot.actorId !== principal.userId ||
+    payload.tenantId !== principal.tenantId ||
+    payload.submissionId !== submissionId ||
+    payload.cardId !== cardId ||
+    payload.side !== side ||
+    payload.actorUserId !== principal.userId ||
+    snapshot.items.length !== 1
+  ) {
+    throw new ObjectWriteConflictError("Idempotency key is already bound to another card image request");
+  }
+}
+
+function parsePartnerCardImageIntent(context: ObjectWriteFinalizeContext): PartnerCardImageIntent {
+  const payload = context.intentPayload;
+  const side = payload.side;
+  if (
+    context.operationKind !== "PARTNER_CARD_IMAGE" ||
+    context.aggregateType !== "partner_submission_card" ||
+    typeof context.tenantId !== "string" ||
+    typeof payload.tenantId !== "string" ||
+    payload.tenantId !== context.tenantId ||
+    typeof payload.submissionId !== "string" ||
+    typeof payload.cardId !== "string" ||
+    (side !== "front" && side !== "back") ||
+    !(payload.beforeKey === null || typeof payload.beforeKey === "string") ||
+    typeof payload.locationId !== "string" ||
+    typeof payload.actorUserId !== "string" ||
+    typeof payload.sessionId !== "string" ||
+    typeof payload.mime !== "string" ||
+    typeof payload.size !== "number" ||
+    !Number.isSafeInteger(payload.size) ||
+    payload.size <= 0
+  ) {
+    throw new Error("PARTNER_CARD_IMAGE intent is malformed");
+  }
+  return {
+    tenantId: payload.tenantId,
+    submissionId: payload.submissionId,
+    cardId: payload.cardId,
+    side,
+    beforeKey: payload.beforeKey,
+    locationId: payload.locationId,
+    actorUserId: payload.actorUserId,
+    sessionId: payload.sessionId,
+    mime: payload.mime,
+    size: payload.size,
+  };
+}
+
+export async function finalizePartnerCardImageObjectWrite(
+  client: PoolClient,
+  context: ObjectWriteFinalizeContext
+): Promise<PartnerCardImageDescriptor> {
+  const intent = parsePartnerCardImageIntent(context);
+  if (
+    context.aggregateId !== intent.cardId ||
+    context.actorId !== intent.actorUserId ||
+    context.expectedState.beforeKey !== intent.beforeKey ||
+    context.items.length !== 1
+  ) {
+    throw new Error("PARTNER_CARD_IMAGE manifest does not identify exactly one card image");
+  }
+  const item = context.items[0];
+  if (
+    item.store !== "R2" ||
+    item.logicalSlot !== intent.side ||
+    item.verificationState !== "VERIFIED" ||
+    item.required !== true ||
+    item.objectClass !== "CANONICAL" ||
+    item.priorObjectKey !== intent.beforeKey ||
+    item.contentType !== intent.mime ||
+    item.byteLength !== intent.size
+  ) {
+    throw new Error("PARTNER_CARD_IMAGE object is not verified for the intended side");
+  }
+  const descriptor: PartnerCardImageDescriptor = {
+    operationId: context.operationId,
+    submissionId: intent.submissionId,
+    cardId: intent.cardId,
+    side: intent.side,
+    logicalSlot: item.logicalSlot,
+    key: item.objectKey,
+    sha256: item.contentSha256,
+    byteLength: item.byteLength,
+    contentType: item.contentType,
+  };
+  const submission = await client.query<{ status: string; location_id: string }>(
+    `SELECT status,location_id FROM partner_submissions
+      WHERE id=$1 AND tenant_id=$2 FOR UPDATE`,
+    [intent.submissionId, intent.tenantId]
+  );
+  if (submission.rowCount !== 1 || submission.rows[0].location_id !== intent.locationId) {
+    throw new ObjectWriteAbandonError("Partner submission is unavailable for card-image publication");
+  }
+  try {
+    assertSubmissionOperationAllowed(submission.rows[0].status, "UPLOAD_CARD_IMAGE");
+  } catch {
+    throw new ObjectWriteAbandonError("Partner submission state no longer permits card-image publication");
+  }
+  const column = intent.side === "front" ? "front_image_key" : "back_image_key";
+  const current = await client.query<{ image_key: string | null }>(
+    `SELECT ${column} AS image_key FROM partner_submission_cards
+      WHERE id=$1 AND submission_id=$2 AND tenant_id=$3 AND removed_at IS NULL
+      FOR UPDATE`,
+    [intent.cardId, intent.submissionId, intent.tenantId]
+  );
+  if (current.rowCount !== 1) {
+    throw new ObjectWriteAbandonError("Partner card is unavailable for card-image publication");
+  }
+  if (current.rows[0].image_key !== intent.beforeKey) {
+    throw new ObjectWriteAbandonError("Partner card image changed before publication");
+  }
+  const updated = await client.query(
+    `UPDATE partner_submission_cards SET ${column}=$4,updated_at=now()
+      WHERE id=$1 AND submission_id=$2 AND tenant_id=$3
+        AND ${column} IS NOT DISTINCT FROM $5
+      RETURNING id`,
+    [intent.cardId, intent.submissionId, intent.tenantId, item.objectKey, intent.beforeKey]
+  );
+  if (updated.rowCount !== 1) {
+    throw new ObjectWriteAbandonError("Partner card image update lost its compare-and-swap");
+  }
+  await writeEvent(client, {
+    tenantId: intent.tenantId,
+    userId: intent.actorUserId,
+  }, intent.submissionId, "card_image_uploaded", null, null, null, {
+    cardId: intent.cardId,
+    side: intent.side,
+    replaced: !!intent.beforeKey,
+    object: descriptor,
+  });
+  await writePartnerAudit(client, {
+    tenantId: intent.tenantId,
+    locationId: intent.locationId,
+    actorUserId: intent.actorUserId,
+    action: "submission.card_image_uploaded",
+    recordType: "partner_submission_card",
+    recordId: intent.cardId,
+    before: intent.beforeKey ? { [intent.side]: "present" } : null,
+    after: { side: intent.side, object: descriptor },
+    sessionId: intent.sessionId,
+    correlationId: context.operationId,
+  });
+  return descriptor;
 }
 
 export async function uploadCardImage(
@@ -583,7 +804,8 @@ export async function uploadCardImage(
   submissionId: string,
   cardId: string,
   side: "front" | "back",
-  file: { buffer: Buffer; mimetype?: string | null; originalname?: string | null; size?: number | null }
+  file: { buffer: Buffer; mimetype?: string | null; originalname?: string | null; size?: number | null },
+  requestIdempotencyKey?: string | null
 ): Promise<CardImage> {
   if (!file?.buffer?.length) throw VALIDATION("Choose an image to upload.");
   const detected = await fileTypeFromBuffer(file.buffer);
@@ -591,10 +813,13 @@ export async function uploadCardImage(
   const mime = detected.mime;
   const ext = ALLOWED_CARD_IMAGE_MIMES.get(mime);
   if (!ext) throw VALIDATION("Upload a JPEG, PNG, WebP or TIFF image.");
-  return withTenant({ tenantId: principal.tenantId }, async (c) => {
+  const suppliedKey = requestIdempotencyKey?.trim() ?? "";
+  if (!suppliedKey) throw VALIDATION("An Idempotency-Key header is required for image uploads.");
+  if (suppliedKey.length > 200) throw VALIDATION("Idempotency key is too long.");
+  const ledgerKey = `partner-card-image:${sha256Hex(suppliedKey)}`;
+  const prepared = await withTenant({ tenantId: principal.tenantId }, async (c) => {
     const row = await loadSubmissionForUpdate(c, principal, submissionId);
     if (!row) throw NOT_FOUND();
-    assertSubmissionOperationAllowed(row.status, "UPLOAD_CARD_IMAGE");
     const current = await c.query<{ id: string; front_image_key: string | null; back_image_key: string | null }>(
       `SELECT id, front_image_key, back_image_key
          FROM partner_submission_cards
@@ -602,37 +827,88 @@ export async function uploadCardImage(
       [cardId, submissionId, principal.tenantId]
     );
     if (current.rows.length !== 1) throw NOT_FOUND();
-
+    const snapshot = await readObjectWriteSnapshot(c, principal.tenantId, ledgerKey);
+    if (snapshot) {
+      assertPartnerCardImageReplay(snapshot, principal, submissionId, cardId, side);
+      return { row, beforeKey: null, snapshot };
+    }
+    assertSubmissionOperationAllowed(row.status, "UPLOAD_CARD_IMAGE");
     const beforeKey = side === "front" ? current.rows[0].front_image_key : current.rows[0].back_image_key;
-    const key = cardImageKey(principal.tenantId, submissionId, cardId, side, ext);
-    await uploadToR2(key, file.buffer, mime);
-    await c.query(
-      `UPDATE partner_submission_cards
-          SET ${side === "front" ? "front_image_key" : "back_image_key"}=$4, updated_at=now()
-        WHERE id=$1 AND submission_id=$2 AND tenant_id=$3`,
-      [cardId, submissionId, principal.tenantId, key]
-    );
-    await writeEvent(c, principal, submissionId, "card_image_uploaded", null, null, null, {
-      cardId,
-      side,
-      replaced: !!beforeKey,
-      size: file.size ?? file.buffer.length,
-      mime,
-    });
-    await writePartnerAudit(c, {
-      tenantId: principal.tenantId,
-      locationId: row.location_id,
-      actorUserId: principal.userId,
-      action: "submission.card_image_uploaded",
-      recordType: "partner_submission_card",
-      recordId: cardId,
-      before: beforeKey ? { [side]: "present" } : null,
-      after: { side, key, mime, size: file.size ?? file.buffer.length },
-      sessionId: principal.sessionId,
-      correlationId: submissionId,
-    });
-    return { side, key, url: await getR2SignedUrl(key) };
+    return { row, beforeKey, snapshot: null };
   });
+  const revision = sha256Hex(`${principal.tenantId}:${submissionId}:${cardId}:${side}:${suppliedKey}`).slice(0, 32);
+  const key = cardImageKey(principal.tenantId, submissionId, cardId, side, revision, ext);
+  const tenantRunner: ObjectWriteTransactionRunner = {
+    transaction: (operation) => withTenant({ tenantId: principal.tenantId }, operation),
+  };
+  const coordinator = new ObjectWriteCoordinator(tenantRunner, objectWriteStore, `partner-card-image:${principal.userId}`);
+  const snapshot = prepared.snapshot;
+  const writeInput = snapshot
+    ? {
+        tenantId: snapshot.tenantId,
+        idempotencyKey: snapshot.idempotencyKey,
+        operationKind: snapshot.operationKind,
+        aggregateType: snapshot.aggregateType,
+        aggregateId: snapshot.aggregateId,
+        actorId: snapshot.actorId,
+        expectedState: snapshot.expectedState,
+        intentPayload: snapshot.intentPayload,
+        items: snapshot.items.map((item) => ({
+          store: item.store,
+          logicalSlot: item.logicalSlot,
+          objectKey: item.objectKey,
+          priorObjectKey: item.priorObjectKey,
+          body: file.buffer,
+          contentType: item.contentType,
+          objectClass: item.objectClass,
+          required: item.required,
+          retentionDays: item.retentionDays ?? undefined,
+        })),
+      }
+    : {
+        tenantId: principal.tenantId,
+        idempotencyKey: ledgerKey,
+        operationKind: "PARTNER_CARD_IMAGE",
+        aggregateType: "partner_submission_card",
+        aggregateId: cardId,
+        actorId: principal.userId,
+        expectedState: { beforeKey: prepared.beforeKey, submissionStatus: prepared.row.status },
+        intentPayload: {
+          tenantId: principal.tenantId,
+          submissionId,
+          cardId,
+          side,
+          beforeKey: prepared.beforeKey,
+          locationId: prepared.row.location_id,
+          actorUserId: principal.userId,
+          sessionId: principal.sessionId,
+          mime,
+          size: file.buffer.length,
+        },
+        items: [
+          {
+            store: "R2" as const,
+            logicalSlot: side,
+            objectKey: key,
+            priorObjectKey: prepared.beforeKey,
+            body: file.buffer,
+            contentType: mime,
+            objectClass: "CANONICAL" as const,
+          },
+        ],
+      };
+  let result;
+  try {
+    result = await coordinator.execute(writeInput, finalizePartnerCardImageObjectWrite);
+  } catch (error) {
+    partnerObjectWriteError(error);
+  }
+  const resultSide = result.result.side;
+  const resultKey = result.result.key;
+  if ((resultSide !== "front" && resultSide !== "back") || typeof resultKey !== "string") {
+    throw new Error("Stored PARTNER_CARD_IMAGE result is malformed");
+  }
+  return { side: resultSide, key: resultKey, url: await getR2SignedUrl(resultKey) };
 }
 
 export async function addCard(principal: PartnerPrincipal, submissionId: string, input: CardInput) {

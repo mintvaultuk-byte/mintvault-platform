@@ -69,6 +69,8 @@ Thumbs.db
 .claude/controlled-code-lead/approvals/*.record.md
 .claude/controlled-code-lead/approvals/*.record.json
 .claude/controlled-code-lead/locks/
+# Preserve the owner's local resource-lifecycle audit workspace without admitting it to this checkpoint.
+/.claude/controlled-code-lead/tasks/resource-lifecycle-audit-20260826/
 # Disposable staging station key minted by scripts/staging/at23-station-reproof.mjs --new-identity.
 # Never commit a station private key.
 at23-station.key
