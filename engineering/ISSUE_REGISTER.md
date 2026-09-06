@@ -2,9 +2,16 @@
 
 ## 2026-09-06 VQ schema authority checkpoint
 
+S3c3 from49c10d2e closes the in-scope memory fallback locally: independent
+Terra22+10, clean-lock92/build/lint/type ratchet pass; exact hashes/limits retained
+in VQ packet. ARCH-SCHEMA-001 implementation is FIXED_WIP; final exact-candidate
+proof remains IN_PROGRESS, not release PROVEN. Export lifecycle remains separate.
+
 S3c2 from e77ede827d68a824db105943c4490fdf185684fa: required VQ observation is
 locally independently proven (clean79 database/readiness,60 architecture/CI/context,
-PG16/17 targeted observations and build). Both new-query delegation gaps repaired
+PG17 suites and explicit version-verified PG16 observations and build). The initially
+PG16-labelled helper run actually selected17; corrected evidence is retained in the
+VQ packet rather than counted as16. Both new-query delegation gaps repaired
 after actual red proof. ARCH-SCHEMA-001 stays IN_PROGRESS for durable-only fallback,
 exact candidate and final gates; see current VQ packet. No new broad review.
 

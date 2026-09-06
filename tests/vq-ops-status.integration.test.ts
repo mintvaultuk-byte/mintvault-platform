@@ -11,8 +11,14 @@ vi.mock("../server/db", () => {
   const url = process.env.TEST_DATABASE_URL || "";
   if (!url) return { db: {}, pool: { end: () => Promise.resolve(), query: () => Promise.resolve({ rows: [] }) } };
   const u = new URL(url);
-  const ok = (u.hostname === "127.0.0.1" || u.hostname === "localhost") && u.port === (process.env.MINTVAULT_TEST_PG16_PORT || "55432") && u.pathname === "/mintvault_vq_phase10_local";
-  if (!ok) throw new Error(`REFUSED: TEST_DATABASE_URL must be the local throwaway DB, got ${u.hostname}:${u.port}${u.pathname}`);
+  const ok =
+    (u.hostname === "127.0.0.1" || u.hostname === "localhost") &&
+    u.port === (process.env.MINTVAULT_TEST_PG16_PORT || "55432") &&
+    u.pathname === "/mintvault_vq_phase10_local";
+  if (!ok)
+    throw new Error(
+      `REFUSED: TEST_DATABASE_URL must be the local throwaway DB, got ${u.hostname}:${u.port}${u.pathname}`
+    );
   // eslint-disable-next-line @typescript-eslint/no-require-imports
   const pg = require("pg");
   // eslint-disable-next-line @typescript-eslint/no-require-imports
@@ -29,7 +35,8 @@ import { getExportJobCounts } from "../server/vault-quest/export-jobs";
 import { getVqOpsStatus } from "../server/vault-quest/lib/vq-ops-status";
 import { pool } from "../server/db";
 
-const q = (s: string, a: unknown[] = []) => (pool as unknown as { query: (s: string, a: unknown[]) => Promise<{ rows: unknown[] }> }).query(s, a);
+const q = (s: string, a: unknown[] = []) =>
+  (pool as unknown as { query: (s: string, a: unknown[]) => Promise<{ rows: unknown[] }> }).query(s, a);
 
 run("vq ops status — local Postgres", () => {
   beforeEach(async () => {
@@ -49,7 +56,9 @@ run("vq ops status — local Postgres", () => {
   it("setVqFeatureFlag inserts, then upserts (update not duplicate) with an audit trail", async () => {
     await setVqFeatureFlag("generation", false, "owner@test", "pausing spend");
     expect(await loadVqDbFlags()).toEqual({ generation: false });
-    const row1 = (await q("SELECT reason, updated_by FROM vq_feature_flags WHERE feature='generation'", [])) as { rows: { reason: string; updated_by: string }[] };
+    const row1 = (await q("SELECT reason, updated_by FROM vq_feature_flags WHERE feature='generation'", [])) as {
+      rows: { reason: string; updated_by: string }[];
+    };
     expect(row1.rows[0].reason).toBe("pausing spend");
     expect(row1.rows[0].updated_by).toBe("owner@test");
 
@@ -62,15 +71,15 @@ run("vq ops status — local Postgres", () => {
   it("getExportJobCounts returns a bounded GROUP BY, not a row dump", async () => {
     await q(
       "INSERT INTO vq_export_jobs(kind, owner_admin_id, idempotency_key, state, requested_count, expires_at) VALUES ($1,$2,$3,$4,$5,now())",
-      ["pack", "x", "k1", "completed", 1],
+      ["pack", "x", "k1", "completed", 1]
     );
     await q(
       "INSERT INTO vq_export_jobs(kind, owner_admin_id, idempotency_key, state, requested_count, expires_at) VALUES ($1,$2,$3,$4,$5,now())",
-      ["pack", "x", "k2", "queued", 1],
+      ["pack", "x", "k2", "queued", 1]
     );
     const counts = await getExportJobCounts();
     expect(counts.durable).toMatchObject({ completed: 1, queued: 1 });
-    expect(typeof counts.legacyInMemoryThisMachineOnly).toBe("number");
+    expect(Object.keys(counts)).toEqual(["durable"]);
   });
 
   it("getVqOpsStatus composes everything into one honest, bounded snapshot", async () => {

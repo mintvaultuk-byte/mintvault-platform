@@ -29,7 +29,7 @@ import { normalizePdf } from "../vault-quest/pdf-normalize";
 import { VQ_ELEMENTS, VQ_ELEMENTS_NEEDS_APPROVAL } from "../vault-quest/lib/vq-constants";
 import { canTransition, isVqStatus } from "@shared/vq-workflow";
 import { setIntegrity, cardMetadata } from "../vault-quest/qa-set";
-import { startExport, getExportStatusView, resolveExportDownload } from "../vault-quest/export-jobs";
+import { startExport, getExportStatusView, resolveExportDownload, ExportUnavailableError } from "../vault-quest/export-jobs";
 import { getR2ObjectStream } from "../r2";
 import { checkGenerationSpend } from "../vault-quest/lib/generation-guard";
 import {
@@ -3877,6 +3877,7 @@ export function registerVaultQuestAdminRoutes(app: Express): void {
         const { jobId, count } = await startExport(kind, ownerAdminId, ids);
         res.status(202).json({ jobId, count });
       } catch (err) {
+        if (err instanceof ExportUnavailableError) return res.status(503).json({ error: "export service temporarily unavailable" });
         const status = (err as { status?: number }).status;
         const msg = err instanceof Error ? err.message : `${kind} failed to start`;
         // Concurrency back-pressure ("too many exports") is our own safe text → surface it.
@@ -3894,27 +3895,29 @@ export function registerVaultQuestAdminRoutes(app: Express): void {
   // export pack (.zip): svg/png/pdf + per-card metadata + manifest + checksums — background job
   app.post("/api/admin/vault-quest/export/pack", requireAdmin, startBatch("pack"));
 
-  // job progress (poll) — durable (Postgres) first, legacy in-memory fallback, so a
+  // job progress (poll) — shared durable PostgreSQL state, so a
   // poll that lands on a different Fly machine than the POST still finds the job.
   app.get("/api/admin/vault-quest/export/jobs/:id", requireAdmin, async (req: Request, res: Response) => {
     const view = await getExportStatusView(String(req.params.id));
-    if (!view) return res.status(404).json({ error: "job not found or expired" });
-    res.json(view);
+    if (!view.ok) return res.status(view.status).json({ error: view.reason === "unavailable" ? "export service temporarily unavailable" : "job not found or expired" });
+    res.json(view.value);
   });
 
   // download the finished file. Durable jobs stream from shared R2 (same-origin,
-  // behind admin auth) so any machine can serve it; legacy jobs stream the temp file.
+  // behind admin auth) so any machine can serve it. Temp render files are never served.
   app.get("/api/admin/vault-quest/export/jobs/:id/file", requireAdmin, async (req: Request, res: Response) => {
     const plan = await resolveExportDownload(String(req.params.id));
     switch (plan.kind) {
+      case "unavailable":
+        return res.status(plan.status).json({ error: "export service temporarily unavailable" });
       case "not_found":
-        return res.status(404).json({ error: "job not found or expired" });
+        return res.status(plan.status).json({ error: "job not found or expired" });
       case "running":
-        return res.status(409).json({ error: "export still running" });
+        return res.status(plan.status).json({ error: "export still running" });
       case "failed":
-        return res.status(422).json({ error: plan.message });
+        return res.status(plan.status).json({ error: plan.message });
       case "gone":
-        return res.status(410).json({ error: "export file no longer available" });
+        return res.status(plan.status).json({ error: "export file no longer available" });
       case "r2": {
         const obj = await getR2ObjectStream(plan.outputKey);
         if (!obj) return res.status(410).json({ error: "export file no longer available" });
@@ -3928,20 +3931,6 @@ export function registerVaultQuestAdminRoutes(app: Express): void {
           else res.destroy();
         });
         return obj.body.pipe(res);
-      }
-      case "file": {
-        const fs = await import("fs");
-        if (!fs.existsSync(plan.filePath)) return res.status(410).json({ error: "export file no longer available" });
-        res.setHeader("Content-Type", plan.contentType);
-        res.setHeader("Content-Disposition", `attachment; filename="${plan.fileName}"`);
-        if (plan.bytes) res.setHeader("Content-Length", String(plan.bytes));
-        const stream = fs.createReadStream(plan.filePath);
-        stream.on("error", () => {
-          if (!res.headersSent) res.status(500).json({ error: "failed to read export file" });
-          else res.destroy();
-        });
-        res.on("close", () => stream.destroy());
-        return stream.pipe(res);
       }
     }
   });

@@ -2,9 +2,19 @@
 
 ## Current checkpoint and next bounded wave
 
+S3c3 from pushed49c10d2eb817d2382905e34492ead72f23d9a5fc is FIXED_WIP:
+durable-only exports, typed503 without render/upload on unavailable authority,
+preserved durable HTTP/download semantics and no legacy ops authority. Root and
+independent Terra22 facade +10 actualPG17; final clean-lock92/build/lint/type
+ratchet pass. Exact hashes, initial REDs and limitations in existing VQ packet.
+WIP commit/push then next dependency-ready wave; no acknowledgement pause.
+Schema final proof, hosted CI, restricted UNKNOWN and Opus remain OPEN.
+
 S3c2 from pushed e77ede827d68a824db105943c4490fdf185684fa locally independently
 proven: required read-only VQ observation, main SQL unchanged, clean79+60/build,
-PG16/17 actual lineages, two delegation gaps reproduced/repaired. Exact hashes and
+PG17 suites plus explicit version-verified PG16 actual lineages, two delegation gaps
+reproduced/repaired. The earlier PG16-labelled helper run used17 and is not16 proof;
+the corrected direct16.13 evidence is in the VQ packet. Exact hashes and
 proof limits are in existing VQ packet. Checkpoint/push then S3c3 durable-only
 exports with no owner pause. Whole-release/hosted/restricted/Opus vetoes stay OPEN.
 

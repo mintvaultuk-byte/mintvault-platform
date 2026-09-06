@@ -2,8 +2,87 @@
 
 ## Current position (2026-09-06)
 
-S3c2 locally independently proven from pushed e77ede827d68a824db105943c4490fdf185684fa.
-Checkpoint/push this wave, then S3c3 durable-only export retirement. No release claim.
+S3c2 checkpoint49c10d2eb817d2382905e34492ead72f23d9a5fc is pushed. S3c3 is
+locally independently proven below; WIP checkpoint/push then the next authorised
+dependency-ready wave. Schema implementation is FIXED_WIP, not release PROVEN.
+
+### S3c3 retained proof (2026-09-06)
+
+Global JOBS, memory fallback, legacy TTL and local-file download are removed.
+Durable create/claim failure refuses503 before rendering, temp-file creation or
+upload; only actual claim conflict dedupes. Cancellation at the local admission
+cap must succeed before429, otherwise503. Poll/download preserve durable status,
+404/409/422/410 and completed/partial R2 output. Ops publishes durable counts only.
+Store changes are comments/formatting, not query or error-classification changes.
+No route mount/auth grant, provider, schema, scheduler, or fencing change.
+
+Initial facade RED3/12 exposed the old fallback; final root and independent Terra
+facade22/22 pass. Real-router proof uses the existing auth stub, not an auth proof.
+Renaming/restoring the owned test table exercises both start endpoints, status and
+download503 with zero render/upload/R2 calls; restored absent identity returns404.
+Owned durable rows exercise all terminal/wait states and mocked completed/partial
+R2 byte streams. Initial fixture UUID/text reuse failed42P08; separate bind
+parameters fix that test defect without changing production behavior.
+
+Root, independent Terra and final clean-lock PG17 serial ops3+router7 =10/10 each,
+zero skips; actual server_version_num170010 recorded. Terra's optional guarded
+db:push lacked native vector and is excluded from this proof; purpose-built VQ
+preparation and all17 migrations succeeded independently. No main-schema claim.
+Final clean-lock facade22+architecture32+CI19+Docker-context9 =82/82, zero skips.
+Scoped lint0 errors/0 warnings; tests ratchet344 existing diagnostics unchanged,
+no baseline waiver. Clean production build3366 modules and runner245.6KiB PASS;
+WIP source provenance only, no exact-candidate image claim. Native canvas/sharp
+duplicate-class and existing browser-data/PostCSS build warnings remain visible.
+Architecture snapshot removes exactly one legacy job and one TTL timer; no
+legacy-authority waiver. Independent source review found no in-scope defect.
+
+Source SHA256 (baseline49c10d2e plus this exact WIP):
+- server/vault-quest/export-jobs.ts:af9c55b56413dc15a5da64063acec9a3a4d41e47c13926603cbd1b8d72fd8cbb
+- server/vault-quest/lib/export-job-store.ts:8b4070300e09faf62d485309c84e11b6417d32b941662d6f48f8a608bff188d5
+- server/routes/vault-quest-admin.ts:183147b3e776e0b63bb8a83f7ffb19a03f2a0eaed8476e8733f19785f376ce4c
+- tests/vq-export-facade.test.ts:4d94cefb0b7e9b0fe037a436b8286e5fb8496776bd35203109237d9e34ca27b7
+- tests/vq-ops-route-spy.integration.test.ts:64316d4ea4bf12b2b43616db55865c2bb848ee667975a21234b41d8132b62685
+- tests/vq-ops-status.integration.test.ts:d44be9c09f1e4714d7e74761bdadb8517992e71fcc97ed04c42dacced378218b
+- scripts/architecture/generated/architecture-authority.json:535c8183c9de06188c15207d5022d3c443c526a6802931680388e41068e1f0a1
+
+Ordinary postflight retains managed-CLAUDE/package-egress/dirty/protected-branch
+vetoes and Graphify rebuild warning; no bypass or restricted test investigation.
+Exact candidate, hosted CI, final Opus and HY-SECURITY UNKNOWN remain open.
+Mid-render fencing/reclaim/timeout lifecycle remains its own dependency-gated wave.
+Rollback after activation is forward fix/withdraw traffic, not restored memory
+authority. No deploy, shared migration, paid provider, object deletion or live data.
+Only fresh helper-owned synthetic PostgreSQL resources were cleaned.
+
+## S3c3 durable-only export manifest
+
+Root sole writer: server/vault-quest/export-jobs.ts, existing store comments in
+server/vault-quest/lib/export-job-store.ts, the three export handlers/import in
+server/routes/vault-quest-admin.ts; tests/vq-export-facade.test.ts and
+tests/vq-ops-status.integration.test.ts; generated architecture snapshot and exact
+obsolete legacy keys only if removal invalidates them; existing packet/graph/task/
+issue/proof records. No new helper/directory/dependency, migration, provider call,
+route mount/permission, rendering/layout, claim-token or lifecycle scheduler edit.
+
+Delete global JOBS and legacy start/poll/TTL/file-download paths. Keep transient
+render state/files solely after durable create+claim; unavailable503 before any
+render/temp/upload, conflict alone dedupes. At existing local concurrency cap,
+cancel must succeed before429; unavailable cancellation503. Preserve safe error
+responses, durable status, R2 completed/partial output and404/409/422/410 semantics.
+Delete legacy ops count rather than publishing zero. Keep DB unavailable typed.
+Bounded independent Terra/Sol proof follows root implementation; tests mock provider
+calls and assert zero calls on refused admission, use helper-owned PG for ops.
+Preflight49c10d2e CRITICAL/HOSTILE; graphvalid101/notready. Existing owner approval
+stands; no source schema/readiness proof repeated beyond actual invalidators.
+Mid-render fencing/reclaim/timeouts belong remaining explicit lifecycle node,
+not a claim closed by removal of fallback. After activation rollback is forward
+fix/withdraw traffic, never restore fleet-unsafe memory authority.
+
+Proof-only extension: add the three changed export-handler HTTP paths to existing
+tests/vq-ops-route-spy.integration.test.ts. Reuse its disposable DB/real router and
+existing test auth bypass (not auth proof), mock R2/render only. Rename/restore the
+owned test export table to exercise actual unavailable503, then prove real durable
+row state→HTTP mapping and absence404; never touch another DB or provider. Run
+ops suites serially because this one explicitly mutates its disposable schema.
 
 ### S3c2 retained proof (2026-09-06)
 
@@ -30,8 +109,17 @@ Production=true observer is exercised with a genuine low-privilege LOGIN; global
 composition positive uses NODE_ENV=test. No claim of whole-production readiness.
 
 Root52/52; clean exact-lock79/79 VQ history/namespace + release/main/print tests,
-zero skips. Clean PG16.13 selected observation3/3 passes (37 filtered), including
-both lineages and malformed/error cases. Sol independently12/12 unit and2/2 PG17
+zero skips. The run initially labelled PG16.13 selected observation3/3 passes
+(37 filtered), but is NOT PG16 evidence: helper inspection found it rejects16 and
+falls back to17.10. This proof-label defect is corrected, not relabelled as a pass.
+Follow-up explicit /opt/homebrew/opt/postgresql@16/bin launch verified postgres
+--version16.13 AND SHOW server_version_num=160013, with no binary fallback.
+On that fresh owned cluster, both fresh and historical low-privilege observations
+pass; each rejects schema GRANT OPTION, membership ADMIN OPTION and bad journal
+checksum, then recovers after rollback (2 lineages/6 mutation refusals). Only its
+newly generated test cluster was stopped/removed. This is direct SQL/observer
+compatibility evidence, not a PG16 Vitest suite claim. Source hash remainsf07be896.
+Sol independently12/12 unit and2/2 PG17
 lineages passes; its requested filter excludes38 other cases, not full-suite proof.
 The final synthetic future row reuses existing0017_test_dependency.sql; a prior
 59/60 aggregate correctly caught an unclassified newly invented fixture filename.

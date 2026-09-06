@@ -9,10 +9,8 @@
  * (`vq/exports/{jobId}/…`), so poll + download succeed from ANY machine — the
  * same fix already shipped for magic-links.
  *
- * Every query is wrapped so a missing table (42P01 — the migration not yet applied
- * to a given DB) degrades to a typed `unavailable` signal instead of throwing;
- * the caller (export-jobs.ts) then falls back to the legacy in-memory path, so a
- * not-yet-migrated deploy keeps working exactly as before. No `drizzle-kit push`.
+ * Missing schema returns a typed `unavailable` signal. The facade refuses with
+ * 503; it never substitutes process-local state. No runtime schema mutation.
  *
  * The pure state/idempotency/key decisions live in ./export-job-state.ts and are
  * unit-tested there; this module is the thin DB+R2 adapter around them.
@@ -29,28 +27,25 @@ import {
 } from "./export-job-state";
 
 /** How long a finished export stays downloadable before the cleanup sweep may
- *  expire it (mirrors the legacy in-memory TTL). */
+ *  expire it. */
 export const EXPORT_TTL_MS = 20 * 60 * 1000;
 
 /** Bound on requeue attempts (defence-in-depth alongside the CHECK on the column). */
 export const MAX_EXPORT_ATTEMPTS = 3;
 
-/** Discriminated result so the caller can tell "table not migrated" (→ fall back
- *  to memory) apart from "migrated but no such job" (→ genuine 404). */
-export type StoreResult<T> =
-  | { ok: true; value: T }
-  | { ok: false; reason: "unavailable" | "not_found" | "conflict" };
+/** Distinguish unavailable durable authority (503) from a genuinely absent job (404). */
+export type StoreResult<T> = { ok: true; value: T } | { ok: false; reason: "unavailable" | "not_found" | "conflict" };
 
 const UNAVAILABLE = { ok: false, reason: "unavailable" } as const;
 
 /** Run a query that may hit the not-yet-migrated table; signal `unavailable` on
- *  42P01 rather than throwing, so exports degrade to the legacy path. */
+ *  42P01 rather than pretending a durable operation succeeded. */
 async function guard<T>(fn: () => Promise<T>): Promise<StoreResult<T>> {
   try {
     return { ok: true, value: await fn() };
   } catch (err) {
     // 42P01 (table absent) OR 42703 (partial migration — table present, 0012 columns
-    // absent, which is staging's current state) → degrade to the legacy in-memory path.
+    // absent) → typed refusal; no assumption about any deployed schema state.
     if (isUndefinedTableOrColumn(err)) return UNAVAILABLE;
     throw err;
   }
@@ -75,7 +70,7 @@ export async function createOrGetExportJob(
   kind: "pack" | "proxy",
   ownerAdminId: string,
   ids: string[],
-  nowMs: number,
+  nowMs: number
 ): Promise<StoreResult<{ job: VqExportJob; deduped: boolean }>> {
   const idempotencyKey = computeExportIdempotencyKey(kind, ownerAdminId, ids);
   const expiresAt = new Date(nowMs + EXPORT_TTL_MS);
@@ -84,7 +79,9 @@ export async function createOrGetExportJob(
     const rows = await db
       .select()
       .from(vqExportJobs)
-      .where(and(eq(vqExportJobs.idempotencyKey, idempotencyKey), sql`${vqExportJobs.state} IN ('queued','processing')`))
+      .where(
+        and(eq(vqExportJobs.idempotencyKey, idempotencyKey), sql`${vqExportJobs.state} IN ('queued','processing')`)
+      )
       .limit(1);
     return rows[0];
   };
@@ -126,7 +123,7 @@ export async function claimExportJob(
   jobId: string,
   workerMachine: string,
   leaseMs: number,
-  nowMs: number,
+  nowMs: number
 ): Promise<StoreResult<VqExportJob>> {
   const leaseExpiresAt = new Date(nowMs + leaseMs);
   const res = await guard(async () => {
@@ -162,7 +159,7 @@ export async function getExportJobByPublicId(jobId: string): Promise<StoreResult
  *  a failed progress write must never abort the render, so unavailability is swallowed. */
 export async function updateExportProgress(
   jobId: string,
-  counts: { completed: number; skipped: number; failed: number },
+  counts: { completed: number; skipped: number; failed: number }
 ): Promise<void> {
   await guard(async () => {
     await db
@@ -189,7 +186,7 @@ export async function finishExportJob(
   jobId: string,
   counts: ExportCounts,
   output: ExportOutput | null,
-  nowMs: number,
+  nowMs: number
 ): Promise<StoreResult<VqExportState>> {
   const outcome = decideExportOutcome(counts);
   const persistOutput = outcome !== "failed" && output;
@@ -221,7 +218,12 @@ export async function cancelExportJob(jobId: string, errorMessage: string, nowMs
   return guard(async () => {
     await db
       .update(vqExportJobs)
-      .set({ state: "cancelled", errorCode: "cancelled", errorMessage: errorMessage.slice(0, 500), completedAt: new Date(nowMs) })
+      .set({
+        state: "cancelled",
+        errorCode: "cancelled",
+        errorMessage: errorMessage.slice(0, 500),
+        completedAt: new Date(nowMs),
+      })
       .where(and(eq(vqExportJobs.jobId, jobId), eq(vqExportJobs.state, "queued")));
   });
 }
@@ -232,7 +234,7 @@ export async function failExportJob(
   jobId: string,
   errorCode: string,
   errorMessage: string,
-  nowMs: number,
+  nowMs: number
 ): Promise<StoreResult<void>> {
   return guard(async () => {
     await db

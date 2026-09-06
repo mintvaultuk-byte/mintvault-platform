@@ -1,13 +1,27 @@
 # Engineering proof ledger
 
+## 2026-09-06 VQ durable-only export checkpoint
+
+[Existing VQ packet](../.claude/controlled-code-lead/tasks/repository-architecture-recovery-20260904/vq-schema-recovery.md)
+binds49c10d2e plus exact source hashes: memory/TTL/file fallback removed, real
+durable unavailable503 before render/upload, existing durable/R2 semantics kept.
+Independent Terra22 facade and10 actualPG17 router/ops; clean-lock82+10, build,
+lint and unchanged344 type debt pass. Real HTTP uses existing auth stub and mocked
+R2, not auth/provider proof. Initial UUID/text fixture failure corrected; optional
+native db:push/vector failure excluded. No migration/provider/deploy action.
+Schema implementation FIXED_WIP; candidate/CI/restricted/finalOpus remain OPEN.
+
 ## 2026-09-06 VQ required runtime observation
 
 [Existing VQ packet](../.claude/controlled-code-lead/tasks/repository-architecture-recovery-20260904/vq-schema-recovery.md)
 binds e77ede827d68a824db105943c4490fdf185684fa plus exact source hashes. Required
 VQ observation uses runtime authority only; fresh/historical lineage, catalog and
 ACL drift fail closed. Two independently identified grant-delegation false greens
-reproduced and repaired. Root52/clean79; independent Sol12+2 targeted; clean PG16
-observation3 targeted; clean architecture/CI/Docker60 and build3366 pass. Unit
+reproduced and repaired. Root52/clean79; independent Sol12+2 targeted. The PG16-labelled
+Vitest run actually used17 due helper fallback and is not16 evidence. Corrective
+explicit16.13 launch verified server_version_num160013: both low-privilege lineages,
+six delegation/checksum mutation refusals and recovery pass. No suite-count claim.
+Clean architecture/CI/Docker60 and build3366 pass. Unit
 observer is mocked only for orchestration; real PG proves unmocked VQ chain and
 global composition with main SQL alone stubbed. Type debt344, no baseline waiver.
 Terra3 focused+2 held-out import cases pass. Main SQL and legacy ownership unchanged.

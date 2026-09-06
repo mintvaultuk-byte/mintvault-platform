@@ -2184,6 +2184,11 @@
       "depends_on": ["ARCH-SCHEMA-001", "OWNER-VQ-SCHEMA", "RECOVERY-VQ-SCHEMA", "REPAIR-CI-TOPOLOGY"],
       "addresses": ["ARCH-SCHEMA-001"],
       "write_scope": [
+        "server/vault-quest/export-jobs.ts",
+        "server/routes/vault-quest-admin.ts",
+        "tests/vq-export-facade.test.ts",
+        "tests/vq-ops-status.integration.test.ts",
+        "tests/vq-ops-route-spy.integration.test.ts",
         "server/readiness.ts",
         "config/components/index.ts",
         "tests/release-readiness.test.ts",
@@ -2229,6 +2234,11 @@
           "ref": "vq-schema-recovery.md: S3c2 exact hashes; Sol actual PG17 fresh/history and orchestration, clean79+60/build; grant-option/admin-option false greens repaired; fallback/final vetoes OPEN.",
           "sha": "e77ede827d68a824db105943c4490fdf185684fa",
           "observer": "sol-s3c2-independent"
+        },
+        {
+          "ref": "vq-schema-recovery.md S3c3 retained hashes: durable-only exports FIXED_WIP, independent Terra22 facade/10 actual PG17 router+ops, clean92/build; schema candidate/hostile/restricted proof remains OPEN.",
+          "sha": "49c10d2eb817d2382905e34492ead72f23d9a5fc",
+          "observer": "terra-s3c3-independent; codex-lead adjudication"
         },
         {
           "ref": "vq-schema-recovery.md: S1 exact manifest; schema/readiness/fallback and final proof remain OPEN",

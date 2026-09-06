@@ -3,7 +3,7 @@
   "counts": {
     "client-route": 173,
     "component": 9,
-    "job": 37,
+    "job": 36,
     "layer-exception": 4,
     "migration": 170,
     "migration-lineage": 6,
@@ -18,7 +18,7 @@
     "session-principal": 587,
     "table": 361,
     "table-access": 3271,
-    "timer": 97
+    "timer": 96
   },
   "records": [
     {
@@ -7260,17 +7260,6 @@
       "legacyExpiry": "the bounded-context repair that assigns explicit authority"
     },
     {
-      "category": "job",
-      "id": "startExportJob:kind",
-      "installer": "startExportJob",
-      "cadence": "kind",
-      "lifecycle": "unclassified",
-      "lock": "unclassified",
-      "key": "job|server/vault-quest/export-jobs.ts|startExportJob:kind#0",
-      "source": "server/vault-quest/export-jobs.ts:244",
-      "owner": "vault-quest-platform"
-    },
-    {
       "category": "layer-exception",
       "id": "import:server/routes.ts",
       "target": "server/routes.ts",
@@ -9991,7 +9980,7 @@
       "id": "uploadToR2:key",
       "effect": "direct-put-r2",
       "key": "object-writer|server/vault-quest/export-jobs.ts|uploadToR2:key#0",
-      "source": "server/vault-quest/export-jobs.ts:296",
+      "source": "server/vault-quest/export-jobs.ts:226",
       "owner": "vault-quest-platform"
     },
     {
@@ -108767,7 +108756,7 @@
       ],
       "routeLocalMiddleware": [
         "requireAdmin",
-        "async (req: Request, res: Response) => { const plan = await resolveExportDownload(String(req.params.id)); switch (plan.kind) { case \"not_found\": return res.status(404).json({ er..."
+        "async (req: Request, res: Response) => { const plan = await resolveExportDownload(String(req.params.id)); switch (plan.kind) { case \"unavailable\": return res.status(plan.status)..."
       ],
       "requestSchemas": [
         "inline-or-unclassified"
@@ -108777,7 +108766,7 @@
       ],
       "retirementState": "retired",
       "key": "server-route|server/routes/vault-quest-admin.ts|GET /api/admin/vault-quest/export/jobs/:id/file#0",
-      "source": "server/routes/vault-quest-admin.ts:3907",
+      "source": "server/routes/vault-quest-admin.ts:3908",
       "disposition": "known-legacy",
       "finding": "ARCH-AUTHORITY-001",
       "legacyExpiry": "the bounded-context repair that assigns explicit authority",
@@ -108794,7 +108783,6 @@
         "server/r2.ts#localEvidenceDirectory",
         "server/r2.ts#localEvidencePath",
         "server/storage.ts#DatabaseStorage.getUserByEmail",
-        "server/vault-quest/export-jobs.ts#getExportJob",
         "server/vault-quest/export-jobs.ts#resolveExportDownload",
         "server/vault-quest/lib/export-job-store.ts#getExportJobByPublicId",
         "server/vault-quest/lib/export-job-store.ts#guard",
@@ -108841,7 +108829,7 @@
       ],
       "routeLocalMiddleware": [
         "requireAdmin",
-        "async (req: Request, res: Response) => { const view = await getExportStatusView(String(req.params.id)); if (!view) return res.status(404).json({ error: \"job not found or expired..."
+        "async (req: Request, res: Response) => { const view = await getExportStatusView(String(req.params.id)); if (!view.ok) return res.status(view.status).json({ error: view.reason ==..."
       ],
       "requestSchemas": [
         "inline-or-unclassified"
@@ -108851,7 +108839,7 @@
       ],
       "retirementState": "active",
       "key": "server-route|server/routes/vault-quest-admin.ts|GET /api/admin/vault-quest/export/jobs/:id#0",
-      "source": "server/routes/vault-quest-admin.ts:3899",
+      "source": "server/routes/vault-quest-admin.ts:3900",
       "disposition": "known-legacy",
       "finding": "ARCH-AUTHORITY-001",
       "legacyExpiry": "the bounded-context repair that assigns explicit authority",
@@ -108864,10 +108852,7 @@
         "server/lib/auth-security.ts#isAbsoluteSessionExpired",
         "server/storage.ts#DatabaseStorage.getUserByEmail",
         "server/vault-quest/export-jobs.ts#durableToView",
-        "server/vault-quest/export-jobs.ts#getExportJob",
         "server/vault-quest/export-jobs.ts#getExportStatusView",
-        "server/vault-quest/export-jobs.ts#jobStatus",
-        "server/vault-quest/export-jobs.ts#legacyToView",
         "server/vault-quest/lib/export-job-store.ts#getExportJobByPublicId",
         "server/vault-quest/lib/export-job-store.ts#guard",
         "server/vault-quest/production-storage.ts#isUndefinedTableOrColumn"
@@ -112339,7 +112324,7 @@
       ],
       "retirementState": "active",
       "key": "server-route|server/routes/vault-quest-admin.ts|POST /api/admin/vault-quest/export/pack#0",
-      "source": "server/routes/vault-quest-admin.ts:3895",
+      "source": "server/routes/vault-quest-admin.ts:3896",
       "disposition": "known-legacy",
       "finding": "ARCH-AUTHORITY-001",
       "legacyExpiry": "the bounded-context repair that assigns explicit authority",
@@ -112363,9 +112348,7 @@
         "server/vault-quest/export-jobs.ts#machineId",
         "server/vault-quest/export-jobs.ts#renderInto",
         "server/vault-quest/export-jobs.ts#runDurableRender",
-        "server/vault-quest/export-jobs.ts#scheduleCleanup",
         "server/vault-quest/export-jobs.ts#startExport",
-        "server/vault-quest/export-jobs.ts#startExportJob",
         "server/vault-quest/lib/export-job-state.ts#computeExportIdempotencyKey",
         "server/vault-quest/lib/export-job-state.ts#decideExportOutcome",
         "server/vault-quest/lib/export-job-store.ts#cancelExportJob",
@@ -112972,7 +112955,7 @@
       ],
       "retirementState": "active",
       "key": "server-route|server/routes/vault-quest-admin.ts|POST /api/admin/vault-quest/proxy#0",
-      "source": "server/routes/vault-quest-admin.ts:3893",
+      "source": "server/routes/vault-quest-admin.ts:3894",
       "disposition": "known-legacy",
       "finding": "ARCH-AUTHORITY-001",
       "legacyExpiry": "the bounded-context repair that assigns explicit authority",
@@ -112996,9 +112979,7 @@
         "server/vault-quest/export-jobs.ts#machineId",
         "server/vault-quest/export-jobs.ts#renderInto",
         "server/vault-quest/export-jobs.ts#runDurableRender",
-        "server/vault-quest/export-jobs.ts#scheduleCleanup",
         "server/vault-quest/export-jobs.ts#startExport",
-        "server/vault-quest/export-jobs.ts#startExportJob",
         "server/vault-quest/lib/export-job-state.ts#computeExportIdempotencyKey",
         "server/vault-quest/lib/export-job-state.ts#decideExportOutcome",
         "server/vault-quest/lib/export-job-store.ts#cancelExportJob",
@@ -148799,7 +148780,7 @@
       "effect": "read",
       "access": "sql",
       "key": "table-access|server/readiness.ts|read:information_schema.columns#0",
-      "source": "server/readiness.ts:1041",
+      "source": "server/readiness.ts:1035",
       "disposition": "known-legacy",
       "finding": "ARCH-AUTHORITY-001",
       "legacyExpiry": "the bounded-context repair that assigns explicit authority"
@@ -148810,7 +148791,7 @@
       "effect": "read",
       "access": "sql",
       "key": "table-access|server/readiness.ts|read:public.pg_attrdef#0",
-      "source": "server/readiness.ts:1041",
+      "source": "server/readiness.ts:1035",
       "disposition": "known-legacy",
       "finding": "ARCH-AUTHORITY-001",
       "legacyExpiry": "the bounded-context repair that assigns explicit authority"
@@ -148821,7 +148802,7 @@
       "effect": "read",
       "access": "sql",
       "key": "table-access|server/readiness.ts|read:public.pg_attribute#0",
-      "source": "server/readiness.ts:1041",
+      "source": "server/readiness.ts:1035",
       "disposition": "known-legacy",
       "finding": "ARCH-AUTHORITY-001",
       "legacyExpiry": "the bounded-context repair that assigns explicit authority"
@@ -148832,7 +148813,7 @@
       "effect": "read",
       "access": "sql",
       "key": "table-access|server/readiness.ts|read:public.pg_attribute#1",
-      "source": "server/readiness.ts:1041",
+      "source": "server/readiness.ts:1035",
       "disposition": "known-legacy",
       "finding": "ARCH-AUTHORITY-001",
       "legacyExpiry": "the bounded-context repair that assigns explicit authority"
@@ -148843,7 +148824,7 @@
       "effect": "read",
       "access": "sql",
       "key": "table-access|server/readiness.ts|read:public.pg_attribute#2",
-      "source": "server/readiness.ts:1041",
+      "source": "server/readiness.ts:1035",
       "disposition": "known-legacy",
       "finding": "ARCH-AUTHORITY-001",
       "legacyExpiry": "the bounded-context repair that assigns explicit authority"
@@ -148854,7 +148835,7 @@
       "effect": "read",
       "access": "sql",
       "key": "table-access|server/readiness.ts|read:public.pg_attribute#3",
-      "source": "server/readiness.ts:1041",
+      "source": "server/readiness.ts:1035",
       "disposition": "known-legacy",
       "finding": "ARCH-AUTHORITY-001",
       "legacyExpiry": "the bounded-context repair that assigns explicit authority"
@@ -148865,7 +148846,7 @@
       "effect": "read",
       "access": "sql",
       "key": "table-access|server/readiness.ts|read:public.pg_attribute#4",
-      "source": "server/readiness.ts:1041",
+      "source": "server/readiness.ts:1035",
       "disposition": "known-legacy",
       "finding": "ARCH-AUTHORITY-001",
       "legacyExpiry": "the bounded-context repair that assigns explicit authority"
@@ -148876,7 +148857,7 @@
       "effect": "read",
       "access": "sql",
       "key": "table-access|server/readiness.ts|read:public.pg_attribute#5",
-      "source": "server/readiness.ts:1041",
+      "source": "server/readiness.ts:1035",
       "disposition": "known-legacy",
       "finding": "ARCH-AUTHORITY-001",
       "legacyExpiry": "the bounded-context repair that assigns explicit authority"
@@ -148887,7 +148868,7 @@
       "effect": "read",
       "access": "sql",
       "key": "table-access|server/readiness.ts|read:public.pg_attribute#6",
-      "source": "server/readiness.ts:1041",
+      "source": "server/readiness.ts:1035",
       "disposition": "known-legacy",
       "finding": "ARCH-AUTHORITY-001",
       "legacyExpiry": "the bounded-context repair that assigns explicit authority"
@@ -148898,7 +148879,7 @@
       "effect": "read",
       "access": "sql",
       "key": "table-access|server/readiness.ts|read:public.pg_attribute#7",
-      "source": "server/readiness.ts:1041",
+      "source": "server/readiness.ts:1035",
       "disposition": "known-legacy",
       "finding": "ARCH-AUTHORITY-001",
       "legacyExpiry": "the bounded-context repair that assigns explicit authority"
@@ -148909,7 +148890,7 @@
       "effect": "read",
       "access": "sql",
       "key": "table-access|server/readiness.ts|read:public.pg_attribute#8",
-      "source": "server/readiness.ts:1041",
+      "source": "server/readiness.ts:1035",
       "disposition": "known-legacy",
       "finding": "ARCH-AUTHORITY-001",
       "legacyExpiry": "the bounded-context repair that assigns explicit authority"
@@ -148920,7 +148901,7 @@
       "effect": "read",
       "access": "sql",
       "key": "table-access|server/readiness.ts|read:public.pg_attribute#9",
-      "source": "server/readiness.ts:1041",
+      "source": "server/readiness.ts:1035",
       "disposition": "known-legacy",
       "finding": "ARCH-AUTHORITY-001",
       "legacyExpiry": "the bounded-context repair that assigns explicit authority"
@@ -148931,7 +148912,7 @@
       "effect": "read",
       "access": "sql",
       "key": "table-access|server/readiness.ts|read:public.pg_auth_members#0",
-      "source": "server/readiness.ts:1041",
+      "source": "server/readiness.ts:1035",
       "disposition": "known-legacy",
       "finding": "ARCH-AUTHORITY-001",
       "legacyExpiry": "the bounded-context repair that assigns explicit authority"
@@ -148942,7 +148923,7 @@
       "effect": "read",
       "access": "sql",
       "key": "table-access|server/readiness.ts|read:public.pg_auth_members#1",
-      "source": "server/readiness.ts:1041",
+      "source": "server/readiness.ts:1035",
       "disposition": "known-legacy",
       "finding": "ARCH-AUTHORITY-001",
       "legacyExpiry": "the bounded-context repair that assigns explicit authority"
@@ -148953,7 +148934,7 @@
       "effect": "read",
       "access": "sql",
       "key": "table-access|server/readiness.ts|read:public.pg_class#0",
-      "source": "server/readiness.ts:1041",
+      "source": "server/readiness.ts:1035",
       "disposition": "known-legacy",
       "finding": "ARCH-AUTHORITY-001",
       "legacyExpiry": "the bounded-context repair that assigns explicit authority"
@@ -148964,7 +148945,7 @@
       "effect": "read",
       "access": "sql",
       "key": "table-access|server/readiness.ts|read:public.pg_class#1",
-      "source": "server/readiness.ts:1041",
+      "source": "server/readiness.ts:1035",
       "disposition": "known-legacy",
       "finding": "ARCH-AUTHORITY-001",
       "legacyExpiry": "the bounded-context repair that assigns explicit authority"
@@ -148975,7 +148956,7 @@
       "effect": "read",
       "access": "sql",
       "key": "table-access|server/readiness.ts|read:public.pg_class#2",
-      "source": "server/readiness.ts:1041",
+      "source": "server/readiness.ts:1035",
       "disposition": "known-legacy",
       "finding": "ARCH-AUTHORITY-001",
       "legacyExpiry": "the bounded-context repair that assigns explicit authority"
@@ -148986,7 +148967,7 @@
       "effect": "read",
       "access": "sql",
       "key": "table-access|server/readiness.ts|read:public.pg_class#3",
-      "source": "server/readiness.ts:1041",
+      "source": "server/readiness.ts:1035",
       "disposition": "known-legacy",
       "finding": "ARCH-AUTHORITY-001",
       "legacyExpiry": "the bounded-context repair that assigns explicit authority"
@@ -148997,7 +148978,7 @@
       "effect": "read",
       "access": "sql",
       "key": "table-access|server/readiness.ts|read:public.pg_class#4",
-      "source": "server/readiness.ts:1041",
+      "source": "server/readiness.ts:1035",
       "disposition": "known-legacy",
       "finding": "ARCH-AUTHORITY-001",
       "legacyExpiry": "the bounded-context repair that assigns explicit authority"
@@ -149008,7 +148989,7 @@
       "effect": "read",
       "access": "sql",
       "key": "table-access|server/readiness.ts|read:public.pg_class#5",
-      "source": "server/readiness.ts:1041",
+      "source": "server/readiness.ts:1035",
       "disposition": "known-legacy",
       "finding": "ARCH-AUTHORITY-001",
       "legacyExpiry": "the bounded-context repair that assigns explicit authority"
@@ -149019,7 +149000,7 @@
       "effect": "read",
       "access": "sql",
       "key": "table-access|server/readiness.ts|read:public.pg_constraint#0",
-      "source": "server/readiness.ts:1041",
+      "source": "server/readiness.ts:1035",
       "disposition": "known-legacy",
       "finding": "ARCH-AUTHORITY-001",
       "legacyExpiry": "the bounded-context repair that assigns explicit authority"
@@ -149030,7 +149011,7 @@
       "effect": "read",
       "access": "sql",
       "key": "table-access|server/readiness.ts|read:public.pg_constraint#1",
-      "source": "server/readiness.ts:1041",
+      "source": "server/readiness.ts:1035",
       "disposition": "known-legacy",
       "finding": "ARCH-AUTHORITY-001",
       "legacyExpiry": "the bounded-context repair that assigns explicit authority"
@@ -149041,7 +149022,7 @@
       "effect": "read",
       "access": "sql",
       "key": "table-access|server/readiness.ts|read:public.pg_constraint#10",
-      "source": "server/readiness.ts:1041",
+      "source": "server/readiness.ts:1035",
       "disposition": "known-legacy",
       "finding": "ARCH-AUTHORITY-001",
       "legacyExpiry": "the bounded-context repair that assigns explicit authority"
@@ -149052,7 +149033,7 @@
       "effect": "read",
       "access": "sql",
       "key": "table-access|server/readiness.ts|read:public.pg_constraint#11",
-      "source": "server/readiness.ts:1041",
+      "source": "server/readiness.ts:1035",
       "disposition": "known-legacy",
       "finding": "ARCH-AUTHORITY-001",
       "legacyExpiry": "the bounded-context repair that assigns explicit authority"
@@ -149063,7 +149044,7 @@
       "effect": "read",
       "access": "sql",
       "key": "table-access|server/readiness.ts|read:public.pg_constraint#12",
-      "source": "server/readiness.ts:1041",
+      "source": "server/readiness.ts:1035",
       "disposition": "known-legacy",
       "finding": "ARCH-AUTHORITY-001",
       "legacyExpiry": "the bounded-context repair that assigns explicit authority"
@@ -149074,7 +149055,7 @@
       "effect": "read",
       "access": "sql",
       "key": "table-access|server/readiness.ts|read:public.pg_constraint#13",
-      "source": "server/readiness.ts:1041",
+      "source": "server/readiness.ts:1035",
       "disposition": "known-legacy",
       "finding": "ARCH-AUTHORITY-001",
       "legacyExpiry": "the bounded-context repair that assigns explicit authority"
@@ -149085,7 +149066,7 @@
       "effect": "read",
       "access": "sql",
       "key": "table-access|server/readiness.ts|read:public.pg_constraint#14",
-      "source": "server/readiness.ts:1041",
+      "source": "server/readiness.ts:1035",
       "disposition": "known-legacy",
       "finding": "ARCH-AUTHORITY-001",
       "legacyExpiry": "the bounded-context repair that assigns explicit authority"
@@ -149096,7 +149077,7 @@
       "effect": "read",
       "access": "sql",
       "key": "table-access|server/readiness.ts|read:public.pg_constraint#15",
-      "source": "server/readiness.ts:1041",
+      "source": "server/readiness.ts:1035",
       "disposition": "known-legacy",
       "finding": "ARCH-AUTHORITY-001",
       "legacyExpiry": "the bounded-context repair that assigns explicit authority"
@@ -149107,7 +149088,7 @@
       "effect": "read",
       "access": "sql",
       "key": "table-access|server/readiness.ts|read:public.pg_constraint#16",
-      "source": "server/readiness.ts:1041",
+      "source": "server/readiness.ts:1035",
       "disposition": "known-legacy",
       "finding": "ARCH-AUTHORITY-001",
       "legacyExpiry": "the bounded-context repair that assigns explicit authority"
@@ -149118,7 +149099,7 @@
       "effect": "read",
       "access": "sql",
       "key": "table-access|server/readiness.ts|read:public.pg_constraint#17",
-      "source": "server/readiness.ts:1041",
+      "source": "server/readiness.ts:1035",
       "disposition": "known-legacy",
       "finding": "ARCH-AUTHORITY-001",
       "legacyExpiry": "the bounded-context repair that assigns explicit authority"
@@ -149129,7 +149110,7 @@
       "effect": "read",
       "access": "sql",
       "key": "table-access|server/readiness.ts|read:public.pg_constraint#2",
-      "source": "server/readiness.ts:1041",
+      "source": "server/readiness.ts:1035",
       "disposition": "known-legacy",
       "finding": "ARCH-AUTHORITY-001",
       "legacyExpiry": "the bounded-context repair that assigns explicit authority"
@@ -149140,7 +149121,7 @@
       "effect": "read",
       "access": "sql",
       "key": "table-access|server/readiness.ts|read:public.pg_constraint#3",
-      "source": "server/readiness.ts:1041",
+      "source": "server/readiness.ts:1035",
       "disposition": "known-legacy",
       "finding": "ARCH-AUTHORITY-001",
       "legacyExpiry": "the bounded-context repair that assigns explicit authority"
@@ -149151,7 +149132,7 @@
       "effect": "read",
       "access": "sql",
       "key": "table-access|server/readiness.ts|read:public.pg_constraint#4",
-      "source": "server/readiness.ts:1041",
+      "source": "server/readiness.ts:1035",
       "disposition": "known-legacy",
       "finding": "ARCH-AUTHORITY-001",
       "legacyExpiry": "the bounded-context repair that assigns explicit authority"
@@ -149162,7 +149143,7 @@
       "effect": "read",
       "access": "sql",
       "key": "table-access|server/readiness.ts|read:public.pg_constraint#5",
-      "source": "server/readiness.ts:1041",
+      "source": "server/readiness.ts:1035",
       "disposition": "known-legacy",
       "finding": "ARCH-AUTHORITY-001",
       "legacyExpiry": "the bounded-context repair that assigns explicit authority"
@@ -149173,7 +149154,7 @@
       "effect": "read",
       "access": "sql",
       "key": "table-access|server/readiness.ts|read:public.pg_constraint#6",
-      "source": "server/readiness.ts:1041",
+      "source": "server/readiness.ts:1035",
       "disposition": "known-legacy",
       "finding": "ARCH-AUTHORITY-001",
       "legacyExpiry": "the bounded-context repair that assigns explicit authority"
@@ -149184,7 +149165,7 @@
       "effect": "read",
       "access": "sql",
       "key": "table-access|server/readiness.ts|read:public.pg_constraint#7",
-      "source": "server/readiness.ts:1041",
+      "source": "server/readiness.ts:1035",
       "disposition": "known-legacy",
       "finding": "ARCH-AUTHORITY-001",
       "legacyExpiry": "the bounded-context repair that assigns explicit authority"
@@ -149195,7 +149176,7 @@
       "effect": "read",
       "access": "sql",
       "key": "table-access|server/readiness.ts|read:public.pg_constraint#8",
-      "source": "server/readiness.ts:1041",
+      "source": "server/readiness.ts:1035",
       "disposition": "known-legacy",
       "finding": "ARCH-AUTHORITY-001",
       "legacyExpiry": "the bounded-context repair that assigns explicit authority"
@@ -149206,7 +149187,7 @@
       "effect": "read",
       "access": "sql",
       "key": "table-access|server/readiness.ts|read:public.pg_constraint#9",
-      "source": "server/readiness.ts:1041",
+      "source": "server/readiness.ts:1035",
       "disposition": "known-legacy",
       "finding": "ARCH-AUTHORITY-001",
       "legacyExpiry": "the bounded-context repair that assigns explicit authority"
@@ -149217,7 +149198,7 @@
       "effect": "read",
       "access": "sql",
       "key": "table-access|server/readiness.ts|read:public.pg_database#0",
-      "source": "server/readiness.ts:1041",
+      "source": "server/readiness.ts:1035",
       "disposition": "known-legacy",
       "finding": "ARCH-AUTHORITY-001",
       "legacyExpiry": "the bounded-context repair that assigns explicit authority"
@@ -149228,7 +149209,7 @@
       "effect": "read",
       "access": "sql",
       "key": "table-access|server/readiness.ts|read:public.pg_index#0",
-      "source": "server/readiness.ts:1041",
+      "source": "server/readiness.ts:1035",
       "disposition": "known-legacy",
       "finding": "ARCH-AUTHORITY-001",
       "legacyExpiry": "the bounded-context repair that assigns explicit authority"
@@ -149239,7 +149220,7 @@
       "effect": "read",
       "access": "sql",
       "key": "table-access|server/readiness.ts|read:public.pg_index#1",
-      "source": "server/readiness.ts:1041",
+      "source": "server/readiness.ts:1035",
       "disposition": "known-legacy",
       "finding": "ARCH-AUTHORITY-001",
       "legacyExpiry": "the bounded-context repair that assigns explicit authority"
@@ -149250,7 +149231,7 @@
       "effect": "read",
       "access": "sql",
       "key": "table-access|server/readiness.ts|read:public.pg_index#10",
-      "source": "server/readiness.ts:1041",
+      "source": "server/readiness.ts:1035",
       "disposition": "known-legacy",
       "finding": "ARCH-AUTHORITY-001",
       "legacyExpiry": "the bounded-context repair that assigns explicit authority"
@@ -149261,7 +149242,7 @@
       "effect": "read",
       "access": "sql",
       "key": "table-access|server/readiness.ts|read:public.pg_index#11",
-      "source": "server/readiness.ts:1041",
+      "source": "server/readiness.ts:1035",
       "disposition": "known-legacy",
       "finding": "ARCH-AUTHORITY-001",
       "legacyExpiry": "the bounded-context repair that assigns explicit authority"
@@ -149272,7 +149253,7 @@
       "effect": "read",
       "access": "sql",
       "key": "table-access|server/readiness.ts|read:public.pg_index#12",
-      "source": "server/readiness.ts:1041",
+      "source": "server/readiness.ts:1035",
       "disposition": "known-legacy",
       "finding": "ARCH-AUTHORITY-001",
       "legacyExpiry": "the bounded-context repair that assigns explicit authority"
@@ -149283,7 +149264,7 @@
       "effect": "read",
       "access": "sql",
       "key": "table-access|server/readiness.ts|read:public.pg_index#2",
-      "source": "server/readiness.ts:1041",
+      "source": "server/readiness.ts:1035",
       "disposition": "known-legacy",
       "finding": "ARCH-AUTHORITY-001",
       "legacyExpiry": "the bounded-context repair that assigns explicit authority"
@@ -149294,7 +149275,7 @@
       "effect": "read",
       "access": "sql",
       "key": "table-access|server/readiness.ts|read:public.pg_index#3",
-      "source": "server/readiness.ts:1041",
+      "source": "server/readiness.ts:1035",
       "disposition": "known-legacy",
       "finding": "ARCH-AUTHORITY-001",
       "legacyExpiry": "the bounded-context repair that assigns explicit authority"
@@ -149305,7 +149286,7 @@
       "effect": "read",
       "access": "sql",
       "key": "table-access|server/readiness.ts|read:public.pg_index#4",
-      "source": "server/readiness.ts:1041",
+      "source": "server/readiness.ts:1035",
       "disposition": "known-legacy",
       "finding": "ARCH-AUTHORITY-001",
       "legacyExpiry": "the bounded-context repair that assigns explicit authority"
@@ -149316,7 +149297,7 @@
       "effect": "read",
       "access": "sql",
       "key": "table-access|server/readiness.ts|read:public.pg_index#5",
-      "source": "server/readiness.ts:1041",
+      "source": "server/readiness.ts:1035",
       "disposition": "known-legacy",
       "finding": "ARCH-AUTHORITY-001",
       "legacyExpiry": "the bounded-context repair that assigns explicit authority"
@@ -149327,7 +149308,7 @@
       "effect": "read",
       "access": "sql",
       "key": "table-access|server/readiness.ts|read:public.pg_index#6",
-      "source": "server/readiness.ts:1041",
+      "source": "server/readiness.ts:1035",
       "disposition": "known-legacy",
       "finding": "ARCH-AUTHORITY-001",
       "legacyExpiry": "the bounded-context repair that assigns explicit authority"
@@ -149338,7 +149319,7 @@
       "effect": "read",
       "access": "sql",
       "key": "table-access|server/readiness.ts|read:public.pg_index#7",
-      "source": "server/readiness.ts:1041",
+      "source": "server/readiness.ts:1035",
       "disposition": "known-legacy",
       "finding": "ARCH-AUTHORITY-001",
       "legacyExpiry": "the bounded-context repair that assigns explicit authority"
@@ -149349,7 +149330,7 @@
       "effect": "read",
       "access": "sql",
       "key": "table-access|server/readiness.ts|read:public.pg_index#8",
-      "source": "server/readiness.ts:1041",
+      "source": "server/readiness.ts:1035",
       "disposition": "known-legacy",
       "finding": "ARCH-AUTHORITY-001",
       "legacyExpiry": "the bounded-context repair that assigns explicit authority"
@@ -149360,7 +149341,7 @@
       "effect": "read",
       "access": "sql",
       "key": "table-access|server/readiness.ts|read:public.pg_index#9",
-      "source": "server/readiness.ts:1041",
+      "source": "server/readiness.ts:1035",
       "disposition": "known-legacy",
       "finding": "ARCH-AUTHORITY-001",
       "legacyExpiry": "the bounded-context repair that assigns explicit authority"
@@ -149371,7 +149352,7 @@
       "effect": "read",
       "access": "sql",
       "key": "table-access|server/readiness.ts|read:public.pg_namespace#0",
-      "source": "server/readiness.ts:1041",
+      "source": "server/readiness.ts:1035",
       "disposition": "known-legacy",
       "finding": "ARCH-AUTHORITY-001",
       "legacyExpiry": "the bounded-context repair that assigns explicit authority"
@@ -149382,7 +149363,7 @@
       "effect": "read",
       "access": "sql",
       "key": "table-access|server/readiness.ts|read:public.pg_namespace#1",
-      "source": "server/readiness.ts:1041",
+      "source": "server/readiness.ts:1035",
       "disposition": "known-legacy",
       "finding": "ARCH-AUTHORITY-001",
       "legacyExpiry": "the bounded-context repair that assigns explicit authority"
@@ -149393,7 +149374,7 @@
       "effect": "read",
       "access": "sql",
       "key": "table-access|server/readiness.ts|read:public.pg_policies#0",
-      "source": "server/readiness.ts:1041",
+      "source": "server/readiness.ts:1035",
       "disposition": "known-legacy",
       "finding": "ARCH-AUTHORITY-001",
       "legacyExpiry": "the bounded-context repair that assigns explicit authority"
@@ -149404,7 +149385,7 @@
       "effect": "read",
       "access": "sql",
       "key": "table-access|server/readiness.ts|read:public.pg_policies#1",
-      "source": "server/readiness.ts:1041",
+      "source": "server/readiness.ts:1035",
       "disposition": "known-legacy",
       "finding": "ARCH-AUTHORITY-001",
       "legacyExpiry": "the bounded-context repair that assigns explicit authority"
@@ -149415,7 +149396,7 @@
       "effect": "read",
       "access": "sql",
       "key": "table-access|server/readiness.ts|read:public.pg_policies#2",
-      "source": "server/readiness.ts:1041",
+      "source": "server/readiness.ts:1035",
       "disposition": "known-legacy",
       "finding": "ARCH-AUTHORITY-001",
       "legacyExpiry": "the bounded-context repair that assigns explicit authority"
@@ -149426,7 +149407,7 @@
       "effect": "read",
       "access": "sql",
       "key": "table-access|server/readiness.ts|read:public.pg_policies#3",
-      "source": "server/readiness.ts:1041",
+      "source": "server/readiness.ts:1035",
       "disposition": "known-legacy",
       "finding": "ARCH-AUTHORITY-001",
       "legacyExpiry": "the bounded-context repair that assigns explicit authority"
@@ -149437,7 +149418,7 @@
       "effect": "read",
       "access": "sql",
       "key": "table-access|server/readiness.ts|read:public.pg_proc#0",
-      "source": "server/readiness.ts:1041",
+      "source": "server/readiness.ts:1035",
       "disposition": "known-legacy",
       "finding": "ARCH-AUTHORITY-001",
       "legacyExpiry": "the bounded-context repair that assigns explicit authority"
@@ -149448,7 +149429,7 @@
       "effect": "read",
       "access": "sql",
       "key": "table-access|server/readiness.ts|read:public.pg_roles#0",
-      "source": "server/readiness.ts:1041",
+      "source": "server/readiness.ts:1035",
       "disposition": "known-legacy",
       "finding": "ARCH-AUTHORITY-001",
       "legacyExpiry": "the bounded-context repair that assigns explicit authority"
@@ -149459,7 +149440,7 @@
       "effect": "read",
       "access": "sql",
       "key": "table-access|server/readiness.ts|read:public.pg_roles#1",
-      "source": "server/readiness.ts:1041",
+      "source": "server/readiness.ts:1035",
       "disposition": "known-legacy",
       "finding": "ARCH-AUTHORITY-001",
       "legacyExpiry": "the bounded-context repair that assigns explicit authority"
@@ -149470,7 +149451,7 @@
       "effect": "read",
       "access": "sql",
       "key": "table-access|server/readiness.ts|read:public.pg_trigger#0",
-      "source": "server/readiness.ts:1041",
+      "source": "server/readiness.ts:1035",
       "disposition": "known-legacy",
       "finding": "ARCH-AUTHORITY-001",
       "legacyExpiry": "the bounded-context repair that assigns explicit authority"
@@ -149481,7 +149462,7 @@
       "effect": "read",
       "access": "sql",
       "key": "table-access|server/readiness.ts|read:public.schema_migrations#0",
-      "source": "server/readiness.ts:1041",
+      "source": "server/readiness.ts:1035",
       "disposition": "known-legacy",
       "finding": "ARCH-AUTHORITY-001",
       "legacyExpiry": "the bounded-context repair that assigns explicit authority"
@@ -158613,7 +158594,7 @@
       "effect": "read",
       "access": "drizzle",
       "key": "table-access|server/vault-quest/export-jobs.ts|read:vqExportJobs#0",
-      "source": "server/vault-quest/export-jobs.ts:492",
+      "source": "server/vault-quest/export-jobs.ts:445",
       "owner": "vault-quest-platform"
     },
     {
@@ -158622,7 +158603,7 @@
       "effect": "read",
       "access": "drizzle",
       "key": "table-access|server/vault-quest/lib/export-job-store.ts|read:vqExportJobs#0",
-      "source": "server/vault-quest/lib/export-job-store.ts:84",
+      "source": "server/vault-quest/lib/export-job-store.ts:79",
       "owner": "vault-quest-platform"
     },
     {
@@ -158631,7 +158612,7 @@
       "effect": "read",
       "access": "drizzle",
       "key": "table-access|server/vault-quest/lib/export-job-store.ts|read:vqExportJobs#1",
-      "source": "server/vault-quest/lib/export-job-store.ts:154",
+      "source": "server/vault-quest/lib/export-job-store.ts:151",
       "owner": "vault-quest-platform"
     },
     {
@@ -158640,7 +158621,7 @@
       "effect": "write",
       "access": "drizzle",
       "key": "table-access|server/vault-quest/lib/export-job-store.ts|write:vqExportJobs#0",
-      "source": "server/vault-quest/lib/export-job-store.ts:96",
+      "source": "server/vault-quest/lib/export-job-store.ts:93",
       "owner": "vault-quest-platform"
     },
     {
@@ -158649,7 +158630,7 @@
       "effect": "write",
       "access": "drizzle",
       "key": "table-access|server/vault-quest/lib/export-job-store.ts|write:vqExportJobs#1",
-      "source": "server/vault-quest/lib/export-job-store.ts:133",
+      "source": "server/vault-quest/lib/export-job-store.ts:130",
       "owner": "vault-quest-platform"
     },
     {
@@ -158658,7 +158639,7 @@
       "effect": "write",
       "access": "drizzle",
       "key": "table-access|server/vault-quest/lib/export-job-store.ts|write:vqExportJobs#2",
-      "source": "server/vault-quest/lib/export-job-store.ts:168",
+      "source": "server/vault-quest/lib/export-job-store.ts:165",
       "owner": "vault-quest-platform"
     },
     {
@@ -158667,7 +158648,7 @@
       "effect": "write",
       "access": "drizzle",
       "key": "table-access|server/vault-quest/lib/export-job-store.ts|write:vqExportJobs#3",
-      "source": "server/vault-quest/lib/export-job-store.ts:197",
+      "source": "server/vault-quest/lib/export-job-store.ts:194",
       "owner": "vault-quest-platform"
     },
     {
@@ -158676,7 +158657,7 @@
       "effect": "write",
       "access": "drizzle",
       "key": "table-access|server/vault-quest/lib/export-job-store.ts|write:vqExportJobs#4",
-      "source": "server/vault-quest/lib/export-job-store.ts:222",
+      "source": "server/vault-quest/lib/export-job-store.ts:219",
       "owner": "vault-quest-platform"
     },
     {
@@ -158685,7 +158666,7 @@
       "effect": "write",
       "access": "drizzle",
       "key": "table-access|server/vault-quest/lib/export-job-store.ts|write:vqExportJobs#5",
-      "source": "server/vault-quest/lib/export-job-store.ts:238",
+      "source": "server/vault-quest/lib/export-job-store.ts:240",
       "owner": "vault-quest-platform"
     },
     {
@@ -161167,22 +161148,12 @@
     },
     {
       "category": "timer",
-      "id": "setTimeout:() => { if (job.filePath) fs.unlink(job.filePath, () => {}); JOBS.delete(job.id); }",
-      "timerKind": "one-shot-unclassified",
-      "delay": "TTL_MS",
-      "lifecycle": "untracked",
-      "key": "timer|server/vault-quest/export-jobs.ts|setTimeout:() => { if (job.filePath) fs.unlink(job.filePath, () => {}); JOBS.delete(job.id); }#0",
-      "source": "server/vault-quest/export-jobs.ts:104",
-      "owner": "vault-quest-platform"
-    },
-    {
-      "category": "timer",
       "id": "setTimeout:() => reject(new Error(\"export timed out\"))",
       "timerKind": "one-shot-unclassified",
       "delay": "JOB_TIMEOUT_MS",
       "lifecycle": "untracked",
       "key": "timer|server/vault-quest/export-jobs.ts|setTimeout:() => reject(new Error(\"export timed out\"))#0",
-      "source": "server/vault-quest/export-jobs.ts:122",
+      "source": "server/vault-quest/export-jobs.ts:86",
       "owner": "vault-quest-platform"
     }
   ],
