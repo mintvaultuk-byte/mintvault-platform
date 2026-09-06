@@ -2,6 +2,60 @@
 
 ## Current position (2026-09-06)
 
+S2c checkpoint `ecdac32562fa81c3d1cc6f3e633adb403aea169a` is pushed and
+verified as the existing draft PR336 head. Continue S3a below without owner pause.
+
+## S3a namespaced readiness foundation manifest
+
+Baseline ecdac325; preflight CRITICAL/HOSTILE. Root alone edits exactly
+`server/lib/component-readiness-registry.ts`,
+`scripts/architecture/check-architecture.mjs`, existing
+`tests/architecture-authority.test.ts`, and this packet plus existing graph/task/
+engineering issue/proof records. Regenerate the existing architecture snapshot
+only if these source changes alter its exact records. No new files, dependencies,
+SQL, component activation, image, runtime database query or diagnostic allowance.
+
+Migration entries gain an optional closed `estate: main | vault-quest`, with
+omission meaning main. Compile explicit immutable estate/name requirements while
+preserving the legacy main-only requiredMigrations projection and every existing
+requirement order. Reject unknown estates, extra keys, same-estate duplicates and
+order gaps; identical names in different estates are distinct identities. The
+architecture gate must resolve required migrations by estate, never let a main
+file satisfy a VQ requirement, and still reject VQ as unshipped until actual image
+wiring lands. Namespaced acceptance is not runtime readiness or shipping proof.
+
+Sol independently reviews the bounded contract and runs regression/held-out proof.
+Existing main readiness projections must remain exact. Rollback is a feature-
+branch code revert of this unused foundation; no database action or historical
+replay. Next S3b extends the manifest for actual image inventory/runner proof,
+then required VQ runtime admission and durable-only fallback. All existing final
+candidate, Opus, restricted-security and external vetoes remain OPEN.
+
+S3a final proof: root30/30; independent Sol30/30 plus held-out estate/immutability/
+order checks; clean exact-lock47/47 architecture+CI tests, zero skips, build3366
+modules PASS. TypeScript and scoped lint0/0 PASS; test345/script11 debt unchanged.
+Architecture8349 unchanged; no snapshot/adoption/owner/diagnostic allowance edits.
+Migration references127 unchanged using existing classified synthetic fixtures.
+Root's first edit missed two main-lineage set lookups; existing regressions caught
+both and main-qualified lookup repair passes, with original lineage SQL untouched.
+Final fixture-only rename independently confirmed equivalent by Sol. No DB access
+needed for this pure foundation. Exact ecdac325 CI33999865052 and governance
+33999864997/33999862748 in progress at observation, not green. Ordinary postflight
+retains known unwaived vetoes. Clean-copy build lacks Git identity and is build
+compatibility proof only, not an exact candidate image claim.
+
+S3a SHA256:
+```text
+6e348e1046a9b2b1138e3a3a4ef93fc23fe92a3b2c0ce8555199c73963aa0cec server/lib/component-readiness-registry.ts
+f37110cc7494adee9f358d6616b202aea77be7ae323202998772eadb39cd9e63 scripts/architecture/check-architecture.mjs
+46215c29dbe16405f6ceb9c59276d7ab7df2e5e11383f887c99b0b80984833b8 tests/architecture-authority.test.ts
+```
+
+S3b pre-existing shipping gap is source-confirmed: Docker copies only main SQL.
+Terra also reproduced the new recovery module's missing exact `.dockerignore`
+admission (Docker context suite7pass/1fail). Both are accepted in-scope work under
+ARCH-SCHEMA-001, not external blockers; next image wave must repair and prove them.
+
 S1/S2 metadata and historical recovery are locally independently proven; current
 wave baseline97a88450, final source hashes below. The dated sections retain
 historical proof, not competing rollout instructions. Required VQ shipping,

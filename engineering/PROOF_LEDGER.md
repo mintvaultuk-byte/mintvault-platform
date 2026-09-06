@@ -1,5 +1,15 @@
 # Engineering proof ledger
 
+## 2026-09-06 VQ namespaced readiness foundation
+
+[Existing VQ packet](../.claude/controlled-code-lead/tasks/repository-architecture-recovery-20260904/vq-schema-recovery.md)
+binds ecdac325 + final source hashes. Root30/independentSol30/clean-lock47 tests
+PASS, zero skips; build3366/typecheck/scoped lint PASS, existing debt unchanged.
+Closed main/VQ identities preserve main-only readiness and lineage; unshipped VQ
+cannot borrow a main migration's identity. Foundation only: no VQ runtime admission,
+schema/image activation or candidate closure. Next image wave includes independently
+reproduced missing Docker context module admission; security/Opus/CI vetoes retained.
+
 ## 2026-09-06 VQ honest historical recovery
 
 [Existing VQ packet](../.claude/controlled-code-lead/tasks/repository-architecture-recovery-20260904/vq-schema-recovery.md)

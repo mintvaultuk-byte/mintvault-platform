@@ -8,6 +8,10 @@ interface OrderedName {
 interface OrderedTrigger extends OrderedName {
   readonly relation: string;
 }
+export type ReadinessMigrationEstate = "main" | "vault-quest";
+interface OrderedMigration extends OrderedName {
+  readonly estate?: ReadinessMigrationEstate;
+}
 
 export interface ComponentReadinessManifest {
   readonly schemaVersion: 1;
@@ -17,7 +21,7 @@ export interface ComponentReadinessManifest {
   readonly runtimeState: "enabled" | "disabled";
   readonly sourceRoots: readonly string[];
   readonly requirements: {
-    readonly migrations: readonly OrderedName[];
+    readonly migrations: readonly OrderedMigration[];
     readonly relations: readonly OrderedName[];
     readonly triggers: readonly OrderedTrigger[];
     readonly environment: readonly OrderedName[];
@@ -29,6 +33,7 @@ export interface CompiledComponentReadinessRegistry {
   readonly componentIds: readonly string[];
   readonly runtimeComponentIds: readonly string[];
   readonly requiredMigrations: readonly string[];
+  readonly requiredMigrationRequirements: readonly Readonly<{ estate: ReadinessMigrationEstate; name: string }>[];
   readonly requiredRelations: readonly string[];
   readonly requiredTriggers: readonly string[];
   readonly requiredTriggerRelations: readonly string[];
@@ -62,11 +67,12 @@ function validateOrdered(
   values: unknown,
   label: string,
   pattern: RegExp,
-  relationRequired = false
+  relationRequired = false,
+  estateAllowed = false
 ): asserts values is readonly (OrderedName | OrderedTrigger)[] {
   if (!Array.isArray(values)) throw new Error(`${label} must be an array`);
   for (const value of values) {
-    const candidate = value as Partial<OrderedTrigger> | null;
+    const candidate = value as Partial<OrderedTrigger & OrderedMigration> | null;
     if (
       !candidate ||
       typeof candidate.name !== "string" ||
@@ -79,7 +85,19 @@ function validateOrdered(
     if (relationRequired && (typeof candidate.relation !== "string" || !RELATION_PATTERN.test(candidate.relation))) {
       throw new Error(`invalid ${label} relation: ${String(candidate.relation)}`);
     }
-    assertExactKeys(candidate, relationRequired ? ["name", "order", "relation"] : ["name", "order"], label);
+    const hasEstate = Object.hasOwn(candidate, "estate");
+    if (estateAllowed && hasEstate && candidate.estate !== "main" && candidate.estate !== "vault-quest") {
+      throw new Error(`invalid ${label} estate: ${String(candidate.estate)}`);
+    }
+    assertExactKeys(
+      candidate,
+      relationRequired
+        ? ["name", "order", "relation"]
+        : estateAllowed && hasEstate
+          ? ["name", "order", "estate"]
+          : ["name", "order"],
+      label
+    );
   }
 }
 
@@ -121,7 +139,7 @@ function validateManifest(value: unknown): asserts value is ComponentReadinessMa
     ["migrations", "relations", "triggers", "environment", "runtimeSignals"],
     `${manifest.id} requirements`
   );
-  validateOrdered(manifest.requirements.migrations, `${manifest.id} migration`, MIGRATION_PATTERN);
+  validateOrdered(manifest.requirements.migrations, `${manifest.id} migration`, MIGRATION_PATTERN, false, true);
   validateOrdered(manifest.requirements.relations, `${manifest.id} relation`, RELATION_PATTERN);
   validateOrdered(manifest.requirements.triggers, `${manifest.id} trigger`, SIGNAL_PATTERN, true);
   validateOrdered(manifest.requirements.environment, `${manifest.id} environment name`, ENV_PATTERN);
@@ -134,7 +152,9 @@ function flatten(
 ): readonly (OrderedName | OrderedTrigger)[] {
   const values = manifests.flatMap((manifest) => [...manifest.requirements[key]]);
   assertUnique(
-    values.map((value) => value.name),
+    values.map((value) =>
+      key === "migrations" ? `${(value as OrderedMigration).estate ?? "main"}:${value.name}` : value.name
+    ),
     `required ${key}`
   );
   assertUnique(
@@ -157,7 +177,7 @@ export function compileComponentReadinessRegistry(manifests: readonly unknown[])
     "component id"
   );
   const required = validated.filter((manifest) => manifest.releaseMode === "required");
-  const migrations = flatten(required, "migrations");
+  const migrations = flatten(required, "migrations") as readonly OrderedMigration[];
   const relations = flatten(required, "relations");
   const triggers = flatten(required, "triggers") as readonly OrderedTrigger[];
   const environment = flatten(required, "environment");
@@ -170,7 +190,14 @@ export function compileComponentReadinessRegistry(manifests: readonly unknown[])
         .map((manifest) => manifest.id)
         .sort()
     ),
-    requiredMigrations: Object.freeze(migrations.map((value) => value.name)),
+    // Compatibility projection for the existing public.schema_migrations query.
+    // Other estates must never be looked up in that journal by filename alone.
+    requiredMigrations: Object.freeze(
+      migrations.filter((value) => (value.estate ?? "main") === "main").map((value) => value.name)
+    ),
+    requiredMigrationRequirements: Object.freeze(
+      migrations.map((value) => Object.freeze({ estate: value.estate ?? "main", name: value.name }))
+    ),
     requiredRelations: Object.freeze(relations.map((value) => value.name)),
     requiredTriggers: Object.freeze(triggers.map((value) => value.name)),
     requiredTriggerRelations: Object.freeze(triggers.map((value) => value.relation)),

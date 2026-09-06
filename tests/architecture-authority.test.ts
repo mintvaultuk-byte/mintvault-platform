@@ -134,6 +134,81 @@ function goldenWorkspace(): string {
 }
 
 describe("component readiness authority", () => {
+  const namespacedManifest = (migrations: readonly unknown[]) => ({
+    schemaVersion: 1,
+    id: "estate-proof",
+    owner: "estate-owner",
+    releaseMode: "required",
+    runtimeState: "enabled",
+    sourceRoots: ["server/estate-proof.ts"],
+    requirements: { migrations, relations: [], triggers: [], environment: [], runtimeSignals: [] },
+  });
+
+  it("keeps colliding filenames in distinct estates and freezes explicit identities", () => {
+    const compiled = compileComponentReadinessRegistry([
+      namespacedManifest([
+        { name: "0000_main.sql", order: 0 },
+        { name: "0000_main.sql", estate: "vault-quest", order: 1 },
+        { name: "0001_core.sql", estate: "main", order: 2 },
+      ]),
+    ]);
+    expect(compiled.requiredMigrations).toEqual(["0000_main.sql", "0001_core.sql"]);
+    expect(compiled.requiredMigrationRequirements).toEqual([
+      { estate: "main", name: "0000_main.sql" },
+      { estate: "vault-quest", name: "0000_main.sql" },
+      { estate: "main", name: "0001_core.sql" },
+    ]);
+    expect(Object.isFrozen(compiled.requiredMigrationRequirements)).toBe(true);
+    expect(compiled.requiredMigrationRequirements.every(Object.isFrozen)).toBe(true);
+    expect(COMPONENT_READINESS_REGISTRY.requiredMigrationRequirements).toEqual(
+      REQUIRED_RELEASE_MIGRATIONS.map((name) => ({ estate: "main", name }))
+    );
+  });
+
+  it("rejects same-estate aliases, unknown estates, non-migration estate keys and global order drift", () => {
+    for (const estate of ["main", "vault-quest"] as const) {
+      expect(() =>
+        compileComponentReadinessRegistry([
+          namespacedManifest([
+            { name: "0000_main.sql", ...(estate === "vault-quest" ? { estate } : {}), order: 0 },
+            { name: "0000_main.sql", estate, order: 1 },
+          ]),
+        ])
+      ).toThrow(/duplicate required migrations/);
+    }
+    for (const estate of ["public", "drizzle", "MAIN", "", null, undefined, 1]) {
+      expect(() =>
+        compileComponentReadinessRegistry([namespacedManifest([{ name: "0000_main.sql", estate, order: 0 }])])
+      ).toThrow(/invalid .* estate/);
+    }
+    for (const order of [0, 2]) {
+      expect(() =>
+        compileComponentReadinessRegistry([
+          namespacedManifest([
+            { name: "0000_main.sql", order: 0 },
+            { name: "0000_main.sql", estate: "vault-quest", order },
+          ]),
+        ])
+      ).toThrow(/order/);
+    }
+    const extra = namespacedManifest([{ name: "0000_main.sql", order: 0, estate: "main", journal: "public.other" }]);
+    expect(() => compileComponentReadinessRegistry([extra])).toThrow(/keys must be exactly/);
+    const relationExtra = {
+      ...namespacedManifest([]),
+      requirements: {
+        ...namespacedManifest([]).requirements,
+        relations: [{ name: "public.same", order: 0, estate: "main" }],
+      },
+    };
+    expect(() => compileComponentReadinessRegistry([relationExtra])).toThrow(/keys must be exactly/);
+    const disabled = {
+      ...namespacedManifest([{ name: "0000_main.sql", estate: "vault-quest", order: 0 }]),
+      releaseMode: "optional-disabled",
+      runtimeState: "disabled",
+    };
+    expect(compileComponentReadinessRegistry([disabled]).requiredMigrationRequirements).toEqual([]);
+  });
+
   it("preserves every legacy readiness projection exactly and in order", () => {
     expect([...REQUIRED_RELEASE_MIGRATIONS]).toEqual([
       "0077_partner_credential_lifecycle_hardening.sql",
@@ -255,6 +330,37 @@ describe("component readiness authority", () => {
 });
 
 describe("architecture topology authority", () => {
+  it("does not let a main migration satisfy a same-named unshipped Vault Quest requirement", async () => {
+    const { buildArchitectureSnapshot } = await architectureModule();
+    const root = goldenWorkspace();
+    const withEstate = (estate: string) =>
+      manifest().replace('name:"0001_core.sql",order:0', `name:"0001_core.sql",estate:"${estate}",order:0`);
+    write(root, "config/components/core.ts", withEstate("main"));
+    expect(buildArchitectureSnapshot(root, miniaturePolicy).violations).toEqual([]);
+    write(root, "config/components/core.ts", withEstate("vault-quest"));
+    expect(buildArchitectureSnapshot(root, miniaturePolicy).violations).toContainEqual({
+      code: "MISSING_REQUIRED_MIGRATION",
+      source: "config/components",
+      target: "vault-quest:0001_core.sql",
+    });
+    write(root, "config/components/core.ts", withEstate("drizzle"));
+    expect(buildArchitectureSnapshot(root, miniaturePolicy).violations).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({ code: "MALFORMED_COMPONENT_MANIFEST", target: "migrations entry" }),
+      ])
+    );
+    write(
+      root,
+      "config/components/core.ts",
+      manifest().replace("order:0}]", 'order:0},{name:"0001_core.sql",estate:"main",order:1}]')
+    );
+    expect(buildArchitectureSnapshot(root, miniaturePolicy).violations).toContainEqual({
+      code: "DUPLICATE_REQUIRED_MIGRATION",
+      source: "config/components",
+      target: "0001_core.sql",
+    });
+  });
+
   it("matches the reviewed real-repository snapshot and complete authority categories", () => {
     const result = spawnSync(process.execPath, ["scripts/architecture/check-architecture.mjs"], {
       cwd: process.cwd(),

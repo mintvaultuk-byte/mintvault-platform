@@ -2,6 +2,12 @@
 
 ## Current checkpoint and next bounded wave
 
+S3a from pushed ecdac32562fa81c3d1cc6f3e633adb403aea169a is locally independently
+proven: explicit closed estate/name readiness identities, main projection preserved,
+main lineage intact, VQ still unshipped. Root30/independent30/clean47 and buildPASS;
+exact hashes/limits in VQ packet. Checkpoint/push then S3b image wiring, including
+reproduced missing exact Docker context admission. No owner pause or release claim.
+
 2026-09-06 S2c from pushed97a8845069042a2ef47f1107f3103b5459ca2cc7 locally
 independently proven: fresh17 execution vs historical1/16attested, actualCLI,
 exact3/23grants, recovery refusals and locked catalog observation; independent64,

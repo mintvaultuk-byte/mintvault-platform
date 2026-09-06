@@ -1741,12 +1741,19 @@ function componentViolations(component, file) {
       continue;
     }
     for (const value of values) {
-      const expected = key === "triggers" ? ["name", "order", "relation"] : ["name", "order"];
+      const hasEstate = value && Object.hasOwn(value, "estate");
+      const expected =
+        key === "triggers"
+          ? ["name", "order", "relation"]
+          : key === "migrations" && hasEstate
+            ? ["name", "order", "estate"]
+            : ["name", "order"];
       if (
         !exactKeys(value, expected) ||
         typeof value.name !== "string" ||
         !Number.isSafeInteger(value.order) ||
-        value.order < 0
+        value.order < 0 ||
+        (key === "migrations" && hasEstate && !["main", "vault-quest"].includes(value.estate))
       )
         fail(`${key} entry`);
     }
@@ -2230,7 +2237,7 @@ function scanComponents(root, files, policy) {
     }
     if (component?.releaseMode === "required") {
       for (const item of component.requirements?.migrations ?? [])
-        if (typeof item?.name === "string") requiredMigrations.push(item.name);
+        if (typeof item?.name === "string") requiredMigrations.push({ name: item.name, estate: item.estate ?? "main" });
       for (const item of component.requirements?.relations ?? [])
         if (typeof item?.name === "string") requiredRelations.push(item.name);
     }
@@ -2671,7 +2678,7 @@ export function buildArchitectureSnapshot(root, policy) {
     } else if (match) {
       shippingDisposition = "shipped-numbered";
       lineage = "main-numbered-runner";
-      shippedMigrations.add(name);
+      shippedMigrations.add(`main:${name}`);
       const normalizedNumber = BigInt(match[1]).toString();
       if (!migrationNumbers.has(normalizedNumber)) migrationNumbers.set(normalizedNumber, []);
       migrationNumbers.get(normalizedNumber).push(name);
@@ -2749,8 +2756,8 @@ export function buildArchitectureSnapshot(root, policy) {
           declaration.incoming === declaration.occupant ||
           typeof declaration.reason !== "string" ||
           declaration.reason.trim() === "" ||
-          !shippedMigrations.has(declaration.incoming) ||
-          !shippedMigrations.has(supersededBy) ||
+          !shippedMigrations.has(`main:${declaration.incoming}`) ||
+          !shippedMigrations.has(`main:${supersededBy}`) ||
           seenPairs.has(pair)
         ) {
           violations.push({
@@ -2772,10 +2779,18 @@ export function buildArchitectureSnapshot(root, policy) {
       }
     }
   }
-  for (const migration of new Set(components.requiredMigrations))
-    if (!shippedMigrations.has(migration)) {
-      violations.push({ code: "MISSING_REQUIRED_MIGRATION", source: "config/components", target: migration });
+  const requiredMigrationKeys = new Set();
+  for (const migration of components.requiredMigrations) {
+    const key = `${migration.estate}:${migration.name}`;
+    const target = migration.estate === "main" ? migration.name : key;
+    if (requiredMigrationKeys.has(key)) {
+      violations.push({ code: "DUPLICATE_REQUIRED_MIGRATION", source: "config/components", target });
     }
+    requiredMigrationKeys.add(key);
+    if (!shippedMigrations.has(key)) {
+      violations.push({ code: "MISSING_REQUIRED_MIGRATION", source: "config/components", target });
+    }
+  }
 
   const authorityTables = new Set(records.filter((item) => item.category === "table").map((item) => item.id));
   for (const relation of new Set(components.requiredRelations))

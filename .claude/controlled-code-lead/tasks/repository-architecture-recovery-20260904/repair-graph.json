@@ -1584,6 +1584,11 @@
           "ref": "vq-schema-recovery.md: S1 only; S2/S3 require extension. Recovery depends on owner authority; repair retains finding dependency.",
           "sha": "c712e4647bf8cd01732370e10e0282e8e454ded1",
           "observer": "codex-lead"
+        },
+        {
+          "ref": "vq-schema-recovery.md: S3a exact closed-estate foundation manifest, unchanged main behavior and no DB/image activation; S3b separately extends shipping scope.",
+          "sha": "ecdac32562fa81c3d1cc6f3e633adb403aea169a",
+          "observer": "codex-lead"
         }
       ],
       "invalidated_by": ["VQ estate", "migration plan", "readiness", "recovery procedure"],
@@ -2179,6 +2184,9 @@
       "depends_on": ["ARCH-SCHEMA-001", "OWNER-VQ-SCHEMA", "RECOVERY-VQ-SCHEMA", "REPAIR-CI-TOPOLOGY"],
       "addresses": ["ARCH-SCHEMA-001"],
       "write_scope": [
+        "server/lib/component-readiness-registry.ts",
+        "scripts/architecture/check-architecture.mjs",
+        "tests/architecture-authority.test.ts",
         "scripts/ci/script-syntax-baseline.json",
         "scripts/ci/prepare-vq-test-db.mjs",
         "scripts/ci/typecheck-baselines/scripts.json",
@@ -2210,6 +2218,11 @@
           "ref": "vq-schema-recovery.md: S1 exact manifest; schema/readiness/fallback and final proof remain OPEN",
           "sha": "c712e4647bf8cd01732370e10e0282e8e454ded1",
           "observer": "codex-lead"
+        },
+        {
+          "ref": "vq-schema-recovery.md: S3a final hashes and independent Sol30/clean47 namespace foundation proof; image/runtime/fallback remain OPEN.",
+          "sha": "ecdac32562fa81c3d1cc6f3e633adb403aea169a",
+          "observer": "sol-s3a-independent"
         }
       ],
       "invalidated_by": [

@@ -1,5 +1,13 @@
 # Engineering issue register
 
+## 2026-09-06 VQ schema authority checkpoint
+
+ARCH-SCHEMA-001 remains IN_PROGRESS. S2c ecdac325 is pushed with honest fresh/history
+proof; S3a namespaced requirement foundation independently passes without changing
+main readiness. Shipping/runtime/fallback remain open. Terra reproduced the exact
+missing Docker build-context admission for vq-schema-recovery.ts; the next shipping
+wave owns that repair under the same finding. No new broad audit or waiver.
+
 ## 2026-09-05 Partner contract checkpoint
 
 ARCH-SUPPLY-001 and ARCH-ROLE-001: FIXED_WIP / exact-candidate proof pending.
